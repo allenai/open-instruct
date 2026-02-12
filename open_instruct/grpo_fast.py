@@ -448,10 +448,20 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.value_model)
 
-        # Use the token index for "score" in the LM head logits as the scalar value output.
-        # This avoids using index 0 which may have special meaning in some tokenizers.
-        self.value_token_idx = self.tokenizer.encode("score", add_special_tokens=False)[0]
-        logger.info(f"{self.rank=}: Using token '{self.tokenizer.decode([self.value_token_idx])}' (idx={self.value_token_idx}) as value output")
+        # Replace the LM head with a Linear(hidden_size, 1) initialized from the "score" token row.
+        # This avoids random initialization (uses existing LM head weights), is memory efficient
+        # (1 output instead of vocab_size), and is ZeRO-3 compatible (part of the model).
+        value_token_idx = self.tokenizer.encode("score", add_special_tokens=False)[0]
+        logger.info(f"{self.rank=}: Initializing value head from LM head token '{self.tokenizer.decode([value_token_idx])}' (idx={value_token_idx})")
+
+        hidden_size = self.value_model.config.hidden_size
+        value_head = torch.nn.Linear(hidden_size, 1, bias=self.value_model.lm_head.bias is not None, dtype=torch.bfloat16)
+        # Initialize from the "score" row of the LM head — NOT random
+        value_head.weight.data.copy_(self.value_model.lm_head.weight.data[value_token_idx].unsqueeze(0))
+        if value_head.bias is not None:
+            value_head.bias.data.copy_(self.value_model.lm_head.bias.data[value_token_idx].unsqueeze(0))
+        # Replace lm_head with the small value head (saves memory: 1 output vs vocab_size)
+        self.value_model.lm_head = value_head
 
         # Load from checkpoint if available (checkpoint_path is a directory)
         if checkpoint_path is not None:
@@ -516,21 +526,14 @@ class PolicyTrainerRayProcess(RayProcess):
         context_manager = torch.enable_grad() if use_grad else torch.no_grad()
 
         with context_manager:
-            # Only compute hidden states, NOT the full logits (which would be huge: batch x seq x vocab)
+            # Forward pass through value model — lm_head has been replaced with Linear(hidden, 1)
+            # so logits shape is (batch, seq_len, 1) instead of (batch, seq_len, vocab_size)
             output = self.value_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask.clamp(0, 1),
                 return_dict=True,
-                output_hidden_states=True,
             )
-            # Project hidden states through only the "score" token's row of the LM head weight
-            # This gives a scalar per position without materializing the full vocab logits
-            last_hidden = output.hidden_states[-1]
-            lm_head = self.value_model.module.lm_head if hasattr(self.value_model, "module") else self.value_model.lm_head
-            score_weight = lm_head.weight[self.value_token_idx]  # (hidden_size,)
-            values = (last_hidden * score_weight).sum(dim=-1)  # (batch, seq_len)
-            if lm_head.bias is not None:
-                values = values + lm_head.bias[self.value_token_idx]
+            values = output.logits.squeeze(-1)  # (batch, seq_len)
 
             # Zero out values at non-response positions
             values = values * response_mask.float()
