@@ -552,6 +552,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 is_main_process=accelerator.is_main_process,
                 model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
                 use_lora=args.use_lora,
+                checkpoint_every_n_steps=checkpointing_steps,
             )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)

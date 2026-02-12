@@ -1,10 +1,14 @@
 """Tests for DPO utility functions."""
 
 import logging
+import pathlib
+import tempfile
 import unittest
+from unittest import mock
 
 import torch
 from parameterized import parameterized
+from torch.utils import data as torch_data
 
 from open_instruct import dpo_utils, utils
 from open_instruct.dataset_transformation import TokenizerConfig
@@ -312,6 +316,124 @@ class TestTokenCountReduction(unittest.TestCase):
 
         self.assertAlmostEqual(result_token_count, true_total_tokens, places=0)
         self.assertAlmostEqual(result_loss, true_average_loss, places=5)
+
+
+class _FakeDPODataset(torch_data.Dataset):
+    """Minimal dataset producing DPO-shaped batches with an 'index' key."""
+
+    def __init__(self, size: int, seq_len: int = 8):
+        self.size = size
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        return {
+            "index": idx,
+            "chosen_input_ids": torch.full((self.seq_len,), idx, dtype=torch.long),
+            "chosen_labels": torch.zeros(self.seq_len, dtype=torch.long),
+            "chosen_attention_mask": torch.ones(self.seq_len, dtype=torch.long),
+            "rejected_input_ids": torch.full((self.seq_len,), idx + self.size, dtype=torch.long),
+            "rejected_labels": torch.zeros(self.seq_len, dtype=torch.long),
+            "rejected_attention_mask": torch.ones(self.seq_len, dtype=torch.long),
+        }
+
+
+def _stack_collate(batch):
+    return {
+        k: (torch.stack([b[k] for b in batch]) if k != "index" else torch.tensor([b[k] for b in batch]))
+        for k in batch[0]
+    }
+
+
+def _deterministic_forward(model, batch, average_log_prob=False):
+    """Return logprobs that depend on the input so we can detect mismatches."""
+    chosen = batch["chosen_input_ids"].float().mean(dim=1)
+    rejected = batch["rejected_input_ids"].float().mean(dim=1)
+    return chosen, rejected, torch.zeros(chosen.shape[0])
+
+
+_TEST_MODEL_DIMS = utils.ModelDims(
+    num_layers=1, hidden_size=1, intermediate_size=1, vocab_size=1, num_attn_heads=1, head_dim=1, device_name="a100"
+)
+
+
+def _make_cache_kwargs(cache_path: pathlib.Path, dataset_size: int = 20, batch_size: int = 4):
+    dl = torch_data.DataLoader(
+        _FakeDPODataset(dataset_size), batch_size=batch_size, shuffle=False, collate_fn=_stack_collate
+    )
+    return dict(
+        model=torch.nn.Linear(1, 1),
+        dataloader=dl,
+        average_log_prob=False,
+        forward_fn=_deterministic_forward,
+        full_dataset_size=dataset_size,
+        device=torch.device("cpu"),
+        cache_path=cache_path,
+        is_main_process=True,
+        model_dims=_TEST_MODEL_DIMS,
+    )
+
+
+class TestBuildReferenceCacheResume(unittest.TestCase):
+    """Verify that resuming from a partial checkpoint produces the same result
+    as a fresh (uninterrupted) run.
+
+    Regression test for AttributeError: 'DataLoader' object has no attribute
+    'batches_processed'.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.cache_path = pathlib.Path(self.tmpdir.name) / "ref_cache.pt"
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    @mock.patch("open_instruct.utils.maybe_update_beaker_description")
+    @mock.patch("torch.cuda.max_memory_allocated", return_value=0)
+    @mock.patch("torch.cuda.get_device_properties", return_value=mock.Mock(total_memory=1))
+    def test_resume_matches_fresh_run(self, _mock_props, _mock_mem, _mock_beaker):
+        dataset_size = 20
+        checkpoint_every = 2
+
+        # Fresh uninterrupted run to get ground truth.
+        fresh_cache = dpo_utils.build_reference_logprobs_cache(
+            **_make_cache_kwargs(self.cache_path, dataset_size=dataset_size), checkpoint_every_n_steps=checkpoint_every
+        )
+        fresh_chosen = fresh_cache.tensors["chosen_logps"].clone()
+        fresh_rejected = fresh_cache.tensors["rejected_logps"].clone()
+
+        # Simulate an interrupted run: use a forward_fn that crashes after
+        # the first checkpoint is written (step 3, after checkpoint at step 2).
+        self.cache_path.unlink()
+        call_count = 0
+
+        def _crashing_forward(model, batch, average_log_prob=False):
+            nonlocal call_count
+            call_count += 1
+            if call_count > checkpoint_every:
+                raise RuntimeError("simulated crash")
+            return _deterministic_forward(model, batch, average_log_prob)
+
+        interrupted_kwargs = _make_cache_kwargs(self.cache_path, dataset_size=dataset_size)
+        interrupted_kwargs["forward_fn"] = _crashing_forward
+        with self.assertRaises(RuntimeError, msg="simulated crash"):
+            dpo_utils.build_reference_logprobs_cache(**interrupted_kwargs, checkpoint_every_n_steps=checkpoint_every)
+
+        # The partial checkpoint should exist from the interrupted run.
+        partial_path = self.cache_path.with_suffix(".partial.pt")
+        self.assertTrue(partial_path.exists())
+        self.assertFalse(self.cache_path.exists())
+
+        # Resume from the partial checkpoint.
+        resumed_cache = dpo_utils.build_reference_logprobs_cache(
+            **_make_cache_kwargs(self.cache_path, dataset_size=dataset_size), checkpoint_every_n_steps=checkpoint_every
+        )
+
+        torch.testing.assert_close(resumed_cache.tensors["chosen_logps"], fresh_chosen)
+        torch.testing.assert_close(resumed_cache.tensors["rejected_logps"], fresh_rejected)
 
 
 if __name__ == "__main__":

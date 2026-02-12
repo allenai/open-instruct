@@ -501,6 +501,7 @@ def build_reference_logprobs_cache(
     model_dims: utils.ModelDims,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
+    checkpoint_every_n_steps: int = 100,
 ) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
@@ -542,8 +543,6 @@ def build_reference_logprobs_cache(
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
-    supports_checkpointing = hasattr(dataloader, "state_dict") and hasattr(dataloader, "load_state_dict")
-
     total_tokens = 0
     total_examples = 0
     total_batches = len(dataloader)
@@ -565,13 +564,12 @@ def build_reference_logprobs_cache(
 
     partial_cache_path = cache_path.with_suffix(".partial.pt")
     start_step = 0
-    if supports_checkpointing and partial_cache_path.exists():
+    if partial_cache_path.exists():
         logger.info("Loading partial reference logprobs cache from %s", partial_cache_path)
         checkpoint = torch.load(partial_cache_path, map_location="cpu", weights_only=False)
         chosen_tensor = checkpoint["chosen_logps"].to(device)
         rejected_tensor = checkpoint["rejected_logps"].to(device)
-        dataloader.load_state_dict(checkpoint["dataloader_state"])
-        start_step = dataloader.batches_processed
+        start_step = checkpoint.get("step", 0)
         logger.info("Resumed from step %d", start_step)
 
     with torch.no_grad():
@@ -586,9 +584,6 @@ def build_reference_logprobs_cache(
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
-
-            if supports_checkpointing:
-                dataloader.batches_processed += 1
 
             batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
             total_tokens += batch_tokens
@@ -610,15 +605,11 @@ def build_reference_logprobs_cache(
                     current_step=step, total_steps=total_batches, start_time=cache_start_time
                 )
 
-            if supports_checkpointing and step % 100 == 0:
+            if step % checkpoint_every_n_steps == 0:
                 if is_main_process:
                     logger.info("Saving partial checkpoint at step %d", step)
                     torch.save(
-                        {
-                            "chosen_logps": chosen_tensor.cpu(),
-                            "rejected_logps": rejected_tensor.cpu(),
-                            "dataloader_state": dataloader.state_dict(),
-                        },
+                        {"chosen_logps": chosen_tensor.cpu(), "rejected_logps": rejected_tensor.cpu(), "step": step},
                         partial_cache_path,
                     )
                 if dist.is_initialized():
