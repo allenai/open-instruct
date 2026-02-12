@@ -497,6 +497,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 dist_init_required=False,
                 mpu=self.mpu,
             )
+
+        # Enable gradient checkpointing on value model to reduce memory
+        if args.gradient_checkpointing:
+            unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+            if hasattr(unwrapped, "gradient_checkpointing_enable"):
+                unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                logger.info(f"{self.rank=}: Enabled gradient checkpointing on value model")
+
         self.value_model.train()
         logger.info(f"{self.rank=}: Loaded value model from {value_model_path}")
 
@@ -944,6 +952,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # Log value warmup status
         if self.args.use_value_model and self.args.value_warmup_steps > 0:
             self.local_metrics["value/warmup"] = 1.0 if is_value_warmup else 0.0
+
+        # Free memory before training loop (value model forward activations are no longer needed)
+        torch.cuda.empty_cache()
 
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
