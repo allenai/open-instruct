@@ -13,8 +13,8 @@ uv run python mason.py \
     --cluster ai2/jupiter \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
-    --workspace ai2/tulu-thinker \
-    --priority high \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
     --preemptible \
     --num_nodes 4 \
     --gpus 8 \
