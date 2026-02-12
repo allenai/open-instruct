@@ -29,6 +29,13 @@ def _fit_to_max_length(
     cu_seq_lens: torch.Tensor | None,
     num_features: int,
 ) -> PackedTensors:
+    """Truncate or pad packed tensors to exactly ``max_seq_length`` tokens.
+
+    When truncating, ``cu_seq_lens`` boundaries that fall beyond the limit are
+    clamped and deduplicated, which may drop trailing sequences entirely. The
+    returned ``PackedTensors`` reports how many sequences remain valid and how
+    many were dropped.
+    """
     current_len = input_ids.shape[1]
 
     if current_len > max_seq_length:
@@ -42,6 +49,11 @@ def _fit_to_max_length(
         num_valid_seqs = num_features
         sequences_dropped = 0
         if cu_seq_lens is not None:
+            # Clamping creates duplicate boundaries for sequences beyond the limit,
+            # and unique_consecutive removes them:
+            #   cu_seq_lens = [0, 100, 250, 400]  (3 seqs of lengths 100, 150, 150)
+            #   after clamp_max_(200): [0, 100, 200, 200]  (seq 3 entirely beyond cut)
+            #   after unique_consecutive: [0, 100, 200]     (seq 3 removed, 2 remain)
             cu_seq_lens = torch.unique_consecutive(cu_seq_lens.clamp_max_(max_seq_length))
             num_valid_seqs = len(cu_seq_lens) - 1
             sequences_dropped = num_features - num_valid_seqs
@@ -323,3 +335,34 @@ def get_batch_logps(
         segment_counts.scatter_add_(0, segment_ids, mask_float)
         return segment_sums / segment_counts.clamp(min=1)
     return segment_sums
+
+
+def get_num_tokens(batch: dict[str, Any]) -> int:
+    """Return total non-padding token count from a training batch.
+
+    For packed batches (DPO or GRPO), reads cu_seq_lens_k tensors whose last
+    element is the total token count for that branch. For padded batches, sums
+    the attention_mask. Falls back to counting input_ids elements.
+    """
+    # cu_seq_lens_k is a cumulative sequence length tensor from the padding-free
+    # collator. Its last element equals the total token count for that branch.
+    # DPO has chosen_cu_seq_lens_k + rejected_cu_seq_lens_k; GRPO has cu_seq_lens_k.
+    cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
+    if cu_keys:
+        return sum(batch[k][-1].item() for k in cu_keys)
+    if "attention_mask" in batch:
+        return batch["attention_mask"].sum().item()
+    return sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
+
+
+def get_num_sequences(batch: dict[str, Any]) -> int | None:
+    """Return total sequence count from a training batch, or None for non-packing batches.
+
+    For packed batches, reads cu_seq_lens_k tensors which each have num_seqs + 1
+    elements (including a leading 0). Returns None if no cu_seq_lens_k keys are found.
+    """
+    cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
+    if cu_keys:
+        # Each cu_seq_lens tensor has num_seqs + 1 elements (leading 0 boundary).
+        return sum(len(batch[k]) - 1 for k in cu_keys)
+    return None

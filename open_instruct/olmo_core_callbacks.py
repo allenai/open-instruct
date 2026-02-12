@@ -20,7 +20,7 @@ from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, padding_free_collator, utils
 from open_instruct.utils import maybe_update_beaker_description
 
 logger = logger_utils.setup_logger(__name__)
@@ -159,13 +159,8 @@ class PerfCallback(Callback):
         self._prev_pre_step_time = self._pre_step_time
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
-        if "chosen_cu_seq_lens_k" in batch:
-            # cu_seq_lens has num_seqs + 1 elements (includes leading 0), so subtract 1.
-            num_seqs = (len(batch["chosen_cu_seq_lens_k"]) - 1) + (len(batch["rejected_cu_seq_lens_k"]) - 1)
-        elif "cu_seq_lens_k" in batch:
-            # cu_seq_lens has num_seqs + 1 elements (includes leading 0), so subtract 1.
-            num_seqs = len(batch["cu_seq_lens_k"]) - 1
-        else:
+        num_seqs = padding_free_collator.get_num_sequences(batch)
+        if num_seqs is None:
             num_seqs = self.per_device_train_batch_size * 2
         self._interval_num_sequences += num_seqs * self.num_training_gpus
 
