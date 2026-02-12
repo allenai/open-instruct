@@ -16,5 +16,6 @@ uv run torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 50 \
     --chat_template_name olmo \
+    --exp_name "dpo-local-debug-$(date +%s)" \
     --seed 123 \
     --push_to_hub false

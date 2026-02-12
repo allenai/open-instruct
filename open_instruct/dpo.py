@@ -8,7 +8,7 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from functools import partial
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -297,7 +297,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size = rank_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -326,14 +327,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
+    forward_kwargs: dict[str, Any] = {}
     if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+        forward_kwargs["packing"] = True
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
         dataloader=cache_data_loader,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
+        forward_kwargs=forward_kwargs,
         full_dataset_size=len(dataset),
         device=device,
         cache_path=reference_cache_path,
@@ -368,7 +371,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     train_module = DPOTrainModule(
         model=model,
         optim=optim_config,
-        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
+        sample_microbatch_size=args.per_device_train_batch_size,
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,

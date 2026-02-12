@@ -94,8 +94,6 @@ class TrackingConfig:
     """A unique name of this run"""
     seed: int = 42
     """Random seed for initialization and dataset shuffling."""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
 
 
 @dataclass
@@ -520,6 +518,7 @@ def build_reference_logprobs_cache(
     model_dims: utils.ModelDims,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
+    forward_kwargs: dict | None = None,
 ) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
@@ -569,9 +568,13 @@ def build_reference_logprobs_cache(
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+                    chosen_logps, rejected_logps, _ = forward_fn(
+                        model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                    )
             else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+                chosen_logps, rejected_logps, _ = forward_fn(
+                    model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                )
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps

@@ -2,7 +2,7 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-noshard-budget01-${LR}
+EXP_NAME=olmo2-7b-DPO-debug-16k-${LR}-$(date +%s)
 
 uv run python mason.py \
     --cluster ai2/saturn \
