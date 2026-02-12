@@ -75,6 +75,7 @@ for model_name_or_path in "$@"; do
             --vllm_tensor_parallel_size 2 \
             --vllm_enable_prefix_caching \
             --vllm_gpu_memory_utilization 0.9 \
+	    --vllm_enforce_eager \
             --pack_length 40000 \
             --chat_template_name "tulu_thinker" \
             --trust_remote_code \
