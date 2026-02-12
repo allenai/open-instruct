@@ -366,14 +366,17 @@ def run_benchmark(
         f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts_rollout}"
     )
 
-    # Create sampling parameters with 'n' for multiple samples per prompt
-    # Set min_tokens = max_tokens to force exact response length for benchmarking
+    # Create sampling parameters with 'n' for multiple samples per prompt.
+    # With stop_strings: variable-length generation matching GRPO conditions.
+    # Without stop_strings: min_tokens = max_tokens for fixed-length benchmarking.
+    use_fixed_length = not streaming_config.stop_strings
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
-        min_tokens=streaming_config.response_length,
+        min_tokens=streaming_config.response_length if use_fixed_length else 0,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
+        stop=streaming_config.stop_strings if streaming_config.stop_strings else [],
         seed=args.seed,
         logprobs=1,
     )
