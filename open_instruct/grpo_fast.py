@@ -436,7 +436,12 @@ class PolicyTrainerRayProcess(RayProcess):
         # Check if we should load from checkpoint
         checkpoint_path = getattr(self, "value_model_checkpoint_path", None)
 
-        # Load as CausalLM - reuse the LM head as value head (no new parameters)
+        # Temporarily disable HfDeepSpeedConfig so the model loads with full weights
+        # (not ZeRO-3 sharded/meta). We need full weights to extract the LM head row.
+        import transformers.integrations.deepspeed as _hf_ds_integration
+        saved_ds_config = _hf_ds_integration._hf_deepspeed_config_weak_ref
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = None
+
         value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
         self.value_model = AutoModelForCausalLM.from_pretrained(
             value_model_path,
@@ -444,7 +449,6 @@ class PolicyTrainerRayProcess(RayProcess):
             torch_dtype=torch.bfloat16,
             attn_implementation=model_config.attn_implementation,
             use_cache=False,
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.value_model)
 
@@ -455,13 +459,17 @@ class PolicyTrainerRayProcess(RayProcess):
         logger.info(f"{self.rank=}: Initializing value head from LM head token '{self.tokenizer.decode([value_token_idx])}' (idx={value_token_idx})")
 
         hidden_size = self.value_model.config.hidden_size
-        value_head = torch.nn.Linear(hidden_size, 1, bias=self.value_model.lm_head.bias is not None, dtype=torch.bfloat16)
+        has_bias = self.value_model.lm_head.bias is not None
+        value_head = torch.nn.Linear(hidden_size, 1, bias=has_bias, dtype=torch.bfloat16)
         # Initialize from the "score" row of the LM head — NOT random
         value_head.weight.data.copy_(self.value_model.lm_head.weight.data[value_token_idx].unsqueeze(0))
-        if value_head.bias is not None:
+        if has_bias:
             value_head.bias.data.copy_(self.value_model.lm_head.bias.data[value_token_idx].unsqueeze(0))
         # Replace lm_head with the small value head (saves memory: 1 output vs vocab_size)
         self.value_model.lm_head = value_head
+
+        # Restore HfDeepSpeedConfig
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
 
         # Load from checkpoint if available (checkpoint_path is a directory)
         if checkpoint_path is not None:
@@ -490,7 +498,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
             )
         self.value_model.train()
-        logger.info(f"{self.rank=}: Loaded value model from {value_model_path} (value_token_idx={self.value_token_idx})")
+        logger.info(f"{self.rank=}: Loaded value model from {value_model_path}")
 
     def forward_value(
         self,
