@@ -498,12 +498,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
             )
 
-        # Enable gradient checkpointing on value model to reduce memory
-        if args.gradient_checkpointing:
-            unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
-            if hasattr(unwrapped, "gradient_checkpointing_enable"):
-                unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-                logger.info(f"{self.rank=}: Enabled gradient checkpointing on value model")
+        # Enable gradient checkpointing on value model to reduce memory (same as policy model)
+        unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+        if hasattr(unwrapped, "gradient_checkpointing_enable"):
+            unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            logger.info(f"{self.rank=}: Enabled gradient checkpointing on value model")
 
         self.value_model.train()
         logger.info(f"{self.rank=}: Loaded value model from {value_model_path}")
