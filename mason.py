@@ -710,8 +710,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
                     )
                 else:
-                    download_from_hf(model_name_or_path, model_revision)  # first download the model
-                    path = download_from_hf(model_name_or_path, model_revision)  # then get the path
+                    path = download_from_hf(model_name_or_path, model_revision)
                 gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
                 gs_folder = gs_folder_exists(
                     gs_saved_path
@@ -845,9 +844,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
                 )
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(
-        c in GCP_CLUSTERS for c in args.cluster
-    ):
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if args.hostname is not None:
