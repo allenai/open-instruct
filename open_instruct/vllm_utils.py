@@ -678,7 +678,7 @@ class LLMRayActor:
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
-        engine_args.disable_log_stats = True
+        engine_args.disable_log_stats = False  # TODO: set to True
         engine_args.disable_cascade_attn = True
 
         init_complete = threading.Event()
