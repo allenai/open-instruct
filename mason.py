@@ -17,9 +17,101 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
-from open_instruct import launch_utils
+from transformers.utils import hub as transformers_hub
 
 console = Console()
+
+# ----------------------------------------------------------------------
+# Cluster constants
+WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
+GCP_CLUSTERS = ["ai2/augusta"]
+INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+
+
+# ----------------------------------------------------------------------
+# Launch helpers (inlined from open_instruct/launch_utils.py)
+def custom_cached_file(model_name_or_path: str, filename: str, revision: str | None = None, repo_type: str = "model"):
+    if os.path.isdir(model_name_or_path):
+        resolved_file = os.path.join(model_name_or_path, filename)
+        if os.path.isfile(resolved_file):
+            return resolved_file
+        else:
+            return None
+    else:
+        resolved_file = transformers_hub.try_to_load_from_cache(
+            model_name_or_path,
+            filename,
+            cache_dir=transformers_hub.TRANSFORMERS_CACHE,
+            revision=revision,
+            repo_type=repo_type,
+        )
+        if not isinstance(resolved_file, str):
+            return None
+        return resolved_file
+
+
+def get_commit_hash(
+    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+) -> str:
+    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    commit_hash = transformers_hub.extract_commit_hash(file, None)
+    return commit_hash
+
+
+def live_subprocess_output(cmd: list[str]) -> str:
+    output_lines = []
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    for line in iter(process.stdout.readline, ""):
+        if line.strip():
+            print(line.strip())
+            output_lines.append(line.strip())
+    process.wait()
+    if process.returncode != 0:
+        full_output = "\n".join(output_lines)
+        error_message = f"Command `{' '.join(cmd)}` failed with return code {process.returncode}:\n{full_output}"
+        raise Exception(error_message)
+
+    return "\n".join(output_lines)
+
+
+def download_from_hf(model_name_or_path: str, revision: str) -> str:
+    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
+    print(f"Downloading from HF with command: {cmd}")
+    output = live_subprocess_output(cmd)
+    if "\n" in output:
+        output = output.split("\n")[-1].strip()
+    return output
+
+
+def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
+    os.makedirs(dest_path, exist_ok=True)
+    cmd = [
+        "gsutil",
+        "-o",
+        "GSUtil:parallel_thread_count=1",
+        "-o",
+        "GSUtil:sliced_object_download_threshold=150",
+        "-m",
+        "cp",
+        "-r",
+    ]
+    cmd.extend(src_paths)
+    cmd.append(dest_path)
+    print(f"Downloading from GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def gs_folder_exists(path: str) -> bool:
+    cmd = ["gsutil", "ls", path]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    return process.returncode == 0
+
+
+def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
 
 
 # ----------------------------------------------------------------------
@@ -304,7 +396,7 @@ def get_env_vars(
         env_vars.extend([beaker.BeakerEnvVar(name="PATH", value=os.getenv("PATH"))])
 
     # if all cluster is in weka, we mount the weka
-    if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
+    if all(c in WEKA_CLUSTERS for c in cluster):
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
@@ -327,7 +419,7 @@ def get_env_vars(
             )
     # if all cluster is in gcp we add the following env
 
-    elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
+    elif all(c in GCP_CLUSTERS for c in cluster):
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
@@ -399,7 +491,7 @@ def get_datasets(beaker_datasets, cluster: list[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
-    if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
+    if all(c in WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
@@ -408,7 +500,7 @@ def get_datasets(beaker_datasets, cluster: list[str]):
                 source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
             ),
         ]
-    elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
+    elif all(c in GCP_CLUSTERS for c in cluster):
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
@@ -551,7 +643,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
         # Otherwise, we'll set a default path in the user's directory on Weka
-        if any(c in launch_utils.WEKA_CLUSTERS for c in args.cluster):
+        if any(c in WEKA_CLUSTERS for c in args.cluster):
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
@@ -583,7 +675,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     )
 
         # For GCP clusters, since shared storage is slow, we optimize model loading by:
-        if any(c in launch_utils.GCP_CLUSTERS for c in args.cluster):
+        if any(c in GCP_CLUSTERS for c in args.cluster):
             # 1. First downloading the model from HuggingFace to a local path
             # 2. Uploading it to a Google Storage bucket (if not already there)
             # 3. Then downloading it from the bucket to the compute node
@@ -605,7 +697,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             if model_name_or_path.startswith("gs://"):
                 gs_saved_path = model_name_or_path
             else:
-                commit_hash = launch_utils.get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
+                commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
                 if os.path.exists(model_name_or_path):
                     path = model_name_or_path
                     assert args.gs_model_name is not None, (
@@ -618,14 +710,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
                     )
                 else:
-                    launch_utils.download_from_hf(model_name_or_path, model_revision)  # first download the model
-                    path = launch_utils.download_from_hf(model_name_or_path, model_revision)  # then get the path
+                    download_from_hf(model_name_or_path, model_revision)  # first download the model
+                    path = download_from_hf(model_name_or_path, model_revision)  # then get the path
                 gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
-                gs_folder = launch_utils.gs_folder_exists(
+                gs_folder = gs_folder_exists(
                     gs_saved_path
                 )  # race condition exists, but it's fine since we are launching mason sequentially
                 if not gs_folder:
-                    launch_utils.upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
+                    upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
@@ -672,11 +764,11 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     zip(dataset_cache_paths, dataset_config_hashes)
                 ):
                     gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
-                    gs_folder = launch_utils.gs_folder_exists(
+                    gs_folder = gs_folder_exists(
                         gs_saved_path
                     )  # race condition exists, but it's fine since we are launching mason sequentially
                     if not gs_folder:
-                        launch_utils.upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
+                        upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
                     dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
                     gs_download_command += [
                         "mkdir",
@@ -739,7 +831,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
 
 def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
-    if args.num_nodes > 1 and not all(c in launch_utils.INTERCONNECT_CLUSTERS for c in args.cluster):
+    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
         while not confirmation:
             confirmation = input(
@@ -749,12 +841,12 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
                 confirmation = True
             elif confirmation == "n":
                 raise ValueError(
-                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {launch_utils.INTERCONNECT_CLUSTERS}"
+                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}"
                 )
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
     if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(
-        c in launch_utils.GCP_CLUSTERS for c in args.cluster
+        c in GCP_CLUSTERS for c in args.cluster
     ):
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
@@ -816,7 +908,7 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     local_cache_folder = f"{auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
 
     if not os.path.exists(local_cache_folder):
-        launch_utils.download_from_gs_bucket(
+        download_from_gs_bucket(
             [
                 f"{model_name_or_path}/tokenizer.json",
                 f"{model_name_or_path}/tokenizer_config.json",
