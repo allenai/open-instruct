@@ -516,13 +516,21 @@ class PolicyTrainerRayProcess(RayProcess):
         context_manager = torch.enable_grad() if use_grad else torch.no_grad()
 
         with context_manager:
+            # Only compute hidden states, NOT the full logits (which would be huge: batch x seq x vocab)
             output = self.value_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask.clamp(0, 1),
                 return_dict=True,
+                output_hidden_states=True,
             )
-            # Use a fixed token index from the LM head logits as the scalar value
-            values = output.logits[:, :, self.value_token_idx]
+            # Project hidden states through only the "score" token's row of the LM head weight
+            # This gives a scalar per position without materializing the full vocab logits
+            last_hidden = output.hidden_states[-1]
+            lm_head = self.value_model.module.lm_head if hasattr(self.value_model, "module") else self.value_model.lm_head
+            score_weight = lm_head.weight[self.value_token_idx]  # (hidden_size,)
+            values = (last_hidden * score_weight).sum(dim=-1)  # (batch, seq_len)
+            if lm_head.bias is not None:
+                values = values + lm_head.bias[self.value_token_idx]
 
             # Zero out values at non-response positions
             values = values * response_mask.float()
