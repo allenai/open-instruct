@@ -43,7 +43,6 @@ for model_name_or_path in "$@"; do
     uv run python mason.py \
         --cluster ai2/ceres \
         --cluster ai2/jupiter \
-        --cluster ai2/saturn \
 	      --non_resumable \
         --image "$image_name" \
         --description "Running single node benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
