@@ -59,7 +59,9 @@ Both runs: 19 steps, 2x8 GPU nodes on Jupiter, identical hyperparameters (DeepSp
 
 ## Standalone vLLM Inference Benchmarks (Hybrid Model Only)
 
-Standalone inference benchmarks for the hybrid model on a single node with 4 vLLM engines (TP=2), prefix caching enabled, **without** `--vllm_enforce_eager`. The GRPO training script uses `--vllm_enforce_eager`, so these numbers represent an upper bound on inference performance.
+### Fixed-length benchmarks (without enforce_eager)
+
+Standalone inference benchmarks for the hybrid model on a single node with 4 vLLM engines (TP=2), prefix caching enabled, **without** `--vllm_enforce_eager`. These numbers represent an upper bound on inference performance.
 
 Config: 16 unique prompts, 4 samples each (64 total per batch), 4 batches + 1 warmup. Benchmark script: `open_instruct/benchmark_generators.py`.
 
@@ -70,11 +72,34 @@ Config: 16 unique prompts, 4 samples each (64 total per batch), 4 batches + 1 wa
 | 8,192 | 2,247 | 1.25% | 17.38% | 233.3s | 3.74s | `01KG5Y220EHSMZ16AA2QD46BJE` |
 | 16,384 | 1,486 | 1.00% | 16.45% | 705.8s | 27.18s | `01KG61HNM2S8M8TQEKABE2MT3T` |
 
-Key observations:
-- TPS degrades significantly with response length (3,483 to 1,486, a 2.3x drop from 1K to 16K).
-- The benchmark (without enforce_eager) at 1K tokens gets 3,483 TPS, but GRPO training (with enforce_eager, avg 151 tokens) gets only ~1,316 actor TPS -- a **2.6x gap**, suggesting `--vllm_enforce_eager` is a major contributor to the actor TPS penalty.
+### Controlled benchmarks (with enforce_eager)
+
+To isolate the factors contributing to the GRPO TPS gap, we ran additional benchmarks with `--vllm_enforce_eager` enabled:
+
+| Config | Avg TPS | Avg MFU | Avg MBU | Avg Gen Time/Batch | Beaker |
+|---|---:|---:|---:|---:|---|
+| Fixed 1024, 16×4 batch, enforce_eager | 1,841 | 0.31% | 5.65% | 35.6s | `01KH92YJ3N7JHKPDW3DXVW1T64` |
+| Variable (stop_strings), 32×16 batch, enforce_eager | 2,122 | 0.36% | 9.98% | 155.4s | `01KH92YJ3N5FMAGSD8AKGT9ZRF` |
+
+The variable-length benchmark used `--stop_strings "</answer>"` and the same dataset as GRPO (`saurabh5/rlvr_acecoder_filtered`), with 32 unique prompts × 16 samples (matching GRPO batch config). The base model (not fine-tuned) produces mean 644-token responses with 84% wasted compute from variable lengths.
+
+### enforce_eager effect on standard transformer
+
+For comparison, the standard OLMo-3-1025-7B was tested with and without enforce_eager in GRPO:
+
+| Config | Actor TPS | Beaker |
+|---|---:|---|
+| Standard, no enforce_eager | ~5,400 | `01KH4N25PN17WYSS1PAY3E4SMC` |
+| Standard, with enforce_eager | ~4,100 | `01KH6WX3RP57VVNAYD93QH99QP` |
+
+enforce_eager costs ~25% on the standard transformer vs ~47% on the hybrid (3,483→1,841).
+
+### Key observations
+
+- **enforce_eager penalty is 47% for hybrid** (3,483→1,841 at fixed 1024 tokens), much worse than 25% for the standard transformer. The hybrid's 6+ Triton kernels per layer pay heavier kernel launch overhead without CUDA graphs.
+- TPS degrades with response length (3,483 to 1,486, a 2.3x drop from 1K to 16K).
 - Weight sync simulation time grows dramatically at 16K (27s), likely due to KV cache pressure.
-- MFU stays very low (1-2%), indicating the model is memory-bandwidth bound, not compute bound.
+- MFU stays very low (<1-2%), indicating the model is memory-bandwidth bound, not compute bound.
 
 ## Single-GPU Benchmark
 
@@ -85,9 +110,10 @@ The full hybrid model forward+backward at seq_len=2048 is **0.93x of OLMo3** (7%
 ## Surprising Observations
 
 1. **10x learner TPS gap** (5,847 vs 625). Both are ~7B models on identical hardware. Single-GPU speed is comparable.
-2. **4x actor TPS gap** (5,186 vs 1,316). vLLM inference is much slower, even though standalone benchmark (without enforce_eager) shows 3,483 TPS.
+2. **4x actor TPS gap** (5,186 vs 1,316). vLLM inference is much slower.
 3. **3x weight sync gap** (11.4s vs 33.0s). Same DeepSpeed stage 3, same node topology.
 4. **3x step time gap with high variance** (27.2s vs 93.3s avg; hybrid ranges 15.2s-132.6s).
+5. **Strong inverse correlation between max response length and actor TPS** in the hybrid per-step data (see below).
 
 ## Root Cause: Two Architectural Differences
 
@@ -115,29 +141,57 @@ FLA's GatedDeltaNet forward uses 6+ custom Triton kernels per layer (chunk_local
 This requires `--vllm_enforce_eager` in the training script, which disables CUDA graph capture in vLLM. CUDA graphs amortize kernel launch overhead by replaying recorded GPU operations -- without them, every forward pass pays full kernel launch cost.
 
 This causes:
-- **4x actor TPS gap**: The standalone benchmark (without enforce_eager) achieves 3,483 TPS at 1K tokens. GRPO training (with enforce_eager) gets only 1,316 -- a 2.6x gap from enforce_eager alone. The remaining gap comes from 6x more kernel launches per layer.
+- **47% actor TPS penalty from enforce_eager**: The standalone benchmark at 1K tokens gets 3,483 TPS without enforce_eager vs 1,841 TPS with enforce_eager. For comparison, the standard transformer only loses ~25% from enforce_eager. The hybrid model's 6+ Triton kernels per layer pay heavier per-kernel launch overhead.
+
+### Difference 3: Long-tail response lengths dominate generation time
+
+The hybrid model produces very short responses on average (151 tokens, stop rate 1.00) but a few responses per batch run to 3,000-4,096 tokens. Actor TPS is computed as `(prompt_tokens + response_tokens) / max(individual_request_time)`, so a single long-running request dominates the denominator while most GPU capacity sits idle after the majority of requests finish early.
+
+This shows up clearly in the per-step data:
+
+| Hyb MaxSeq | Hyb ActTPS | Category |
+|---:|---:|---|
+| 677 | 3,566 | No long tail |
+| 847 | 2,735 | No long tail |
+| 927 | 2,613 | No long tail |
+| 1,018 | 2,566 | Mild long tail |
+| 1,778 | 1,536 | Moderate |
+| 1,841 | 1,400 | Moderate |
+| 2,409 | 1,048 | Long tail |
+| 3,451 | 758 | Long tail |
+| 3,623 | 713 | Long tail |
+| 4,096 | 625-678 | Max length |
+
+When no response exceeds ~1,000 tokens (step 18: MaxSeq=677), actor TPS reaches **3,566** — comparable to the standalone benchmark's 3,483 (without enforce_eager). The average of 1,316 is dragged down by steps where a few responses hit max length.
+
+The standalone benchmark avoids this entirely because it sets `min_tokens = max_tokens`, forcing all requests to the exact same length — there is no long tail.
+
+The standard transformer doesn't suffer from this because its average response length (619) is much closer to its max (always 4,096), so the ratio between avg and max is only ~6.6x. For the hybrid it's ~27x (151 avg vs 4,096 max).
 
 ### Combined effect: 3x step time with high variance
 
 The 3.4x step time gap is the compound effect of:
 - Slower training (from Difference 1)
 - Slower weight sync (from Difference 1)
+- enforce_eager penalty (from Difference 2)
+- Long-tail response lengths (from Difference 3)
 - The async pipeline can't overlap training and inference as effectively when both are slower
 
-The high variance (hybrid ranges 15.2s-132.6s vs standard 10.7s-30.0s) may be because shorter sequences (avg 151 tokens) mean more sequences packed per batch (~135 vs ~33), creating more variable workloads across ranks, and ZeRO-3 all-gathers are synchronous barriers.
+The high variance (hybrid ranges 15.2s-132.6s vs standard 10.7s-30.0s) is primarily driven by the long-tail effect: steps where all responses are short (MaxSeq<1000) complete in ~60s, while steps with even one max-length response take 100-130s.
 
 ## Investigation Plan
 
-These experiments specifically test whether the two architectural differences explain the gaps:
-
-| # | Experiment | What it tests | Method |
-|---|---|---|---|
-| 1 | Count parameter tensors | Verify 3.25x tensor ratio (Diff 1) | Print `len(list(model.named_parameters()))` for both models |
-| 2 | Profile all-gather time | Verify all-gathers dominate hybrid training (Diff 1) | `torch.profiler` around training step, compare all-gather fraction |
-| 3 | Remove enforce_eager | Verify CUDA graph incompatibility still holds (Diff 2) | Run hybrid without `--vllm_enforce_eager` -- if it works, actor TPS should approach 3,483 |
-| 4 | Try ZeRO-2 | Verify param sharding is the cause (Diff 1) | `--deepspeed_stage 2` eliminates per-param all-gathers entirely -- if learner TPS normalizes, Diff 1 is confirmed |
+| # | Experiment | What it tests | Status | Result |
+|---|---|---|---|---|
+| 1 | Count parameter tensors | Verify 3.25x tensor ratio (Diff 1) | Planned | -- |
+| 2 | Profile all-gather time | Verify all-gathers dominate hybrid training (Diff 1) | Planned | -- |
+| 3 | Benchmark with enforce_eager (fixed length) | Quantify enforce_eager penalty (Diff 2) | **Done** | 47% penalty (3,483→1,841) |
+| 4 | Benchmark with enforce_eager (variable length, GRPO config) | Test long-tail effect (Diff 3) | **Done** | 2,122 TPS, 84% wasted compute |
+| 5 | enforce_eager on standard transformer | Compare enforce_eager penalty across architectures | **Done** | ~25% penalty (5,400→4,100) |
+| 6 | Try ZeRO-2 | Verify param sharding is the cause (Diff 1) | Planned | -- |
 
 ## Related
 - Prior DPO investigation: `docs/dpo_performance_investigation.md`
 - Single-GPU benchmark: `open_instruct/test_hybrid_layer_speed_gpu.py`
 - Benchmark script: `open_instruct/benchmark_generators.py`
+- Benchmark scripts (enforce_eager): `scripts/benchmarking/launch_benchmark_hybrid_fixed.sh`, `scripts/benchmarking/launch_benchmark_hybrid_realistic.sh`
