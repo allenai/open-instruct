@@ -67,7 +67,8 @@ for MODEL in "${MODELS[@]}"; do
         --priority urgent \
         --preemptible \
         --use_hf_tokenizer_template \
-        --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
+        --model_type olmo_core \
+        --beaker_image tylerr/oe-eval-olmocore-gdn-v1 \
         --oe_eval_tasks zebralogic::hamish_zs_reasoning_deepseek \
         --run_oe_eval_experiments \
         --evaluate_on_weka \
@@ -76,6 +77,7 @@ for MODEL in "${MODELS[@]}"; do
         --process_output r1_style \
         --skip_oi_evals
 
+        # --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
         # --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek" \
         # --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,ifeval::hamish_zs_reasoning_deepseek" \
 

@@ -47,7 +47,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>] [--model-type <model_type>]"
     echo "TASK_SUITE should be one of: OLMO_3, OLMO_3_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: OLMO_3)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
@@ -76,6 +76,7 @@ while [[ "$#" -gt 0 ]]; do
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
         --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
+        --model-type) MODEL_TYPE_ARG="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -279,7 +280,8 @@ else
     esac
 fi
 
-MODEL_TYPE="--model-type vllm"
+MODEL_TYPE_ARG="${MODEL_TYPE_ARG:-vllm}"
+MODEL_TYPE="--model-type ${MODEL_TYPE_ARG}"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
 # Set GPU_COUNT and GPU_COUNT_OTHER based on NUM_GPUS
@@ -304,7 +306,7 @@ for TASK in "${TASKS[@]}"; do
         MODEL_TYPE=$MODEL_TYPE_OTHER
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
-        MODEL_TYPE="--model-type vllm"
+        MODEL_TYPE="--model-type ${MODEL_TYPE_ARG}"
         GPU_COUNT="$NUM_GPUS"
     fi
 

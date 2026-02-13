@@ -156,6 +156,12 @@ parser.add_argument(
     default="r1_style",
     help="Process output type for OE eval (e.g., 'r1_style'). Defaults to 'r1_style', which should work for most of our models, including non-thinking ones.",
 )
+parser.add_argument(
+    "--model_type",
+    type=str,
+    default=None,
+    help="Model backend type for OE eval (e.g., 'vllm', 'olmo_core'). Defaults to vllm if not specified.",
+)
 args = parser.parse_args()
 
 
@@ -728,6 +734,10 @@ if args.run_oe_eval_experiments:
     if args.cluster and len(args.cluster) > 0:
         cluster_str = ",".join(args.cluster)
         oe_eval_cmd += f" --cluster '{cluster_str}'"
+
+    # Add model type if specified (e.g., 'olmo_core')
+    if args.model_type:
+        oe_eval_cmd += f" --model-type {args.model_type}"
 
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
