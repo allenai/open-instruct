@@ -215,7 +215,7 @@ OLMO_3=(
     # Math
     "minerva_math_500::hamish_zs_reasoning"
     # # "minerva_math::hamish_zs_reasoning_deepseek"
-    "omega_500:0-shot-chat_deepseek" 
+    "omega_500:0-shot-chat_deepseek"
     # # FULL: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
     "aime:zs_cot_r1::pass_at_32_2025_deepseek"
@@ -305,7 +305,8 @@ for TASK in "${TASKS[@]}"; do
         GPU_COUNT=$GPU_COUNT_OTHER
         MODEL_TYPE=$MODEL_TYPE_OTHER
     else
-        BATCH_SIZE=$BATCH_SIZE_VLLM
+        # BATCH_SIZE=$BATCH_SIZE_VLLM
+        BATCH_SIZE="auto"
         MODEL_TYPE="--model-type ${MODEL_TYPE_ARG}"
         GPU_COUNT="$NUM_GPUS"
     fi
