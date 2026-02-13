@@ -1116,8 +1116,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
-        if "index" in features[0]:
-            result["index"] = torch.tensor([f["index"] for f in features])
+        result["index"] = torch.tensor([f["index"] for f in features])
         max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
         for prefix in ["chosen_", "rejected_"]:
             for key in ["input_ids", "attention_mask", "labels"]:
