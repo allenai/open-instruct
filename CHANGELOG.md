@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Enable packing with torch.compile for DPO training, fix cu_seq_lens offset bug for padded chosen/rejected sequences, add wasted_tokens_from_truncation/sequences_dropped/tokens_per_second_per_gpu metrics (https://github.com/allenai/open-instruct/pull/1466).
+- Enable packing with torch.compile for DPO training, fix cu_seq_lens offset bug for padded chosen/rejected sequences, add tokens_per_second_per_gpu metric (https://github.com/allenai/open-instruct/pull/1466).
 - Production DPO script for OLMo3-7B hybrid (https://github.com/allenai/open-instruct/pull/1449).
 - Gradient accumulation/microbatching support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1447).
 - Evolving rubrics support with RubricVerifier and utility functions for GRPO training (https://github.com/allenai/open-instruct/pull/1460).
