@@ -1143,10 +1143,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.backward(policy_loss)
 
                     # Value model backward (through DeepSpeed engine)
+                    # Note: value_loss_BT is full-length (B, L), use full response_mask (not shifted)
+                    # since V(s_t) predicts the return from state t (no logprob shift needed)
                     if self.args.use_value_model and value_loss_BT is not None:
+                        full_response_mask = data_BT.response_masks[i]
                         value_loss = masked_mean(
-                            value_loss_BT[:, 1:],
-                            response_mask_BT,
+                            value_loss_BT,
+                            full_response_mask,
                             None,
                             loss_denominator,
                         ) * self.args.value_loss_coef
@@ -1161,11 +1164,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.value_model.step()
 
                     # Compute total loss for logging
+                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
                     if self.args.use_value_model and value_loss_BT is not None:
-                        total_loss_BT = per_token_loss_BT + self.args.value_loss_coef * value_loss_BT[:, 1:]
-                    else:
-                        total_loss_BT = per_token_loss_BT
-                    loss = masked_mean(total_loss_BT, response_mask_BT, None, loss_denominator)
+                        value_loss_for_log = masked_mean(
+                            value_loss_BT, full_response_mask, None, loss_denominator
+                        ) * self.args.value_loss_coef
+                        loss = loss + value_loss_for_log
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
