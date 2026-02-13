@@ -12,6 +12,7 @@ set -e
 # cd ..
 
 BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
+BASE_PATH_OLMO_CORE=" /weka/oe-training-default/ai2-llm/checkpoints/nathanl/olmo-sft"
 
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_8e-5/step3256-hf
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_5e-5/step3256-hf
@@ -51,7 +52,7 @@ for MODEL in "${MODELS[@]}"; do
     # INSTRUCT MODELS
     # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
     # MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}"
-    GCS_PATH="${BASE_PATH}/${MODEL}/step3256"
+    GCS_PATH="${BASE_PATH_OLMO_CORE}/${MODEL}/step3256"
     MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}-olmocore"
 
     echo "====================================="
