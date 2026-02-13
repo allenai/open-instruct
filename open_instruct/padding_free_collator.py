@@ -185,8 +185,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         input_ids_tensor = torch.cat(ret["input_ids"], dim=0)[None]
         labels_tensor = torch.cat(ret["labels"], dim=0)[None]
 
-        num_valid_seqs = len(features)
-        sequences_dropped = 0
         if self.max_seq_length is not None:
             cu_seq_lens_tensor = cast(torch.Tensor, ret["cu_seq_lens_q"]) if self.return_flash_attn_kwargs else None
             packed = _fit_to_max_length(
@@ -200,40 +198,16 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             )
             input_ids_tensor, labels_tensor = packed.input_ids, packed.labels
             position_ids_tensor, seq_idx_tensor = packed.position_ids, packed.seq_idx
-            num_valid_seqs, sequences_dropped = packed.num_valid_seqs, packed.sequences_dropped
             if packed.cu_seq_lens is not None:
                 ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = packed.cu_seq_lens
 
         ret["input_ids"] = input_ids_tensor
         ret["labels"] = labels_tensor
-        ret["_num_valid_seqs"] = num_valid_seqs
-        ret["_sequences_dropped"] = sequences_dropped
         if position_ids_tensor is not None:
             ret["position_ids"] = position_ids_tensor
         if seq_idx_tensor is not None:
             ret["seq_idx"] = seq_idx_tensor
         return ret
-
-
-def _align_dpo_seq_counts(chosen_features: dict[str, Any], rejected_features: dict[str, Any]) -> tuple[int, int]:
-    chosen_valid = chosen_features.pop("_num_valid_seqs")
-    rejected_valid = rejected_features.pop("_num_valid_seqs")
-    chosen_dropped = chosen_features.pop("_sequences_dropped")
-    rejected_dropped = rejected_features.pop("_sequences_dropped")
-    num_valid = min(chosen_valid, rejected_valid)
-
-    if num_valid < chosen_valid and "cu_seq_lens_q" in chosen_features:
-        chosen_features["cu_seq_lens_q"] = chosen_features["cu_seq_lens_q"][: num_valid + 1]
-        chosen_features["cu_seq_lens_k"] = chosen_features["cu_seq_lens_k"][: num_valid + 1]
-        boundary = chosen_features["cu_seq_lens_k"][-1].item()
-        chosen_features["labels"][:, boundary:] = -100
-    if num_valid < rejected_valid and "cu_seq_lens_q" in rejected_features:
-        rejected_features["cu_seq_lens_q"] = rejected_features["cu_seq_lens_q"][: num_valid + 1]
-        rejected_features["cu_seq_lens_k"] = rejected_features["cu_seq_lens_k"][: num_valid + 1]
-        boundary = rejected_features["cu_seq_lens_k"][-1].item()
-        rejected_features["labels"][:, boundary:] = -100
-
-    return num_valid, max(chosen_dropped, rejected_dropped)
 
 
 @dataclass
@@ -265,16 +239,13 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
             _filter_feature_dicts(features, "rejected_"), return_tensors=return_tensors, separator_id=separator_id
         )
 
-        num_valid, sequences_dropped = _align_dpo_seq_counts(chosen_features, rejected_features)
-
-        result = {"_sequences_dropped": sequences_dropped, "_num_valid_seqs": num_valid}
+        result = {}
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
-            all_indices = torch.tensor([f["index"] for f in features])
-            result["index"] = all_indices[:num_valid]
+            result["index"] = torch.tensor([f["index"] for f in features])
         return result
 
 

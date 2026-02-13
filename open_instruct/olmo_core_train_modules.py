@@ -13,7 +13,6 @@ import torch.distributed.checkpoint.state_dict as dist_cp_sd
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
-from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from transformers import PreTrainedTokenizer
@@ -186,12 +185,6 @@ class DPOTrainModule(TransformerTrainModule):
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
-
-            if "_sequences_dropped" in batch:
-                self.record_metric("train/sequences_dropped", batch["_sequences_dropped"], ReduceType.sum)
-                total_seqs = batch["_sequences_dropped"] + batch["_num_valid_seqs"]
-                dropped_pct = batch["_sequences_dropped"] / total_seqs * 100
-                self.record_metric("train/sequences_dropped_pct", dropped_pct, ReduceType.mean)
 
             if self.dpo_config.loss_type.computes_reward_metrics:
                 margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
