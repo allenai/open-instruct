@@ -12,7 +12,7 @@ set -e
 # cd ..
 
 BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
-BASE_PATH_OLMO_CORE=" /weka/oe-training-default/ai2-llm/checkpoints/nathanl/olmo-sft"
+BASE_PATH_OLMO_CORE="/weka/oe-training-default/ai2-llm/checkpoints/nathanl/olmo-sft"
 
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_8e-5/step3256-hf
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_5e-5/step3256-hf
@@ -71,7 +71,7 @@ for MODEL in "${MODELS[@]}"; do
         --preemptible \
         --use_hf_tokenizer_template \
         --model_type olmo_core \
-        --beaker_image tylerr/oe-eval-olmocore-gdn-v1 \
+        --beaker_image tylerr/oe-eval-olmocore-gdn-v2 \
         --oe_eval_tasks zebralogic::hamish_zs_reasoning_deepseek \
         --run_oe_eval_experiments \
         --evaluate_on_weka \
