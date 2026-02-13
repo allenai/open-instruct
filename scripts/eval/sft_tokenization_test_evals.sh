@@ -49,8 +49,10 @@ for MODEL in "${MODELS[@]}"; do
 
 
     # INSTRUCT MODELS
-    GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
-    MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}"
+    # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
+    # MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}"
+    GCS_PATH="${BASE_PATH}/${MODEL}/step3256"
+    MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}-olmocore"
 
     echo "====================================="
     echo "Running evals for: ${MODEL}"
