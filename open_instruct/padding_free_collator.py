@@ -137,16 +137,12 @@ def count_features_within_token_budget(features: list[dict[str, Any]], max_seq_l
         return len(features)
     chosen_total = 0
     rejected_total = 0
-    keep = 0
-    for f in features:
-        chosen_len = len(f["chosen_input_ids"])
-        rejected_len = len(f["rejected_input_ids"])
-        if keep > 0 and (chosen_total + chosen_len > max_seq_length or rejected_total + rejected_len > max_seq_length):
-            break
-        chosen_total += chosen_len
-        rejected_total += rejected_len
-        keep += 1
-    return keep
+    for i, f in enumerate(features):
+        chosen_total += len(f["chosen_input_ids"])
+        rejected_total += len(f["rejected_input_ids"])
+        if i > 0 and (chosen_total > max_seq_length or rejected_total > max_seq_length):
+            return i
+    return len(features)
 
 
 @dataclass
