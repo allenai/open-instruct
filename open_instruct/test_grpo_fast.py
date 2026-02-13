@@ -238,7 +238,7 @@ class TestGrpoFastBase(unittest.TestCase):
             dp_rank=0,
             dp_world_size=1,
             work_dir="/tmp",
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
@@ -568,7 +568,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             dp_rank=0,
             dp_world_size=1,
             work_dir="/tmp",
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
@@ -605,7 +605,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             dp_rank=0,
             dp_world_size=1,
             work_dir="/tmp",
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
