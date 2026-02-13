@@ -270,6 +270,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
+        # Handles both packing (cu_seq_lens) and non-packing (attention_mask) batches.
         num_tokens = padding_free_collator.get_num_tokens(batch)
         return num_tokens * self.dp_world_size
 
