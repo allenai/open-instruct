@@ -38,7 +38,7 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, tensor_utils, utils
+from open_instruct import logger_utils, model_utils, padding_free_collator, tensor_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
@@ -493,14 +493,13 @@ def _get_batch_stats(batch: dict) -> tuple[int, int, list[int], list[int]]:
         (batch_tokens, batch_size, chosen_lengths, rejected_lengths)
     """
     batch_size = len(batch["index"])
+    batch_tokens = padding_free_collator.get_num_tokens(batch)
     if "chosen_cu_seq_lens_k" in batch:
         chosen_cu = batch["chosen_cu_seq_lens_k"]
         rejected_cu = batch["rejected_cu_seq_lens_k"]
-        batch_tokens = chosen_cu[-1].item() + rejected_cu[-1].item()
         chosen_lengths = (chosen_cu[1:] - chosen_cu[:-1]).tolist()
         rejected_lengths = (rejected_cu[1:] - rejected_cu[:-1]).tolist()
     else:
-        batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
         chosen_lengths = [batch["chosen_input_ids"].shape[1]] * batch_size
         rejected_lengths = [batch["rejected_input_ids"].shape[1]] * batch_size
     return batch_tokens, batch_size, chosen_lengths, rejected_lengths

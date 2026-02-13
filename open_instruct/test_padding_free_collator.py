@@ -259,14 +259,9 @@ class TestDPOPackingIndices(unittest.TestCase):
         cu_seq_lens = concat_batch["concatenated_cu_seq_lens_k"]
 
         logps = get_batch_logps(logits, labels, cu_seq_lens)
-        expected_logps_count = 2 * bs
 
-        self.assertEqual(
-            len(logps),
-            expected_logps_count,
-            f"get_batch_logps returned {len(logps)} logps but expected {expected_logps_count} "
-            f"(2 * {bs} for chosen + rejected). batch has {num_indices} indices.",
-        )
+        # 2 * bs because DPO concatenates chosen and rejected sequences.
+        self.assertEqual(len(logps), 2 * bs)
 
         chosen_logps = logps[:bs]
         rejected_logps = logps[bs:]
@@ -297,12 +292,7 @@ class TestDPOPackingIndices(unittest.TestCase):
             chosen_logps = logps[:bs]
             rejected_logps = logps[bs:]
 
-            self.assertEqual(
-                len(chosen_logps),
-                len(batch["index"]),
-                f"Mismatch: batch['index'] has {len(batch['index'])} elements, "
-                f"but chosen_logps has {len(chosen_logps)} elements",
-            )
+            self.assertEqual(len(chosen_logps), len(batch["index"]))
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps

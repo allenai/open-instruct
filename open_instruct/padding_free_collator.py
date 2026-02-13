@@ -52,9 +52,9 @@ def _fit_to_max_length(
             # Clamping creates duplicate boundaries for sequences beyond the limit,
             # and unique_consecutive removes them:
             #   cu_seq_lens = [0, 100, 250, 400]  (3 seqs of lengths 100, 150, 150)
-            #   after clamp_max_(200): [0, 100, 200, 200]  (seq 3 entirely beyond cut)
+            #   after clamp(max=200): [0, 100, 200, 200]  (seq 3 entirely beyond cut)
             #   after unique_consecutive: [0, 100, 200]     (seq 3 removed, 2 remain)
-            cu_seq_lens = torch.unique_consecutive(cu_seq_lens.clamp_max_(max_seq_length))
+            cu_seq_lens = torch.unique_consecutive(cu_seq_lens.clamp(max=max_seq_length))
             num_valid_seqs = len(cu_seq_lens) - 1
             sequences_dropped = num_features - num_valid_seqs
             if sequences_dropped > 0:
@@ -118,8 +118,8 @@ def _collect_flattened_features(
     return ret, pos_ids, seq_idx, cu_seq_lens, max_length
 
 
-def _filter_feature_dicts(features: list[dict[str, Any]], match_string: str) -> list[dict[str, Any]]:
-    return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
+def _filter_feature_dicts(features: list[dict[str, Any]], prefix: str) -> list[dict[str, Any]]:
+    return [{k.removeprefix(prefix): v for k, v in f.items() if k.startswith(prefix)} for f in features]
 
 
 def _split_prefixed_batch(batch: dict[str, list | torch.Tensor]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -171,16 +171,16 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             return_seq_idx=self.return_seq_idx,
         )
 
-        if self.return_flash_attn_kwargs and cu_seq_lens is not None:
+        if self.return_flash_attn_kwargs:
             ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = torch.tensor(
                 cu_seq_lens, dtype=torch.int32, device=features[0]["input_ids"].device
             )
             ret["max_length_q"] = ret["max_length_k"] = max_length
         position_ids_tensor = None
         seq_idx_tensor = None
-        if self.return_position_ids and pos_ids is not None:
+        if self.return_position_ids:
             position_ids_tensor = torch.cat(pos_ids, dim=0)[None]
-        if self.return_seq_idx and seq_idx is not None:
+        if self.return_seq_idx:
             seq_idx_tensor = torch.cat(seq_idx, dim=0)[None]
         input_ids_tensor = torch.cat(ret["input_ids"], dim=0)[None]
         labels_tensor = torch.cat(ret["labels"], dim=0)[None]
