@@ -452,21 +452,15 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.value_model)
 
-        # Replace the LM head with a Linear(hidden_size, 1) initialized from the "score" token row.
-        # This avoids random initialization (uses existing LM head weights), is memory efficient
-        # (1 output instead of vocab_size), and is ZeRO-3 compatible (part of the model).
-        value_token_idx = self.tokenizer.encode("score", add_special_tokens=False)[0]
-        logger.info(f"{self.rank=}: Initializing value head from LM head token '{self.tokenizer.decode([value_token_idx])}' (idx={value_token_idx})")
-
+        # Replace the LM head with a newly initialized Linear(hidden_size, 1).
+        # Small random init for stable training; the value warmup phase will train it.
         hidden_size = self.value_model.config.hidden_size
-        has_bias = self.value_model.lm_head.bias is not None
-        value_head = torch.nn.Linear(hidden_size, 1, bias=has_bias, dtype=torch.bfloat16)
-        # Initialize from the "score" row of the LM head — NOT random
-        value_head.weight.data.copy_(self.value_model.lm_head.weight.data[value_token_idx].unsqueeze(0))
-        if has_bias:
-            value_head.bias.data.copy_(self.value_model.lm_head.bias.data[value_token_idx].unsqueeze(0))
+        value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+        std = 1.0 / (hidden_size + 1) ** 0.5
+        torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
         # Replace lm_head with the small value head (saves memory: 1 output vs vocab_size)
         self.value_model.lm_head = value_head
+        logger.info(f"{self.rank=}: Replaced LM head with newly initialized value head (hidden_size={hidden_size})")
 
         # Restore HfDeepSpeedConfig
         _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
