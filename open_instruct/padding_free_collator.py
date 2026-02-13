@@ -1,80 +1,29 @@
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import torch
 from transformers import DefaultDataCollator
 
-from open_instruct import logger_utils, tensor_utils
-
-logger = logger_utils.setup_logger(__name__)
+from open_instruct import tensor_utils
 
 
-@dataclass
-class PackedTensors:
-    input_ids: torch.Tensor
-    labels: torch.Tensor
-    position_ids: torch.Tensor | None
-    seq_idx: torch.Tensor | None
-    cu_seq_lens: torch.Tensor | None
-    num_valid_seqs: int
-    sequences_dropped: int
-
-
-def _fit_to_max_length(
+def _pad_to_max_length(
     max_seq_length: int,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     position_ids: torch.Tensor | None,
     seq_idx: torch.Tensor | None,
-    cu_seq_lens: torch.Tensor | None,
-    num_features: int,
-) -> PackedTensors:
-    """Truncate or pad packed tensors to exactly ``max_seq_length`` tokens.
-
-    When truncating, ``cu_seq_lens`` boundaries that fall beyond the limit are
-    clamped and deduplicated, which may drop trailing sequences entirely. The
-    returned ``PackedTensors`` reports how many sequences remain valid and how
-    many were dropped.
-    """
-    current_len = input_ids.shape[1]
-
-    if current_len > max_seq_length:
-        input_ids = input_ids[:, :max_seq_length]
-        labels = labels[:, :max_seq_length]
-        if position_ids is not None:
-            position_ids = position_ids[:, :max_seq_length]
-        if seq_idx is not None:
-            seq_idx = seq_idx[:, :max_seq_length]
-
-        num_valid_seqs = num_features
-        sequences_dropped = 0
-        if cu_seq_lens is not None:
-            # Clamping creates duplicate boundaries for sequences beyond the limit,
-            # and unique_consecutive removes them:
-            #   cu_seq_lens = [0, 100, 250, 400]  (3 seqs of lengths 100, 150, 150)
-            #   after clamp(max=200): [0, 100, 200, 200]  (seq 3 entirely beyond cut)
-            #   after unique_consecutive: [0, 100, 200]     (seq 3 removed, 2 remain)
-            cu_seq_lens = torch.unique_consecutive(cu_seq_lens.clamp(max=max_seq_length))
-            num_valid_seqs = len(cu_seq_lens) - 1
-            sequences_dropped = num_features - num_valid_seqs
-            if sequences_dropped > 0:
-                logger.warning(
-                    f"Truncation dropped {sequences_dropped} sequences "
-                    f"(packed {num_features} sequences into {current_len} tokens, "
-                    f"truncated to {max_seq_length}, {num_valid_seqs} sequences remain)"
-                )
-
-        return PackedTensors(input_ids, labels, position_ids, seq_idx, cu_seq_lens, num_valid_seqs, sequences_dropped)
-
-    if current_len < max_seq_length:
-        input_ids = tensor_utils.pad_to_length(input_ids, max_seq_length, pad_value=0)
-        labels = tensor_utils.pad_to_length(labels, max_seq_length, pad_value=-100)
-        if position_ids is not None:
-            position_ids = tensor_utils.pad_to_length(position_ids, max_seq_length, pad_value=0)
-        if seq_idx is not None:
-            seq_idx = tensor_utils.pad_to_length(seq_idx, max_seq_length, pad_value=-1)
-
-    return PackedTensors(input_ids, labels, position_ids, seq_idx, cu_seq_lens, num_features, 0)
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    """Right-pad packed tensors to exactly ``max_seq_length`` tokens."""
+    if input_ids.shape[1] >= max_seq_length:
+        return input_ids, labels, position_ids, seq_idx
+    input_ids = tensor_utils.pad_to_length(input_ids, max_seq_length, pad_value=0)
+    labels = tensor_utils.pad_to_length(labels, max_seq_length, pad_value=-100)
+    if position_ids is not None:
+        position_ids = tensor_utils.pad_to_length(position_ids, max_seq_length, pad_value=0)
+    if seq_idx is not None:
+        seq_idx = tensor_utils.pad_to_length(seq_idx, max_seq_length, pad_value=-1)
+    return input_ids, labels, position_ids, seq_idx
 
 
 def _collect_flattened_features(
@@ -186,20 +135,9 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         labels_tensor = torch.cat(ret["labels"], dim=0)[None]
 
         if self.max_seq_length is not None:
-            cu_seq_lens_tensor = cast(torch.Tensor, ret["cu_seq_lens_q"]) if self.return_flash_attn_kwargs else None
-            packed = _fit_to_max_length(
-                self.max_seq_length,
-                input_ids_tensor,
-                labels_tensor,
-                position_ids_tensor,
-                seq_idx_tensor,
-                cu_seq_lens_tensor,
-                len(features),
+            input_ids_tensor, labels_tensor, position_ids_tensor, seq_idx_tensor = _pad_to_max_length(
+                self.max_seq_length, input_ids_tensor, labels_tensor, position_ids_tensor, seq_idx_tensor
             )
-            input_ids_tensor, labels_tensor = packed.input_ids, packed.labels
-            position_ids_tensor, seq_idx_tensor = packed.position_ids, packed.seq_idx
-            if packed.cu_seq_lens is not None:
-                ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = packed.cu_seq_lens
 
         ret["input_ids"] = input_ids_tensor
         ret["labels"] = labels_tensor
