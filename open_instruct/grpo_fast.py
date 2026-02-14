@@ -873,6 +873,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         data_BT.response_masks[i],
                         self.pad_token_id,
                     )
+                    # V(EOS) = 0: the value at terminal positions should be 0
+                    # because by definition, the sum of future rewards after EOS is 0.
+                    # The reward at the EOS position is captured by the GAE delta, not V.
+                    dones_mask = data_BT.dones[i] > 0
+                    values = values * (~dones_mask).float()
                     values_BT.append(values)
                     old_values_BT.append(values.clone())
 
@@ -1041,7 +1046,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Use GAE advantages if using value model, otherwise use pre-computed group-normalized advantages
                     if self.args.use_value_model:
-                        advantages_for_loss = gae_advantages_BT[i][:, 1:]
+                        # GAE advantages at position t correspond to the action at state s_t
+                        # (generating token t+1). Logprobs at shifted index j also correspond
+                        # to state s_j (predicting token j+1). So we take [:, :-1] to align
+                        # GAE positions 0..L-2 with shifted logprob indices 0..L-2.
+                        advantages_for_loss = gae_advantages_BT[i][:, :-1]
                     else:
                         advantages_for_loss = data_BT.advantages[i][:, 1:]
 
@@ -1098,7 +1107,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     vf_clipfrac_BT = None
                     if self.args.use_value_model:
                         # Compute current value predictions (with gradient for value loss backprop)
-                        current_values = self.forward_value(
+                        current_values_full = self.forward_value(
                             data_BT.query_responses[i],
                             data_BT.attention_masks[i],
                             data_BT.position_ids[i],
@@ -1106,9 +1115,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.pad_token_id,
                             use_grad=True,
                         )
-                        # Target returns
-                        target_returns = returns_BT[i]
-                        old_values = old_values_BT[i]
+                        # Align values with actions: V(s_t) at position t predicts value for
+                        # the action of generating token t+1. Take [:, :-1] to get positions
+                        # 0..L-2, matching the L-1 actions (same alignment as logprobs).
+                        current_values = current_values_full[:, :-1]
+                        target_returns = returns_BT[i][:, :-1]
+                        old_values = old_values_BT[i][:, :-1]
 
                         # Value function loss with optional clipping
                         if self.args.vf_clip_range > 0:
@@ -1143,13 +1155,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.backward(policy_loss)
 
                     # Value model backward (through DeepSpeed engine)
-                    # Note: value_loss_BT is full-length (B, L), use full response_mask (not shifted)
-                    # since V(s_t) predicts the return from state t (no logprob shift needed)
+                    # value_loss_BT is (B, L-1), aligned with response_mask_BT (B, L-1)
                     if self.args.use_value_model and value_loss_BT is not None:
-                        full_response_mask = data_BT.response_masks[i]
                         value_loss = masked_mean(
                             value_loss_BT,
-                            full_response_mask,
+                            response_mask_BT,
                             None,
                             loss_denominator,
                         ) * self.args.value_loss_coef
@@ -1167,7 +1177,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
                     if self.args.use_value_model and value_loss_BT is not None:
                         value_loss_for_log = masked_mean(
-                            value_loss_BT, full_response_mask, None, loss_denominator
+                            value_loss_BT, response_mask_BT, None, loss_denominator
                         ) * self.args.value_loss_coef
                         loss = loss + value_loss_for_log
                     local_step += 1
