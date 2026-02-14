@@ -1197,8 +1197,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
                         if self.args.use_value_model and value_loss_BT is not None:
-                            loss_stats_B["value_loss"][i] = masked_mean(value_loss_BT[:, 1:], response_mask_BT)
-                            loss_stats_B["vf_clipfrac"][i] = masked_mean(vf_clipfrac_BT[:, 1:], response_mask_BT)
+                            loss_stats_B["value_loss"][i] = masked_mean(value_loss_BT, response_mask_BT)
+                            loss_stats_B["vf_clipfrac"][i] = masked_mean(vf_clipfrac_BT, response_mask_BT)
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
