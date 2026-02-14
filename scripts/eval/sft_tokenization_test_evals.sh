@@ -22,9 +22,9 @@ BASE_PATH_OLMO_CORE="/weka/oe-training-default/ai2-llm/checkpoints/nathanl/olmo-
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_SFT_YARN_LR2.5e-5/step46412-hf
 
 MODELS=(
-    # "TEST_HYBRIC_SFT_LARGER_LR1e-4"
-    # "TEST_HYBRIC_SFT_LARGER_LR5e-5"
-    # "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
+    "TEST_HYBRIC_SFT_LARGER_LR1e-4"
+    "TEST_HYBRIC_SFT_LARGER_LR5e-5"
+    "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
     # "HYBRID_SFT_YARN_LR5e-5"
     # "HYBRID_SFT_YARN_LR2.5e-5"
     # "ABLATE_HYBRID_THINK_SFT_0210_LR2.5e-5"
@@ -39,21 +39,26 @@ for MODEL in "${MODELS[@]}"; do
     # THINK MODELS
     # GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
     # MODEL_NAME="0208-${MODEL}"
+    GCS_PATH="${BASE_PATH_OLMO_CORE}/${MODEL}/step46412"
+    MODEL_NAME="0208-${MODEL}-olmocore"
 
     # Think models -- yarn
     # GCS_PATH="${BASE_PATH}/${MODEL}/step43110-hf"
     # MODEL_NAME="0210-${MODEL}"
+    # GCS_PATH="${BASE_PATH_OLMO_CORE}/${MODEL}/step43110"
+    # MODEL_NAME="0210-${MODEL}-olmocore"
 
     # Think models -- ablation
     # GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf"
     # MODEL_NAME="0208-${MODEL}"
-
+    # GCS_PATH="${BASE_PATH_OLMO_CORE}/${MODEL}/step46412"
+    # MODEL_NAME="0208-${MODEL}-olmocore"
 
     # INSTRUCT MODELS
     # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
     # MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}"
-    GCS_PATH="${BASE_PATH_OLMO_CORE}/${MODEL}/step3256"
-    MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}-olmocore"
+    # GCS_PATH="${BASE_PATH_OLMO_CORE}/${MODEL}/step3256"
+    # MODEL_NAME="instruct-sft-hybrid-tok-0207-${MODEL}-olmocore"
 
     echo "====================================="
     echo "Running evals for: ${MODEL}"
