@@ -152,7 +152,7 @@ class DPOTrainModule(TransformerTrainModule):
         micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
         device = batch["chosen_input_ids"].device
-        total_tokens = torch.tensor(padding_free_collator.get_num_tokens(batch), dtype=torch.float32, device=device)
+        total_tokens = padding_free_collator.get_num_tokens(batch)
 
         for v in self._metrics.values():
             v.zero_()
@@ -160,9 +160,7 @@ class DPOTrainModule(TransformerTrainModule):
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 loss, step_metrics = self._compute_microbatch_loss(micro_batch)
-                micro_tokens = torch.tensor(
-                    padding_free_collator.get_num_tokens(micro_batch), dtype=torch.float32, device=device
-                )
+                micro_tokens = padding_free_collator.get_num_tokens(micro_batch)
                 weight = micro_tokens / total_tokens
                 for k, v in step_metrics.items():
                     self._metrics[k] += v.detach() * micro_tokens
@@ -172,7 +170,9 @@ class DPOTrainModule(TransformerTrainModule):
 
         if not dry_run:
             metric_keys = sorted(self._metrics.keys())
-            local_sums_list = [total_tokens] + [self._metrics[k] for k in metric_keys]
+            local_sums_list = [torch.tensor(total_tokens, dtype=torch.float32, device=device)] + [
+                self._metrics[k] for k in metric_keys
+            ]
             local_sums = torch.stack(local_sums_list)
             dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 

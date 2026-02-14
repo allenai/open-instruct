@@ -8,21 +8,17 @@ from open_instruct import tensor_utils
 
 
 def _collect_flattened_features(
-    features: list[dict[str, Any]],
-    separator_id: int,
-    return_flash_attn_kwargs: bool,
-    return_position_ids: bool,
-    return_seq_idx: bool,
-) -> tuple[dict[str, Any], list[torch.Tensor] | None, list[torch.Tensor] | None, list[int] | None, int]:
+    features: list[dict[str, Any]], separator_id: int
+) -> tuple[dict[str, Any], list[torch.Tensor], list[torch.Tensor], list[int], int]:
     """
-    Flatten a list of example dicts into concatenated tensors plus optional
+    Flatten a list of example dicts into concatenated tensors plus
     metadata used for padding-free training.
     """
     is_labels_provided = "labels" in features[0]
     ret: dict[str, Any] = {"input_ids": [], "labels": []}
-    pos_ids: list[torch.Tensor] | None = [] if return_position_ids else None
-    seq_idx: list[torch.Tensor] | None = [] if return_seq_idx else None
-    cu_seq_lens: list[int] | None = [0] if return_flash_attn_kwargs else None
+    pos_ids: list[torch.Tensor] = []
+    seq_idx: list[torch.Tensor] = []
+    cu_seq_lens: list[int] = [0]
     max_length = 0
 
     separator = torch.tensor(
@@ -32,18 +28,14 @@ def _collect_flattened_features(
         input_ids = item["input_ids"]
         ret["input_ids"].append(input_ids)
 
-        # Labels are next-token shifted: insert a separator, then drop the first token.
         label_source = item["labels"] if is_labels_provided else input_ids
         ret["labels"].append(separator)
         ret["labels"].append(label_source[1:])
 
-        if return_flash_attn_kwargs and cu_seq_lens is not None:
-            cu_seq_lens.append(cu_seq_lens[-1] + len(input_ids))
-            max_length = max(max_length, len(input_ids))
-        if return_position_ids and pos_ids is not None:
-            pos_ids.append(torch.arange(input_ids.numel(), device=input_ids.device))
-        if return_seq_idx and seq_idx is not None:
-            seq_idx.append(torch.full_like(input_ids, s_idx, dtype=torch.int32))
+        cu_seq_lens.append(cu_seq_lens[-1] + len(input_ids))
+        max_length = max(max_length, len(input_ids))
+        pos_ids.append(torch.arange(input_ids.numel(), device=input_ids.device))
+        seq_idx.append(torch.full_like(input_ids, s_idx, dtype=torch.int32))
 
     return ret, pos_ids, seq_idx, cu_seq_lens, max_length
 
@@ -94,11 +86,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             separator_id = self.separator_id
 
         ret, pos_ids, seq_idx, cu_seq_lens, max_length = _collect_flattened_features(
-            features=features,
-            separator_id=separator_id,
-            return_flash_attn_kwargs=self.return_flash_attn_kwargs,
-            return_position_ids=self.return_position_ids,
-            return_seq_idx=self.return_seq_idx,
+            features=features, separator_id=separator_id
         )
 
         if self.return_flash_attn_kwargs:
