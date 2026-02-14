@@ -7,7 +7,7 @@ import parameterized
 import torch
 
 import open_instruct.data_loader
-from open_instruct import dpo_utils
+from open_instruct import tensor_utils
 
 
 def single_example_collator(examples: list[dict]) -> dict:
@@ -361,10 +361,10 @@ class TestHFDataLoader(unittest.TestCase):
 
         for padding_amount in [0, 5, 10, 50, 100]:
             batch = {
-                "input_ids": dpo_utils.pad_to_length(
+                "input_ids": tensor_utils.pad_to_length(
                     torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
                 ),
-                "attention_mask": dpo_utils.pad_to_length(
+                "attention_mask": tensor_utils.pad_to_length(
                     torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
                 ),
             }
