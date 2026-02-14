@@ -1112,9 +1112,9 @@ def setup_datasets(
         with open(streaming_config.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
-    elif streaming_config.system_prompt_override is not None:
-        system_prompt_override = streaming_config.system_prompt_override
-        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+    elif streaming_config.system_prompt_remove:
+        system_prompt_override = ""
+        logger.info("System prompt removed")
 
     transform_fn_args = [
         {

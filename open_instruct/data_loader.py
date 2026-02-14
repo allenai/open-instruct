@@ -326,7 +326,7 @@ class StreamingDataLoaderConfig:
     dataset_skip_cache: bool = False
     shuffle_eval_dataset: bool = False
     system_prompt_override_file: str | None = None
-    system_prompt_override: str | None = None
+    system_prompt_remove: bool = False
     user_prompt_transform: str | None = None
 
     # Generation
