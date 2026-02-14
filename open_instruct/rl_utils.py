@@ -401,6 +401,11 @@ def calculate_advantages_packed(
 ):
     """Packed implementation of GAE. Each row is a packed sequence.
     The `dones` specifies the sequence boundaries, and the `response_masks` specifies the query boundaries.
+
+    The GAE propagation continues through query positions (so the last query token before a response
+    gets a non-zero advantage reflecting future response rewards). Only the delta is zeroed at query
+    positions since they have no rewards/values. The `nonterminal` flag blocks propagation across
+    sequence boundaries.
     """
     response_masks = response_masks.clip(0, 1)
     dones = dones.clip(0, 1)
@@ -411,8 +416,11 @@ def calculate_advantages_packed(
         nonterminal = 1 - dones[:, t]
         nonquery = response_masks[:, t]
         nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        # Delta is zeroed at query positions (no rewards/values there)
         delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
-        lastgaelam = delta + gamma * lam * lastgaelam * nonterminal * nonquery
+        # GAE propagates through query positions (only blocked by sequence boundaries via nonterminal)
+        # so the last query token gets a non-zero advantage from future response rewards
+        lastgaelam = delta + gamma * lam * lastgaelam * nonterminal
         advantages_reversed.append(lastgaelam)
     advantages = np.stack(advantages_reversed[::-1], axis=1)
     returns = advantages + values
@@ -498,7 +506,7 @@ def calculate_advantages_packed_vapo(
         nonquery = response_masks[:, t]
         nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
         delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
-        lastgaelam_critic = delta + gamma * lam_critic * lastgaelam_critic * nonterminal * nonquery
+        lastgaelam_critic = delta + gamma * lam_critic * lastgaelam_critic * nonterminal
         advantages_reversed_critic.append(lastgaelam_critic)
     advantages_critic = np.stack(advantages_reversed_critic[::-1], axis=1)
     critic_returns = advantages_critic + values
@@ -511,7 +519,7 @@ def calculate_advantages_packed_vapo(
         nonquery = response_masks[:, t]
         nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
         delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
-        lastgaelam_policy = delta + gamma * lam_policy * lastgaelam_policy * nonterminal * nonquery
+        lastgaelam_policy = delta + gamma * lam_policy * lastgaelam_policy * nonterminal
         advantages_reversed_policy.append(lastgaelam_policy)
     policy_advantages = np.stack(advantages_reversed_policy[::-1], axis=1)
     
