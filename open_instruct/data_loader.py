@@ -176,6 +176,13 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 self._overflow = all_examples[len(batch["index"]) :]
                 yield batch
                 batch_examples = []
+        while self._overflow:
+            batch = to_device(self._collator(self._overflow), self._device)
+            assert len(batch["index"]) > 0, (
+                f"Collator consumed 0 examples from {len(self._overflow)} overflow examples"
+            )
+            self._overflow = self._overflow[len(batch["index"]) :]
+            yield batch
 
     @property
     def total_batches(self) -> int:
@@ -542,6 +549,7 @@ class BatchStatistics:
 
 
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
+    assert len(examples) == 1, f"Expected 1 example, got {len(examples)}"
     example = examples[0]
     return example | {"index": torch.tensor([example["index"]])}
 
