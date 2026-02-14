@@ -1881,7 +1881,7 @@ def run_training(
             dp_world_size=1,
             work_dir=args.output_dir,
             automatic_reshuffle=False,
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
     else:
         eval_data_loader = None

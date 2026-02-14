@@ -139,6 +139,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._automatic_reshuffle = automatic_reshuffle
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
+        self._overflow: list[dict[str, Any]] = []
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
@@ -170,8 +171,18 @@ class HFDataLoader(data_loader.DataLoaderBase):
             example = self.dataset[i]
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
-                yield to_device(self._collator(batch_examples), self._device)
+                all_examples = self._overflow + batch_examples
+                batch = to_device(self._collator(all_examples), self._device)
+                self._overflow = all_examples[len(batch["index"]) :]
+                yield batch
                 batch_examples = []
+        while self._overflow:
+            batch = to_device(self._collator(self._overflow), self._device)
+            assert len(batch["index"]) > 0, (
+                f"Collator consumed 0 examples from {len(self._overflow)} overflow examples"
+            )
+            self._overflow = self._overflow[len(batch["index"]) :]
+            yield batch
 
     @property
     def total_batches(self) -> int:
@@ -537,10 +548,16 @@ class BatchStatistics:
     total_prompts: int
 
 
+def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
+    assert len(examples) == 1, f"Expected 1 example, got {len(examples)}"
+    example = examples[0]
+    return example | {"index": torch.tensor([example["index"]])}
+
+
 def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
-    index = example["index"]
+    index = int(example["index"])
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
@@ -963,7 +980,7 @@ class DataPreparationActor:
             dp_world_size=1,
             work_dir=work_dir,
             automatic_reshuffle=True,
-            collator=lambda x: x[0],
+            collator=single_example_collator,
         )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
