@@ -1,8 +1,11 @@
 #!/bin/bash
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_ATTENTION_BACKEND="FLASHINFER"
 export VLLM_USE_V1=1
-uv run python open_instruct/grpo_fast.py \
+uv run --active python open_instruct/grpo_fast.py \
+    --output_dir results \
+    --run_name test \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
@@ -34,7 +37,4 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
-    --push_to_hub false \
-    --system_prompt_override_file scripts/train/debug/cute_debug_system_prompt.txt \
-    --active_sampling --async_steps 8
-    # --with_tracking
+    --push_to_hub false 

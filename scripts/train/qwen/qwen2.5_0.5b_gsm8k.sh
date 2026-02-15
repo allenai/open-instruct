@@ -56,15 +56,16 @@ uv run mason.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --user_prompt_transform "{prompt}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}." \
+    --system_prompt_remove True \
+    --user_prompt_transform "{prompt}\n\nPlease reason step by step, and write your final answer as an integer at the end." \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256 \
+    --total_episodes 512000 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 1 \
+    --local_eval_every 100 \
     --save_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
@@ -74,7 +75,7 @@ uv run mason.py \
     --mask_truncated_completions False \
     --load_ref_policy False \
     --eval_on_step_0 True \
-    --eval_pass_at_k 4 \
+    --eval_pass_at_k 32 \
     --with_tracking \
     --push_to_hub False $@
 

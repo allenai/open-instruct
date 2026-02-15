@@ -26,5 +26,5 @@ docker:
 	DOCKER_BUILDKIT=1 docker build -f Dockerfile --build-arg UV_CACHE_DIR=$(UV_CACHE_DIR) -t open_instruct .
 	# if you are internally at AI2, you can create an image like this:
 	$(eval beaker_user := $(shell beaker account whoami --format json | jq -r '.[0].name'))
-	# beaker image delete $(beaker_user)/open_instruct
+	beaker image delete $(beaker_user)/open_instruct
 	beaker image create open_instruct -n open_instruct -w ai2/$(beaker_user)

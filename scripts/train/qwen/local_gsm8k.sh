@@ -1,7 +1,7 @@
 #!/bin/bash
 
 EXP_NAME="qwen25_05b_it_gsm8k"
-MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
+MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
 LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
@@ -63,7 +63,7 @@ uv run --active open_instruct/grpo_fast.py \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --system_prompt_remove True \
-    --user_prompt_transform "{prompt}\n\nPlease reason step by step, put your final answer as an integer at the very end of your response after Answer:" \
+    --user_prompt_transform "{prompt}\n\nPlease reason step by step, and write your final answer as an integer at the end." \
     --non_stop_penalty False \
     --temperature 1.0 \
     --vllm_top_p 1.0 \
