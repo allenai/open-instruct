@@ -3,6 +3,7 @@
 import base64
 import contextlib
 import logging
+import shlex
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -199,14 +200,16 @@ class DockerBackend(SandboxBackend):
     - Bash/shell execution
     """
 
-    def __init__(self, image: str = "ubuntu:24.04"):
+    def __init__(self, image: str = "ubuntu:24.04", timeout: int = 1800):
         """
         Initialize Docker backend.
 
         Args:
             image: Docker image to use (default: ubuntu:24.04)
+            timeout: Per-command timeout in seconds (default: 1800 / 30 min)
         """
         self._image = image
+        self._timeout = timeout
         self._container = None
         self._client = None
 
@@ -247,11 +250,14 @@ class DockerBackend(SandboxBackend):
         if self._container is None:
             raise RuntimeError("Container not started. Call start() first.")
 
-        exit_code, output = self._container.exec_run(["bash", "-c", command], demux=True)
+        wrapped = f"timeout --signal=TERM --kill-after=10 {self._timeout} bash -c {shlex.quote(command)}"
+        exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
         stdout_raw = (output[0] or b"") if output else b""
         stderr_raw = (output[1] or b"") if output else b""
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         stderr = stderr_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+        if exit_code == 124:
+            stderr = f"Command timed out after {self._timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
     def write_file(self, path: str, content: str | bytes) -> None:

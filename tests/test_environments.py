@@ -10,7 +10,7 @@ from datasets import Dataset
 from open_instruct.dataset_transformation import ENV_CONFIG_KEY, rlvr_tokenize_v3
 from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, ToolCall, get_env_class
 from open_instruct.environments.agent_task import AgentTaskEnv
-from open_instruct.environments.backends import DaytonaBackend, ExecutionResult, create_backend
+from open_instruct.environments.backends import DaytonaBackend, DockerBackend, ExecutionResult, create_backend
 from open_instruct.environments.base import RLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.environments.openenv_client import OpenEnvClient, OpenEnvREPLClient, OpenEnvTextClient
@@ -594,6 +594,60 @@ class TestAgentTaskEnv:
                 assert env._backend_kwargs["image"] == "from-config:v2"
 
         run_async(_test())
+
+
+# ---------------------------------------------------------------------------
+# DockerBackend timeout tests
+# ---------------------------------------------------------------------------
+class TestDockerBackendTimeout:
+    """Tests for DockerBackend command-level timeout."""
+
+    def test_default_timeout(self):
+        backend = DockerBackend()
+        assert backend._timeout == 1800
+
+    def test_custom_timeout(self):
+        backend = DockerBackend(timeout=60)
+        assert backend._timeout == 60
+
+    def test_create_backend_passes_timeout(self):
+        backend = create_backend("docker", timeout=120)
+        assert isinstance(backend, DockerBackend)
+        assert backend._timeout == 120
+
+    def test_run_command_wraps_with_timeout(self):
+        backend = DockerBackend(timeout=30)
+        mock_container = MagicMock()
+        mock_container.exec_run.return_value = (0, (b"ok", b""))
+        backend._container = mock_container
+
+        backend.run_command("echo hello")
+
+        cmd = mock_container.exec_run.call_args[0][0]
+        # Should be ["bash", "-c", "timeout ... bash -c 'echo hello'"]
+        assert cmd[0] == "bash"
+        assert "timeout" in cmd[2]
+        assert "30" in cmd[2]
+
+    def test_timeout_exit_code_124_prepends_message(self):
+        backend = DockerBackend(timeout=10)
+        mock_container = MagicMock()
+        mock_container.exec_run.return_value = (124, (b"", b"killed"))
+        backend._container = mock_container
+
+        result = backend.run_command("sleep 999")
+        assert result.exit_code == 124
+        assert "Command timed out after 10s" in result.stderr
+
+    def test_normal_exit_no_timeout_message(self):
+        backend = DockerBackend(timeout=10)
+        mock_container = MagicMock()
+        mock_container.exec_run.return_value = (0, (b"output", b""))
+        backend._container = mock_container
+
+        result = backend.run_command("echo hi")
+        assert result.exit_code == 0
+        assert "timed out" not in result.stderr
 
 
 # ---------------------------------------------------------------------------

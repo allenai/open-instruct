@@ -157,8 +157,7 @@ class SandboxLMEnv(RLEnvironment):
             self._backend.start()
         else:
             bkwargs = dict(self._backend_kwargs)
-            if self._backend_type == "e2b":
-                bkwargs.setdefault("timeout", self._timeout)
+            bkwargs.setdefault("timeout", self._timeout)
             self._backend = create_backend(self._backend_type, **bkwargs)
             self._backend.start()
         self._step_count = 0
