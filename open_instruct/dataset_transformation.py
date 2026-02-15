@@ -1331,11 +1331,13 @@ def rlvr_tokenize_v1(
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    # Override the system prompt if provided
-    if system_prompt_override:
+    # Override the system prompt if provided.
+    # Use `is not None` so an empty string explicitly means "remove system prompt".
+    if system_prompt_override is not None:
         if prompt[0]["role"] == "system":
             prompt = prompt[1:]
-        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+        if system_prompt_override != "":
+            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template: list[dict[str, Any]] | None = None
     if pass_tools_to_chat_template and tool_definitions:
@@ -1419,11 +1421,13 @@ def rlvr_tokenize_v3(
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
     if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
         prompt = prompt[:-1]
-    # override the system prompt if we have a new one provided.
-    if system_prompt_override:
+    # Override the system prompt if we have a new one provided.
+    # Use `is not None` so an empty string explicitly means "remove system prompt".
+    if system_prompt_override is not None:
         if prompt[0]["role"] == "system":
             del prompt[0]
-        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+        if system_prompt_override != "":
+            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template: list[dict[str, Any]] | None = None
     if pass_tools_to_chat_template and tool_definitions:

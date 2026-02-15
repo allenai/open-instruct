@@ -4,7 +4,7 @@ EXP_NAME="qwen25_05b_it_gsm8k"
 MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
+LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 2"
 LOCAL_EVAL_SPLITS="test"
 
 # EVALS="aime:2024::justrl,aime:2025::justrl"
@@ -35,6 +35,7 @@ cluster=ai2/saturn
 #     -- source configs/beaker_configs/ray_node_setup.sh \
 # \&\& 
 #!/bin/bash
+export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
@@ -50,7 +51,7 @@ uv run --active open_instruct/grpo_fast.py \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 4 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -63,11 +64,11 @@ uv run --active open_instruct/grpo_fast.py \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --system_prompt_remove True \
-    --user_prompt_transform "{prompt}\n\nPlease reason step by step, and write your final answer as an integer at the end." \
+    --user_prompt_transform "{prompt}\\n\\nPlease reason step by step, and write your final answer as an integer at the end." \
     --non_stop_penalty False \
     --temperature 1.0 \
     --vllm_top_p 1.0 \
-    --total_episodes 512 \
+    --total_episodes 128 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -77,6 +78,7 @@ uv run --active open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --single_gpu_mode \
+    --vllm_enforce_eager \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --num_learners_per_node 1 \
