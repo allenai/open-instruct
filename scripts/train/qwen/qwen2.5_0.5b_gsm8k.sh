@@ -11,7 +11,7 @@ LOCAL_EVAL_SPLITS="test"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/triton
+cluster=ai2/saturn
 
 # Check if the first argument starts with the value of $BEAKER_NAME
 # if [[ "$1" == "$BEAKER_USER"* ]]; then

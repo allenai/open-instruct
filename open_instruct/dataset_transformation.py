@@ -258,6 +258,20 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "qwen_instruct_gsm8k": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and write your final answer as an integer at the end.<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     "tulu_thinker": (
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"

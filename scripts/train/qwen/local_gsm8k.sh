@@ -63,8 +63,8 @@ uv run --active open_instruct/grpo_fast.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --chat_template_name qwen_tulu_gsm8k \
     --system_prompt_remove True \
-    --user_prompt_transform "{prompt}\\n\\nPlease reason step by step, and write your final answer as an integer at the end." \
     --non_stop_penalty False \
     --temperature 1.0 \
     --vllm_top_p 1.0 \
