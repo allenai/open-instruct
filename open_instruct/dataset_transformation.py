@@ -260,9 +260,7 @@ CHAT_TEMPLATES = {
     ),
     "qwen_instruct_gsm8k": (
         "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}"
-        "{{ '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% elif message['role'] == 'user' %}"
+        "{% if message['role'] == 'user' %}"
         "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and write your final answer as an integer at the end.<|im_end|>\n' }}"
         "{% elif message['role'] == 'assistant' %}"
         "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"

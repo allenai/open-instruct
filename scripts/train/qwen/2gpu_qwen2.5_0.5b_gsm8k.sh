@@ -11,7 +11,7 @@ LOCAL_EVAL_SPLITS="test"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/saturn
+cluster=ai2/neptune
 
 # Check if the first argument starts with the value of $BEAKER_NAME
 # if [[ "$1" == "$BEAKER_USER"* ]]; then
@@ -29,8 +29,8 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 1 \
+    --env VLLM_ATTENTION_BACKEND="FLASH_INFER" \
+    --gpus 2 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run --active open_instruct/grpo_fast.py \
@@ -66,12 +66,6 @@ uv run mason.py \
     --save_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
-    --single_gpu_mode \
-    --vllm_enforce_eager \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
-    --num_learners_per_node 1 \
-    --vllm_tensor_parallel_size 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
