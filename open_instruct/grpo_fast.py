@@ -1659,6 +1659,7 @@ def maybe_evaluate(
     eval_generation_config,
     model_dims: utils.ModelDims,
     max_possible_score: float,
+    local_eval_start_time: float | None = None,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1753,6 +1754,8 @@ def maybe_evaluate(
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
         )
         eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+        if local_eval_start_time is not None:
+            eval_metrics["time/local_eval"] = time.perf_counter() - local_eval_start_time
 
         print_rich_single_line_metrics(eval_metrics)
 
@@ -1983,6 +1986,7 @@ def run_training(
         wandb_url=wandb_url,
     )
     last_eval_collected = True
+    local_eval_start_time = None
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -1997,6 +2001,8 @@ def run_training(
             and (args.eval_on_step_0 or training_step > 1)
         ):
             print("EVAL DATALOADING")
+            if local_eval_start_time is None:
+                local_eval_start_time = time.perf_counter()
             if not last_eval_collected:
                 logger.warning(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
@@ -2079,8 +2085,11 @@ def run_training(
             generation_configs["eval"],
             model_dims,
             streaming_config.max_possible_score,
+            local_eval_start_time,
             actor_manager,
         )
+        if last_eval_collected:
+            local_eval_start_time = None
 
         maybe_update_beaker_description(
             current_step=training_step,
