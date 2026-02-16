@@ -1610,11 +1610,43 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging
+        # Convert array/list metrics to wandb histograms for logging.
+        # Handles arrays with missing values (None/NaN) by filtering to finite numeric values.
+        metrics_to_log = {}
+        per_index_solve_rates = metrics.pop("val/train_prompt_solve_rate_by_index_hist", None)
+        if per_index_solve_rates is not None:
+            values_iter = (
+                per_index_solve_rates.tolist()
+                if isinstance(per_index_solve_rates, np.ndarray)
+                else per_index_solve_rates
+            )
+            index_table = wandb.Table(columns=["index_pos", "solve_rate"])
+            for index_pos, solve_rate in enumerate(values_iter):
+                if isinstance(solve_rate, (int, float, np.integer, np.floating)) and np.isfinite(solve_rate):
+                    index_table.add_data(index_pos, float(solve_rate))
+                else:
+                    index_table.add_data(index_pos, None)
+            metrics_to_log["val/train_prompt_solve_rate_by_index_table"] = index_table
+            metrics_to_log["val/train_prompt_solve_rate_by_index_bar"] = wandb.plot.bar(
+                index_table, "index_pos", "solve_rate", title="Train Prompt Solve Rate By Index"
+            )
+
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=training_step)
+                values_iter = value.tolist() if isinstance(value, np.ndarray) else value
+
+                numeric_values = [
+                    float(v)
+                    for v in values_iter
+                    if isinstance(v, (int, float, np.integer, np.floating)) and np.isfinite(v)
+                ]
+                if len(numeric_values) > 0:
+                    metrics_to_log[key] = wandb.Histogram(numeric_values)
+                else:
+                    metrics_to_log[f"{key}/num_items"] = len(values_iter)
+            else:
+                metrics_to_log[key] = value
+        wandb.log(metrics_to_log, step=training_step)
 
     return num_step_tokens
 
@@ -2196,8 +2228,9 @@ def main(
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
     ):
-        raise ValueError(
-            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
+        logger.warning(
+            f"Train dataset has {len(train_dataset)} prompts, below the {needed} prompts needed to fully "
+            "prefill async steps without reuse. Continuing with prompt reuse across epochs."
         )
 
     if args.cache_dataset_only:

@@ -986,6 +986,10 @@ class DataPreparationActor:
         self.verbose = verbose
         self.dataset = dataset
         self.dataset_index_map = {dataset[i]["index"]: i for i in range(len(dataset))}
+        self.sorted_dataset_indices = sorted(self.dataset_index_map.keys())
+        self.dataset_index_to_hist_position = {
+            dataset_index: position for position, dataset_index in enumerate(self.sorted_dataset_indices)
+        }
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
@@ -1178,6 +1182,8 @@ class DataPreparationActor:
                 stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 
                 batch_metrics_dict = asdict(batch_stats)
+                # Avoid logging raw dataset-name lists as metrics.
+                batch_metrics_dict.pop("prompt_datasets", None)
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
@@ -1216,6 +1222,17 @@ class DataPreparationActor:
                     prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
                 for prompt_index, rates in prompt_index_to_solve_rates.items():
                     step_metrics[f"val/train_prompt_solve_rate_by_index_{prompt_index}"] = float(np.mean(rates))
+                # Dense per-index vector for histogram logging. Missing indices are None.
+                # Position i corresponds to the i-th smallest dataset index value.
+                prompt_solve_rate_by_index_hist: list[float | None] = [None] * len(self.sorted_dataset_indices)
+                for prompt_index, rates in prompt_index_to_solve_rates.items():
+                    hist_position = self.dataset_index_to_hist_position.get(prompt_index)
+                    if hist_position is not None:
+                        prompt_solve_rate_by_index_hist[hist_position] = float(np.mean(rates))
+                step_metrics["val/train_prompt_solve_rate_by_index_hist"] = prompt_solve_rate_by_index_hist
+                step_metrics["val/train_prompt_solve_rate_by_index_hist_non_null_count"] = int(
+                    sum(value is not None for value in prompt_solve_rate_by_index_hist)
+                )
 
                 dataset_to_solve_rates: dict[str, list[float]] = {}
                 for dataset_name, prompt_solve_rate in zip(

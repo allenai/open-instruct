@@ -9,7 +9,7 @@ DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 1.0 mnoukhov/gsm
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/neptune
+# cluster=ai2/neptune
 
     # --dataset_mixer_eval_list $LOCAL_EVALS \
     # --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
@@ -29,22 +29,22 @@ cluster=ai2/neptune
 #     --gpus 2 \
 #     --budget ai2/oe-adapt \
 #     -- source configs/beaker_configs/ray_node_setup.sh \
-# \&\&
     # --active_sampling \
-export TORCH_COMPILE_DISABLE=1
+    # --filter_zero_std_samples True \
+# \&\&
+# export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
-export VLLM_DISABLE_COMPILE_CACHE=1
+# export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 export VLLM_ATTENTION_BACKEND="FLASHINFER"
 uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
     --beta 0.0 \
-    --async_steps 1 \
+    --async_steps 4 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
-    --filter_zero_std_samples False \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
@@ -68,9 +68,11 @@ uv run --active open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 1 \
+    --vllm_num_engines 3 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
     --eval_pass_at_k 32 \
+    --with_tracking \
     --push_to_hub False $@
