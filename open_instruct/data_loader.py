@@ -14,6 +14,7 @@
 
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -47,6 +48,25 @@ from open_instruct.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_metric_name(name: str) -> str:
+    return re.sub(r"[^0-9A-Za-z_]+", "_", name).strip("_")
+
+
+def _normalize_dataset_metric_key(dataset_name: Any) -> str:
+    """Convert dataset identifiers to a stable string key for metric grouping."""
+    if isinstance(dataset_name, str):
+        return dataset_name
+    if isinstance(dataset_name, (list, tuple)):
+        if len(dataset_name) == 1:
+            return _normalize_dataset_metric_key(dataset_name[0])
+        return "__".join(_normalize_dataset_metric_key(item) for item in dataset_name)
+    if isinstance(dataset_name, set):
+        if len(dataset_name) == 1:
+            return _normalize_dataset_metric_key(next(iter(dataset_name)))
+        return "__".join(sorted(_normalize_dataset_metric_key(item) for item in dataset_name))
+    return str(dataset_name)
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -523,6 +543,8 @@ class BatchStatistics:
     filtered_prompts_nonzero: int
     percent_solved_mean: float
     percent_solved_hist: np.ndarray
+    prompt_indices: list[int]
+    prompt_datasets: list[str]
     no_resampled_prompts: int
     total_prompts: int
 
@@ -550,6 +572,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
+    dataset_index_map: dict[int, int] | None = None,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -566,6 +589,9 @@ def accumulate_inference_batches(
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
 ):
+    if dataset_index_map is None:
+        dataset_index_map = {dataset[i]["index"]: i for i in range(len(dataset))}
+
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
@@ -584,6 +610,8 @@ def accumulate_inference_batches(
     all_active_tools = []
     all_scores = []
     all_percent_solved = []
+    all_prompt_indices = []
+    all_prompt_datasets = []
     all_model_steps = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
@@ -629,7 +657,8 @@ def accumulate_inference_batches(
             f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.index]
+        dataset_position = dataset_index_map[result.index]
+        example = dataset[dataset_position]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -655,8 +684,10 @@ def accumulate_inference_batches(
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
+        prompt_dataset_key = _normalize_dataset_metric_key(dataset_name)
 
-        percent_solved = np.mean(result.reward_scores).item() / max_possible_score
+        reward_scores = np.asarray(result.reward_scores, dtype=float)
+        percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
             iter_dataloader.exclude_index(result.index)
@@ -695,6 +726,8 @@ def accumulate_inference_batches(
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
+        all_prompt_indices.append(result.index)
+        all_prompt_datasets.append(prompt_dataset_key)
         if result.model_step is not None:
             all_model_steps.append(result.model_step)
 
@@ -811,6 +844,8 @@ def accumulate_inference_batches(
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         percent_solved_mean=percent_solved_mean,
         percent_solved_hist=np.array(all_percent_solved),
+        prompt_indices=all_prompt_indices,
+        prompt_datasets=all_prompt_datasets,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
@@ -950,6 +985,7 @@ class DataPreparationActor:
         self.model_dims = model_dims
         self.verbose = verbose
         self.dataset = dataset
+        self.dataset_index_map = {dataset[i]["index"]: i for i in range(len(dataset))}
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
@@ -1014,6 +1050,7 @@ class DataPreparationActor:
                 model_dims=self.model_dims,
                 tokenizer=self.tokenizer,
                 dataset=self.dataset,
+                dataset_index_map=self.dataset_index_map,
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
@@ -1169,6 +1206,25 @@ class DataPreparationActor:
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
+                solve_rates = batch_stats.percent_solved_hist
+                if solve_rates.size > 0:
+                    step_metrics["val/train_prompt_solve_rate_count"] = int(solve_rates.size)
+                prompt_index_to_solve_rates: dict[int, list[float]] = {}
+                for prompt_index, prompt_solve_rate in zip(
+                    batch_stats.prompt_indices, batch_stats.percent_solved_hist
+                ):
+                    prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
+                for prompt_index, rates in prompt_index_to_solve_rates.items():
+                    step_metrics[f"val/train_prompt_solve_rate_by_index_{prompt_index}"] = float(np.mean(rates))
+
+                dataset_to_solve_rates: dict[str, list[float]] = {}
+                for dataset_name, prompt_solve_rate in zip(
+                    batch_stats.prompt_datasets, batch_stats.percent_solved_hist
+                ):
+                    dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
+                for dataset_name, rates in dataset_to_solve_rates.items():
+                    metric_name = _sanitize_metric_name(dataset_name)
+                    step_metrics[f"val/train_prompt_solve_rate_mean_{metric_name}"] = float(np.mean(rates))
 
                 tool_stats = ToolStatistics(tool_names=self.tool_names)
                 excess_calls = result.request_info.excess_tool_calls or [
