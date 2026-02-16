@@ -72,7 +72,6 @@ uv run mason.py \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
-    --eval_on_step_0 True \
     --eval_pass_at_k 32 \
     --with_tracking \
     --push_to_hub False $@

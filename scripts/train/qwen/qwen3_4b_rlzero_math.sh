@@ -11,7 +11,7 @@ EVALS="aime:2024::justrl,aime:2025::justrl"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/saturn
+cluster=ai2/titan
 
 # Check if the first argument starts with the value of $BEAKER_NAME
 # if [[ "$1" == "$BEAKER_USER"* ]]; then
@@ -22,14 +22,14 @@ cluster=ai2/saturn
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
-    --workspace ai2/oe-adapt-code \
-    --priority high \
+    --workspace ai2/scaling-rl \
+    --priority low \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
     --gpus 4 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
