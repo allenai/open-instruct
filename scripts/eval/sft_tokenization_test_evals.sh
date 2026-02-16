@@ -67,7 +67,7 @@ for MODEL in "${MODELS[@]}"; do
         --preemptible \
         --use_hf_tokenizer_template \
         --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
-        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek" \
+        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,ifeval::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite" \
         --run_oe_eval_experiments \
         --evaluate_on_weka \
         --run_id placeholder \
@@ -75,27 +75,28 @@ for MODEL in "${MODELS[@]}"; do
         --process_output r1_style \
         --skip_oi_evals
 
+        #  --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek" \
         # --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,ifeval::hamish_zs_reasoning_deepseek" \
 
     # Batch 2: gpu_multiplier 2
-    uv run scripts/submit_eval_jobs.py \
-        --model_name "${MODEL_NAME}" \
-        --location "${GCS_PATH}" \
-        --cluster ai2/jupiter ai2/ceres \
-        --is_tuned \
-        --workspace ai2/olmo-instruct \
-        --priority urgent \
-        --gpu_multiplier 2 \
-        --preemptible \
-        --use_hf_tokenizer_template \
-        --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
-        --oe_eval_tasks "bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek" \
-        --run_oe_eval_experiments \
-        --evaluate_on_weka \
-        --run_id placeholder \
-        --oe_eval_max_length 32768 \
-        --process_output r1_style \
-        --skip_oi_evals
+    # uv run scripts/submit_eval_jobs.py \
+    #     --model_name "${MODEL_NAME}" \
+    #     --location "${GCS_PATH}" \
+    #     --cluster ai2/jupiter ai2/ceres \
+    #     --is_tuned \
+    #     --workspace ai2/olmo-instruct \
+    #     --priority urgent \
+    #     --gpu_multiplier 2 \
+    #     --preemptible \
+    #     --use_hf_tokenizer_template \
+    #     --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
+    #     --oe_eval_tasks "bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek" \
+    #     --run_oe_eval_experiments \
+    #     --evaluate_on_weka \
+    #     --run_id placeholder \
+    #     --oe_eval_max_length 32768 \
+    #     --process_output r1_style \
+    #     --skip_oi_evals
 
     echo "Completed evals for: ${MODEL}"
     echo ""
