@@ -60,8 +60,6 @@ uv run python mason.py \
     --with_tracking \
     --save_traces \
     --apply_verifiable_reward true \
-    --stop_strings "</answer>" \
-    --chat_template_name r1_simple_chat_postpend_think \
     --active_sampling \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
