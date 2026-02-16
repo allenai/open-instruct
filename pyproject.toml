@@ -53,7 +53,7 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-transformers = { git = "https://github.com/jacob-morrison/transformers", branch = "olmo3-sequence-classification" }
+transformers = { git = "https://github.com/jacob-morrison/transformers", rev = "1840b2df12" }
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
