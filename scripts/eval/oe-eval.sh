@@ -201,36 +201,36 @@ TULU_3_UNSEEN=(
 # New default task suites
 OLMO_3=(
     # Knowledge
-    "mmlu:cot::hamish_zs_reasoning_deepseek"
-    "popqa::hamish_zs_reasoning_deepseek"
+    # "mmlu:cot::hamish_zs_reasoning_deepseek"
+    # "popqa::hamish_zs_reasoning_deepseek"
     # "simpleqa::tulu-thinker_deepseek"
 
     # Reasoning
-    "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
+    # "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
     "gpqa:0shot_cot::qwen3-instruct"
-    "zebralogic::hamish_zs_reasoning_deepseek"
+    # "zebralogic::hamish_zs_reasoning_deepseek"
     # "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
     # Math
-    "minerva_math_500::hamish_zs_reasoning"
+    # "minerva_math_500::hamish_zs_reasoning"
     # # "minerva_math::hamish_zs_reasoning_deepseek"
-    "omega_500:0-shot-chat_deepseek" 
+    # "omega_500:0-shot-chat_deepseek" 
     # # FULL: "omega:0-shot-chat"
-    "aime:zs_cot_r1::pass_at_32_2024_deepseek"
-    "aime:zs_cot_r1::pass_at_32_2025_deepseek"
+    # "aime:zs_cot_r1::pass_at_32_2024_deepseek"
+    # "aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
     # # Coding
-    "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
-    "mbppplus:0-shot-chat::tulu-thinker_deepseek"
+    # "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
+    # "mbppplus:0-shot-chat::tulu-thinker_deepseek"
     "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
 
     # # Chat / IF / Vibes
-    "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
+    # "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
-    "ifeval_ood::tulu-thinker-deepseek"
+    # "ifeval_ood::tulu-thinker-deepseek"
 
     # Tool Use
-    "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
+    # "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
 )
 
 OLMO_3_UNSEEN=(

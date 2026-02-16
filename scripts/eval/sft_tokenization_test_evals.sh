@@ -22,8 +22,8 @@ BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 
 MODELS=(
     # "TEST_HYBRIC_SFT_LARGER_LR1e-4"
-    # "TEST_HYBRIC_SFT_LARGER_LR5e-5"
-    # "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
+    "TEST_HYBRIC_SFT_LARGER_LR5e-5"
+    "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
     "TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42"
     # "TEST_HYBRIC_SFT_LARGER_LR1e-5"
     # "HYBRID_SFT_YARN_LR5e-5"
@@ -37,7 +37,7 @@ MODELS=(
 for MODEL in "${MODELS[@]}"; do
     # THINK MODELS
     GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
-    MODEL_NAME="0216-${MODEL}"
+    MODEL_NAME="0216-extra-${MODEL}"
 
     # Think models -- yarn
     # GCS_PATH="${BASE_PATH}/${MODEL}/step43110-hf"
