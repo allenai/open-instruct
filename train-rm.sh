@@ -1,0 +1,24 @@
+uv run python mason.py \
+    --cluster ai2/jupiter \
+    --budget ai2/oe-adapt \
+    --workspace ai2/olmo-instruct \
+    --image jacobm/olmo3-rm-test3 \
+    --pure_docker_mode \
+    --no-host-networking \
+    --gpus 8 \
+    --priority urgent \
+    --description "olmo 3 reasoning refresh - rm" \
+    --no_auto_dataset_cache \
+    -- python open_instruct/reward_modeling.py \
+        --dataset_mixer_list allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_reje-426124-rm-gemma3-kwd-ftd-ch-ftd-topic-ftd-dedup5-lbc100 400 \
+        --model_name_or_path allenai/Olmo-3-1025-7B \
+        --tokenizer_name jacobmorrison/olmo3-32b-tokenizer \
+        --chat_template_name olmo \
+        --learning_rate 3e-7 \
+        --per_device_train_batch_size 1 \
+        --per_device_eval_batch_size 1 \
+        --gradient_accumulation_steps 32 \
+        --max_token_length 4096 \
+        --max_prompt_token_length 2048 \
+        --num_train_epochs 1 \
+        --output_dir /weka/oe-adapt-default/jacobm/olmo3-reasoning-refresh/reward-modeling/debug-training/ 
