@@ -29,12 +29,13 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_INFER" \
+    --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
     --gpus 2 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
+    --run_name $EXP_NAME \
     --beta 0.0 \
     --async_steps 4 \
     --active_sampling \

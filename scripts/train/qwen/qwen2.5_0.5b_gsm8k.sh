@@ -35,6 +35,7 @@ uv run mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
+    --run_name $EXP_NAME \
     --beta 0.0 \
     --async_steps 4 \
     --active_sampling \

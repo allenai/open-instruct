@@ -1234,6 +1234,7 @@ def create_model_and_optimizer(
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
     prompt_Q: ray_queue.Queue,
+    eval_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1256,6 +1257,7 @@ def create_model_and_optimizer(
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Prompt Queue": prompt_Q,
+        "Eval Prompt Queue": eval_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
@@ -1327,6 +1329,7 @@ def create_model_and_optimizer(
         max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
+        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -1683,10 +1686,10 @@ def maybe_evaluate(
                     queued_results,
                     num_eval_prompts,
                 )
-                return
+                return False
 
         # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        timeout = 100 if is_final_step else 0.01
+        timeout = max(300, args.backend_timeout * 5) if is_final_step else 0.01
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
@@ -1899,6 +1902,7 @@ def run_training(
     executor,
     inference_results_Q,
     prompt_Q,
+    eval_prompt_Q,
     evaluation_inference_results_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
@@ -1985,7 +1989,7 @@ def run_training(
         start_time=training_start_time,
         wandb_url=wandb_url,
     )
-    last_eval_collected = True
+    pending_local_eval_rounds = 0
     local_eval_start_time = None
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -1995,21 +1999,28 @@ def run_training(
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
 
-        if (
+        should_schedule_local_eval = (
             training_step % args.local_eval_every == 0
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
-        ):
+        )
+
+        if should_schedule_local_eval:
             print("EVAL DATALOADING")
             if local_eval_start_time is None:
                 local_eval_start_time = time.perf_counter()
-            if not last_eval_collected:
+            if pending_local_eval_rounds > 0:
                 logger.warning(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
                     "Consider increasing local_eval_every."
                 )
-            for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+            for idx in range(len(eval_dataset)):
+                eval_example = eval_dataset[idx]
+                # Use training_step to keep eval prompt IDs unique across rounds.
+                add_prompt_to_generator(
+                    eval_example, training_step, eval_prompt_Q, generation_configs["eval"], is_eval=True
+                )
+            pending_local_eval_rounds += 1
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2075,20 +2086,28 @@ def run_training(
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger.notify(step=training_step)
 
-        last_eval_collected = maybe_evaluate(
-            args,
-            training_step,
-            evaluation_inference_results_Q,
-            tokenizer,
-            episode,
-            eval_dataset,
-            generation_configs["eval"],
-            model_dims,
-            streaming_config.max_possible_score,
-            local_eval_start_time,
-            actor_manager,
-        )
-        if last_eval_collected:
+        # Collect at most one pending eval round per non-final step. On the final step,
+        # keep collecting until all pending rounds are drained (or timeout/no-results).
+        max_rounds_to_collect = pending_local_eval_rounds if training_step >= args.num_training_steps else 1
+        rounds_collected = 0
+        while pending_local_eval_rounds > 0 and rounds_collected < max_rounds_to_collect:
+            eval_collected = maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                episode,
+                eval_dataset,
+                generation_configs["eval"],
+                model_dims,
+                streaming_config.max_possible_score,
+                local_eval_start_time,
+                actor_manager,
+            )
+            if not eval_collected:
+                break
+            pending_local_eval_rounds -= 1
+            rounds_collected += 1
             local_eval_start_time = None
 
         maybe_update_beaker_description(
@@ -2194,6 +2213,7 @@ def main(
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    eval_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -2235,6 +2255,7 @@ def main(
             tokenizer,
             inference_results_Q,
             prompt_Q,
+            eval_prompt_Q,
             evaluation_inference_results_Q,
             streaming_config,
             vllm_config,
@@ -2276,6 +2297,7 @@ def main(
             executor,
             inference_results_Q,
             prompt_Q,
+            eval_prompt_Q,
             evaluation_inference_results_Q,
             weight_sync_metrics_Q,
             actor_manager,
@@ -2291,7 +2313,10 @@ def main(
         raise
     finally:
         cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
+            stop_event,
+            executor,
+            [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
+            actor_manager,
         )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
