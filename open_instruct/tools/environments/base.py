@@ -104,9 +104,10 @@ class RLEnvironment(Tool):
         """Execute action, return observation, reward, done."""
         pass
 
+    @abstractmethod
     def state(self) -> EnvironmentState:
-        """Return current episode state. Subclasses override to populate."""
-        return EnvironmentState()
+        """Return current episode state."""
+        pass
 
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:
