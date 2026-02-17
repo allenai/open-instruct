@@ -216,6 +216,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if not torch.distributed.is_initialized():
             torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
+        logger_utils.setup_logger()
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,

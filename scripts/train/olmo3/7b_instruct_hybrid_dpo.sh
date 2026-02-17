@@ -8,7 +8,6 @@ do
         --cluster ai2/jupiter \
         --workspace ai2/olmo-instruct \
         --priority urgent \
-        --max_retries 2 \
         --preemptible \
         --image $BEAKER_IMAGE --pure_docker_mode \
         --no_auto_dataset_cache \

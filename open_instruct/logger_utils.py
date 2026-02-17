@@ -14,26 +14,30 @@
 
 import logging
 
+import torch.distributed as dist
 
-def setup_logger(name: str | None = None, rank: int = 0) -> logging.Logger:
+
+def setup_logger(name: str | None = None) -> logging.Logger:
     """Set up a logger with consistent formatting across the project.
 
-    This function configures logging.basicConfig with a standard format
-    that includes timestamp, level, filename, line number, and message.
-    It only configures basicConfig once to avoid overwriting existing config.
+    Only rank 0 logs at INFO; all other ranks log at WARNING.
+    Rank is auto-detected from torch.distributed.
 
     Args:
         name: Logger name (typically __name__). If None, returns root logger.
-        rank: Process rank in distributed training. Only rank 0 logs INFO.
 
     Returns:
         Logger instance with the specified name
     """
+    rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+    level = logging.INFO if rank == 0 else logging.WARNING
     if not logging.getLogger().handlers:
         logging.basicConfig(
-            level=logging.INFO if rank == 0 else logging.WARNING,
+            level=level,
             format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+    else:
+        logging.getLogger().setLevel(level)
 
     return logging.getLogger(name)

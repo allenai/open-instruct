@@ -300,7 +300,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     dp_world_size = world_size // tp_degree
 
-    logger_utils.setup_logger(rank=global_rank)
+    logger_utils.setup_logger()
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
 
