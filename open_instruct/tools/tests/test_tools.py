@@ -11,6 +11,7 @@ import aiohttp
 from parameterized import parameterized
 
 from open_instruct import data_types
+from open_instruct.executable import ExecutableOutput
 from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
 from open_instruct.tools.tools import (
     TOOL_REGISTRY,
@@ -25,7 +26,6 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
-from open_instruct.executable import ExecutableOutput
 from open_instruct.tools.utils import (
     APIResponse,
     ParsedToolConfig,

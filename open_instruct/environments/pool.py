@@ -7,7 +7,7 @@ import ray
 
 from open_instruct import logger_utils
 
-from .base import RLEnvironment, get_env_class
+from .base import get_env_class
 
 logger = logger_utils.setup_logger(__name__)
 
