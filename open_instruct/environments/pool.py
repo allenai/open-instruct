@@ -1,22 +1,18 @@
 """Pool of Ray environment actors with acquire/release semantics."""
 
 import asyncio
+import logging
 from typing import Any
 
 import ray
 
-from open_instruct.logger_utils import setup_logger
-
 from .base import RLEnvironment, get_env_class
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class EnvironmentPool:
-    """
-    Pool of RLEnvironment Ray actors for concurrent rollouts.
-    Used to manage environment startup/shutdown/acquisition.
-    """
+    """Pool of RLEnvironment Ray actors for concurrent rollouts."""
 
     def __init__(self, pool_size: int, env_name: str | None = None, env_class: str | None = None, **env_kwargs: Any):
         self.pool_size = pool_size
@@ -44,7 +40,11 @@ class EnvironmentPool:
         try:
             await asyncio.to_thread(ray.get, setup_tasks)
         except Exception as e:
-            logger.warning(f"Error during environment setup: {e}")
+            logger.error(f"Error during environment setup, shutting down created actors: {e}")
+            for actor in self._actors:
+                ray.kill(actor)
+            self._actors = []
+            raise
 
         self._available = asyncio.Queue()
         for actor in self._actors:
