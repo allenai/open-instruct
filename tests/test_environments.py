@@ -5,9 +5,9 @@ import random
 
 import pytest
 
-from open_instruct.tools.environments import ENV_REGISTRY, get_env_class
-from open_instruct.tools.environments.base import RLEnvironment, StepResult
-from open_instruct.tools.environments.examples import CounterEnv, GuessNumberEnv
+from open_instruct.environments import ENV_REGISTRY, get_env_class
+from open_instruct.environments.base import RLEnvironment, StepResult
+from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.data_types import ToolCall
 
 
