@@ -1,11 +1,11 @@
 """Compute max KV cache concurrency for different sequence lengths.
 
-Loads a model once, profiles GPU memory, then computes the maximum
+Loads each model once, profiles GPU memory, then computes the maximum
 number of concurrent requests that fit in KV cache at each sequence length.
 
 Usage:
     python scripts/benchmarking/kv_cache_concurrency.py \
-        --model_name_or_path <model> \
+        --model_name_or_path <model1> [model2] ... \
         --tensor_parallel_size 2 \
         --gpu_memory_utilization 0.9 \
         --trust_remote_code \
@@ -13,38 +13,25 @@ Usage:
 """
 
 import argparse
+import gc
 import os
 
 # Force in-process engine core so we can access internals directly.
 os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
+import torch  # noqa: E402
 from vllm import LLM  # noqa: E402
 from vllm.v1.core import kv_cache_utils  # noqa: E402
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Compute max KV cache concurrency at various sequence lengths."
-    )
-    parser.add_argument("--model_name_or_path", required=True)
-    parser.add_argument("--tensor_parallel_size", type=int, default=2)
-    parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
-    parser.add_argument("--trust_remote_code", action="store_true")
-    parser.add_argument(
-        "--sequence_lengths",
-        nargs="+",
-        type=int,
-        default=[1024, 4096, 8192, 16384, 32768],
-    )
-    args = parser.parse_args()
-
-    sequence_lengths = sorted(args.sequence_lengths)
+def profile_model(model_path, args, sequence_lengths):
+    """Profile a single model and print its KV cache concurrency results."""
     max_seq_len = max(sequence_lengths)
 
     # Create LLM with the largest sequence length to profile GPU memory once.
     # enforce_eager=True skips CUDA graph warmup for faster initialization.
     llm = LLM(
-        model=args.model_name_or_path,
+        model=model_path,
         max_model_len=max_seq_len,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=args.gpu_memory_utilization,
@@ -71,7 +58,7 @@ def main():
     original_max_model_len = vllm_config.model_config.max_model_len
 
     print("\n" + "=" * 60)
-    print(f"Model: {args.model_name_or_path}")
+    print(f"Model: {model_path}")
     print(f"TP: {args.tensor_parallel_size}")
     print(f"GPU memory utilization: {args.gpu_memory_utilization}")
     print(f"Available KV cache memory: {available_memory[0] / 1e9:.2f} GB")
@@ -99,6 +86,30 @@ def main():
     vllm_config.model_config.max_model_len = original_max_model_len
 
     del llm
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Compute max KV cache concurrency at various sequence lengths."
+    )
+    parser.add_argument("--model_name_or_path", nargs="+", required=True)
+    parser.add_argument("--tensor_parallel_size", type=int, default=2)
+    parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
+    parser.add_argument("--trust_remote_code", action="store_true")
+    parser.add_argument(
+        "--sequence_lengths",
+        nargs="+",
+        type=int,
+        default=[1024, 4096, 8192, 16384, 32768],
+    )
+    args = parser.parse_args()
+
+    sequence_lengths = sorted(args.sequence_lengths)
+
+    for model_path in args.model_name_or_path:
+        profile_model(model_path, args, sequence_lengths)
 
 
 if __name__ == "__main__":
