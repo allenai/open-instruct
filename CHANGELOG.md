@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Thinking trace semantic repetition filter (`filter_thinking_repetitions.py`) that detects strategy cycling, marker phrase loops, and structural repetition in `<think>` traces using five complementary strategies (https://github.com/allenai/open-instruct/pull/TBD).
+- Thinking trace semantic repetition filter (`filter_thinking_repetitions.py`) that detects strategy cycling, marker phrase loops, and structural repetition in `<think>` traces using six complementary strategies with length-scaled thresholds and near-duplicate segment detection (https://github.com/allenai/open-instruct/pull/TBD).
 - Production DPO script for OLMo3-7B hybrid (https://github.com/allenai/open-instruct/pull/1449).
 - Gradient accumulation/microbatching support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1447).
 - Evolving rubrics support with RubricVerifier and utility functions for GRPO training (https://github.com/allenai/open-instruct/pull/1460).

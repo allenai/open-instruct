@@ -2,8 +2,8 @@
 """
 Test suite for filter_thinking_repetitions.py
 
-Tests all five detection strategies and the combined detection logic
-using inline test data that simulates repetitive and clean thinking traces.
+Tests all six detection strategies, length scaling, and the combined detection
+logic using inline test data that simulates repetitive and clean thinking traces.
 """
 
 import os
@@ -16,7 +16,9 @@ from filter_thinking_repetitions import (
     classify_thinking_segments,
     detect_thinking_repetition,
     extract_thinking_trace,
+    length_scaled_min_repeats,
     marker_phrase_density,
+    near_duplicate_segments,
     paragraph_start_repetition,
     process_example,
     topk_vocab_combined,
@@ -215,9 +217,91 @@ EMPTY_ASSISTANT_EXAMPLE = {"messages": [{"role": "user", "content": "Hello!"}, {
 NO_ASSISTANT_EXAMPLE = {"messages": [{"role": "user", "content": "Hello!"}]}
 
 
+# 11. Near-duplicate segments -- should be flagged by Strategy 6
+# Each segment paraphrases the same approach with slightly different wording
+_NEAR_DUP_SEGMENT_TEMPLATE = [
+    (
+        "Let me try solving this using the substitution method to find the unknown variable. "
+        "First I will substitute the known values into the equation and then simplify "
+        "the resulting expression step by step until I arrive at the final answer. "
+        "This approach should work because substitution preserves equality throughout."
+    ),
+    (
+        "Wait, let me attempt solving this problem with the substitution technique instead. "
+        "I will substitute the given values into our equation and carefully simplify "
+        "the expression that results from this operation step by step to get the answer. "
+        "The substitution approach maintains equality at every stage of the process."
+    ),
+    (
+        "Actually, let me try the substitution method to solve for the unknown variable here. "
+        "Substituting the known values into the original equation gives an expression "
+        "that I need to simplify step by step until I reach the final answer value. "
+        "Substitution is valid because it preserves the equality relationship throughout."
+    ),
+    (
+        "Hmm, let me reconsider and solve this using substitution to find the variable. "
+        "By substituting known values into the equation I can simplify the resulting "
+        "expression step by step and eventually arrive at the correct final answer. "
+        "This substitution approach works because equality is preserved at each step."
+    ),
+    (
+        "Hold on, I should try the substitution method to solve for the unknown here. "
+        "When I substitute the known values into the equation the expression simplifies "
+        "step by step and I should be able to determine the answer from the result. "
+        "Substitution keeps the equality relationship intact throughout the process."
+    ),
+    (
+        "Let me reconsider this problem and apply substitution to find the unknown value. "
+        "Taking the known values and substituting them into the equation gives me "
+        "an expression to simplify step by step until I can determine the final answer. "
+        "The substitution method preserves equality so this approach should be correct."
+    ),
+]
+
+NEAR_DUPLICATE_EXAMPLE = {
+    "messages": [
+        {"role": "user", "content": "Solve for x: 3x + 5 = 20"},
+        {
+            "role": "assistant",
+            "content": "<think>"
+            + "\n\n".join(_NEAR_DUP_SEGMENT_TEMPLATE * 4)
+            + "</think>\nx = 5",
+        },
+    ]
+}
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+def test_length_scaled_min_repeats():
+    """Test the length scaling function for min_repeats thresholds."""
+    print("Testing length_scaled_min_repeats...")
+    print("=" * 80)
+
+    # Short texts: should return base unchanged
+    assert length_scaled_min_repeats(8, 1000) == 8, "1K words should keep base=8"
+    assert length_scaled_min_repeats(8, 5000) == 8, "5K words (reference) should keep base=8"
+    print("  Short texts: base threshold preserved")
+
+    # Long texts: should scale up
+    assert length_scaled_min_repeats(8, 10000) == 16, "10K words should give 16"
+    assert length_scaled_min_repeats(8, 20000) == 32, "20K words should give 32"
+    assert length_scaled_min_repeats(8, 40000) == 64, "40K words should give 64"
+    print("  Long texts: threshold scales linearly")
+
+    # Custom reference
+    assert length_scaled_min_repeats(4, 2000, reference_words=1000) == 8, "2x reference should double"
+    print("  Custom reference: correct scaling")
+
+    # Edge cases
+    assert length_scaled_min_repeats(8, 0) == 8, "0 words should keep base"
+    assert length_scaled_min_repeats(1, 100000) == 20, "Very long text with base=1"
+    print("  Edge cases: correct")
+
+    print("  PASSED\n")
 
 
 def test_extract_thinking_trace():
@@ -432,6 +516,99 @@ def test_segment_classification():
     print("  PASSED\n")
 
 
+def test_near_duplicate_segments():
+    """Test Strategy 6: Near-duplicate segment detection."""
+    print("Testing near_duplicate_segments (Strategy 6)...")
+    print("=" * 80)
+
+    # Near-duplicate example should be flagged
+    trace = extract_thinking_trace(NEAR_DUPLICATE_EXAMPLE, "messages")
+    assert trace is not None
+
+    flagged, details = near_duplicate_segments(trace)
+    print(f"  Near-duplicate: flagged={flagged}, details={details}")
+    assert flagged, "Near-duplicate segments should be flagged"
+
+    # Clean trace: too few qualifying segments (short text)
+    trace = extract_thinking_trace(CLEAN_SHORT_EXAMPLE, "messages")
+    assert trace is not None
+
+    flagged, details = near_duplicate_segments(trace)
+    print(f"  Clean: flagged={flagged}, skipped={details.get('skipped', False)}")
+    assert not flagged, "Clean trace should NOT be flagged by near-duplicate detection"
+
+    # Code example: segments are structurally different
+    trace = extract_thinking_trace(CODE_EXAMPLE, "messages")
+    assert trace is not None
+
+    flagged, details = near_duplicate_segments(trace)
+    print(f"  Code: flagged={flagged}")
+    assert not flagged, "Code trace should NOT be flagged by near-duplicate detection"
+
+    # Diverse paragraphs should not flag
+    diverse = "\n\n".join(
+        [
+            f"Let me think about topic {chr(65 + i)}. "
+            + f"This involves understanding concept {i} which relates to "
+            + f"theorem number {i * 7} in the textbook. The proof requires "
+            + f"applying lemma {i + 100} and corollary {i + 200} sequentially."
+            for i in range(10)
+        ]
+    )
+    flagged, details = near_duplicate_segments(diverse)
+    print(f"  Diverse segments: flagged={flagged}")
+    assert not flagged, "Diverse segments should NOT be flagged"
+
+    print("  PASSED\n")
+
+
+def test_topk_length_scaling():
+    """Test that length scaling raises thresholds and is correctly applied."""
+    print("Testing top-K length scaling behavior...")
+    print("=" * 80)
+
+    import re
+
+    # Test 1: Verify effective_min_repeats is reported correctly in details
+    # Build text where a pattern repeats exactly 6 times in ~10K words of filler
+    filler_words = ["the", "quick", "brown", "fox", "jumped", "over", "lazy", "dog"]
+    import random
+
+    rng = random.Random(42)
+
+    # Create ~10K words of random filler
+    filler_parts = []
+    for _ in range(1250):
+        rng.shuffle(filler_words)
+        filler_parts.append(" ".join(filler_words))
+    filler_text = " ".join(filler_parts)
+    num_words = len(re.findall(r"[a-z]+", filler_text.lower()))
+    print(f"  Filler text has {num_words} words")
+
+    # A single config: k=50, n=5, base min_repeats=4
+    # With ~10K words, scale = max(1.0, 10000/5000) = 2.0
+    # effective = max(4, int(4*2)) = 8
+    flagged, details = topk_vocab_ngram_repetition(filler_text, k=50, n=5, min_repeats=4)
+    effective = details.get("effective_min_repeats", details.get("min_repeats"))
+    print(f"  Effective min_repeats for {num_words} words, base=4: {effective}")
+    assert effective > 4, f"Length scaling should raise min_repeats above 4 for {num_words} words"
+
+    # Test 2: Verify word_class_ngrams also scales
+    flagged, details = word_class_ngrams(filler_text)
+    wc_effective = details.get("effective_min_repeats", details.get("min_repeats"))
+    print(f"  word_class_ngrams effective min_repeats: {wc_effective} (base=6)")
+    assert wc_effective > 6, f"word_class_ngrams should scale min_repeats above 6 for long text"
+
+    # Test 3: Short text should NOT scale (keeps base threshold)
+    short_text = "wait let me try this approach again " * 10  # ~70 words
+    flagged, details = topk_vocab_ngram_repetition(short_text, k=10, n=4, min_repeats=8)
+    short_effective = details.get("effective_min_repeats", details.get("min_repeats"))
+    print(f"  Short text effective min_repeats: {short_effective} (base=8)")
+    assert short_effective == 8, "Short text should keep base min_repeats"
+
+    print("  PASSED\n")
+
+
 def test_combined_detection():
     """Test combined detection with min_strategies threshold."""
     print("Testing detect_thinking_repetition (combined)...")
@@ -525,18 +702,18 @@ def test_min_strategies_threshold():
     strategies_1 = reason_1.split(", ") if reason_1 else []
     print(f"  min_strategies=1: flagged={has_rep_1}, strategies={len(strategies_1)}")
 
-    # With min_strategies=5 (very conservative): likely not flagged
-    has_rep_5, reason_5, _ = detect_thinking_repetition(trace, min_strategies=5)
+    # With min_strategies=6 (very conservative): likely not flagged
+    has_rep_6, reason_6, _ = detect_thinking_repetition(trace, min_strategies=6)
     assert trace is not None
 
-    strategies_5 = reason_5.split(", ") if reason_5 else []
-    print(f"  min_strategies=5: flagged={has_rep_5}, strategies={len(strategies_5)}")
+    strategies_6 = reason_6.split(", ") if reason_6 else []
+    print(f"  min_strategies=6: flagged={has_rep_6}, strategies={len(strategies_6)}")
 
     assert has_rep_1, "Should be flagged with min_strategies=1"
-    # With 5 strategies available, the wait loop likely triggers most but maybe not all 5
-    # The point is min_strategies=5 is stricter
-    if len(strategies_1) < 5:
-        assert not has_rep_5, "Should NOT be flagged with min_strategies=5 if fewer than 5 trigger"
+    # With 6 strategies available, the wait loop likely triggers most but maybe not all 6
+    # The point is min_strategies=6 is stricter
+    if len(strategies_1) < 6:
+        assert not has_rep_6, "Should NOT be flagged with min_strategies=6 if fewer than 6 trigger"
 
     print("  PASSED\n")
 
@@ -558,6 +735,7 @@ def test_process_example():
     assert isinstance(result["hit_paragraph_starts"], bool)
     assert isinstance(result["hit_pos_or_wordclass"], bool)
     assert isinstance(result["hit_segment_classification"], bool)
+    assert isinstance(result["hit_near_duplicate_segments"], bool)
     # At least the marker density and topk should hit
     assert result["hit_marker_density"], "Wait loop should hit marker_density"
 
@@ -616,12 +794,15 @@ def run_all_tests():
     print("=" * 80)
 
     try:
+        test_length_scaled_min_repeats()
         test_extract_thinking_trace()
         test_marker_phrase_density()
         test_topk_vocab_ngrams()
         test_paragraph_start_repetition()
         test_word_class_ngrams()
         test_segment_classification()
+        test_near_duplicate_segments()
+        test_topk_length_scaling()
         test_combined_detection()
         test_min_strategies_threshold()
         test_process_example()

@@ -9,7 +9,7 @@
 * `scripts/data/filtering_and_updates/filter_cots.py`: Filters datasets for proper thinking token format and answer token format, specifically for reasoner model generations
 * `scripts/data/filtering_and_updates/filter_dataset_by_keywords.py`: Removes phrases identifying the model as specific entities (e.g., "I am DeepSeek", "OpenAI", "Claude") from datasets
 * `scripts/data/filtering_and_updates/filter_ngram_repetitions.py`: Removes examples with repetitive reasoning/text patterns in post-training datasets, focusing on sentence-level repetition patterns that indicate "unhinged" behavior
-* `scripts/data/filtering_and_updates/filter_thinking_repetitions.py`: Detects semantic repetition in `<think>` traces (strategy cycling, excessive "Wait"/"Let me" loops, hedging overload) using five complementary strategies: marker phrase density, top-K vocabulary n-grams, paragraph-start patterns, POS tag n-grams, and thinking segment action classification. Defaults to spaCy POS tagging; run via `filter_thinking_repetitions.sh` or `uv run --extra filtering` to install spaCy + model automatically. Use `--no-pos-tagging` to fall back to lightweight word-class system
+* `scripts/data/filtering_and_updates/filter_thinking_repetitions.py`: Detects semantic repetition in `<think>` traces (strategy cycling, excessive "Wait"/"Let me" loops, hedging overload, near-duplicate reasoning segments) using six complementary strategies: marker phrase density, top-K vocabulary n-grams (with length-scaled thresholds), paragraph-start patterns, POS tag n-grams, thinking segment action classification, and near-duplicate segment detection via content-word bigram Jaccard similarity. Defaults to spaCy POS tagging; run via `filter_thinking_repetitions.sh` or `uv run --extra filtering` to install spaCy + model automatically. Use `--no-pos-tagging` to fall back to lightweight word-class system
 * `scripts/data/filtering_and_updates/filter_thinking_repetitions.sh`: Shell wrapper for thinking trace repetition filtering (handles `--extra filtering` for spaCy)
 * `scripts/data/filtering_and_updates/filter_datasets_sequential.sh`: Shell script that runs keyword filtering followed by cutoff date filtering sequentially
 * `scripts/data/filtering_and_updates/update_subsets.py`: Loads base dataset, removes unwanted sources, adds additional datasets, removes columns, and pushes combined dataset
@@ -17,7 +17,7 @@
 ## Testing
 
 * `scripts/data/filtering_and_updates/test_filter_ngram_repetitions.py`: Comprehensive test suite for the n-gram repetition filtering functionality
-* `scripts/data/filtering_and_updates/test_filter_thinking_repetitions.py`: Test suite for thinking trace semantic repetition detection (all five strategies and combined logic)
+* `scripts/data/filtering_and_updates/test_filter_thinking_repetitions.py`: Test suite for thinking trace semantic repetition detection (all six strategies, length scaling, and combined logic)
 * `scripts/data/filtering_and_updates/run_tests.py`: Test runner that executes all test files in the directory
 * `scripts/data/filtering_and_updates/TEST_README.md`: Detailed documentation for running tests and test coverage
 

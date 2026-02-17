@@ -9,12 +9,13 @@ Unlike filter_ngram_repetitions.py which catches exact text repetition, this fil
 catches cases where the model applies the same *strategy* or *pattern* over and over
 with slightly different words.
 
-Five complementary detection strategies are used:
+Six complementary detection strategies are used:
   1. Marker phrase density (counting known loop markers per paragraph)
   2. Top-K vocabulary n-grams (reducing vocab then finding repeated n-grams)
   3. Paragraph-start pattern repetition (low diversity in how paragraphs begin)
   4. POS tag n-grams via spaCy (falls back to lightweight word-class system if unavailable)
   5. Thinking segment action classification (detecting verify/reconsider/wait loops)
+  6. Near-duplicate segment detection (content-word bigram Jaccard similarity)
 
 By default, an example is flagged only when 2+ strategies agree (--min-strategies).
 
@@ -77,6 +78,21 @@ def extract_thinking_trace(example: dict, column: str) -> str | None:
     if match:
         return match.group(1).strip()
     return None
+
+
+# ---------------------------------------------------------------------------
+# Length-Scaled Thresholds
+# ---------------------------------------------------------------------------
+
+
+def length_scaled_min_repeats(base_min_repeats: int, num_words: int, reference_words: int = 5000) -> int:
+    """Scale min_repeats proportionally to text length.
+
+    For texts <= reference_words, returns base unchanged.
+    For longer texts, scales linearly (expected n-gram counts scale linearly with length).
+    """
+    scale = max(1.0, num_words / reference_words)
+    return max(base_min_repeats, int(base_min_repeats * scale))
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +195,18 @@ def marker_phrase_density(text: str, threshold_scale: float = 1.0) -> tuple[bool
 # ---------------------------------------------------------------------------
 
 # Default configurations: (K, n, min_repeats)
-DEFAULT_TOPK_CONFIGS: list[tuple[int, int, int]] = [(10, 4, 8), (20, 4, 5), (50, 5, 4)]
+# min_repeats are base values; they get length-scaled inside topk_vocab_ngram_repetition.
+DEFAULT_TOPK_CONFIGS: list[tuple[int, int, int]] = [
+    (10, 3, 12),  # Very coarse, short n-grams, high threshold
+    (10, 4, 8),  # Original, now length-scaled
+    (10, 6, 4),  # Coarse vocab, longer patterns
+    (20, 4, 8),  # Raised from min_repeats=5
+    (20, 5, 5),  # Medium granularity
+    (20, 7, 3),  # Long patterns, medium vocab
+    (50, 5, 4),  # Original, now length-scaled
+    (50, 6, 3),  # Near-original vocab, 6-grams
+    (50, 8, 3),  # Near-original vocab, catches repeated reasoning chains
+]
 
 
 def topk_vocab_ngram_repetition(text: str, k: int, n: int, min_repeats: int) -> tuple[bool, dict]:
@@ -198,6 +225,9 @@ def topk_vocab_ngram_repetition(text: str, k: int, n: int, min_repeats: int) -> 
     if len(words) < n:
         return False, {}
 
+    # Length-scale min_repeats so long texts aren't unfairly penalized
+    effective_min_repeats = length_scaled_min_repeats(min_repeats, len(words))
+
     word_freq = Counter(words)
     top_k_words = {w for w, _ in word_freq.most_common(k)}
 
@@ -212,13 +242,14 @@ def topk_vocab_ngram_repetition(text: str, k: int, n: int, min_repeats: int) -> 
     meaningful_repeats = {
         " ".join(ng): count
         for ng, count in ngram_counts.items()
-        if count >= min_repeats and not all(w == "_" for w in ng)
+        if count >= effective_min_repeats and not all(w == "_" for w in ng)
     }
 
     details = {
         "k": k,
         "n": n,
         "min_repeats": min_repeats,
+        "effective_min_repeats": effective_min_repeats,
         "num_words": len(words),
         "top_k_words": sorted(top_k_words),
         "repeated_ngrams": dict(sorted(meaningful_repeats.items(), key=lambda x: -x[1])[:10]),
@@ -264,7 +295,8 @@ def paragraph_start_repetition(
     Returns:
         (flagged, details) with diversity and start-ratio per prefix length.
     """
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    # Split on both single and double newlines so we handle both formats
+    paragraphs = [p.strip() for p in re.split(r"\n\n?", text) if p.strip()]
     if len(paragraphs) < min_paragraphs:
         return False, {"num_paragraphs": len(paragraphs), "skipped": True}
 
@@ -451,15 +483,17 @@ def word_class(w: str) -> str:
     return "C"
 
 
-def word_class_ngrams(text: str, n: int = 4, min_repeats: int = 8) -> tuple[bool, dict]:
+def word_class_ngrams(text: str, n: int = 6, min_repeats: int = 6) -> tuple[bool, dict]:
     """Classify words by type and find repeated word-class n-grams.
 
     Focuses on n-grams containing at least one Marker word.
+    Uses n=6 (3,367 marker-containing patterns) instead of n=4 (175 patterns)
+    to avoid false positives on long texts.
 
     Args:
         text: The thinking trace text.
         n: N-gram size.
-        min_repeats: Minimum repeat count to flag.
+        min_repeats: Base minimum repeat count to flag (length-scaled).
 
     Returns:
         (flagged, details) with repeated word-class n-grams.
@@ -468,17 +502,25 @@ def word_class_ngrams(text: str, n: int = 4, min_repeats: int = 8) -> tuple[bool
     if len(words) < n:
         return False, {}
 
+    # Length-scale min_repeats
+    effective_min_repeats = length_scaled_min_repeats(min_repeats, len(words))
+
     classes = [word_class(w) for w in words]
 
     ngrams = [tuple(classes[i : i + n]) for i in range(len(classes) - n + 1)]
     ngram_counts = Counter(ngrams)
 
     # Focus on n-grams with at least one marker
-    marker_repeats = {"".join(ng): count for ng, count in ngram_counts.items() if count >= min_repeats and "M" in ng}
+    marker_repeats = {
+        "".join(ng): count
+        for ng, count in ngram_counts.items()
+        if count >= effective_min_repeats and "M" in ng
+    }
 
     details = {
         "n": n,
         "min_repeats": min_repeats,
+        "effective_min_repeats": effective_min_repeats,
         "num_words": len(words),
         "repeated_class_ngrams": dict(sorted(marker_repeats.items(), key=lambda x: -x[1])[:10]),
     }
@@ -497,15 +539,16 @@ def _get_spacy_nlp():
     return _spacy_nlp
 
 
-def pos_tag_ngrams(text: str, n: int = 4, min_repeats: int = 8, max_chars: int = 50000) -> tuple[bool, dict]:
+def pos_tag_ngrams(text: str, n: int = 5, min_repeats: int = 10, max_chars: int = 50000) -> tuple[bool, dict]:
     """Use spaCy POS tagging to find repeated POS n-grams.
 
     Requires spaCy and en_core_web_sm model (``uv run --extra filtering``).
+    Uses n=5 (1.4M patterns) instead of n=4 (83K patterns) to reduce false positives.
 
     Args:
         text: The thinking trace text.
         n: N-gram size.
-        min_repeats: Minimum repeat count to flag.
+        min_repeats: Base minimum repeat count to flag (length-scaled).
         max_chars: Truncate text to this many chars for performance.
 
     Returns:
@@ -524,18 +567,72 @@ def pos_tag_ngrams(text: str, n: int = 4, min_repeats: int = 8, max_chars: int =
     if len(pos_tags) < n:
         return False, {}
 
+    # Length-scale min_repeats
+    effective_min_repeats = length_scaled_min_repeats(min_repeats, len(pos_tags))
+
     ngrams = [tuple(pos_tags[i : i + n]) for i in range(len(pos_tags) - n + 1)]
     ngram_counts = Counter(ngrams)
 
-    repeated = {" ".join(ng): count for ng, count in ngram_counts.items() if count >= min_repeats}
+    repeated = {" ".join(ng): count for ng, count in ngram_counts.items() if count >= effective_min_repeats}
 
     details = {
         "n": n,
         "min_repeats": min_repeats,
+        "effective_min_repeats": effective_min_repeats,
         "num_tokens": len(pos_tags),
         "repeated_pos_ngrams": dict(sorted(repeated.items(), key=lambda x: -x[1])[:10]),
     }
     return len(repeated) > 0, details
+
+
+# ---------------------------------------------------------------------------
+# Shared: Transition Splitting
+# ---------------------------------------------------------------------------
+
+_TRANSITION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"^wait[,.\s]",
+        r"^but wait\b",
+        r"^actually[,.\s]",
+        r"^hmm[,.\s]",
+        r"^hm[,.\s]",
+        r"^let me (?:re|try|check|verify|think|start|go back)",
+        r"^alternatively\b",
+        r"^maybe I should\b",
+        r"^perhaps\b",
+        r"^no[,.\s]",
+        r"^on second thought\b",
+        r"^hold on\b",
+        r"^i think\b",
+        r"^so(?:,|\s+(?:the|let|i|we|if))",
+        r"^okay[,.\s]",
+        r"^alright[,.\s]",
+    ]
+]
+
+
+def _split_at_transitions(text: str) -> list[str]:
+    """Split text into segments at transition boundaries.
+
+    Splits on both single and double newlines, then groups paragraphs
+    at transition markers (Wait, Let me, Actually, etc.).
+    """
+    paragraphs = [p.strip() for p in re.split(r"\n\n?", text) if p.strip()]
+
+    segments: list[str] = []
+    current: list[str] = []
+    for para in paragraphs:
+        is_transition = any(pat.match(para) for pat in _TRANSITION_PATTERNS)
+        if is_transition and current:
+            segments.append("\n\n".join(current))
+            current = [para]
+        else:
+            current.append(para)
+    if current:
+        segments.append("\n\n".join(current))
+
+    return segments
 
 
 # ---------------------------------------------------------------------------
@@ -595,20 +692,7 @@ def classify_thinking_segments(
     Returns:
         (flagged, details) with segment classification info.
     """
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-
-    # Split at transition boundaries
-    segments: list[str] = []
-    current: list[str] = []
-    for para in paragraphs:
-        is_transition = any(pat.match(para) for pat in TRANSITION_PATTERNS)
-        if is_transition and current:
-            segments.append("\n\n".join(current))
-            current = [para]
-        else:
-            current.append(para)
-    if current:
-        segments.append("\n\n".join(current))
+    segments = _split_at_transitions(text)
 
     if len(segments) < min_segments:
         return False, {"num_segments": len(segments), "skipped": True}
@@ -646,6 +730,91 @@ def classify_thinking_segments(
         and max_action_repeat >= min_action_repeat
     )
     return flagged, details
+
+
+# ---------------------------------------------------------------------------
+# Strategy 6: Near-Duplicate Segment Detection
+# ---------------------------------------------------------------------------
+
+
+def _segment_fingerprint(segment: str) -> frozenset[tuple[str, str]]:
+    """Content-word bigram fingerprint for a text segment.
+
+    Removes function words and short words (<3 chars) to focus on topical content.
+    """
+    words = re.findall(r"[a-z]+", segment.lower())
+    content = [w for w in words if w not in FUNCTION_WORDS and len(w) > 2]
+    if len(content) < 2:
+        return frozenset()
+    return frozenset((content[i], content[i + 1]) for i in range(len(content) - 1))
+
+
+def near_duplicate_segments(
+    text: str,
+    min_segments: int = 5,
+    min_segment_words: int = 50,
+    jaccard_threshold: float = 0.3,
+    duplicate_pair_ratio: float = 0.2,
+    window_size: int = 20,
+    max_segments: int = 200,
+) -> tuple[bool, dict]:
+    """Detect near-duplicate segments using content-word bigram Jaccard similarity.
+
+    Splits at transition boundaries, fingerprints qualifying segments, and checks
+    whether too many segment pairs within a sliding window are near-duplicates.
+
+    Args:
+        text: The thinking trace text.
+        min_segments: Minimum qualifying segments to analyze.
+        min_segment_words: Minimum words for a segment to qualify.
+        jaccard_threshold: Jaccard similarity threshold for a near-duplicate pair.
+        duplicate_pair_ratio: Fraction of pairs that must be near-duplicates to flag.
+        window_size: Sliding window size for pairwise comparison.
+        max_segments: Cap segments for performance.
+
+    Returns:
+        (flagged, details) with near-duplicate pair statistics.
+    """
+    segments = _split_at_transitions(text)
+    qualifying = [s for s in segments if len(re.findall(r"[a-z]+", s.lower())) >= min_segment_words]
+
+    if len(qualifying) < min_segments:
+        return False, {"num_qualifying_segments": len(qualifying), "skipped": True}
+
+    # Limit segments for performance
+    if len(qualifying) > max_segments:
+        qualifying = qualifying[:max_segments]
+
+    # Compute fingerprints
+    fingerprints = [_segment_fingerprint(s) for s in qualifying]
+
+    # Count near-duplicate pairs in sliding window
+    total_pairs = 0
+    duplicate_pairs = 0
+
+    for i in range(len(fingerprints)):
+        window_end = min(i + window_size, len(fingerprints))
+        for j in range(i + 1, window_end):
+            fp_i, fp_j = fingerprints[i], fingerprints[j]
+            if not fp_i or not fp_j:
+                continue
+            total_pairs += 1
+            intersection = len(fp_i & fp_j)
+            union = len(fp_i | fp_j)
+            jaccard = intersection / union if union > 0 else 0
+            if jaccard >= jaccard_threshold:
+                duplicate_pairs += 1
+
+    ratio = duplicate_pairs / total_pairs if total_pairs > 0 else 0
+
+    details = {
+        "num_qualifying_segments": len(qualifying),
+        "total_pairs_checked": total_pairs,
+        "duplicate_pairs": duplicate_pairs,
+        "duplicate_pair_ratio": round(ratio, 3),
+    }
+
+    return ratio >= duplicate_pair_ratio, details
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +883,12 @@ def detect_thinking_repetition(
     if seg_flagged:
         reasons.append("segment_classification")
 
+    # Strategy 6: Near-duplicate segment detection
+    dup_flagged, dup_details = near_duplicate_segments(thinking_text)
+    scores["near_duplicate_segments"] = dup_details
+    if dup_flagged:
+        reasons.append("near_duplicate_segments")
+
     has_repetition = len(reasons) >= min_strategies
     reason = ", ".join(reasons) if reasons else ""
 
@@ -745,6 +920,7 @@ def process_example(
         - hit_paragraph_starts: bool
         - hit_pos_or_wordclass: bool  (POS tagging or word-class, depending on mode)
         - hit_segment_classification: bool
+        - hit_near_duplicate_segments: bool
     """
     _empty = {
         "has_thinking_repetition": False,
@@ -755,6 +931,7 @@ def process_example(
         "hit_paragraph_starts": False,
         "hit_pos_or_wordclass": False,
         "hit_segment_classification": False,
+        "hit_near_duplicate_segments": False,
     }
 
     thinking_text = extract_thinking_trace(example, column)
@@ -780,6 +957,7 @@ def process_example(
         "hit_paragraph_starts": "paragraph_starts" in reasons_set,
         "hit_pos_or_wordclass": "pos_tag_ngrams" in reasons_set or "word_class_ngrams" in reasons_set,
         "hit_segment_classification": "segment_classification" in reasons_set,
+        "hit_near_duplicate_segments": "near_duplicate_segments" in reasons_set,
     }
 
 
@@ -802,13 +980,12 @@ def main():
     parser.add_argument("--split", type=str, default="train", help="Dataset split (default: train)")
     parser.add_argument("--debug", action="store_true", help="Process only first 1000 examples")
     parser.add_argument(
-        "--streaming", action="store_true",
-        help="Use streaming mode to avoid downloading the full dataset. "
-        "Takes only the first --num-examples rows.",
+        "--streaming",
+        action="store_true",
+        help="Use streaming mode to avoid downloading the full dataset. Takes only the first --num-examples rows.",
     )
     parser.add_argument(
-        "--num-examples", type=int, default=100,
-        help="Number of examples to take in streaming mode (default: 100)",
+        "--num-examples", type=int, default=100, help="Number of examples to take in streaming mode (default: 100)"
     )
     parser.add_argument("--push-to-hf", action="store_true", help="Push filtered dataset to HuggingFace Hub")
     parser.add_argument("--num-proc", type=int, default=None, help="Number of processes (default: auto)")
@@ -837,7 +1014,15 @@ def main():
         "--topk-k-values",
         type=str,
         default="10,20,50",
-        help="Comma-separated K values for top-K vocab strategy (default: 10,20,50)",
+        help="Comma-separated K values for top-K vocab strategy (default: 10,20,50). "
+        "Ignored if --topk-configs is provided.",
+    )
+    parser.add_argument(
+        "--topk-configs",
+        type=str,
+        default=None,
+        help="Custom top-K configs as comma-separated K:n:min_repeats triples "
+        "(e.g. '10:4:8,20:5:5,50:6:3'). Overrides --topk-k-values and DEFAULT_TOPK_CONFIGS.",
     )
     args = parser.parse_args()
 
@@ -863,15 +1048,28 @@ def main():
     num_proc = args.num_proc or open_instruct_utils.max_num_processes()
 
     # Parse top-K configs
-    k_values = [int(k.strip()) for k in args.topk_k_values.split(",")]
-    topk_configs = []
-    for k in k_values:
-        if k <= 10:
-            topk_configs.append((k, 4, 8))
-        elif k <= 30:
-            topk_configs.append((k, 4, 5))
+    if args.topk_configs:
+        # Explicit K:n:min_repeats triples override everything
+        topk_configs = []
+        for triple in args.topk_configs.split(","):
+            parts = triple.strip().split(":")
+            if len(parts) != 3:
+                parser.error(f"Invalid topk-configs triple: '{triple}'. Expected K:n:min_repeats.")
+            topk_configs.append((int(parts[0]), int(parts[1]), int(parts[2])))
+    else:
+        # Use defaults (the expanded DEFAULT_TOPK_CONFIGS) unless --topk-k-values overrides
+        if args.topk_k_values != "10,20,50":
+            k_values = [int(k.strip()) for k in args.topk_k_values.split(",")]
+            topk_configs = []
+            for k in k_values:
+                if k <= 10:
+                    topk_configs.append((k, 4, 8))
+                elif k <= 30:
+                    topk_configs.append((k, 4, 5))
+                else:
+                    topk_configs.append((k, 5, 4))
         else:
-            topk_configs.append((k, 5, 4))
+            topk_configs = None  # Use DEFAULT_TOPK_CONFIGS
 
     # Load dataset
     logger.info(f"Loading dataset: {args.input_dataset}")
@@ -900,6 +1098,7 @@ def main():
     new_features["hit_paragraph_starts"] = Value("bool")
     new_features["hit_pos_or_wordclass"] = Value("bool")
     new_features["hit_segment_classification"] = Value("bool")
+    new_features["hit_near_duplicate_segments"] = Value("bool")
 
     logger.info("Detecting thinking trace repetitions...")
     dataset_with_flags = dataset.map(
