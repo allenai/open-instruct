@@ -43,6 +43,7 @@ class CounterEnv(RLEnvironment):
         self._target = target
         self._current = 0
         self._step_count = 0
+        self._done = False
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
@@ -52,6 +53,7 @@ class CounterEnv(RLEnvironment):
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
         self._current = 0
         self._step_count = 0
+        self._done = False
         self._task_id = task_id
 
         if task_id and task_id.isdigit():
@@ -89,6 +91,7 @@ class CounterEnv(RLEnvironment):
             reward = -0.5
             done = True
 
+        self._done = done
         return StepResult(
             observation=obs, reward=reward, done=done, info={"current": self._current, "target": self._target}
         )
@@ -104,7 +107,7 @@ class CounterEnv(RLEnvironment):
         return EnvironmentState(
             episode_id=self._task_id,
             step_count=self._step_count,
-            done=self._current == self._target,
+            done=self._done,
             info={"current": self._current, "target": self._target},
         )
 
@@ -136,6 +139,7 @@ class GuessNumberEnv(RLEnvironment):
         self._max_val = max_val
         self._secret = 0
         self._guesses = 0
+        self._done = False
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
@@ -149,6 +153,7 @@ class GuessNumberEnv(RLEnvironment):
         else:
             self._secret = random.randint(self._min_val, self._max_val)
         self._guesses = 0
+        self._done = False
 
         result = StepResult(
             observation=f"Guess a number between {self._min_val} and {self._max_val}.",
@@ -160,6 +165,7 @@ class GuessNumberEnv(RLEnvironment):
         self._guesses += 1
 
         if tool_call.name != "guess":
+            self._done = True
             return StepResult(
                 observation=f"Unknown action: {tool_call.name}. Use 'guess' with a number.", reward=-0.1, done=True
             )
@@ -180,6 +186,7 @@ class GuessNumberEnv(RLEnvironment):
         closeness_reward = 1.0 - distance / max_distance if max_distance > 0 else 0.0
 
         if guess == self._secret:
+            self._done = True
             return StepResult(
                 observation=f"Correct! The number was {self._secret}. You got it in {self._guesses} guesses!",
                 reward=1.0,
@@ -198,6 +205,6 @@ class GuessNumberEnv(RLEnvironment):
         return EnvironmentState(
             episode_id=self._task_id,
             step_count=self._guesses,
-            done=False,
+            done=self._done,
             info={"secret": self._secret},
         )
