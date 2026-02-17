@@ -70,27 +70,27 @@ class CounterEnv(RLEnvironment):
             info={"target": self._target},
         )
 
+    @staticmethod
+    def _parse_amount(tool_args: dict) -> int:
+        amount = tool_args.get("amount", 1)
+        if isinstance(amount, int):
+            return amount
+        try:
+            return int(amount)
+        except (ValueError, TypeError):
+            return 1
+
     async def step(self, tool_call: ToolCall) -> StepResult:
         self._step_count += 1
 
         if tool_call.name == "increment":
-            amount = tool_call.args.get("amount", 1)
-            if not isinstance(amount, int):
-                try:
-                    amount = int(amount)
-                except (ValueError, TypeError):
-                    amount = 1
+            amount = self._parse_amount(tool_call.args)
             self._current += amount
             obs = f"Counter incremented by {amount}, now at {self._current}."
             reward = -0.1
             done = False
         elif tool_call.name == "decrement":
-            amount = tool_call.args.get("amount", 1)
-            if not isinstance(amount, int):
-                try:
-                    amount = int(amount)
-                except (ValueError, TypeError):
-                    amount = 1
+            amount = self._parse_amount(tool_call.args)
             self._current -= amount
             obs = f"Counter decremented by {amount}, now at {self._current}."
             reward = -0.1
