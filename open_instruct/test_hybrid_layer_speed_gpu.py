@@ -21,8 +21,8 @@ import unittest
 import torch
 from transformers import AutoModelForCausalLM
 from transformers.models.olmo3.configuration_olmo3 import Olmo3Config
-from transformers.models.olmo3_5_hybrid import modeling_olmo3_5_hybrid
-from transformers.models.olmo3_5_hybrid.configuration_olmo3_5_hybrid import Olmo3_5HybridConfig
+from transformers.models.olmo3_2_hybrid import modeling_olmo3_2_hybrid
+from transformers.models.olmo3_2_hybrid.configuration_olmo3_2_hybrid import Olmo3_2HybridConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ OLMO3_CONFIG_KWARGS = {
 
 
 def _build_hybrid_config():
-    return Olmo3_5HybridConfig(**HYBRID_CONFIG_KWARGS)
+    return Olmo3_2HybridConfig(**HYBRID_CONFIG_KWARGS)
 
 
 def _build_olmo3_config():
@@ -106,11 +106,11 @@ class TestHybridLayerSpeed(unittest.TestCase):
         full_attn_layer_idx = config.layer_types.index("full_attention")
         linear_attn_layer_idx = config.layer_types.index("linear_attention")
 
-        full_attn_block = modeling_olmo3_5_hybrid.Olmo3_5HybridDecoderLayer(config, layer_idx=full_attn_layer_idx).to(
+        full_attn_block = modeling_olmo3_2_hybrid.Olmo3_5HybridDecoderLayer(config, layer_idx=full_attn_layer_idx).to(
             device=device, dtype=torch.bfloat16
         )
 
-        linear_attn_block = modeling_olmo3_5_hybrid.Olmo3_5HybridDecoderLayer(
+        linear_attn_block = modeling_olmo3_2_hybrid.Olmo3_5HybridDecoderLayer(
             config, layer_idx=linear_attn_layer_idx
         ).to(device=device, dtype=torch.bfloat16)
 

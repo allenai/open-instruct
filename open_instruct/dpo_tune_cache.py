@@ -351,7 +351,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
 
-    if model.config.model_type == "olmo3_5_hybrid" and not is_flash_linear_attention_available():
+    if model.config.model_type == "olmo3_2_hybrid" and not is_flash_linear_attention_available():
         raise ImportError(
             "flash-linear-attention (fla) is required for hybrid models but is not installed. "
             "Without it, linear attention layers fall back to a slow PyTorch implementation. "
