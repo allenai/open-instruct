@@ -34,6 +34,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.fsdp import FSDPModule
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
@@ -558,6 +559,9 @@ def build_reference_logprobs_cache(
         dist.barrier()
 
     model.eval()
+    if isinstance(model, FSDPModule):
+        model.set_reshard_after_forward(False, recurse=True)
+
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
@@ -620,6 +624,9 @@ def build_reference_logprobs_cache(
         )
 
     model.train()
+    if isinstance(model, FSDPModule):
+        model.set_reshard_after_forward(True, recurse=True)
+
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
     cache_mem_bytes = sum(t.numel() * t.element_size() for t in cache.tensors.values())
