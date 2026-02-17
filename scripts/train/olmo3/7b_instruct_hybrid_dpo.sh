@@ -6,6 +6,7 @@ do
     EXP_NAME=olmo3-7b-hybrid-DPO-1115-newb-tpc-d5-lbc100-${LR}
     uv run python mason.py \
         --cluster ai2/jupiter \
+        --description "OLMo3-7B hybrid (GatedDeltaNet+Attn) DPO, 4 nodes, 16k packing, compiled" \
         --workspace ai2/olmo-instruct \
         --priority urgent \
         --preemptible \
@@ -50,6 +51,7 @@ do
         --logging_steps 1 \
         --loss_type dpo_norm \
         --beta 5 \
+        --num_replicas 1 \
         --activation_memory_budget 0.1 \
         --compile_model \
         --with_tracking \

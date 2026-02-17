@@ -64,7 +64,8 @@ WORKDIR /stage/
 
 ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
-    UV_COMPILE_BYTECODE=0
+    UV_COMPILE_BYTECODE=0 \
+    TORCH_CUDA_ARCH_LIST="8.0;9.0"
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
