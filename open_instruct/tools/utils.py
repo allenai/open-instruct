@@ -218,7 +218,7 @@ class ToolCall:
 
     name: str
     args: dict[str, Any]
-    id: str
+    id: str = ""
 
 
 @dataclass
@@ -479,7 +479,7 @@ class Tool(ABC):
         """Execute the tool. Must be implemented by subclasses."""
         raise NotImplementedError("_execute must be implemented by subclasses.")
 
-    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str | None = None, **kwargs: Any) -> ToolOutput:
+    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ToolOutput:
         """Coerce arguments and execute the tool.
 
         This is the unified dispatch entry point for both tools and environments.
