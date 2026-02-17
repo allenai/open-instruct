@@ -11,7 +11,6 @@ class CounterEnv(RLEnvironment):
 
     max_steps = 20
 
-    # Tool definitions shared between get_tool_definitions() and reset()
     _tool_definitions = [
         {
             "type": "function",
@@ -47,7 +46,6 @@ class CounterEnv(RLEnvironment):
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
-        """Return tool definitions for prompt injection."""
         return cls._tool_definitions
 
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
@@ -118,7 +116,6 @@ class GuessNumberEnv(RLEnvironment):
 
     max_steps = 10
 
-    # Tool definitions shared between get_tool_definitions() and reset()
     _tool_definitions = [
         {
             "type": "function",
@@ -143,7 +140,6 @@ class GuessNumberEnv(RLEnvironment):
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
-        """Return tool definitions for prompt injection."""
         return cls._tool_definitions
 
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:

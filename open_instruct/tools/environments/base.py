@@ -56,14 +56,11 @@ def register_env(name: str):
 class RLEnvironment(Tool):
     """Abstract base class for RL environments (use as Ray actors via ray.remote).
 
-    Extends Tool so that environments and regular tools share a common base.
-    Environments use reset()/step() instead of _execute().
+    Subclass this to implement your own environment, defining reset/state/step.
     """
 
     async def _execute(self, _name_: str = "", _id_: str | None = None, **kwargs) -> ToolOutput:
         """Delegates to step(), wrapping the result as ToolOutput.
-
-        This is called by the shared Tool.safe_execute() dispatch path.
         """
         start = time.perf_counter()
         tc = ToolCall(name=_name_, args=kwargs, id=_id_)
