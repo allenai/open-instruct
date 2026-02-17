@@ -224,6 +224,12 @@ class DPOTrainModule(TransformerTrainModule):
             ]
             local_sums = torch.stack(local_sums_list)
             dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+            # Move to CPU after all_reduce to avoid per-.item() CUDA syncs, matching
+            # olmo-core's reduce_metrics() pattern (train/utils.py:335-336).
+            # TODO: refactor to use olmo-core's record_metric with ReduceType.weighted_mean
+            # once that's available in our installed version, eliminating the manual
+            # all_reduce + .cpu() + .item() pattern entirely.
+            local_sums = local_sums.cpu()
 
             global_total_tokens = local_sums[0]
             global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
