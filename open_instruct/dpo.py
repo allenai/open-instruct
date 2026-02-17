@@ -312,6 +312,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size
     # and the overflow mechanism in HFDataLoader ensures no examples are dropped.
+    # We could probably have logic to use a longer sequence length here when packing
+    # is enabled, but for simplicity we just keep the 4x increase in batch size regardless of packing.
+    # We want the batch size to be as large as possible so that we always pack efficiently.
     cache_batch_size = int(args.per_device_train_batch_size * 4 * dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
