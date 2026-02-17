@@ -94,6 +94,12 @@ class RLEnvironment(Tool):
                 info={},
             )
 
+    @classmethod
+    @abstractmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions in OpenAI format. Environments must implement this."""
+        ...
+
     @abstractmethod
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
         """Initialize episode. Returns (initial observation, tool definitions)."""
