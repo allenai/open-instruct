@@ -218,7 +218,7 @@ class ToolCall:
 
     name: str
     args: dict[str, Any]
-    id: str | None = None
+    id: str
 
 
 @dataclass

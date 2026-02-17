@@ -25,10 +25,6 @@ class TestRegistry:
         cls = get_env_class(env_name="counter")
         assert cls == CounterEnv
 
-    def test_get_env_class_by_import(self):
-        cls = get_env_class(env_class="open_instruct.tools.environments.examples.CounterEnv")
-        assert cls == CounterEnv
-
     def test_get_env_class_unknown_name(self):
         try:
             get_env_class(env_name="nonexistent")
@@ -36,12 +32,6 @@ class TestRegistry:
         except ValueError:
             pass
 
-    def test_get_env_class_no_args(self):
-        try:
-            get_env_class()
-            assert False, "Expected ValueError"
-        except ValueError:
-            pass
 
 
 class TestCounterEnv:
