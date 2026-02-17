@@ -11,7 +11,7 @@ import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.executable import Executable, ExecutableOutput, ToolCall  # noqa: F401
+from open_instruct.executable import Executable, ExecutableOutput
 
 logger = logger_utils.setup_logger(__name__)
 

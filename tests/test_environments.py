@@ -8,7 +8,7 @@ import pytest
 from open_instruct.tools.environments import ENV_REGISTRY, get_env_class
 from open_instruct.tools.environments.base import RLEnvironment, StepResult
 from open_instruct.tools.environments.examples import CounterEnv, GuessNumberEnv
-from open_instruct.tools.utils import ToolCall
+from open_instruct.executable import ToolCall
 
 
 def run_async(coro):

@@ -25,10 +25,10 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
+from open_instruct.executable import ExecutableOutput
 from open_instruct.tools.utils import (
     APIResponse,
     ParsedToolConfig,
-    ExecutableOutput,
     ToolsConfig,
     ToolStatistics,
     coerce_args,
