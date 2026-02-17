@@ -47,7 +47,7 @@ class RLEnvironment(Executable):
     async def _execute(self, _name_: str = "", _id_: str = "", **kwargs) -> ExecutableOutput:
         """Delegates to step(), wrapping the result as ExecutableOutput."""
         start = time.perf_counter()
-        tc = ToolCall(name=_name_, args=kwargs, id=_id_)
+        tc = ToolCall(id=_id_, name=_name_, args=kwargs)
         try:
             result = await self.step(tc)
             return ExecutableOutput(

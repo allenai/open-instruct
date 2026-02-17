@@ -102,7 +102,7 @@ class OpenInstructLegacyToolParser(ToolParser):
         tool_calls: list[ToolCall] = []
         for _, tool_name, tool_content in matches:
             param_name = self.tool_param_names.get(tool_name, "text")
-            tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
+            tool_calls.append(ToolCall(id="", name=tool_name, args={param_name: tool_content}))
         return tool_calls
 
     def _format_tool_output(self, tool_output: str) -> str:
@@ -171,7 +171,7 @@ class VllmToolParser(ToolParser):
         tool_calls = []
         for call in result.tool_calls:
             try:
-                tool_calls.append(ToolCall(name=call.function.name, args=json.loads(call.function.arguments)))
+                tool_calls.append(ToolCall(id=call.id or "", name=call.function.name, args=json.loads(call.function.arguments)))
             except json.JSONDecodeError as e:
                 # the model may have mungled the tool call somehow, catch the error here.
                 logger.warning(
@@ -293,7 +293,7 @@ class DRTuluToolParser(ToolParser):
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         for stop in self.stop_sequences:
             if stop in text:
-                return [ToolCall(name=self.tool_call_name, args={"text": text})]
+                return [ToolCall(id="", name=self.tool_call_name, args={"text": text})]
         return []
 
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
