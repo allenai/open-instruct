@@ -214,20 +214,14 @@ class PerfCallback(Callback):
             wall_clock_per_step = self._wall_clock_step_start - self._prev_wall_clock_step_start
             self.trainer.record_metric("perf/wall_clock_per_step", wall_clock_per_step, reduce_type=None)
             if wall_clock_per_step > 0:
-                data_loading_pct = 100 * self._batch_load_time / wall_clock_per_step
-                self.trainer.record_metric("perf/data_loading_pct", data_loading_pct, reduce_type=None)
-                step_overhead_pct = 100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step
-                self.trainer.record_metric("perf/step_overhead_pct", step_overhead_pct, reduce_type=None)
-
-        step_time_ms = (interval_end - self._pre_step_time) * 1000
-        self.trainer.record_metric("perf/step_time_ms", step_time_ms, reduce_type=None)
-        if self._prev_pre_step_time > 0:
-            cycle_time_ms = (self._pre_step_time - self._prev_pre_step_time) * 1000
-            overhead_ms = cycle_time_ms - step_time_ms
-            step_pct = step_time_ms / cycle_time_ms * 100 if cycle_time_ms > 0 else 0
-            self.trainer.record_metric("perf/cycle_time_ms", cycle_time_ms, reduce_type=None)
-            self.trainer.record_metric("perf/overhead_ms", overhead_ms, reduce_type=None)
-            self.trainer.record_metric("perf/step_pct", step_pct, reduce_type=None)
+                self.trainer.record_metric(
+                    "perf/data_loading_pct", 100 * self._batch_load_time / wall_clock_per_step, reduce_type=None
+                )
+                self.trainer.record_metric(
+                    "perf/step_overhead_pct",
+                    100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step,
+                    reduce_type=None,
+                )
 
         self._interval_start_time = interval_end
         self._interval_num_sequences = 0

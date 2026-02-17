@@ -1874,6 +1874,18 @@ class ModelDims:
             device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
         )
 
+    @classmethod
+    def from_transformer_config(cls, config) -> "ModelDims":
+        return cls(
+            num_layers=config.n_layers,
+            hidden_size=config.d_model,
+            intermediate_size=config.block.feed_forward.hidden_size,
+            vocab_size=config.vocab_size,
+            num_attn_heads=config.block.attention.n_heads,
+            head_dim=config.d_model // config.block.attention.n_heads,
+            num_kv_heads=config.block.attention.n_kv_heads or config.block.attention.n_heads,
+        )
+
     @property
     def device_flops(self) -> float:
         assert self.device_name is not None, "device_name must be set"

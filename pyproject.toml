@@ -18,7 +18,7 @@ dependencies = [
     "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy>=2",
-    "ai2-olmo-core==2.3.0",
+    "ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@tyler/anejs/linear-rnns",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
@@ -32,6 +32,8 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
+    "flash-linear-attention; platform_system != 'Darwin'",
+    "causal-conv1d>=1.4.0; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",

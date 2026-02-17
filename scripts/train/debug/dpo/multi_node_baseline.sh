@@ -1,13 +1,13 @@
 #!/bin/bash
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-MODEL_NAME=/weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842
+MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo3-7b-hybrid-DPO-debug-8k-packing-bs16-${LR}
+EXP_NAME=olmo2-7b-DPO-debug-16k-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO run with hybrid OLMo3-7B, 8k seq len, bs=16 (packing, compile)." \
+    --description "2 node DPO baseline with OLMo-2-7B, 16k seq len, bs=16 (packing)." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -18,7 +18,6 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
-    --env 'PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' \
     --gpus 8 -- torchrun \
     --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
@@ -28,11 +27,8 @@ uv run python mason.py \
     open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
-    --config_name olmo3_7B_hybrid \
-    --vocab_size 100352 \
-    --tokenizer_name_or_path allenai/dolma-2-tokenizer-olmo-3-instruct-final \
-    --chat_template_name olmo123 \
-    --max_seq_length 8192 \
+    --chat_template_name olmo \
+    --max_seq_length 16384 \
     --per_device_train_batch_size 16 \
     --packing \
     --gradient_accumulation_steps 1 \
@@ -41,17 +37,15 @@ uv run python mason.py \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_epochs 1 \
-    --output_dir output/dpo_hybrid_debug_8k/ \
+    --output_dir output/dpo_olmo2_debug_16k_baseline/ \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 7680 \
     --seed 123 \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
     --activation_memory_budget 0.1 \
-    --compile_model \
     --profiling \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --tensor_parallel_degree 1 \
     --try_auto_save_to_beaker false

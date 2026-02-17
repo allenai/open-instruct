@@ -43,8 +43,8 @@ wheels = [
 
 [[package]]
 name = "ai2-olmo-core"
-version = "2.3.0"
-source = { registry = "https://pypi.org/simple" }
+version = "2.4.0"
+source = { git = "https://github.com/allenai/OLMo-core.git?rev=tyler%2Fanejs%2Flinear-rnns#318964b3a2a99a039316cc407099bb2ae9e4c46c" }
 dependencies = [
     { name = "bettermap", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "cached-path", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -52,16 +52,13 @@ dependencies = [
     { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "omegaconf", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "packaging", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "pandas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "requests", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "rich", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "safetensors", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.9.1+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torch", version = "2.9.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/68/f8/0a55822e471a1143fc4e55dbe6995259141260ed9c460c7eac448e9e9acd/ai2_olmo_core-2.3.0.tar.gz", hash = "sha256:7745fea1268cf0d882d28c25fbbfbedc969e2f9bf4f187d8c042105429d0dff7", size = 345084, upload-time = "2025-10-17T16:22:04.579Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/d2/353853a4de4ccf209dd04d3ceb28e2d8ce11c06816a2517eb6b412524294/ai2_olmo_core-2.3.0-py3-none-any.whl", hash = "sha256:7b22d09aaaf8e49000c808833b377b7cef774f10e93114fb3c6e61b74cb75df8", size = 404339, upload-time = "2025-10-17T16:22:02.903Z" },
 ]
 
 [[package]]
@@ -458,6 +455,18 @@ sdist = { url = "https://files.pythonhosted.org/packages/bc/1d/ede8680603f601688
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/fc/1d7b80d0eb7b714984ce40efc78859c022cd930e402f599d8ca9e39c78a4/cachetools-6.2.4-py3-none-any.whl", hash = "sha256:69a7a52634fed8b8bf6e24a050fb60bff1c9bd8f6d24572b99c32d4e71e62a51", size = 11551, upload-time = "2025-12-15T18:24:52.332Z" },
 ]
+
+[[package]]
+name = "causal-conv1d"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ninja", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "packaging", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "torch", version = "2.9.1+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "torch", version = "2.9.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/db/df/63a384c49743b9fc8fec4c05dbd0b515e1c1c2b07e4559acc4fc37c69223/causal_conv1d-1.6.0.tar.gz", hash = "sha256:4eae3220d08e1e88238f3a0a88783147cbdf47f612cc610add75127c7a37ca3e", size = 29356, upload-time = "2026-01-12T17:33:32.794Z" }
 
 [[package]]
 name = "cbor2"
@@ -1166,6 +1175,20 @@ wheels = [
 ]
 
 [[package]]
+name = "fla-core"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "torch", version = "2.9.1+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "torch", version = "2.9.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f1/de/0d6bd5664ba2e711cabdde11ccb41ddcdd866c531e40900af3601bd7b8c6/fla_core-0.4.1.tar.gz", hash = "sha256:38ab28966eeadc2141b29e87c2bf72a8a4851e00af9d25bbbc3596b1fb53450d", size = 319608, upload-time = "2025-12-24T18:07:37.669Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/43/945ef69eb48a14c30fd7323d3e0b560c821ae71e6d3ef979e06a901bc3b9/fla_core-0.4.1-py3-none-any.whl", hash = "sha256:93c6afe4c80fc7bc705fa8aeea6a46d2cf2d77383f9619a41863c7114c801bab", size = 437282, upload-time = "2025-12-24T18:07:34.41Z" },
+]
+
+[[package]]
 name = "flash-attn"
 version = "2.8.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1174,6 +1197,19 @@ dependencies = [
     { name = "torch", version = "2.9.1+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
+
+[[package]]
+name = "flash-linear-attention"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fla-core", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "transformers", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/83/7d8ec7ffb5229080b1c9b772338ff588cbd63282ac355ede2a12a6e174a8/flash_linear_attention-0.4.1.tar.gz", hash = "sha256:127ee7273ed15ac17f72bcf4c75e1051719d8fbe0a2d1d047e59406f36d81ee2", size = 158280, upload-time = "2025-12-24T18:07:38.812Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/d5/6327559a9d5b9243b10c3984f1bcef256ed2ad06d105a3bb8f7b2979659c/flash_linear_attention-0.4.1-py3-none-any.whl", hash = "sha256:d18bdfe9d1f4b424676444eac9d50fb8433b70e5d4e0e0878b20bcbcdbea57ce", size = 287415, upload-time = "2025-12-24T18:07:35.815Z" },
+]
 
 [[package]]
 name = "flashinfer-python"
@@ -2650,11 +2686,13 @@ dependencies = [
     { name = "antlr4-python3-runtime", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "backoff", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "bitsandbytes", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "causal-conv1d", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "datasets", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "debugpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "deepspeed", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "fastapi", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "flash-linear-attention", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "hf-transfer", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "immutabledict", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "langdetect", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -2705,16 +2743,18 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", specifier = "==2.3.0" },
+    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=tyler%2Fanejs%2Flinear-rnns" },
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
+    { name = "causal-conv1d", marker = "sys_platform != 'darwin'", specifier = ">=1.4.0" },
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = ">=0.18.3" },
     { name = "dr-agent", marker = "extra == 'dr-tulu'" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "platform_machine != 'aarch64' and sys_platform != 'darwin'", specifier = ">=2.8.3" },
+    { name = "flash-linear-attention", marker = "sys_platform != 'darwin'" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },

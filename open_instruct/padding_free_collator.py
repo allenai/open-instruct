@@ -154,6 +154,16 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
         return result
 
 
+def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    shifted_labels = torch.full_like(labels, -100)
+    shifted_labels[:, :-1] = labels[:, 1:]
+
+    logits = logits.to(torch.float32)
+    safe = shifted_labels.clamp(min=0)
+    mask = (shifted_labels != -100).float()
+    return torch.gather(logits.log_softmax(-1), 2, safe.unsqueeze(2)).squeeze(2) * mask
+
+
 def concatenated_inputs(
     batch: dict[str, list | torch.Tensor], tag: str = "concatenated_"
 ) -> tuple[dict[str, torch.Tensor], int]:
@@ -191,26 +201,13 @@ def concatenated_inputs(
 
 
 def get_batch_logps(
-    logits: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
+    per_token_logps: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
 ) -> torch.Tensor:
-    assert logits.shape[:-1] == labels.shape
+    per_token_logps = per_token_logps[:, :-1]
+    loss_mask = labels[:, 1:] != -100
 
-    # - we are going to get crossings at labels / logits
-    #   cont batch boundaries, but we assume that the
-    #   loss mask == True at those places
-    labels = labels[:, 1:].clone()
-    logits = logits[:, :-1, :]
-    loss_mask = labels != -100
-
-    # dummy token; we'll ignore the losses on these tokens later
-    labels = labels.masked_fill(~loss_mask, 0)
-
-    # Compensate for the next-token shift above: each boundary moved left by 1,
-    # but the leading 0 must stay at 0.
     cu_seq_lens = cu_seq_lens.clone() - 1
     cu_seq_lens[0] = 0
-
-    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
 
     num_seqs = cu_seq_lens.shape[0] - 1
     seq_len = per_token_logps.shape[1]
@@ -238,9 +235,6 @@ def get_num_tokens(batch: dict[str, Any]) -> int:
     element is the total token count for that branch. For padded batches, sums
     the attention_mask. Falls back to counting input_ids elements.
     """
-    # cu_seq_lens_k is a cumulative sequence length tensor from the padding-free
-    # collator. Its last element equals the total token count for that branch.
-    # DPO has chosen_cu_seq_lens_k + rejected_cu_seq_lens_k; GRPO has cu_seq_lens_k.
     cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
     if cu_keys:
         return sum(batch[k][-1].item() for k in cu_keys)
@@ -257,6 +251,5 @@ def get_num_sequences(batch: dict[str, Any]) -> int | None:
     """
     cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
     if cu_keys:
-        # Each cu_seq_lens tensor has num_seqs + 1 elements (leading 0 boundary).
         return sum(len(batch[k]) - 1 for k in cu_keys)
     return None

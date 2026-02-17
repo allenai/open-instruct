@@ -8,7 +8,8 @@ including model configuration mappings and helper functions.
 import transformers
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import save_hf_model
-from olmo_core.nn.transformer import TransformerConfig
+from olmo_core.nn.transformer import TransformerBlockType, TransformerConfig
+from olmo_core.nn.transformer.block import FLAConfig
 
 from open_instruct import logger_utils
 
@@ -28,6 +29,25 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "Qwen/Qwen3-14B": "qwen3_14B",
     "Qwen/Qwen3-32B": "qwen3_32B",
 }
+
+
+def _build_olmo3_7B_hybrid(vocab_size: int, **kwargs) -> TransformerConfig:
+    remove_heads = 2
+    config = TransformerConfig.olmo3_7B(vocab_size=vocab_size, **kwargs)
+    config.d_model -= remove_heads * 128
+    config.block.attention.n_heads -= remove_heads
+    config.block.name = TransformerBlockType.fla_hybrid
+    config.block.fla = FLAConfig(
+        name="GatedDeltaNet",
+        dtype=config.dtype,
+        fla_layer_kwargs={
+            "head_dim": int(0.75 * config.d_model / config.block.attention.n_heads),
+            "use_gate": True,
+            "allow_neg_eigval": True,
+        },
+    )
+    config.block.fla_hybrid_attention_indices = [i for i in range(config.n_layers) if i % 4 == 3]
+    return config
 
 
 def get_transformer_config(
@@ -50,6 +70,13 @@ def get_transformer_config(
     if config_name is None:
         config_name = model_name_or_config
 
+    kwargs: dict = {"vocab_size": vocab_size}
+    if attn_backend is not None:
+        kwargs["attn_backend"] = AttentionBackendName(attn_backend)
+
+    if config_name == "olmo3_7B_hybrid":
+        return _build_olmo3_7B_hybrid(**kwargs)
+
     if not hasattr(TransformerConfig, config_name):
         available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
         available_configs = [
@@ -60,9 +87,6 @@ def get_transformer_config(
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
-    kwargs: dict = {"vocab_size": vocab_size}
-    if attn_backend is not None:
-        kwargs["attn_backend"] = AttentionBackendName(attn_backend)
     return getattr(TransformerConfig, config_name)(**kwargs)
 
 
@@ -71,5 +95,10 @@ def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_nam
     unwrapped_model.load_state_dict(state_dict)
     save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
     tokenizer.save_pretrained(save_dir)
-    original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
-    original_config.save_pretrained(save_dir)
+    if original_model_name_or_path and not _is_native_olmo_checkpoint(original_model_name_or_path):
+        original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
+        original_config.save_pretrained(save_dir)
+
+
+def _is_native_olmo_checkpoint(path: str) -> bool:
+    return path.startswith("/weka/") and not path.endswith("-hf")

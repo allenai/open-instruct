@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Tensor parallelism (TP) support for OLMo-core DPO training, achieving 1.6x MFU improvement (https://github.com/allenai/open-instruct/pull/1467).
 - Enable packing with torch.compile for DPO training, fix cu_seq_lens offset bug for padded chosen/rejected sequences, add tokens_per_second_per_gpu metric (https://github.com/allenai/open-instruct/pull/1466).
 - Production DPO script for OLMo3-7B hybrid (https://github.com/allenai/open-instruct/pull/1449).
 - Gradient accumulation/microbatching support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1447).
