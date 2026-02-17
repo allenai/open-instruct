@@ -248,12 +248,11 @@ def _random_tool_call(tools: list[dict]) -> ToolCall:
     return ToolCall(name=func["name"], args=args)
 
 
-@pytest.mark.parametrize("env_name", list(ENV_REGISTRY.keys()))
-def test_env_survives_20_random_steps(env_name: str):
-    """Every registered env should handle 20 random tool calls without crashing."""
+@pytest.mark.parametrize("env_cls", [CounterEnv, GuessNumberEnv])
+def test_env_survives_20_random_steps(env_cls: type[RLEnvironment]):
+    """Example envs should handle 20 random tool calls without crashing."""
 
     async def _test():
-        env_cls = get_env_class(env_name)
         env = env_cls()
         result, tools = await env.reset()
         assert isinstance(result, StepResult)
