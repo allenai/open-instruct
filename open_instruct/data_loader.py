@@ -26,6 +26,7 @@ from typing import Any, Literal
 import numpy as np
 import ray
 import torch
+import torch.distributed as dist
 import vllm
 from datasets import Dataset
 from olmo_core.data import data_loader
@@ -176,13 +177,27 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 self._overflow = all_examples[len(batch["index"]) :]
                 yield batch
                 batch_examples = []
+        overflow_batches: list[dict[str, Any]] = []
         while self._overflow:
             batch = to_device(self._collator(self._overflow), self._device)
             assert len(batch["index"]) > 0, (
                 f"Collator consumed 0 examples from {len(self._overflow)} overflow examples"
             )
             self._overflow = self._overflow[len(batch["index"]) :]
-            yield batch
+            overflow_batches.append(batch)
+
+        if self.dp_world_size > 1 and dist.is_initialized():
+            local_count = torch.tensor(len(overflow_batches), dtype=torch.long, device=self._device)
+            dist.all_reduce(local_count, op=dist.ReduceOp.MAX)
+            max_overflow_batches = int(local_count.item())
+        else:
+            max_overflow_batches = len(overflow_batches)
+
+        for i in range(max_overflow_batches):
+            if i < len(overflow_batches):
+                yield overflow_batches[i]
+            else:
+                yield overflow_batches[-1]
 
     @property
     def total_batches(self) -> int:
