@@ -57,6 +57,7 @@ torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
@@ -80,6 +81,10 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+]
+filtering = [
+    "spacy>=3.7.0",
+    "en-core-web-sm>=3.8.0",
 ]
 
 [tool.uv]
