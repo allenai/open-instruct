@@ -38,21 +38,6 @@ class EnvironmentState:
         return sum(self.rewards)
 
 
-ENV_REGISTRY: dict[str, type["RLEnvironment"]] = {}
-
-
-def register_env(name: str):
-    """Decorator to register an environment class."""
-
-    def decorator(cls: type["RLEnvironment"]) -> type["RLEnvironment"]:
-        if name in ENV_REGISTRY:
-            raise ValueError(f"Environment '{name}' already registered")
-        ENV_REGISTRY[name] = cls
-        return cls
-
-    return decorator
-
-
 class RLEnvironment(Tool):
     """Abstract base class for RL environments (use as Ray actors via ray.remote).
 
@@ -101,6 +86,21 @@ class RLEnvironment(Tool):
     def state(self) -> EnvironmentState:
         """Return current episode state."""
         pass
+
+
+ENV_REGISTRY: dict[str, type[RLEnvironment]] = {}
+
+
+def register_env(name: str):
+    """Decorator to register an environment class."""
+
+    def decorator(cls: type[RLEnvironment]) -> type[RLEnvironment]:
+        if name in ENV_REGISTRY:
+            raise ValueError(f"Environment '{name}' already registered")
+        ENV_REGISTRY[name] = cls
+        return cls
+
+    return decorator
 
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:
