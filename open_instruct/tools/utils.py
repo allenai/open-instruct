@@ -475,15 +475,8 @@ class Tool(ABC):
         return get_openai_tool_definitions(self)
 
     @abstractmethod
-    async def _execute(self, *args: Any, _name_: str = "", _id_: str | None = None, **kwargs: Any) -> ToolOutput:
-        """Execute the tool. Must be implemented by subclasses.
-
-        Args:
-            *args: Positional arguments (passed through from safe_execute).
-            _name_: Tool name from the model's tool call (used by environments to dispatch).
-            _id_: Tool call ID from the model's tool call.
-            **kwargs: Tool-specific arguments.
-        """
+    async def _execute(self, **kwargs: Any) -> ToolOutput:
+        """Execute the tool. Must be implemented by subclasses."""
         raise NotImplementedError("_execute must be implemented by subclasses.")
 
     async def safe_execute(self, *args: Any, _name_: str = "", _id_: str | None = None, **kwargs: Any) -> ToolOutput:
