@@ -43,6 +43,11 @@ class RLEnvironment(Tool):
     Subclass this to implement your own environment, defining reset/state/step.
     """
 
+    config_name: str = ""
+    call_name: str = ""
+    description: str = ""
+    parameters: dict[str, Any] = {}
+
     async def _execute(self, _name_: str = "", _id_: str = "", **kwargs) -> ToolOutput:
         """Delegates to step(), wrapping the result as ToolOutput."""
         start = time.perf_counter()

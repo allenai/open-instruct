@@ -414,13 +414,13 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
 
 
 class Tool(ABC):
-    config_name: str = ""
+    config_name: str
     """Name used to specify the tool in the CLI."""
-    description: str = ""
+    description: str
     """Default description used for e.g. system prompts."""
-    call_name: str = ""
+    call_name: str
     """Name used to identify the tool when function calling."""
-    parameters: dict[str, Any] = {}
+    parameters: dict[str, Any]
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
     observation_role: str = "tool"
     """Role for observations/feedback in conversation."""
