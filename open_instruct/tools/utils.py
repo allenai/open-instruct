@@ -106,6 +106,9 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
+    reward: float | None = None
+    done: bool = False
+    info: dict = field(default_factory=dict)
 
 
 def truncate(text: str, max_length: int = 500) -> str:
@@ -211,8 +214,11 @@ class ToolStatistics:
 
 @dataclass
 class ToolCall:
+    """Parsed tool call from model output."""
+
     name: str
     args: dict[str, Any]
+    id: str | None = None
 
 
 @dataclass
@@ -408,25 +414,49 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
 
 
 class Tool(ABC):
-    config_name: str
+    config_name: str = ""
     """Name used to specify the tool in the CLI."""
-    description: str
+    description: str = ""
     """Default description used for e.g. system prompts."""
-    call_name: str
+    call_name: str = ""
     """Name used to identify the tool when function calling."""
-    parameters: dict[str, Any]
+    parameters: dict[str, Any] = {}
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
+    observation_role: str = "tool"
+    """Role for observations/feedback in conversation."""
 
-    def __init__(self, config_name: str, description: str, call_name: str, parameters: dict[str, Any]) -> None:
-        self.config_name = config_name
-        self.description = description
-        self.call_name = call_name
-        self.parameters = parameters
-        # validate parameters are valid JSON
-        try:
-            json.loads(json.dumps(parameters))
-        except Exception as e:
-            raise ValueError(f"Invalid parameters: {e}") from e
+    async def setup(self) -> None:
+        """Called once at start of training for resource initialization."""
+        return
+
+    async def close(self) -> None:
+        """Cleanup resources for a single episode."""
+        return
+
+    async def shutdown(self) -> None:
+        """Called once at end of training for resource cleanup."""
+        return
+
+    def get_observation_role(self) -> str:
+        """Return the role to use for observations in conversation."""
+        return self.observation_role
+
+    def get_metrics(self) -> dict[str, float]:
+        """Return custom metrics."""
+        return {}
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions in OpenAI format for prompt injection.
+
+        Override this method to provide tool definitions that will be included
+        in the chat template. This is called at dataset setup time, before
+        any instances are created.
+
+        Returns:
+            List of tool definitions in OpenAI format.
+        """
+        return []
 
     def get_call_name(self) -> str:
         """Get the tool's call name (used when function calling)."""
@@ -455,7 +485,12 @@ class Tool(ABC):
         This method coerces kwargs to match the tool's parameter schema types
         before calling _execute(). Use this instead of _execute() when you want
         automatic type coercion (e.g., when calling from Ray actors).
+
+        Reserved meta-kwargs (_name_, _id_) are stripped before coercion so that
+        callers can use a unified dispatch interface for both tools and environments.
         """
+        kwargs.pop("_name_", None)
+        kwargs.pop("_id_", None)
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)
