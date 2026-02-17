@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, utils
+from open_instruct import data_types, padding_free_collator, utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -281,9 +281,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
-        # attention_mask is 1 for all non-padding tokens, and 0 otherwise.
-        # Using sum() excludes padding tokens from the count.
-        num_tokens = batch["attention_mask"].sum().item()
+        num_tokens = padding_free_collator.get_num_tokens(batch)
         return num_tokens * self.dp_world_size
 
 
