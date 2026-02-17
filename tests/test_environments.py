@@ -1,8 +1,12 @@
 """Unit tests for RL environments."""
 
 import asyncio
+import random
+
+import pytest
 
 from open_instruct.tools.environments import ENV_REGISTRY, get_env_class
+from open_instruct.tools.environments.base import RLEnvironment, StepResult
 from open_instruct.tools.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.tools.utils import ToolCall
 
@@ -227,3 +231,45 @@ class TestGuessNumberEnv:
             assert s.step_count == 1
 
         run_async(_test())
+
+
+def _random_tool_call(tools: list[dict]) -> ToolCall:
+    """Pick a random tool and fill required args with random values."""
+    tool = random.choice(tools)
+    func = tool["function"]
+    args = {}
+    for name, schema in func.get("parameters", {}).get("properties", {}).items():
+        if schema.get("type") == "integer":
+            args[name] = random.randint(-100, 100)
+        elif schema.get("type") == "string":
+            args[name] = "test"
+        else:
+            args[name] = None
+    return ToolCall(name=func["name"], args=args)
+
+
+@pytest.mark.parametrize("env_name", list(ENV_REGISTRY.keys()))
+def test_env_survives_20_random_steps(env_name: str):
+    """Every registered env should handle 20 random tool calls without crashing."""
+
+    async def _test():
+        env_cls = get_env_class(env_name)
+        env = env_cls()
+        result, tools = await env.reset()
+        assert isinstance(result, StepResult)
+        assert len(tools) > 0
+
+        for _ in range(20):
+            tc = _random_tool_call(tools)
+            step = await env.step(tc)
+            assert isinstance(step, StepResult)
+            assert isinstance(step.observation, str)
+            if step.done:
+                # Reset and keep going
+                result, tools = await env.reset()
+
+        # state() should work at any point
+        s = env.state()
+        assert s.step_count >= 0
+
+    run_async(_test())
