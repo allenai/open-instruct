@@ -746,6 +746,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     )["mfu"]
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
+                    metrics_to_log["perf/seconds_per_step"] = training_time / args.logging_steps
 
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
