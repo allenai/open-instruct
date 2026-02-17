@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -12,6 +11,10 @@ import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
+from open_instruct.executable import Executable, ExecutableOutput, ToolCall
+
+# Re-export for backward compatibility
+__all__ = ["Executable", "ExecutableOutput", "ToolCall"]
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -97,18 +100,6 @@ class ToolsConfig:
     def enabled(self) -> bool:
         """Return True if any tools are configured."""
         return bool(self.tools)
-
-
-@dataclass
-class ExecutableOutput:
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
-    reward: float | None = None
-    done: bool = False
-    info: dict = field(default_factory=dict)
 
 
 def truncate(text: str, max_length: int = 500) -> str:
@@ -210,15 +201,6 @@ class ToolStatistics:
         metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
 
         return metrics
-
-
-@dataclass
-class ToolCall:
-    """Parsed tool call from model output."""
-
-    name: str
-    args: dict[str, Any]
-    id: str = ""
 
 
 @dataclass
@@ -411,40 +393,6 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
             continue
         coerced[name] = _COERCERS[expected_type](value)
     return coerced
-
-
-class Executable(ABC):
-    """Base class for anything the vLLM actor can dispatch to (tools and environments)."""
-
-    async def setup(self) -> None:
-        """Called once at start of training for resource initialization."""
-        return
-
-    async def shutdown(self) -> None:
-        """Called once at end of training for resource cleanup."""
-        return
-
-    def get_metrics(self) -> dict[str, float]:
-        """Return custom metrics."""
-        return {}
-
-    @classmethod
-    def get_tool_definitions(cls) -> list[dict]:
-        """Return tool definitions in OpenAI format for prompt injection."""
-        return []
-
-    @abstractmethod
-    async def _execute(self, **kwargs: Any) -> ExecutableOutput:
-        """Execute. Must be implemented by subclasses."""
-        raise NotImplementedError("_execute must be implemented by subclasses.")
-
-    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ExecutableOutput:
-        """Dispatch entry point. Calls _execute with the provided arguments."""
-        return await self._execute(*args, _name_=_name_, _id_=_id_, **kwargs)
-
-    async def __call__(self, *args: Any, **kwargs: Any) -> ExecutableOutput:
-        """Alias for safe_execute, useful for inference scripts."""
-        return await self.safe_execute(*args, **kwargs)
 
 
 class Tool(Executable):

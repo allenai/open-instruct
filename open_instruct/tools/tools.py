@@ -176,7 +176,9 @@ class JinaBrowseTool(Tool):
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
         output = error if error else content
-        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        result = ExecutableOutput(
+            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
+        )
         log_tool_call(self.call_name, url, result)
         return result
 
@@ -250,7 +252,9 @@ class S2SearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n".join(snippets).strip() if snippets else error
 
-        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        result = ExecutableOutput(
+            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
+        )
         log_tool_call(self.call_name, query, result)
         return result
 
@@ -340,7 +344,9 @@ class SerperSearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n\n".join(snippets).strip() if snippets else error
 
-        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        result = ExecutableOutput(
+            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
+        )
         log_tool_call(self.call_name, query, result)
         return result
 
@@ -492,7 +498,9 @@ class Crawl4AIBrowseTool(Tool):
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
         output = error if error else content
-        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        result = ExecutableOutput(
+            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
+        )
         log_tool_call(self.call_name, url, result)
         return result
 
