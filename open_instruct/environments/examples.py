@@ -106,7 +106,7 @@ class CounterEnv(RLEnvironment):
         else:
             obs = f"Unknown action: {tool_call.name}"
             reward = -0.5
-            done = False
+            done = True
 
         return StepResult(
             observation=obs, reward=reward, done=done, info={"current": self._current, "target": self._target}
@@ -171,7 +171,7 @@ class GuessNumberEnv(RLEnvironment):
 
         if tool_call.name != "guess":
             return StepResult(
-                observation=f"Unknown action: {tool_call.name}. Use 'guess' with a number.", reward=-0.1, done=False
+                observation=f"Unknown action: {tool_call.name}. Use 'guess' with a number.", reward=-0.1, done=True
             )
 
         guess = tool_call.args.get("number", 0)
