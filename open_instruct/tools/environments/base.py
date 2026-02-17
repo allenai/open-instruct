@@ -5,7 +5,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from open_instruct.executable import Executable, ExecutableOutput, ToolCall
+from open_instruct.data_types import ToolCall
+from open_instruct.executable import Executable, ExecutableOutput
 
 
 @dataclass

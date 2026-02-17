@@ -17,15 +17,6 @@ class ExecutableOutput:
     info: dict = field(default_factory=dict)
 
 
-@dataclass
-class ToolCall:
-    """Parsed tool call from model output."""
-
-    name: str
-    args: dict[str, Any]
-    id: str = ""
-
-
 class Executable(ABC):
     """Base class for anything the vLLM actor can dispatch to (tools and environments)."""
 

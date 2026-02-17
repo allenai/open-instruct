@@ -20,6 +20,15 @@ class TokenStatistics:
 
 
 @dataclass
+class ToolCall:
+    """Parsed tool call from model output."""
+
+    name: str
+    args: dict[str, Any]
+    id: str = ""
+
+
+@dataclass
 class ToolCallStats:
     """Statistics for a single tool call."""
 

@@ -24,7 +24,7 @@ from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.logger_utils import setup_logger
-from open_instruct.executable import ToolCall
+from open_instruct.data_types import ToolCall
 from open_instruct.utils import import_class_from_string
 
 logger = setup_logger(__name__)
