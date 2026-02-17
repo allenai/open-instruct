@@ -5,7 +5,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from open_instruct.tools.utils import Tool, ToolCall, ToolOutput
+from open_instruct.tools.utils import Executable, ToolCall, ToolOutput
 
 
 @dataclass
@@ -37,16 +37,11 @@ class EnvironmentState:
         return sum(self.rewards)
 
 
-class RLEnvironment(Tool):
+class RLEnvironment(Executable):
     """Abstract base class for RL environments (use as Ray actors via ray.remote).
 
     Subclass this to implement your own environment, defining reset/state/step.
     """
-
-    config_name: str = ""
-    call_name: str = ""
-    description: str = ""
-    parameters: dict[str, Any] = {}
 
     async def _execute(self, _name_: str = "", _id_: str = "", **kwargs) -> ToolOutput:
         """Delegates to step(), wrapping the result as ToolOutput."""

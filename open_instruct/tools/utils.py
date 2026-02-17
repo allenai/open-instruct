@@ -413,17 +413,8 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
     return coerced
 
 
-class Tool(ABC):
-    config_name: str
-    """Name used to specify the tool in the CLI."""
-    description: str
-    """Default description used for e.g. system prompts."""
-    call_name: str
-    """Name used to identify the tool when function calling."""
-    parameters: dict[str, Any]
-    """JSON schema for tool parameters. Exposed to the model when calling the tool."""
-    observation_role: str = "tool"
-    """Role for observations/feedback in conversation."""
+class Executable(ABC):
+    """Base class for anything the vLLM actor can dispatch to (tools and environments)."""
 
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
@@ -437,26 +428,46 @@ class Tool(ABC):
         """Called once at end of training for resource cleanup."""
         return
 
-    def get_observation_role(self) -> str:
-        """Return the role to use for observations in conversation."""
-        return self.observation_role
-
     def get_metrics(self) -> dict[str, float]:
         """Return custom metrics."""
         return {}
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
-        """Return tool definitions in OpenAI format for prompt injection.
-
-        Override this method to provide tool definitions that will be included
-        in the chat template. This is called at dataset setup time, before
-        any instances are created.
-
-        Returns:
-            List of tool definitions in OpenAI format.
-        """
+        """Return tool definitions in OpenAI format for prompt injection."""
         return []
+
+    @abstractmethod
+    async def _execute(self, **kwargs: Any) -> ToolOutput:
+        """Execute. Must be implemented by subclasses."""
+        raise NotImplementedError("_execute must be implemented by subclasses.")
+
+    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ToolOutput:
+        """Dispatch entry point. Calls _execute with the provided arguments."""
+        return await self._execute(*args, _name_=_name_, _id_=_id_, **kwargs)
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Alias for safe_execute, useful for inference scripts."""
+        return await self.safe_execute(*args, **kwargs)
+
+
+class Tool(Executable):
+    """Base class for stateless tools (e.g. code execution, web search)."""
+
+    config_name: str
+    """Name used to specify the tool in the CLI."""
+    description: str
+    """Default description used for e.g. system prompts."""
+    call_name: str
+    """Name used to identify the tool when function calling."""
+    parameters: dict[str, Any]
+    """JSON schema for tool parameters. Exposed to the model when calling the tool."""
+    observation_role: str = "tool"
+    """Role for observations/feedback in conversation."""
+
+    def get_observation_role(self) -> str:
+        """Return the role to use for observations in conversation."""
+        return self.observation_role
 
     def get_call_name(self) -> str:
         """Get the tool's call name (used when function calling)."""
@@ -474,28 +485,14 @@ class Tool(ABC):
         """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
 
-    @abstractmethod
-    async def _execute(self, **kwargs: Any) -> ToolOutput:
-        """Execute the tool. Must be implemented by subclasses."""
-        raise NotImplementedError("_execute must be implemented by subclasses.")
-
     async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ToolOutput:
-        """Coerce arguments and execute the tool.
-
-        This is the unified dispatch entry point for both tools and environments.
-        It coerces kwargs to match the tool's parameter schema types, then calls
-        _execute() with the coerced arguments plus _name_ and _id_.
-        """
+        """Coerce arguments to match parameter schema, then call _execute."""
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)
         except (ValueError, TypeError) as e:
             return ToolOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
         return await self._execute(*args, _name_=_name_, _id_=_id_, **coerced_kwargs)
-
-    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Alias for safe_execute, useful for inference scripts."""
-        return await self.safe_execute(*args, **kwargs)
 
 
 @dataclass
