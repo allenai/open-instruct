@@ -224,7 +224,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if torch.cuda.is_available():
         init_gpu_memory = torch.cuda.mem_get_info()[0]
 
-    # Make one log on every process with the configuration for debugging.
+    # Reconfigure root logger: only rank 0 logs at INFO after distributed init.
     logger_utils.setup_logger()
     if accelerator.is_main_process:
         logger.info(accelerator.state)

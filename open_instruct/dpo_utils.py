@@ -520,6 +520,7 @@ def build_reference_logprobs_cache(
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
     forward_kwargs: dict | None = None,
+    num_gpus: int = 1,
 ) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
@@ -562,10 +563,19 @@ def build_reference_logprobs_cache(
 
     total_tokens = 0
     total_examples = 0
+    num_batches = 0
+    cache_start = time.perf_counter()
 
-    with torch.no_grad():
-        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
+    with (
+        torch.no_grad(),
+        tqdm(
+            total=getattr(dataloader, "effective_size", None),
+            disable=not is_main_process,
+            desc="Caching reference logprobs",
+            unit="ex",
+        ) as pbar,
+    ):
+        for batch in dataloader:
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -583,11 +593,14 @@ def build_reference_logprobs_cache(
             batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
             total_tokens += batch_tokens
             total_examples += batch_size
+            num_batches += 1
+            elapsed = time.perf_counter() - cache_start
+            pbar.update(batch_size)
             pbar.set_postfix(
                 {
-                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
-                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                    "avg_bs": f"{total_examples / num_batches:.1f}",
+                    "tok/s": f"{total_tokens / elapsed:.0f}",
+                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start, num_gpus=num_gpus):.1f}",
                     "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 },
                 refresh=False,

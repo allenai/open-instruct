@@ -300,6 +300,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     dp_world_size = world_size // tp_degree
 
+    # Reconfigure root logger: only rank 0 logs at INFO after distributed init.
     logger_utils.setup_logger()
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
@@ -373,6 +374,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         ),
         use_lora=False,
         disable_adapter_context=None,
+        num_gpus=tp_degree,
     )
 
     data_loader.reshuffle(epoch=0)

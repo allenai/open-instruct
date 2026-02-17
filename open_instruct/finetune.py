@@ -441,7 +441,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if accelerator.is_main_process:
         pprint([args, tc])
 
-    # Make one log on every process with the configuration for debugging.
+    # Reconfigure root logger: only rank 0 logs at INFO after distributed init.
     logger_utils.setup_logger()
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
