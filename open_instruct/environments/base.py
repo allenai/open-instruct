@@ -18,6 +18,25 @@ class StepResult:
     done: bool = False
     info: dict[str, Any] = field(default_factory=dict)
     tools: list[dict] | None = None
+    """Tool schemas (only returned from reset)."""
+
+
+@dataclass
+class EnvironmentState:
+    """Accumulated state from an environment rollout."""
+
+    rewards: list[float] = field(default_factory=list)
+    step_count: int = 0
+    done: bool = False
+    info: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def final_reward(self) -> float:
+        return self.rewards[-1] if self.rewards else 0.0
+
+    @property
+    def total_reward(self) -> float:
+        return sum(self.rewards)
 
 
 ENV_REGISTRY: dict[str, type["RLEnvironment"]] = {}
