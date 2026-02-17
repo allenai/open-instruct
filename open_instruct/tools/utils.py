@@ -17,6 +17,15 @@ logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
+class ToolCall:
+    """Parsed tool call from model output."""
+
+    id: str
+    name: str
+    args: dict[str, Any]
+
+
+@dataclass
 class ParsedToolConfig:
     """A parsed tool configuration combining name, call name, and config."""
 
