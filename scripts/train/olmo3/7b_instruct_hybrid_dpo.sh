@@ -65,7 +65,6 @@ do
             --use_flash_attn \
             --activation_memory_budget 0.5 \
             --chat_template_name olmo123 \
-            --with_tracking \
-            --profile_every_n_steps 2
+            --with_tracking
     done
 done

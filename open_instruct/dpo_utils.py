@@ -934,8 +934,6 @@ def concatenated_forward(
         for k, v in concatenated_batch.items()
         if k.startswith("concatenated_") and not k.endswith("labels")
     }
-    shapes = {k: tuple(v.shape) for k, v in inputs.items() if hasattr(v, "shape")}
-    logger.info("Model forward: %s", shapes)
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
         logits = outputs.logits.to(torch.float32)
