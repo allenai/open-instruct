@@ -3,9 +3,8 @@
 import asyncio
 
 from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, get_env_class
-from open_instruct.environments.base import RLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
-from open_instruct.tools.utils import Tool, ToolCall
+from open_instruct.tools.utils import ToolCall
 
 
 def run_async(coro):
@@ -46,22 +45,6 @@ class TestDataClasses:
         state = EnvironmentState()
         assert state.final_reward == 0.0
         assert state.total_reward == 0.0
-
-
-class TestInheritance:
-    """Test that RLEnvironment extends Tool."""
-
-    def test_rlenvironment_is_tool(self):
-        assert issubclass(RLEnvironment, Tool)
-
-    def test_counter_env_is_tool(self):
-        assert issubclass(CounterEnv, Tool)
-
-    def test_counter_env_is_rlenvironment(self):
-        assert issubclass(CounterEnv, RLEnvironment)
-
-    def test_guess_number_env_is_rlenvironment(self):
-        assert issubclass(GuessNumberEnv, RLEnvironment)
 
 
 class TestRegistry:
@@ -249,38 +232,3 @@ class TestGuessNumberEnv:
         run_async(_test())
 
 
-class TestSafeExecute:
-    """Test RLEnvironment.safe_execute() unified interface."""
-
-    def test_safe_execute_wraps_step(self):
-        async def _test():
-            env = CounterEnv(target=1)
-            await env.reset()
-            result = await env.safe_execute(_name_="increment")
-            assert result.called
-            assert result.error == ""
-            assert "Counter is now 1" in result.output
-
-        run_async(_test())
-
-    def test_safe_execute_returns_reward(self):
-        async def _test():
-            env = CounterEnv(target=1)
-            await env.reset()
-            await env.safe_execute(_name_="increment")
-            result = await env.safe_execute(_name_="submit")
-            assert result.reward == 1.0
-            assert result.done is True
-
-        run_async(_test())
-
-    def test_safe_execute_handles_errors(self):
-        async def _test():
-            env = CounterEnv(target=1)
-            # Don't call reset — step should fail or handle gracefully
-            # The CounterEnv doesn't actually raise, but safe_execute has error handling
-            await env.reset()
-            result = await env.safe_execute(_name_="increment")
-            assert result.called
-
-        run_async(_test())
