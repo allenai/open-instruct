@@ -64,25 +64,10 @@ class RLEnvironment(Tool):
     # Role for model output in conversation (used when no tool parser)
     response_role: str = "assistant"
 
-    async def _execute(self, **kwargs) -> ToolOutput:
-        """Not used by environments — they use step() via safe_execute()."""
-        raise NotImplementedError("RLEnvironment uses step() via safe_execute()")
+    async def _execute(self, _name_: str = "", _id_: str | None = None, **kwargs) -> ToolOutput:
+        """Delegates to step(), wrapping the result as ToolOutput.
 
-    @abstractmethod
-    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
-        """Initialize episode, return observation and tools."""
-        pass
-
-    @abstractmethod
-    async def step(self, tool_call: ToolCall) -> StepResult:
-        """Execute action, return observation, reward, done."""
-        pass
-
-    async def safe_execute(self, _name_: str = "", _id_: str | None = None, **kwargs) -> ToolOutput:
-        """Unified interface matching regular tools.
-
-        Wraps step() and returns a ToolOutput so that callers can use
-        the same dispatch path for both environments and regular tools.
+        This is called by the shared Tool.safe_execute() dispatch path.
         """
         start = time.perf_counter()
         tc = ToolCall(name=_name_, args=kwargs, id=_id_)
@@ -109,6 +94,16 @@ class RLEnvironment(Tool):
                 done=False,
                 info={},
             )
+
+    @abstractmethod
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
+        """Initialize episode, return observation and tools."""
+        pass
+
+    @abstractmethod
+    async def step(self, tool_call: ToolCall) -> StepResult:
+        """Execute action, return observation, reward, done."""
+        pass
 
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:

@@ -484,28 +484,30 @@ class Tool(ABC):
         return get_openai_tool_definitions(self)
 
     @abstractmethod
-    async def _execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Execute the tool. Must be implemented by subclasses."""
+    async def _execute(self, *args: Any, _name_: str = "", _id_: str | None = None, **kwargs: Any) -> ToolOutput:
+        """Execute the tool. Must be implemented by subclasses.
+
+        Args:
+            *args: Positional arguments (passed through from safe_execute).
+            _name_: Tool name from the model's tool call (used by environments to dispatch).
+            _id_: Tool call ID from the model's tool call.
+            **kwargs: Tool-specific arguments.
+        """
         raise NotImplementedError("_execute must be implemented by subclasses.")
 
-    async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
+    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str | None = None, **kwargs: Any) -> ToolOutput:
         """Coerce arguments and execute the tool.
 
-        This method coerces kwargs to match the tool's parameter schema types
-        before calling _execute(). Use this instead of _execute() when you want
-        automatic type coercion (e.g., when calling from Ray actors).
-
-        Reserved meta-kwargs (_name_, _id_) are stripped before coercion so that
-        callers can use a unified dispatch interface for both tools and environments.
+        This is the unified dispatch entry point for both tools and environments.
+        It coerces kwargs to match the tool's parameter schema types, then calls
+        _execute() with the coerced arguments plus _name_ and _id_.
         """
-        kwargs.pop("_name_", None)
-        kwargs.pop("_id_", None)
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)
         except (ValueError, TypeError) as e:
             return ToolOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
-        return await self._execute(*args, **coerced_kwargs)
+        return await self._execute(*args, _name_=_name_, _id_=_id_, **coerced_kwargs)
 
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Alias for safe_execute, useful for inference scripts."""
