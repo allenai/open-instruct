@@ -184,14 +184,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self._overflow = self._overflow[len(batch["index"]) :]
             yield batch
 
-        while self._overflow:
-            batch = to_device(self._collator(self._overflow), self._device)
-            assert len(batch["index"]) > 0, (
-                f"Collator consumed 0 examples from {len(self._overflow)} overflow examples"
-            )
-            self._overflow = self._overflow[len(batch["index"]) :]
-            yield batch
-
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
