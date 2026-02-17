@@ -1,14 +1,15 @@
 """Pool of Ray environment actors with acquire/release semantics."""
 
-import logging
 from queue import Queue
 from typing import Any
 
 import ray
 
+from open_instruct import logger_utils
+
 from .base import RLEnvironment, get_env_class
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 class EnvironmentPool:
