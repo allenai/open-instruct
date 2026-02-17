@@ -47,6 +47,8 @@ from torch import profiler as torch_profiler
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
+from transformers import initialization as transformers_init
+from transformers.models.olmo3_2_hybrid import modeling_olmo3_2_hybrid
 from transformers.utils.import_utils import is_flash_linear_attention_available
 
 from open_instruct import dpo_utils, logger_utils, model_utils, utils
@@ -291,6 +293,25 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
+
+    # Workaround: olmo3_2_hybrid's _init_weights accesses Embedding weights by
+    # padding_idx, which crashes under ZeRO-3 where weights are partitioned (size 0
+    # on non-owning ranks). Monkey-patch until fixed upstream:
+    # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
+    if config.model_type == "olmo3_2_hybrid":
+        _original_init_weights = modeling_olmo3_2_hybrid.Olmo3_2HybridPreTrainedModel._init_weights
+
+        def _init_weights_zero3_safe(self, module):
+            if (
+                isinstance(module, torch.nn.Embedding)
+                and module.padding_idx is not None
+                and module.padding_idx >= module.weight.shape[0]
+            ):
+                transformers_init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+                return
+            _original_init_weights(self, module)
+
+        modeling_olmo3_2_hybrid.Olmo3_2HybridPreTrainedModel._init_weights = _init_weights_zero3_safe
 
     def load_model():
         if args.model_name_or_path:
