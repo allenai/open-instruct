@@ -49,14 +49,14 @@ class TestCounterEnv:
 
     def test_full_episode(self):
         async def _test():
-            env = CounterEnv(target=7)
+            env = CounterEnv(target=3)
             result = await env.reset()
             assert isinstance(result, StepResult)
             assert result.tools is not None
             assert len(result.tools) == 3
 
-            await env.step(ToolCall(name="increment", args={"amount": 5}))
-            await env.step(ToolCall(name="increment", args={"amount": 2}))
+            for _ in range(3):
+                await env.step(ToolCall(name="increment", args={}))
 
             step = await env.step(ToolCall(name="submit", args={}))
             assert step.done
@@ -76,10 +76,10 @@ class TestCounterEnv:
 
     def test_decrement(self):
         async def _test():
-            env = CounterEnv(target=3)
+            env = CounterEnv(target=0)
             await env.reset()
-            await env.step(ToolCall(name="increment", args={"amount": 10}))
-            await env.step(ToolCall(name="decrement", args={"amount": 7}))
+            await env.step(ToolCall(name="increment", args={}))
+            await env.step(ToolCall(name="decrement", args={}))
             step = await env.step(ToolCall(name="submit", args={}))
             assert step.done
             assert step.reward == 1.0
@@ -112,13 +112,14 @@ class TestCounterEnv:
 
     def test_metrics(self):
         async def _test():
-            env = CounterEnv(target=10)
+            env = CounterEnv(target=2)
             await env.reset()
-            await env.step(ToolCall(name="increment", args={"amount": 10}))
+            await env.step(ToolCall(name="increment", args={}))
+            await env.step(ToolCall(name="increment", args={}))
             await env.step(ToolCall(name="submit", args={}))
             metrics = env.get_metrics()
-            assert metrics["step_count"] == 2.0
-            assert metrics["final_value"] == 10.0
+            assert metrics["step_count"] == 3.0
+            assert metrics["final_value"] == 2.0
             assert metrics["reached_target"] == 1.0
 
         run_async(_test())
