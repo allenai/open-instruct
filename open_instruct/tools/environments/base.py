@@ -60,9 +60,6 @@ class RLEnvironment(Tool):
     Environments use reset()/step() instead of _execute().
     """
 
-    # Role for model output in conversation (used when no tool parser)
-    response_role: str = "assistant"
-
     async def _execute(self, _name_: str = "", _id_: str | None = None, **kwargs) -> ToolOutput:
         """Delegates to step(), wrapping the result as ToolOutput.
 
