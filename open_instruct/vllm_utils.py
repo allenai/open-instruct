@@ -63,7 +63,7 @@ from open_instruct.data_types import GenerationResult, PromptRequest, RequestInf
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
-from open_instruct.tools.utils import ToolOutput
+from open_instruct.tools.utils import ExecutableOutput
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -951,14 +951,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 continue
 
             try:
-                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
+                tool_result: ExecutableOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
                     **tool_call.args
                 )
             except TypeError as e:
                 # This can happen if the model generated a tool call with missing/wrong arguments
                 error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
                 logger.warning(error_msg)
-                tool_result = ToolOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
+                tool_result = ExecutableOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
 
             timeout = timeout or tool_result.timeout
             tool_error += tool_result.error or ""

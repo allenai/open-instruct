@@ -100,7 +100,7 @@ class ToolsConfig:
 
 
 @dataclass
-class ToolOutput:
+class ExecutableOutput:
     output: str
     called: bool
     error: str
@@ -118,7 +118,7 @@ def truncate(text: str, max_length: int = 500) -> str:
     return text[:max_length] + f"... [{len(text) - max_length} more chars]"
 
 
-def log_tool_call(tool_name: str, input_text: str, output: ToolOutput) -> None:
+def log_tool_call(tool_name: str, input_text: str, output: ExecutableOutput) -> None:
     """Log a tool call at DEBUG level with truncated input/output."""
     logger.debug(
         f"Tool '{tool_name}' called:\n"
@@ -420,10 +420,6 @@ class Executable(ABC):
         """Called once at start of training for resource initialization."""
         return
 
-    async def close(self) -> None:
-        """Cleanup resources for a single episode."""
-        return
-
     async def shutdown(self) -> None:
         """Called once at end of training for resource cleanup."""
         return
@@ -438,15 +434,15 @@ class Executable(ABC):
         return []
 
     @abstractmethod
-    async def _execute(self, **kwargs: Any) -> ToolOutput:
+    async def _execute(self, **kwargs: Any) -> ExecutableOutput:
         """Execute. Must be implemented by subclasses."""
         raise NotImplementedError("_execute must be implemented by subclasses.")
 
-    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ToolOutput:
+    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ExecutableOutput:
         """Dispatch entry point. Calls _execute with the provided arguments."""
         return await self._execute(*args, _name_=_name_, _id_=_id_, **kwargs)
 
-    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+    async def __call__(self, *args: Any, **kwargs: Any) -> ExecutableOutput:
         """Alias for safe_execute, useful for inference scripts."""
         return await self.safe_execute(*args, **kwargs)
 
@@ -485,13 +481,13 @@ class Tool(Executable):
         """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
 
-    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ToolOutput:
+    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ExecutableOutput:
         """Coerce arguments to match parameter schema, then call _execute."""
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)
         except (ValueError, TypeError) as e:
-            return ToolOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
+            return ExecutableOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
         return await self._execute(*args, _name_=_name_, _id_=_id_, **coerced_kwargs)
 
 

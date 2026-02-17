@@ -5,7 +5,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from open_instruct.tools.utils import Executable, ToolCall, ToolOutput
+from open_instruct.tools.utils import Executable, ToolCall, ExecutableOutput
 
 
 @dataclass
@@ -43,13 +43,13 @@ class RLEnvironment(Executable):
     Subclass this to implement your own environment, defining reset/state/step.
     """
 
-    async def _execute(self, _name_: str = "", _id_: str = "", **kwargs) -> ToolOutput:
-        """Delegates to step(), wrapping the result as ToolOutput."""
+    async def _execute(self, _name_: str = "", _id_: str = "", **kwargs) -> ExecutableOutput:
+        """Delegates to step(), wrapping the result as ExecutableOutput."""
         start = time.perf_counter()
         tc = ToolCall(name=_name_, args=kwargs, id=_id_)
         try:
             result = await self.step(tc)
-            return ToolOutput(
+            return ExecutableOutput(
                 output=result.observation or "",
                 called=True,
                 error="",
@@ -60,7 +60,7 @@ class RLEnvironment(Executable):
                 info=result.info,
             )
         except Exception as e:
-            return ToolOutput(
+            return ExecutableOutput(
                 output=f"Error: {e}",
                 called=True,
                 error=str(e),
