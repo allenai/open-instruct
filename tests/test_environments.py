@@ -2,8 +2,8 @@
 
 import asyncio
 
-from open_instruct.environments import ENV_REGISTRY, get_env_class
-from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
+from open_instruct.tools.environments import ENV_REGISTRY, get_env_class
+from open_instruct.tools.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.tools.utils import ToolCall
 
 
@@ -26,7 +26,7 @@ class TestRegistry:
         assert cls == CounterEnv
 
     def test_get_env_class_by_import(self):
-        cls = get_env_class(env_class="open_instruct.environments.examples.CounterEnv")
+        cls = get_env_class(env_class="open_instruct.tools.environments.examples.CounterEnv")
         assert cls == CounterEnv
 
     def test_get_env_class_unknown_name(self):
