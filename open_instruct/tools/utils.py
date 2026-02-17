@@ -425,6 +425,15 @@ class Tool(ABC):
     observation_role: str = "tool"
     """Role for observations/feedback in conversation."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        params = cls.__dict__.get("parameters")
+        if isinstance(params, dict):
+            try:
+                json.loads(json.dumps(params))
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Invalid parameters on {cls.__name__}: {e}") from e
+
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
         return
