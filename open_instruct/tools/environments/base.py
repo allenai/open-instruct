@@ -60,8 +60,7 @@ class RLEnvironment(Tool):
     """
 
     async def _execute(self, _name_: str = "", _id_: str | None = None, **kwargs) -> ToolOutput:
-        """Delegates to step(), wrapping the result as ToolOutput.
-        """
+        """Delegates to step(), wrapping the result as ToolOutput."""
         start = time.perf_counter()
         tc = ToolCall(name=_name_, args=kwargs, id=_id_)
         try:

@@ -58,8 +58,7 @@ class CounterEnv(RLEnvironment):
             self._target = int(task_id)
 
         result = StepResult(
-            observation=f"Counter is at {self._current}. Reach {self._target} to win.",
-            info={"target": self._target},
+            observation=f"Counter is at {self._current}. Reach {self._target} to win.", info={"target": self._target}
         )
         return result, self._tool_definitions
 
@@ -198,8 +197,5 @@ class GuessNumberEnv(RLEnvironment):
 
     def state(self) -> EnvironmentState:
         return EnvironmentState(
-            episode_id=self._task_id,
-            step_count=self._guesses,
-            done=self._done,
-            info={"secret": self._secret},
+            episode_id=self._task_id, step_count=self._guesses, done=self._done, info={"secret": self._secret}
         )
