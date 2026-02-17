@@ -90,8 +90,8 @@ class TestCounterEnv:
             env = CounterEnv()
             await env.reset()
             step = await env.step(ToolCall(name="fly", args={}))
-            assert step.done
-            assert step.reward == -0.5
+            assert not step.done
+            assert step.reward == 0.0
 
         run_async(_test())
 
@@ -197,8 +197,8 @@ class TestGuessNumberEnv:
             env = GuessNumberEnv()
             await env.reset(task_id="5")
             result = await env.step(ToolCall(name="jump", args={}))
-            assert result.done
-            assert result.reward == -0.1
+            assert not result.done
+            assert result.reward == 0.0
 
         run_async(_test())
 
