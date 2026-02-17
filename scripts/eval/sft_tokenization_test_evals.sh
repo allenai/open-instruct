@@ -22,9 +22,9 @@ BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 
 MODELS=(
     # "TEST_HYBRIC_SFT_LARGER_LR1e-4"
-    "TEST_HYBRIC_SFT_LARGER_LR5e-5"
-    "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
-    "TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42"
+    # "TEST_HYBRIC_SFT_LARGER_LR5e-5"
+    # "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
+    # "TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42"
     # "TEST_HYBRIC_SFT_LARGER_LR1e-5"
     # "HYBRID_SFT_YARN_LR5e-5"
     # "HYBRID_SFT_YARN_LR2.5e-5"
@@ -32,12 +32,25 @@ MODELS=(
     # "ABLATE_HYBRID_THINK_SFT_0210_5e-5"
     # "HYBRID_INSTRUCT_SFT_8e-5"
     # "HYBRID_INSTRUCT_SFT_5e-5"
+
+    # --- 0217 instruct SFT models (step3256) ---
+    # "HYBRID_INSTRUCT_SFT_0217_8e-5"
+    "HYBRID_INSTRUCT_SFT_0217_5e-5"
+    # "HYBRID_INSTRUCT_SFT_0217_2.5e-5"
+    # "HYBRID_INSTRUCT_SFT_0217_1e-4"
+    # "HYBRID_INSTRUCT_SFT_0217_6e-5"
+    # "HYBRID_INSTRUCT_SFT_0217_3e-5"
+    # "HYBRID_INSTRUCT_SFT_0217_1.5e-5"
 )
 
 for MODEL in "${MODELS[@]}"; do
     # THINK MODELS
-    GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
-    MODEL_NAME="0216-extra-${MODEL}"
+    # GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
+    # MODEL_NAME="0216-extra-2-${MODEL}"
+
+    # Final Instruct SFT models
+    GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
+    MODEL_NAME="0217-instruct-${MODEL}"
 
     # Think models -- yarn
     # GCS_PATH="${BASE_PATH}/${MODEL}/step43110-hf"
@@ -67,7 +80,7 @@ for MODEL in "${MODELS[@]}"; do
         --preemptible \
         --use_hf_tokenizer_template \
         --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
-        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,ifeval::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite" \
+        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek" \
         --run_oe_eval_experiments \
         --evaluate_on_weka \
         --run_id placeholder \
@@ -75,28 +88,55 @@ for MODEL in "${MODELS[@]}"; do
         --process_output r1_style \
         --skip_oi_evals
 
-        #  --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek" \
+        #  
         # --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,ifeval::hamish_zs_reasoning_deepseek" \
 
     # Batch 2: gpu_multiplier 2
-    # uv run scripts/submit_eval_jobs.py \
-    #     --model_name "${MODEL_NAME}" \
-    #     --location "${GCS_PATH}" \
-    #     --cluster ai2/jupiter ai2/ceres \
-    #     --is_tuned \
-    #     --workspace ai2/olmo-instruct \
-    #     --priority urgent \
-    #     --gpu_multiplier 2 \
-    #     --preemptible \
-    #     --use_hf_tokenizer_template \
-    #     --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
-    #     --oe_eval_tasks "bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek" \
-    #     --run_oe_eval_experiments \
-    #     --evaluate_on_weka \
-    #     --run_id placeholder \
-    #     --oe_eval_max_length 32768 \
-    #     --process_output r1_style \
-    #     --skip_oi_evals
+    uv run scripts/submit_eval_jobs.py \
+        --model_name "${MODEL_NAME}" \
+        --location "${GCS_PATH}" \
+        --cluster ai2/jupiter ai2/ceres \
+        --is_tuned \
+        --workspace ai2/olmo-instruct \
+        --priority urgent \
+        --gpu_multiplier 2 \
+        --preemptible \
+        --use_hf_tokenizer_template \
+        --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
+        --oe_eval_tasks "bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek" \
+        --run_oe_eval_experiments \
+        --evaluate_on_weka \
+        --run_id placeholder \
+        --oe_eval_max_length 32768 \
+        --process_output r1_style \
+        --skip_oi_evals
+
+    # ---- BEGIN: Repeated evals for variance estimation (GPQA, LiveCodeBench, IFEval) ----
+    # Run these 3 evals 2 more times with different names to measure variance.
+    # Comment out this entire block to disable repeated runs.
+    for REPEAT in 1 2; do
+        REPEAT_MODEL_NAME="${MODEL_NAME}_repeat_${REPEAT}"
+        echo "  -> Repeat ${REPEAT}: ${REPEAT_MODEL_NAME}"
+
+        uv run scripts/submit_eval_jobs.py \
+            --model_name "${REPEAT_MODEL_NAME}" \
+            --location "${GCS_PATH}" \
+            --cluster ai2/jupiter ai2/ceres \
+            --is_tuned \
+            --workspace ai2/olmo-instruct \
+            --priority urgent \
+            --preemptible \
+            --use_hf_tokenizer_template \
+            --beaker_image yanhongl/oe_eval_olmo3_devel_v6 \
+            --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,ifeval::hamish_zs_reasoning_deepseek" \
+            --run_oe_eval_experiments \
+            --evaluate_on_weka \
+            --run_id placeholder \
+            --oe_eval_max_length 32768 \
+            --process_output r1_style \
+            --skip_oi_evals
+    done
+    # ---- END: Repeated evals for variance estimation ----
 
     echo "Completed evals for: ${MODEL}"
     echo ""
