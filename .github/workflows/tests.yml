@@ -112,7 +112,31 @@ jobs:
           cache-to: type=inline
 
       - name: Upload image to Beaker and run tests
+        id: run_tests
         if: env.RUN_GPU_TESTS == 'true'
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: ./scripts/test/run_gpu_tests_on_beaker.sh "${{ github.sha }}"
+
+      - name: Update PR body with GPU test results
+        if: env.RUN_GPU_TESTS == 'true' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXP_ID="${{ steps.run_tests.outputs.exp_id }}"
+          EXP_URL="${{ steps.run_tests.outputs.exp_url }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          CURRENT_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body')
+
+          if echo "$CURRENT_BODY" | grep -qE 'GPU_TESTS='; then
+            echo "GPU_TESTS already present in PR body, skipping update"
+            exit 0
+          fi
+
+          NEW_BODY=$(printf '%s\n\nGPU_TESTS=[%s](%s)' "$CURRENT_BODY" "$EXP_ID" "$EXP_URL")
+
+          gh api -X PATCH "/repos/${{ github.repository }}/pulls/${PR_NUMBER}" \
+            -f body="$NEW_BODY"
+
+          echo "Updated PR body with GPU_TESTS=[$EXP_ID]($EXP_URL)"
