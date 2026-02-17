@@ -1,18 +1,22 @@
 """Pool of Ray environment actors with acquire/release semantics."""
 
 import asyncio
-import logging
 from typing import Any
 
 import ray
 
+from open_instruct.logger_utils import setup_logger
+
 from .base import RLEnvironment, get_env_class
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class EnvironmentPool:
-    """Pool of RLEnvironment Ray actors for concurrent rollouts."""
+    """
+    Pool of RLEnvironment Ray actors for concurrent rollouts.
+    Used to manage environment startup/shutdown/acquisition.
+    """
 
     def __init__(self, pool_size: int, env_name: str | None = None, env_class: str | None = None, **env_kwargs: Any):
         self.pool_size = pool_size
