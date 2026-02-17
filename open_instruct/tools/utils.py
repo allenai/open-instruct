@@ -436,7 +436,7 @@ class Tool(Executable):
             coerced_kwargs = coerce_args(properties, kwargs)
         except (ValueError, TypeError) as e:
             return ExecutableOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
-        return await self._execute(*args, _name_=_name_, _id_=_id_, **coerced_kwargs)
+        return await self._execute(*args, **coerced_kwargs)
 
 
 @dataclass

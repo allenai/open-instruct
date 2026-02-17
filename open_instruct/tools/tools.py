@@ -54,7 +54,7 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def _execute(self, code: str, **_kwargs) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, code: str) -> ExecutableOutput:  # type: ignore[override]
         """Execute Python code via the API."""
         if not code or not code.strip():
             result = ExecutableOutput(
@@ -128,7 +128,7 @@ class JinaBrowseTool(Tool):
         if not self.api_key:
             raise ValueError("Missing JINA_API_KEY environment variable.")
 
-    async def _execute(self, url: str, **_kwargs) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, url: str) -> ExecutableOutput:  # type: ignore[override]
         """Fetch webpage content via Jina Reader API."""
         if not url or not url.strip():
             result = ExecutableOutput(
@@ -176,9 +176,7 @@ class JinaBrowseTool(Tool):
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
         output = error if error else content
-        result = ExecutableOutput(
-            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
-        )
+        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         log_tool_call(self.call_name, url, result)
         return result
 
@@ -216,7 +214,7 @@ class S2SearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing S2_API_KEY environment variable.")
 
-    async def _execute(self, query: str, **_kwargs) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, query: str) -> ExecutableOutput:  # type: ignore[override]
         """Search Semantic Scholar for documents matching the query."""
         if not query or not query.strip():
             result = ExecutableOutput(
@@ -252,9 +250,7 @@ class S2SearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n".join(snippets).strip() if snippets else error
 
-        result = ExecutableOutput(
-            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
-        )
+        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         log_tool_call(self.call_name, query, result)
         return result
 
@@ -293,7 +289,7 @@ class SerperSearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing SERPER_API_KEY environment variable.")
 
-    async def _execute(self, query: str, **_kwargs) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, query: str) -> ExecutableOutput:  # type: ignore[override]
         """Search Google via Serper for documents matching the query."""
         if not query or not query.strip():
             result = ExecutableOutput(
@@ -344,9 +340,7 @@ class SerperSearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n\n".join(snippets).strip() if snippets else error
 
-        result = ExecutableOutput(
-            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
-        )
+        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         log_tool_call(self.call_name, query, result)
         return result
 
@@ -447,7 +441,7 @@ class Crawl4AIBrowseTool(Tool):
         with open(blocklist_path, encoding="utf-8") as f:
             self.blocklist = [line.strip() for line in f if line.strip()]
 
-    async def _execute(self, url: str, **_kwargs) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, url: str) -> ExecutableOutput:  # type: ignore[override]
         """Fetch webpage content via Crawl4AI Docker API."""
         if not url or not url.strip():
             result = ExecutableOutput(
@@ -498,9 +492,7 @@ class Crawl4AIBrowseTool(Tool):
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
         output = error if error else content
-        result = ExecutableOutput(
-            output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
-        )
+        result = ExecutableOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         log_tool_call(self.call_name, url, result)
         return result
 
@@ -565,7 +557,7 @@ class DrAgentMCPTool(Tool):
     def get_stop_strings(self) -> list[str]:
         return self.stop_strings
 
-    async def _execute(self, text: str, **_kwargs) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, text: str) -> ExecutableOutput:  # type: ignore[override]
         if not text or not text.strip():
             return ExecutableOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
 
