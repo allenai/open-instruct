@@ -17,16 +17,24 @@ class CounterEnv(RLEnvironment):
             "type": "function",
             "function": {
                 "name": "increment",
-                "description": "Increment the counter by 1",
-                "parameters": {"type": "object", "properties": {}, "required": []},
+                "description": "Increment the counter by a given amount",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"amount": {"type": "integer", "description": "Amount to increment by"}},
+                    "required": ["amount"],
+                },
             },
         },
         {
             "type": "function",
             "function": {
                 "name": "decrement",
-                "description": "Decrement the counter by 1",
-                "parameters": {"type": "object", "properties": {}, "required": []},
+                "description": "Decrement the counter by a given amount",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"amount": {"type": "integer", "description": "Amount to decrement by"}},
+                    "required": ["amount"],
+                },
             },
         },
         {
@@ -66,13 +74,25 @@ class CounterEnv(RLEnvironment):
         self._step_count += 1
 
         if tool_call.name == "increment":
-            self._current += 1
-            obs = f"Counter is now {self._current}."
+            amount = tool_call.args.get("amount", 1)
+            if not isinstance(amount, int):
+                try:
+                    amount = int(amount)
+                except (ValueError, TypeError):
+                    amount = 1
+            self._current += amount
+            obs = f"Counter incremented by {amount}, now at {self._current}."
             reward = -0.1
             done = False
         elif tool_call.name == "decrement":
-            self._current -= 1
-            obs = f"Counter is now {self._current}."
+            amount = tool_call.args.get("amount", 1)
+            if not isinstance(amount, int):
+                try:
+                    amount = int(amount)
+                except (ValueError, TypeError):
+                    amount = 1
+            self._current -= amount
+            obs = f"Counter decremented by {amount}, now at {self._current}."
             reward = -0.1
             done = False
         elif tool_call.name == "submit":
