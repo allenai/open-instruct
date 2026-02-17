@@ -75,8 +75,10 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import initialization as transformers_init
 from transformers.integrations import HfDeepSpeedConfig
+from transformers.models.olmo3_2_hybrid import modeling_olmo3_2_hybrid
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -246,6 +248,26 @@ class PolicyTrainerRayProcess(RayProcess):
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
+        # Workaround: olmo3_2_hybrid's _init_weights accesses Embedding weights by
+        # padding_idx, which crashes under ZeRO-3 where weights are partitioned (size 0
+        # on non-owning ranks). Monkey-patch until fixed upstream:
+        # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
+        _model_config = AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
+        if _model_config.model_type == "olmo3_2_hybrid":
+            _original_init_weights = modeling_olmo3_2_hybrid.Olmo3_2HybridPreTrainedModel._init_weights
+
+            def _init_weights_zero3_safe(self, module):
+                if (
+                    isinstance(module, torch.nn.Embedding)
+                    and module.padding_idx is not None
+                    and module.padding_idx >= module.weight.shape[0]
+                ):
+                    transformers_init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+                    return
+                _original_init_weights(self, module)
+
+            modeling_olmo3_2_hybrid.Olmo3_2HybridPreTrainedModel._init_weights = _init_weights_zero3_safe
+
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,

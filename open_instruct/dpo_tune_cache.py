@@ -837,4 +837,9 @@ def print_gpu_stats(init_gpu_memory: int | None):
 if __name__ == "__main__":
     parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
-    main(args, tc)
+    try:
+        main(args, tc)
+    except Exception as e:
+        if args.send_slack_alerts:
+            utils.send_slack_message(f"<!here> A DPO job has died. Error message: {e}.")
+        raise

@@ -98,3 +98,4 @@ uv run python mason.py \
         --advantage_normalization_type centered \
         --no_resampling_pass_rate 0.875 \
         --save_traces \
+        --send_slack_alerts \

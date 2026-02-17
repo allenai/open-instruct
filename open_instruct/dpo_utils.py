@@ -96,6 +96,8 @@ class TrackingConfig:
     """A unique name of this run"""
     seed: int = 42
     """Random seed for initialization and dataset shuffling."""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
 
 
 @dataclass
