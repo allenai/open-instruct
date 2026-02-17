@@ -11,10 +11,7 @@ import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.executable import Executable, ExecutableOutput, ToolCall
-
-# Re-export for backward compatibility
-__all__ = ["Executable", "ExecutableOutput", "ToolCall"]
+from open_instruct.executable import Executable, ExecutableOutput, ToolCall  # noqa: F401
 
 logger = logger_utils.setup_logger(__name__)
 
