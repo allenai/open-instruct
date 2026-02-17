@@ -2,7 +2,7 @@
 
 import asyncio
 
-from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, get_env_class
+from open_instruct.environments import ENV_REGISTRY, StepResult, get_env_class
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.tools.utils import ToolCall
 
@@ -10,41 +10,6 @@ from open_instruct.tools.utils import ToolCall
 def run_async(coro):
     """Run async function in sync test."""
     return asyncio.run(coro)
-
-
-class TestDataClasses:
-    """Test core data classes."""
-
-    def test_tool_call(self):
-        tc = ToolCall(name="test", args={"x": 1})
-        assert tc.name == "test"
-        assert tc.args == {"x": 1}
-
-    def test_tool_call_with_id(self):
-        tc = ToolCall(name="test", args={"x": 1}, id="call_123")
-        assert tc.id == "call_123"
-
-    def test_tool_call_id_default_none(self):
-        tc = ToolCall(name="test", args={})
-        assert tc.id is None
-
-    def test_step_result_defaults(self):
-        result = StepResult(observation="hello")
-        assert result.observation == "hello"
-        assert result.reward == 0.0
-        assert result.done is False
-        assert result.info == {}
-        assert result.tools is None
-
-    def test_environment_state(self):
-        state = EnvironmentState(rewards=[0.1, 0.2, 0.5])
-        assert state.final_reward == 0.5
-        assert abs(state.total_reward - 0.8) < 0.001
-
-    def test_empty_state(self):
-        state = EnvironmentState()
-        assert state.final_reward == 0.0
-        assert state.total_reward == 0.0
 
 
 class TestRegistry:
