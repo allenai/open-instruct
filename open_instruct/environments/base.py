@@ -11,20 +11,19 @@ from open_instruct.tools.utils import Tool, ToolCall, ToolOutput
 
 @dataclass
 class StepResult:
-    """Result from environment reset or step."""
+    """Result from an environment step."""
 
     observation: str
     reward: float = 0.0
     done: bool = False
     info: dict[str, Any] = field(default_factory=dict)
-    tools: list[dict] | None = None
-    """Tool schemas (only returned from reset)."""
 
 
 @dataclass
 class EnvironmentState:
     """Accumulated state from an environment rollout."""
 
+    episode_id: str | None = None
     rewards: list[float] = field(default_factory=list)
     step_count: int = 0
     done: bool = False
@@ -96,14 +95,18 @@ class RLEnvironment(Tool):
             )
 
     @abstractmethod
-    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
-        """Initialize episode, return observation and tools."""
+    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+        """Initialize episode. Returns (initial observation, tool definitions)."""
         pass
 
     @abstractmethod
     async def step(self, tool_call: ToolCall) -> StepResult:
         """Execute action, return observation, reward, done."""
         pass
+
+    def state(self) -> EnvironmentState:
+        """Return current episode state. Subclasses override to populate."""
+        return EnvironmentState()
 
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:

@@ -2,7 +2,7 @@
 
 import asyncio
 
-from open_instruct.environments import ENV_REGISTRY, StepResult, get_env_class
+from open_instruct.environments import ENV_REGISTRY, get_env_class
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.tools.utils import ToolCall
 
@@ -50,10 +50,9 @@ class TestCounterEnv:
     def test_full_episode(self):
         async def _test():
             env = CounterEnv(target=3)
-            result = await env.reset()
-            assert isinstance(result, StepResult)
-            assert result.tools is not None
-            assert len(result.tools) == 3
+            result, tools = await env.reset()
+            assert result.observation
+            assert len(tools) == 3
 
             for _ in range(3):
                 await env.step(ToolCall(name="increment", args={}))
@@ -99,7 +98,7 @@ class TestCounterEnv:
     def test_task_id_sets_target(self):
         async def _test():
             env = CounterEnv()
-            result = await env.reset(task_id="7")
+            result, _ = await env.reset(task_id="7")
             assert "7" in result.observation
 
         run_async(_test())
@@ -109,6 +108,16 @@ class TestCounterEnv:
         assert len(tools) == 3
         names = {t["function"]["name"] for t in tools}
         assert names == {"increment", "decrement", "submit"}
+
+    def test_reset_returns_tool_definitions(self):
+        async def _test():
+            env = CounterEnv()
+            _, tools = await env.reset()
+            assert len(tools) == 3
+            names = {t["function"]["name"] for t in tools}
+            assert names == {"increment", "decrement", "submit"}
+
+        run_async(_test())
 
     def test_metrics(self):
         async def _test():
@@ -121,6 +130,20 @@ class TestCounterEnv:
             assert metrics["step_count"] == 3.0
             assert metrics["final_value"] == 2.0
             assert metrics["reached_target"] == 1.0
+
+        run_async(_test())
+
+    def test_state(self):
+        async def _test():
+            env = CounterEnv()
+            await env.reset(task_id="5")
+            await env.step(ToolCall(name="increment", args={}))
+            await env.step(ToolCall(name="increment", args={}))
+            s = env.state()
+            assert s.episode_id == "5"
+            assert s.step_count == 2
+            assert s.info["current"] == 2
+            assert s.info["target"] == 5
 
         run_async(_test())
 
@@ -162,7 +185,6 @@ class TestGuessNumberEnv:
         async def _test():
             env = GuessNumberEnv(min_val=1, max_val=100)
             await env.reset(task_id="50")
-            # Close guess should get higher reward than distant guess
             close_result = await env.step(ToolCall(name="guess", args={"number": 49}))
             await env.reset(task_id="50")
             far_result = await env.step(ToolCall(name="guess", args={"number": 1}))
@@ -185,6 +207,15 @@ class TestGuessNumberEnv:
         assert len(tools) == 1
         assert tools[0]["function"]["name"] == "guess"
 
+    def test_reset_returns_tool_definitions(self):
+        async def _test():
+            env = GuessNumberEnv()
+            _, tools = await env.reset()
+            assert len(tools) == 1
+            assert tools[0]["function"]["name"] == "guess"
+
+        run_async(_test())
+
     def test_metrics(self):
         async def _test():
             env = GuessNumberEnv()
@@ -196,4 +227,13 @@ class TestGuessNumberEnv:
 
         run_async(_test())
 
+    def test_state(self):
+        async def _test():
+            env = GuessNumberEnv()
+            await env.reset(task_id="50")
+            await env.step(ToolCall(name="guess", args={"number": 30}))
+            s = env.state()
+            assert s.episode_id == "50"
+            assert s.step_count == 1
 
+        run_async(_test())

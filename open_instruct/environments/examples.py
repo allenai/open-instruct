@@ -2,7 +2,7 @@
 
 import random
 
-from .base import RLEnvironment, StepResult, ToolCall, register_env
+from .base import EnvironmentState, RLEnvironment, StepResult, ToolCall, register_env
 
 
 @register_env("counter")
@@ -49,18 +49,19 @@ class CounterEnv(RLEnvironment):
         """Return tool definitions for prompt injection."""
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
         self._current = 0
         self._step_count = 0
+        self._task_id = task_id
 
         if task_id and task_id.isdigit():
             self._target = int(task_id)
 
-        return StepResult(
+        result = StepResult(
             observation=f"Counter is at {self._current}. Reach {self._target} to win.",
-            tools=self._tool_definitions,
             info={"target": self._target},
         )
+        return result, self._tool_definitions
 
     async def step(self, tool_call: ToolCall) -> StepResult:
         self._step_count += 1
@@ -99,6 +100,14 @@ class CounterEnv(RLEnvironment):
             "reached_target": 1.0 if self._current == self._target else 0.0,
         }
 
+    def state(self) -> EnvironmentState:
+        return EnvironmentState(
+            episode_id=self._task_id,
+            step_count=self._step_count,
+            done=self._current == self._target,
+            info={"current": self._current, "target": self._target},
+        )
+
 
 @register_env("guess_number")
 class GuessNumberEnv(RLEnvironment):
@@ -133,18 +142,19 @@ class GuessNumberEnv(RLEnvironment):
         """Return tool definitions for prompt injection."""
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+        self._task_id = task_id
         if task_id and task_id.isdigit():
             self._secret = int(task_id)
         else:
             self._secret = random.randint(self._min_val, self._max_val)
         self._guesses = 0
 
-        return StepResult(
+        result = StepResult(
             observation=f"Guess a number between {self._min_val} and {self._max_val}.",
-            tools=self._tool_definitions,
             info={"min": self._min_val, "max": self._max_val},
         )
+        return result, self._tool_definitions
 
     async def step(self, tool_call: ToolCall) -> StepResult:
         self._guesses += 1
@@ -183,3 +193,11 @@ class GuessNumberEnv(RLEnvironment):
 
     def get_metrics(self) -> dict[str, float]:
         return {"guesses": float(self._guesses)}
+
+    def state(self) -> EnvironmentState:
+        return EnvironmentState(
+            episode_id=self._task_id,
+            step_count=self._guesses,
+            done=False,
+            info={"secret": self._secret},
+        )
