@@ -184,8 +184,9 @@ class PerfCallback(Callback):
         tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
-        num_sequences = self._interval_num_sequences
-        avg_sequence_length = total_tokens_step / num_sequences if num_sequences > 0 else 0
+        avg_sequence_length = (
+            total_tokens_step / self._interval_num_sequences if self._interval_num_sequences > 0 else 0
+        )
 
         mfu_result = self.model_dims.approximate_learner_utilization(
             total_tokens=total_tokens_step,
