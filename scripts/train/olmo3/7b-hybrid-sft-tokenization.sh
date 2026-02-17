@@ -25,7 +25,7 @@ uv run python mason.py \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
   --no-host-networking \
-  --gpus 8 \
+  --gpus 0 \
   --priority urgent \
   --description "7B hybrid SFT tokenization" \
   --no_auto_dataset_cache \
