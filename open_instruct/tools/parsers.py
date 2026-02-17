@@ -171,7 +171,9 @@ class VllmToolParser(ToolParser):
         tool_calls = []
         for call in result.tool_calls:
             try:
-                tool_calls.append(ToolCall(id=call.id or "", name=call.function.name, args=json.loads(call.function.arguments)))
+                tool_calls.append(
+                    ToolCall(id=call.id or "", name=call.function.name, args=json.loads(call.function.arguments))
+                )
             except json.JSONDecodeError as e:
                 # the model may have mungled the tool call somehow, catch the error here.
                 logger.warning(
