@@ -30,9 +30,9 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
-    --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
-    --num_mini_batches 1 \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 512 \
+    --num_mini_batches 16 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --kl_estimator 2 \
