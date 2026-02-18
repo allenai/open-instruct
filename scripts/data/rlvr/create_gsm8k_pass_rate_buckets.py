@@ -11,6 +11,7 @@ HF_TOKEN=... uv run python scripts/data/rlvr/create_gsm8k_pass_rate_buckets.py \
 """
 
 import argparse
+import math
 
 import numpy as np
 from datasets import Dataset, load_dataset
@@ -22,7 +23,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create 25%/75% pass-rate bucket datasets.")
+    parser = argparse.ArgumentParser(description="Create two pass-rate bucket datasets.")
     parser.add_argument(
         "--input-dataset",
         default="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct",
@@ -35,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-prefix",
         default="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct",
-        help="Outputs are <prefix>-25 and <prefix>-75",
+        help="Outputs are <prefix>-<low_bucket_pct> and <prefix>-<high_bucket_pct> (e.g., -0 and -50).",
     )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--private", action="store_true")
@@ -78,6 +79,14 @@ def with_dataset_name(ds: Dataset, dataset_name: str) -> Dataset:
     return ds.add_column("dataset", [dataset_name] * len(ds))
 
 
+def bucket_suffix(bucket: float) -> str:
+    pct = bucket * 100.0
+    rounded = round(pct)
+    if math.isclose(pct, rounded, rel_tol=0.0, abs_tol=1e-9):
+        return str(int(rounded))
+    return f"{pct:g}".replace(".", "p")
+
+
 def main() -> None:
     args = parse_args()
     logger.info("Loading %s[%s]", args.input_dataset, args.split)
@@ -94,11 +103,13 @@ def main() -> None:
     ds_low = ds.select(low_indices)
     ds_high = ds.select(high_indices)
 
-    low_name = f"{args.output_prefix}-25"
-    high_name = f"{args.output_prefix}-75"
+    low_suffix = bucket_suffix(args.bucket_low)
+    high_suffix = bucket_suffix(args.bucket_high)
+    low_name = f"{args.output_prefix}-{low_suffix}"
+    high_name = f"{args.output_prefix}-{high_suffix}"
 
-    ds_low = with_dataset_name(ds_low, "gsm8k_pass25")
-    ds_high = with_dataset_name(ds_high, "gsm8k_pass75")
+    ds_low = with_dataset_name(ds_low, f"gsm8k_pass{low_suffix}")
+    ds_high = with_dataset_name(ds_high, f"gsm8k_pass{high_suffix}")
 
     logger.info(
         "Selected low bucket: %d samples, avg pass_rate=%.4f (target %.2f)",

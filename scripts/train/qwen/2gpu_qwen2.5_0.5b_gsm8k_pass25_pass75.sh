@@ -2,7 +2,8 @@
 
 EXP_NAME="qwen25_05b_it_gsm8k_pass25_pass75"
 MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
-DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 1.0 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 1.0"
+
+LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
 
 # LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
 # LOCAL_EVAL_SPLITS="test"
@@ -30,7 +31,6 @@ BEAKER_IMAGE="michaeln/open_instruct"
 #     --budget ai2/oe-adapt \
 #     -- source configs/beaker_configs/ray_node_setup.sh \
     # --active_sampling \
-    # --filter_zero_std_samples True \
 # \&\&
 # export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
@@ -43,10 +43,11 @@ uv run --active open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
+    --filter_zero_std_samples False \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -72,7 +73,7 @@ uv run --active open_instruct/grpo_fast.py \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
-    --load_ref_policy False \
+    --load_ref_policy True \
     --eval_pass_at_k 32 \
     --with_tracking \
     --push_to_hub False $@

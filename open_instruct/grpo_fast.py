@@ -1158,6 +1158,10 @@ def setup_datasets(
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
+        if "index" not in eval_dataset.column_names:
+            raise ValueError(
+                "eval_dataset must have an `index` column for stable prompt identity and per-index metrics."
+            )
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
@@ -1723,14 +1727,18 @@ def maybe_evaluate(
         # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
         timeout = max(300, args.backend_timeout * 5) if is_final_step else 0.01
 
+        eval_dataset_index_map = {eval_dataset[i]["index"]: i for i in range(num_eval_prompts)}
+        sorted_eval_indices = sorted(eval_dataset_index_map.keys())
+
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            dataset_index_map=eval_dataset_index_map,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -1784,6 +1792,34 @@ def maybe_evaluate(
             eval_metrics["eval/model_step_diff_avg"] = model_step_mean - assumed_step
             if model_step_span is not None:
                 eval_metrics["eval/model_step_diff_span"] = model_step_span
+        if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
+            prompt_index_to_solve_rates: dict[int, list[float]] = {}
+            for prompt_index, prompt_solve_rate in zip(
+                eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
+            ):
+                prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
+
+            eval_index_to_hist_position = {
+                eval_index: position for position, eval_index in enumerate(sorted_eval_indices)
+            }
+            eval_prompt_solve_rate_by_index_hist: list[float | None] = [None] * len(sorted_eval_indices)
+            for prompt_index, rates in prompt_index_to_solve_rates.items():
+                hist_position = eval_index_to_hist_position.get(prompt_index)
+                if hist_position is not None:
+                    eval_prompt_solve_rate_by_index_hist[hist_position] = float(np.mean(rates))
+            eval_metrics["eval/prompt_solve_rate_by_index_hist"] = eval_prompt_solve_rate_by_index_hist
+            eval_metrics["eval/prompt_solve_rate_by_index_hist_non_null_count"] = int(
+                sum(value is not None for value in eval_prompt_solve_rate_by_index_hist)
+            )
+
+            dataset_to_solve_rates: dict[str, list[float]] = {}
+            for dataset_name, prompt_solve_rate in zip(
+                eval_batch_stats.prompt_datasets, eval_batch_stats.percent_solved_hist
+            ):
+                dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
+            for dataset_name, rates in dataset_to_solve_rates.items():
+                metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
+                eval_metrics[f"eval/prompt_solve_rate_mean_{metric_name}"] = float(np.mean(rates))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -1805,6 +1841,23 @@ def maybe_evaluate(
         df = pd.DataFrame(table)
 
         if args.with_tracking:
+            per_index_solve_rates = eval_metrics.pop("eval/prompt_solve_rate_by_index_hist", None)
+            if per_index_solve_rates is not None:
+                values_iter = (
+                    per_index_solve_rates.tolist()
+                    if isinstance(per_index_solve_rates, np.ndarray)
+                    else per_index_solve_rates
+                )
+                index_table = wandb.Table(columns=["index_pos", "solve_rate"])
+                for index_pos, solve_rate in enumerate(values_iter):
+                    if isinstance(solve_rate, (int, float, np.integer, np.floating)) and np.isfinite(solve_rate):
+                        index_table.add_data(index_pos, float(solve_rate))
+                    else:
+                        index_table.add_data(index_pos, None)
+                eval_metrics["eval/prompt_solve_rate_by_index_table"] = index_table
+                eval_metrics["eval/prompt_solve_rate_by_index_bar"] = wandb.plot.bar(
+                    index_table, "index_pos", "solve_rate", title="Eval Prompt Solve Rate By Index"
+                )
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
             wandb.log(eval_metrics, step=training_step)
         else:
