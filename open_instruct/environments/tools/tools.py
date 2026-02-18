@@ -60,11 +60,7 @@ class PythonCodeTool(Tool):
         args = coerce_args(self.parameters, call.args)
         code = args.get("code", "")
         if not code or not code.strip():
-            result = StepResult(
-                observation="",
-                error="Empty code. Please provide some code to execute.",
-                runtime=0,
-            )
+            result = StepResult(observation="", error="Empty code. Please provide some code to execute.", runtime=0)
             log_env_call(self.call_name, code or "", result)
             return result
 
@@ -84,9 +80,7 @@ class PythonCodeTool(Tool):
             output = api_response.data.get("output") or ""
             error = api_response.data.get("error") or ""
             full_output = output + ("\n" + error if error else "")
-            result = StepResult(
-                observation=full_output, error=error, runtime=time.time() - start_time
-            )
+            result = StepResult(observation=full_output, error=error, runtime=time.time() - start_time)
 
         log_env_call(self.call_name, code, result)
         return result
@@ -133,9 +127,7 @@ class JinaBrowseTool(Tool):
         args = coerce_args(self.parameters, call.args)
         url = args.get("url", "")
         if not url or not url.strip():
-            result = StepResult(
-                observation="", error="Empty URL. Please provide a URL to fetch.", runtime=0
-            )
+            result = StepResult(observation="", error="Empty URL. Please provide a URL to fetch.", runtime=0)
             log_env_call(self.call_name, url or "", result)
             return result
 
@@ -177,9 +169,7 @@ class JinaBrowseTool(Tool):
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
         output = error if error else content
-        result = StepResult(
-            observation=output, error=error, runtime=time.time() - start_time
-        )
+        result = StepResult(observation=output, error=error, runtime=time.time() - start_time)
         log_env_call(self.call_name, url, result)
         return result
 
@@ -222,9 +212,7 @@ class S2SearchTool(Tool):
         args = coerce_args(self.parameters, call.args)
         query = args.get("query", "")
         if not query or not query.strip():
-            result = StepResult(
-                observation="", error="Empty query. Please provide a search query.", runtime=0
-            )
+            result = StepResult(observation="", error="Empty query. Please provide a search query.", runtime=0)
             log_env_call(self.call_name, query or "", result)
             return result
 
@@ -254,9 +242,7 @@ class S2SearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n".join(snippets).strip() if snippets else error
 
-        result = StepResult(
-            observation=output, error=error, runtime=time.time() - start_time
-        )
+        result = StepResult(observation=output, error=error, runtime=time.time() - start_time)
         log_env_call(self.call_name, query, result)
         return result
 
@@ -300,9 +286,7 @@ class SerperSearchTool(Tool):
         args = coerce_args(self.parameters, call.args)
         query = args.get("query", "")
         if not query or not query.strip():
-            result = StepResult(
-                observation="", error="Empty query. Please provide a search query.", runtime=0
-            )
+            result = StepResult(observation="", error="Empty query. Please provide a search query.", runtime=0)
             log_env_call(self.call_name, query or "", result)
             return result
 
@@ -347,9 +331,7 @@ class SerperSearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n\n".join(snippets).strip() if snippets else error
 
-        result = StepResult(
-            observation=output, error=error, runtime=time.time() - start_time
-        )
+        result = StepResult(observation=output, error=error, runtime=time.time() - start_time)
         log_env_call(self.call_name, query, result)
         return result
 
@@ -455,9 +437,7 @@ class Crawl4AIBrowseTool(Tool):
         args = coerce_args(self.parameters, call.args)
         url = args.get("url", "")
         if not url or not url.strip():
-            result = StepResult(
-                observation="", error="Empty URL. Please provide a URL to fetch.", runtime=0
-            )
+            result = StepResult(observation="", error="Empty URL. Please provide a URL to fetch.", runtime=0)
             log_env_call(self.call_name, url or "", result)
             return result
 
@@ -502,9 +482,7 @@ class Crawl4AIBrowseTool(Tool):
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
         output = error if error else content
-        result = StepResult(
-            observation=output, error=error, runtime=time.time() - start_time
-        )
+        result = StepResult(observation=output, error=error, runtime=time.time() - start_time)
         log_env_call(self.call_name, url, result)
         return result
 

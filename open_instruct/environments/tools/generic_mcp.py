@@ -157,16 +157,12 @@ class GenericMCPTool(Tool):
                     continue
 
             except Exception as e:
-                result = StepResult(
-                    observation="", error=str(e), runtime=time.time() - start_time
-                )
+                result = StepResult(observation="", error=str(e), runtime=time.time() - start_time)
                 log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
         result = StepResult(
-            observation="",
-            error=last_error or "Unknown error after retries",
-            runtime=time.time() - start_time,
+            observation="", error=last_error or "Unknown error after retries", runtime=time.time() - start_time
         )
         log_env_call(self.tool_name, str(kwargs), result)
         return result

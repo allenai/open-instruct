@@ -80,9 +80,7 @@ class CounterEnv(RLEnvironment):
                     done=True,
                 )
             return StepResult(
-                observation=f"Wrong! Counter is {self._current}, target was {self._target}.",
-                reward=-0.5,
-                done=True,
+                observation=f"Wrong! Counter is {self._current}, target was {self._target}.", reward=-0.5, done=True
             )
         else:
             return StepResult(observation=f"Unknown action: {call.name}. Available: increment, decrement, submit.")

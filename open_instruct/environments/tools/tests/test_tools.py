@@ -162,7 +162,9 @@ class TestPythonCodeToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.step(EnvCall(id="", name="python", args={"code": "import time; time.sleep(100)"})))
+        result = asyncio.run(
+            self.tool.step(EnvCall(id="", name="python", args={"code": "import time; time.sleep(100)"}))
+        )
 
         self.assertTrue(result.called)
         self.assertTrue(result.timeout)
@@ -193,7 +195,9 @@ class TestPythonCodeToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.step(EnvCall(id="", name="python", args={"code": "print('Partial output'); raise Exception()"})))
+        result = asyncio.run(
+            self.tool.step(EnvCall(id="", name="python", args={"code": "print('Partial output'); raise Exception()"}))
+        )
 
         self.assertTrue(result.called)
         self.assertIn("Partial output", result.observation)
