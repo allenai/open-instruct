@@ -586,6 +586,8 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    progress_bar_desc: str | None = None,
+    show_progress_bar: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -619,21 +621,13 @@ def accumulate_inference_batches(
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
-    progress_bar = tqdm(
-        total=num_prompts,
-        desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
-        bar_format="{l_bar}{bar}{r_bar}\n",
-        disable=not verbose,
-    )
+    progress_bar = tqdm(total=num_prompts, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
     logger.info(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
     collected_results = []  # Track results for potential requeue on timeout
     while num_prompts_sampled < num_prompts:
-        logger.info(
-            f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
-        )
         try:
             result = inference_results_Q.get(timeout=timeout)
         except Empty:
@@ -643,13 +637,12 @@ def accumulate_inference_batches(
                 )
                 for r in collected_results:
                     inference_results_Q.put(r)
+            progress_bar.close()
             raise
         collected_results.append(result)
-        logger.info(
-            f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
-        )
 
         if isinstance(result, data_types.ShutdownSentinel):
+            progress_bar.close()
             return result, None, None, None
 
         assert len(result.responses) == generation_config.n, (
@@ -733,6 +726,7 @@ def accumulate_inference_batches(
             all_model_steps.append(result.model_step)
 
     if len(results) == 0:
+        progress_bar.close()
         logging.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
@@ -850,6 +844,7 @@ def accumulate_inference_batches(
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
+    progress_bar.close()
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
@@ -1066,6 +1061,8 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+                progress_bar_desc=f"Training accumulating responses step {step}",
+                show_progress_bar=True,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"

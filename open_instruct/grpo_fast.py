@@ -1749,6 +1749,8 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            progress_bar_desc=f"Eval responses step {training_step}",
+            show_progress_bar=True,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
