@@ -873,6 +873,72 @@ def concatenated_inputs(batch: dict[str, list | torch.Tensor]) -> dict[str, torc
     return concatenated_batch
 
 
+def unpack_to_padded(
+    packed_logits: torch.Tensor, cu_doc_lens: torch.Tensor, batch_size: int, max_seq_len: int, pad_value: float = 0.0
+) -> torch.Tensor:
+    """Unpack packed logits back to padded format (batch_size, max_seq_len, vocab_size).
+
+    Args:
+        packed_logits: Packed logits of shape (1, total_tokens, vocab_size).
+        cu_doc_lens: Cumulative document lengths of shape (batch_size + 1,).
+        batch_size: Number of sequences in the batch.
+        max_seq_len: Maximum sequence length for padding.
+        pad_value: Value to use for padding (default 0.0).
+
+    Returns:
+        Padded logits of shape (batch_size, max_seq_len, vocab_size).
+    """
+    vocab_size = packed_logits.shape[-1]
+    padded = torch.full(
+        (batch_size, max_seq_len, vocab_size), pad_value, dtype=packed_logits.dtype, device=packed_logits.device
+    )
+    splits = cu_doc_lens.diff().tolist()
+    packed_list = torch.split(packed_logits.squeeze(0), splits, dim=0)
+    for i, doc_logits in enumerate(packed_list):
+        padded[i, : doc_logits.shape[0]] = doc_logits
+    return padded
+
+
+def pack_padded_sequences(
+    input_ids: torch.Tensor, labels: torch.Tensor, attention_mask: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    """Convert padded sequences to packed format with cumulative document lengths.
+
+    This is needed for OLMo-core models which don't support attention_mask but use
+    cu_doc_lens for intra-document attention masking.
+
+    Args:
+        input_ids: Padded input IDs of shape (batch_size, seq_len).
+        labels: Padded labels of shape (batch_size, seq_len).
+        attention_mask: Attention mask of shape (batch_size, seq_len), where 1 indicates
+            valid tokens and 0 indicates padding.
+
+    Returns:
+        Tuple of (packed_input_ids, packed_labels, cu_doc_lens, max_doc_len).
+        - packed_input_ids: Shape (1, total_tokens) with all sequences concatenated.
+        - packed_labels: Shape (1, total_tokens) with all labels concatenated.
+        - cu_doc_lens: Cumulative document lengths of shape (batch_size + 1,).
+        - max_doc_len: Maximum document length in the batch.
+    """
+    batch_size = input_ids.shape[0]
+    seq_lengths = attention_mask.sum(dim=1)
+    max_doc_len = int(seq_lengths.max().item())
+    cu_doc_lens = torch.zeros(batch_size + 1, dtype=torch.int32, device=input_ids.device)
+    cu_doc_lens[1:] = seq_lengths.cumsum(dim=0)
+
+    packed_input_ids_list = []
+    packed_labels_list = []
+    for i in range(batch_size):
+        length = seq_lengths[i].item()
+        packed_input_ids_list.append(input_ids[i, :length])
+        packed_labels_list.append(labels[i, :length])
+
+    packed_input_ids = torch.cat(packed_input_ids_list, dim=0).unsqueeze(0)
+    packed_labels = torch.cat(packed_labels_list, dim=0).unsqueeze(0)
+
+    return packed_input_ids, packed_labels, cu_doc_lens, max_doc_len
+
+
 def concatenated_forward(
     model: nn.Module,
     batch: dict[str, list | torch.Tensor],
@@ -905,6 +971,7 @@ def concatenated_forward(
         for k, v in concatenated_batch.items()
         if k.startswith("concatenated_") and not k.endswith("labels")
     }
+
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
         logits = outputs.logits.to(torch.float32)
@@ -1023,25 +1090,41 @@ def concatenated_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
+    bs = batch["chosen_input_ids"].shape[0]
+
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
-    else:
-        concatenated_batch, bs = pf_concatenated_inputs(batch)
+        packed_input_ids, packed_labels, cu_doc_lens, max_doc_len = pack_padded_sequences(
+            concatenated_batch["concatenated_input_ids"],
+            concatenated_batch["concatenated_labels"],
+            concatenated_batch["concatenated_attention_mask"],
+        )
 
-    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
+        doc_lens = cu_doc_lens.diff()
+        packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
 
-    if not packing:
+        batch_size = concatenated_batch["concatenated_input_ids"].shape[0]
+        max_seq_len = concatenated_batch["concatenated_input_ids"].shape[1]
+        logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
+
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
         )
-        bs = batch["chosen_input_ids"].shape[0]
     else:
+        concatenated_batch, bs = pf_concatenated_inputs(batch)
+        cu_doc_lens_packing = concatenated_batch["concatenated_cu_seq_lens_k"]
+        doc_lens_packing = cu_doc_lens_packing.diff()
+        max_doc_len_packing = concatenated_batch["concatenated_max_length_k"]
+        logits = model(
+            concatenated_batch["concatenated_input_ids"], doc_lens=doc_lens_packing, max_doc_lens=[max_doc_len_packing]
+        ).to(torch.float32)
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
             concatenated_batch["concatenated_cu_seq_lens_k"],
             average_log_prob=average_log_prob,
         )
+
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
     return chosen_logps, rejected_logps, None
@@ -1069,17 +1152,29 @@ def separate_forward_olmo(
     """
     del output_router_logits
     chosen_batch = process_batch(batch, "chosen")
-    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
-
+    packed_input_ids, _, cu_doc_lens, max_doc_len = pack_padded_sequences(
+        chosen_batch["input_ids"], chosen_batch["labels"], chosen_batch["attention_mask"]
+    )
+    doc_lens = cu_doc_lens.diff()
+    packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
+    batch_size = chosen_batch["input_ids"].shape[0]
+    max_seq_len = chosen_batch["input_ids"].shape[1]
+    chosen_logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch, chosen_logits
+    del chosen_batch, chosen_logits, packed_input_ids, packed_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
-    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
-
+    packed_input_ids, _, cu_doc_lens, max_doc_len = pack_padded_sequences(
+        rejected_batch["input_ids"], rejected_batch["labels"], rejected_batch["attention_mask"]
+    )
+    doc_lens = cu_doc_lens.diff()
+    packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
+    batch_size = rejected_batch["input_ids"].shape[0]
+    max_seq_len = rejected_batch["input_ids"].shape[1]
+    rejected_logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
-    del rejected_batch, rejected_logits
+    del rejected_batch, rejected_logits, packed_input_ids, packed_logits
     torch.cuda.empty_cache()
 
     return chosen_logps, rejected_logps, None

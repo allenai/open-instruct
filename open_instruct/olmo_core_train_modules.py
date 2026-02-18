@@ -107,9 +107,6 @@ class DPOTrainModule(TransformerTrainModule):
             self._forward_kwargs["packing"] = True
 
     def pre_train(self):
-        # Override to skip batch size validation from TransformerTrainModule.
-        # DPO processes 2x sequences per batch (chosen + rejected), so the parent's
-        # validation (global_batch_size % rank_microbatch_size == 0) would fail.
         pass
 
     def _compute_microbatch_loss(self, micro_batch: dict[str, Any]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:

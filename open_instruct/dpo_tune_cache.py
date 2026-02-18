@@ -43,7 +43,7 @@ from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 
@@ -407,8 +407,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     else:
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
+    train_sampler = RandomSampler(train_dataset, generator=torch.Generator().manual_seed(args.seed))
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset, sampler=train_sampler, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
@@ -535,6 +536,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             is_main_process=accelerator.is_main_process,
             model_dims=model_dims,
             use_lora=args.use_lora,
+            disable_adapter_context=None,
         )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -573,6 +575,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     average_log_prob=args.loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
@@ -621,7 +624,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
                     global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
-                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
+                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= (
+                        accelerator.num_processes * args.gradient_accumulation_steps * args.logging_steps
+                    )
                     global_metrics = {
                         name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
                     }

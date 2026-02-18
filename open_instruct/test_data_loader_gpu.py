@@ -2,7 +2,6 @@ import tempfile
 import unittest
 
 import datasets
-import numpy as np
 import parameterized
 import torch
 
@@ -92,9 +91,9 @@ class TestHFDataLoader(unittest.TestCase):
             union |= indices
         total_batches = num_examples // batch_size
         usable_size = total_batches * batch_size
-        rng = np.random.default_rng(42)
-        shuffled = np.arange(num_examples)
-        rng.shuffle(shuffled)
+        generator = torch.Generator()
+        generator.manual_seed(42)
+        shuffled = torch.randperm(num_examples, generator=generator).numpy()
         expected_indices = set(shuffled[:usable_size].tolist())
         self.assertEqual(union, expected_indices)
 

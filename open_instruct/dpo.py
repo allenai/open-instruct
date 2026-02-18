@@ -85,7 +85,7 @@ def _load_dataset_distributed(
 
 
 def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
-    """Load and configure OLMo-core model."""
+    """Build OLMo-core model architecture (weights loaded after parallelization)."""
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
@@ -102,10 +102,6 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         config_name_for_lookup, vocab_size, attn_backend=attn_backend
     )
     model = model_config.build(init_device="cpu")
-
-    logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
-    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
-    model = model.to(device=device, dtype=torch.bfloat16)
 
     return model, model_config
 
@@ -271,7 +267,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
-    dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
+    dataset.set_format(type="pt")
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     dp_world_size = world_size // args.tensor_parallel_degree
@@ -308,6 +304,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
+        drop_last=True,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size
@@ -325,7 +322,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        drop_last=False,
+        drop_last=True,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
@@ -350,8 +347,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     data_loader.reshuffle(epoch=0)
     num_training_steps = len(data_loader) * args.num_epochs
+    effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
     optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
-    scheduler = _setup_scheduler(args, num_training_steps)
+    scheduler = _setup_scheduler(args, effective_steps)
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     dp_config = transformer_config.TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
@@ -384,9 +382,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         device=device,
     )
 
-    # Build reference cache after train_module init because TransformerTrainModule applies
-    # FSDP parallelism to the model, and we need the parallelized model to calculate the
-    # logprobs in case the model is too big to fit in memory.
+    # TransformerTrainModule.__init__ calls parallelize_model which calls init_weights,
+    # reinitializing all model weights from scratch. We must reload the HF checkpoint.
+    logger.info("Reloading HuggingFace weights after parallelization...")
+    sd = train_module.model.state_dict()
+    load_hf_model(args.model_name_or_path, sd, work_dir=args.output_dir)
+    train_module.model.load_state_dict(sd)
+
     logger.info("Caching reference logprobs...")
     train_module.reference_cache = dpo_utils.build_reference_logprobs_cache(model=train_module.model, **cache_kwargs)
 
@@ -399,13 +401,20 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     trainer_callbacks = _setup_callbacks(args, dp_world_size)
 
+    if args.max_train_steps is not None:
+        max_duration = train.Duration.steps(args.max_train_steps)
+    else:
+        max_duration = train.Duration.steps(num_training_steps)
+
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
-        max_duration=train.Duration.epochs(args.num_epochs),
+        max_duration=max_duration,
         metrics_collect_interval=args.logging_steps,
         callbacks=trainer_callbacks,
         save_overwrite=True,
     ).build(train_module, data_loader)
+
+    trainer.epoch = 0
 
     logger.info("Starting training...")
     trainer.fit()

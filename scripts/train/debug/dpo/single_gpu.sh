@@ -19,8 +19,8 @@ uv run python mason.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
     --tokenizer_name_or_path allenai/OLMo-2-0425-1B \
     --max_seq_length 1024 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 1 \
     --learning_rate 5e-07 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
