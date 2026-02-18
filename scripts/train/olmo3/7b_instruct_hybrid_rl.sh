@@ -77,7 +77,6 @@ uv run python mason.py \
         --save_freq 50 \
         --checkpoint_state_freq 50 \
         --checkpoint_state_dir /weka/oe-adapt-default/allennlp/checkpoint_states/${EXP_NAME} \
-        --beaker_eval_freq 50 \
         --gradient_checkpointing \
         --with_tracking \
         --vllm_enable_prefix_caching \
