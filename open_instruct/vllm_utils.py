@@ -952,7 +952,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             try:
                 tool_result: StepResult = await actor.tool_actor_map[tool_call.name].step.remote(tool_call)
-            except TypeError as e:
+            except (TypeError, ValueError) as e:
                 error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
                 logger.warning(error_msg)
                 tool_result = StepResult(observation="", error=error_msg, runtime=0.0)
