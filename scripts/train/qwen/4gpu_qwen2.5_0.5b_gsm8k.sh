@@ -4,20 +4,12 @@ EXP_NAME="qwen25_05b_it_gsm8k"
 MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
-LOCAL_EVAL_SPLITS="test"
+LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+LOCAL_EVAL_SPLITS="train"
 
-# EVALS="aime:2024::justrl,aime:2025::justrl"
 
-# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/neptune
-
-# Check if the first argument starts with the value of $BEAKER_NAME
-# if [[ "$1" == "$BEAKER_USER"* ]]; then
-#     BEAKER_IMAGE="$1"
-#     shift
-# fi
+cluster=ai2/saturn
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -30,7 +22,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 2 \
+    --gpus 4 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run --active open_instruct/grpo_fast.py \
@@ -38,8 +30,8 @@ uv run mason.py \
     --run_name $EXP_NAME \
     --beta 0.0 \
     --async_steps 4 \
-    --active_sampling \
     --inflight_updates \
+    --filter_zero_std_samples False \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
@@ -68,20 +60,15 @@ uv run mason.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 1 \
+    --vllm_num_engines 3 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
-    --load_ref_policy False \
+    --load_ref_policy True \
     --eval_pass_at_k 32 \
+    --eval_top_p 0.95 \
     --with_tracking \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \
     # --keep_last_n_checkpoints -1 \
-
-    # --eval_priority normal \
-    # --try_launch_beaker_eval_jobs_on_weka True \
-    # --oe_eval_max_length 32768 \
-    # --oe_eval_gpu_multiplier 2  \
-    # --oe_eval_beaker_image michaeln/oe_eval_internal \
-    # --oe_eval_tasks $EVALS \

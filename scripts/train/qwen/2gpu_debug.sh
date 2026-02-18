@@ -16,7 +16,7 @@ uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 1 \
     --inflight_updates \
     --filter_zero_std_samples False \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -42,18 +42,18 @@ uv run --active open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
+    --local_eval_every 2 \
     --save_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 1 \
-    --vllm_num_engines 3 \
+    --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy True \
     --eval_pass_at_k 32 \
-    --with_tracking \
+    --with_tracking False \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \
