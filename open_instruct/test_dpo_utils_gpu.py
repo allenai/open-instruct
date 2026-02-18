@@ -83,7 +83,6 @@ class OlmoStyleModel(torch.nn.Module):
     def forward(
         self, input_ids: torch.Tensor, doc_lens: torch.Tensor | None = None, max_doc_lens: list[int] | None = None
     ) -> torch.Tensor:
-        del doc_lens, max_doc_lens
         return self.linear(self.embed(input_ids))
 
 
