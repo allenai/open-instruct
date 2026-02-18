@@ -40,7 +40,7 @@ do
             allenai/repeat_gpt_pairs_filtered_lbc100 312 \
             allenai/self-talk_gpt_pairs_filtered_lbc100 2500 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 8 \
+        --per_device_train_batch_size 16 \
         --packing \
         --gradient_accumulation_steps 1 \
         --learning_rate $LR \
@@ -54,6 +54,8 @@ do
         --activation_memory_budget 0.1 \
         --compile_model \
         --with_tracking \
+        --num_replicas 2 \
+        --shard_degree 16 \
         --tensor_parallel_degree 1 \
         --eval_workspace ai2/olmo-instruct \
         --eval_priority urgent \
