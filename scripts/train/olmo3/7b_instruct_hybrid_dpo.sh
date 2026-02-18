@@ -40,7 +40,7 @@ do
             allenai/repeat_gpt_pairs_filtered_lbc100 312 \
             allenai/self-talk_gpt_pairs_filtered_lbc100 2500 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 16 \
+        --per_device_train_batch_size 8 \
         --packing \
         --gradient_accumulation_steps 1 \
         --learning_rate $LR \
