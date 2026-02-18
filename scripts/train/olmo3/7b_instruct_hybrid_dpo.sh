@@ -54,8 +54,8 @@ do
         --activation_memory_budget 0.1 \
         --compile_model \
         --with_tracking \
-        --num_replicas 2 \
-        --shard_degree 16 \
+        --num_replicas 1 \
+        --shard_degree 32 \
         --tensor_parallel_degree 1 \
         --eval_workspace ai2/olmo-instruct \
         --eval_priority urgent \
