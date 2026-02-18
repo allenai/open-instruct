@@ -51,7 +51,6 @@ do
         --logging_steps 1 \
         --loss_type dpo_norm \
         --beta 5 \
-        --num_replicas 1 \
         --activation_memory_budget 0.1 \
         --compile_model \
         --with_tracking \
