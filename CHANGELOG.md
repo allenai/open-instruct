@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Enable packing with torch.compile for DPO training, fix cu_seq_lens offset bug for padded chosen/rejected sequences, add tokens_per_second_per_gpu metric (https://github.com/allenai/open-instruct/pull/1466).
+- Production DPO script for OLMo3-7B hybrid (https://github.com/allenai/open-instruct/pull/1449).
+- Gradient accumulation/microbatching support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1447).
 - Evolving rubrics support with RubricVerifier and utility functions for GRPO training (https://github.com/allenai/open-instruct/pull/1460).
 - New perf metrics in PerfCallback: total_tokens, data_loading_seconds, data_loading_pct, wall_clock_per_step, step_overhead_pct (https://github.com/allenai/open-instruct/pull/1457).
 - Warning when eval prompts are queuing up (new eval round starts before the previous one completes) (https://github.com/allenai/open-instruct/pull/1461).
@@ -17,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count) (https://github.com/allenai/open-instruct/pull/1434).
 
 ### Changed
+- Replaces lambda collators with a "single_example_collator" (https://github.com/allenai/open-instruct/pull/1472).
 - Clarified `activation_memory_budget` guidance in DPO utils with a practical default (`0.5`) and memory/speed tradeoff notes (https://github.com/allenai/open-instruct/pull/1460).
 - Let TransformerTrainModule handle FSDP parallelism instead of manual application in DPO (https://github.com/allenai/open-instruct/pull/1458).
 - Refactored DPOTrainModule to inherit from TransformerTrainModule (https://github.com/allenai/open-instruct/pull/1456)
@@ -25,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - Changed default wandb x-axis from `episode` to `training_step` for grpo_fast (https://github.com/allenai/open-instruct/pull/1437).
 
 ### Fixed
+- Fixed test `single_example_collator` returning raw int for index, causing `TypeError` in `_iter_batches` (https://github.com/allenai/open-instruct/pull/1477).
 - Fixed SFT integration test failing due to missing `--try_launch_beaker_eval_jobs false` flag (https://github.com/allenai/open-instruct/pull/1470).
 - Fixed checkpoint cleanup race condition on shared filesystems by using `ignore_errors=True` and restricting cleanup to global rank 0 (https://github.com/allenai/open-instruct/pull/1468).
 - Fixed checkpoint resume failing on Beaker retries by removing non-deterministic timestamp from `exp_name` (https://github.com/allenai/open-instruct/pull/1468).

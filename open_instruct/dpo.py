@@ -8,7 +8,7 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from functools import partial
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -21,7 +21,7 @@ from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback
+from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
@@ -144,6 +144,10 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_training_gpus=dp_world_size,
     )
+    if args.profiling:
+        trainer_callbacks["profiler"] = ProfilerCallback(
+            skip_first=5, wait=1, warmup=2, active=3, repeat=1, profile_memory=True
+        )
     return trainer_callbacks
 
 
@@ -209,13 +213,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_lora:
         raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
 
-    if args.packing and args.compile_model:
-        raise ValueError(
-            "packing and compile_model cannot be used together. "
-            "Packing creates variable-length batches which causes torch.compile to recompile on every batch. "
-            "Either disable packing or disable compile_model."
-        )
-
     if args.tensor_parallel_degree > 1:
         raise NotImplementedError(
             "Tensor parallelism is not supported with DPO (DTensor view ops are incompatible with torch.compile)."
@@ -273,7 +270,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset.set_format(type="pt")
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    dp_world_size = world_size
+    dp_world_size = world_size // args.tensor_parallel_degree
 
     logger_utils.setup_logger(rank=dp_rank)
 
@@ -290,11 +287,14 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        collator = TensorDataCollatorWithFlatteningDPO(
+            return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
+        )
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * dp_world_size
+    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size = rank_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -307,7 +307,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         drop_last=False,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    # With packing, the collator's token budget controls the actual forward-pass size
+    # and the overflow mechanism in HFDataLoader ensures no examples are dropped.
+    # We could probably have logic to use a longer sequence length here when packing
+    # is enabled, but for simplicity we just keep the 4x increase in batch size regardless of packing.
+    # We want the batch size to be as large as possible so that we always pack efficiently.
+    cache_batch_size = int(args.per_device_train_batch_size * 4 * dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
@@ -321,14 +326,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
+    forward_kwargs: dict[str, Any] = {}
     if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+        forward_kwargs["packing"] = True
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
         dataloader=cache_data_loader,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
+        forward_kwargs=forward_kwargs,
         full_dataset_size=len(dataset),
         device=device,
         cache_path=reference_cache_path,

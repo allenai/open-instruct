@@ -20,7 +20,7 @@ from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, padding_free_collator, utils
 from open_instruct.utils import maybe_update_beaker_description
 
 logger = logger_utils.setup_logger(__name__)
@@ -137,6 +137,7 @@ class PerfCallback(Callback):
     _batch_load_time: float = field(default=0.0, repr=False)
     _wall_clock_step_start: float = field(default=0.0, repr=False)
     _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
+    _interval_num_sequences: int = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
 
@@ -146,6 +147,7 @@ class PerfCallback(Callback):
         self._total_tokens_processed = 0
         self._mfu_sum = 0.0
         self._last_step = 0
+        self._interval_num_sequences = 0
 
     def pre_load_batch(self) -> None:
         self._batch_load_start = time.perf_counter()
@@ -153,11 +155,14 @@ class PerfCallback(Callback):
         self._wall_clock_step_start = self._batch_load_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
-        del batch
         self._batch_load_time = time.perf_counter() - self._batch_load_start
         self._prev_pre_step_time = self._pre_step_time
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
+        num_seqs = padding_free_collator.get_num_sequences(batch)
+        if num_seqs is None:
+            num_seqs = self.per_device_train_batch_size * 2
+        self._interval_num_sequences += num_seqs * self.num_training_gpus
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -179,14 +184,9 @@ class PerfCallback(Callback):
         tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
-        num_sequences = (
-            self.per_device_train_batch_size
-            * self.num_training_gpus
-            * self.gradient_accumulation_steps
-            * logging_steps
-            * 2  # * 2 for chosen + rejected
+        avg_sequence_length = (
+            total_tokens_step / self._interval_num_sequences if self._interval_num_sequences > 0 else 0
         )
-        avg_sequence_length = total_tokens_step / num_sequences if num_sequences > 0 else 0
 
         mfu_result = self.model_dims.approximate_learner_utilization(
             total_tokens=total_tokens_step,
@@ -205,6 +205,9 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
+        self.trainer.record_metric(
+            "perf/tokens_per_second_per_gpu", tokens_per_second / self.num_training_gpus, reduce_type=None
+        )
         self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)
         self.trainer.record_metric("perf/data_loading_seconds", self._batch_load_time, reduce_type=None)
 
@@ -228,4 +231,5 @@ class PerfCallback(Callback):
             self.trainer.record_metric("perf/step_pct", step_pct, reduce_type=None)
 
         self._interval_start_time = interval_end
+        self._interval_num_sequences = 0
         self._last_step = self.step

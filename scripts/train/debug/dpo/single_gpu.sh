@@ -13,11 +13,12 @@ uv run python mason.py \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --no-host-networking \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --no-host-networking \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
-    --tokenizer_name allenai/OLMo-2-0425-1B \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
