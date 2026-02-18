@@ -1399,7 +1399,12 @@ def create_generation_configs(
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, n=args.eval_pass_at_k)
+    eval_generation_config = dataclasses.replace(
+        generation_config,
+        n=args.eval_pass_at_k,
+        temperature=args.eval_temperature if args.eval_temperature is not None else generation_config.temperature,
+        top_p=args.eval_top_p if args.eval_top_p is not None else generation_config.top_p,
+    )
     return {"train": generation_config, "eval": eval_generation_config}
 
 
