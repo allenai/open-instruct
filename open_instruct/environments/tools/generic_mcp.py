@@ -18,7 +18,7 @@ from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
 from open_instruct.environments.base import EnvCall, StepResult
-from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, log_env_call
+from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, coerce_args, log_env_call
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -115,7 +115,7 @@ class GenericMCPTool(Tool):
 
     async def step(self, call: EnvCall) -> StepResult:
         """Call the MCP tool with retry logic."""
-        kwargs = self.coerce_args(call.args)
+        kwargs = coerce_args(self.parameters, call.args)
         if self.tool_name is None:
             raise ValueError("tool_name must be set before execute")
         start_time = time.time()

@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 from open_instruct import logger_utils
 from open_instruct.environments.base import EnvCall, StepResult
 from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, log_env_call, make_api_request
+from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, coerce_args, log_env_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -57,7 +57,7 @@ class PythonCodeTool(Tool):
 
     async def step(self, call: EnvCall) -> StepResult:
         """Execute Python code via the API."""
-        args = self.coerce_args(call.args)
+        args = coerce_args(self.parameters, call.args)
         code = args.get("code", "")
         if not code or not code.strip():
             result = StepResult(
@@ -130,7 +130,7 @@ class JinaBrowseTool(Tool):
 
     async def step(self, call: EnvCall) -> StepResult:
         """Fetch webpage content via Jina Reader API."""
-        args = self.coerce_args(call.args)
+        args = coerce_args(self.parameters, call.args)
         url = args.get("url", "")
         if not url or not url.strip():
             result = StepResult(
@@ -219,7 +219,7 @@ class S2SearchTool(Tool):
 
     async def step(self, call: EnvCall) -> StepResult:
         """Search Semantic Scholar for documents matching the query."""
-        args = self.coerce_args(call.args)
+        args = coerce_args(self.parameters, call.args)
         query = args.get("query", "")
         if not query or not query.strip():
             result = StepResult(
@@ -297,7 +297,7 @@ class SerperSearchTool(Tool):
 
     async def step(self, call: EnvCall) -> StepResult:
         """Search Google via Serper for documents matching the query."""
-        args = self.coerce_args(call.args)
+        args = coerce_args(self.parameters, call.args)
         query = args.get("query", "")
         if not query or not query.strip():
             result = StepResult(
@@ -452,7 +452,7 @@ class Crawl4AIBrowseTool(Tool):
 
     async def step(self, call: EnvCall) -> StepResult:
         """Fetch webpage content via Crawl4AI Docker API."""
-        args = self.coerce_args(call.args)
+        args = coerce_args(self.parameters, call.args)
         url = args.get("url", "")
         if not url or not url.strip():
             result = StepResult(
@@ -570,7 +570,7 @@ class DrAgentMCPTool(Tool):
         return self.stop_strings
 
     async def step(self, call: EnvCall) -> StepResult:
-        args = self.coerce_args(call.args)
+        args = coerce_args(self.parameters, call.args)
         text = args.get("text", "")
         if not text or not text.strip():
             return StepResult(observation="", error="Empty input", runtime=0)

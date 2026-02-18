@@ -368,12 +368,12 @@ _COERCERS: dict[str, Callable[[Any], Any]] = {
 }
 
 
-def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Coerce arguments to match the expected types in a JSON schema properties dict.
+def coerce_args(parameters: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    """Coerce arguments to match the expected types from a JSON schema.
 
     Args:
-        properties: The "properties" dict from a JSON schema.
-        kwargs: The keyword arguments to coerce.
+        parameters: A JSON schema dict (with a "properties" key).
+        args: The arguments to coerce.
 
     Returns:
         A new dict with coerced values.
@@ -381,8 +381,9 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
     Raises:
         ValueError or TypeError if coercion fails.
     """
-    coerced = dict(kwargs)
-    for name, value in kwargs.items():
+    properties = parameters.get("properties", {})
+    coerced = dict(args)
+    for name, value in args.items():
         if value is None or name not in properties:
             continue
         expected_type = properties[name].get("type")
@@ -396,7 +397,7 @@ class Tool(RLEnvironment):
     """Base class for stateless tools (e.g. code execution, web search).
 
     Subclasses implement step() directly and return StepResult.
-    Use self.coerce_args(call.args) to coerce model args to the expected types.
+    Use coerce_args(self.parameters, call.args) to coerce model args to the expected types.
     """
 
     config_name: str
@@ -419,10 +420,6 @@ class Tool(RLEnvironment):
         return EnvironmentState(done=False)
 
     # -- Utilities for tool implementations --
-
-    def coerce_args(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Coerce args dict to match the parameter schema types."""
-        return coerce_args(self.parameters.get("properties", {}), args)
 
     def get_observation_role(self) -> str:
         return self.observation_role

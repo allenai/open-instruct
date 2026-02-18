@@ -307,9 +307,9 @@ class TestToolArgCoercion(unittest.TestCase):
     @parameterized.expand([("true_string", "true", True), ("false_string", "false", False)])
     def test_string_to_bool_coercion(self, name, string_value, expected_bool):
         """Test that string 'true'/'false' are correctly coerced to boolean."""
-        properties = {"flag": {"type": "boolean"}}
+        parameters = {"properties": {"flag": {"type": "boolean"}}}
 
-        result = coerce_args(properties, {"flag": string_value})
+        result = coerce_args(parameters, {"flag": string_value})
         self.assertEqual(result["flag"], expected_bool)
 
     def test_invalid_bool_string_returns_error(self):
