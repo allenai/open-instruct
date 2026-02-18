@@ -30,7 +30,7 @@ uv run python mason.py \
         --pure_docker_mode \
         --image $BEAKER_IMAGE \
         --preemptible \
-        --num_nodes 8 \
+        --num_nodes 4 \
         --no_auto_dataset_cache \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env HOSTED_VLLM_API_BASE=$hosted_vllm \
@@ -68,13 +68,14 @@ uv run python mason.py \
         --total_episodes 1024000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 56 \
+        --vllm_num_engines 24 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --seed 1 \
         --local_eval_every 50 \
-        --save_freq 50 \
-        --checkpoint_state_freq 50 \
+        --save_freq 10 \
+        --checkpoint_state_freq 10 \
+        --keep_last_n_checkpoints -1 \
         --checkpoint_state_dir /weka/oe-adapt-default/allennlp/checkpoint_states/${EXP_NAME} \
         --gradient_checkpointing \
         --with_tracking \
