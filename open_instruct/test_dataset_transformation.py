@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 
+from jinja2 import Environment
 from parameterized import parameterized
 
 import open_instruct.dataset_transformation
@@ -255,6 +256,24 @@ class TestSystemPromptOverride(unittest.TestCase):
         self.assertEqual(prompt_call[0]["role"], "system")
         self.assertEqual(prompt_call[0]["content"], "")
         self.assertEqual(output[open_instruct.dataset_transformation.RAW_PROMPT_KEY].splitlines()[0], "system: ")
+
+
+class TestChatTemplateValidity(unittest.TestCase):
+    def test_qwen_instruct_math_template_renders(self):
+        template = open_instruct.dataset_transformation.CHAT_TEMPLATES["qwen_instruct_math"]
+        rendered = (
+            Environment()
+            .from_string(template)
+            .render(
+                messages=[{"role": "user", "content": "what is 1 + 1?"}],
+                add_generation_prompt=True,
+                eos_token="<|endoftext|>",
+            )
+        )
+        self.assertIn("<|im_start|>system", rendered)
+        self.assertIn("\\boxed{}", rendered)
+        self.assertIn("<|im_start|>user", rendered)
+        self.assertTrue(rendered.endswith("<|im_start|>assistant\n"))
 
 
 if __name__ == "__main__":

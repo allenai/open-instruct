@@ -1136,6 +1136,7 @@ def setup_datasets(
         hf_entity=args.hf_entity,
         dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
         dataset_skip_cache=streaming_config.dataset_skip_cache,
+        dataset_overwrite_cache=streaming_config.dataset_overwrite_cache,
         system_prompt_override=system_prompt_override,
     )
 
@@ -1154,6 +1155,7 @@ def setup_datasets(
             dataset_config_hash=streaming_config.dataset_config_eval_hash,
             dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
             dataset_skip_cache=streaming_config.dataset_skip_cache,
+            dataset_overwrite_cache=streaming_config.dataset_overwrite_cache,
             system_prompt_override=system_prompt_override,
         )
 

@@ -9,7 +9,7 @@ LOCAL_EVAL_SPLITS="train"
 
 
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/saturn
+cluster="ai2/saturn ai2/jupiter"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
