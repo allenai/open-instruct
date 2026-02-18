@@ -48,19 +48,40 @@ class TestEnvCommon(unittest.TestCase):
         s = env.state()
         self.assertGreaterEqual(s.step_count, 1)
 
-    @parameterized.expand([(CounterEnv,), (GuessNumberEnv,)])
-    def test_survives_20_random_steps(self, env_cls: type[RLEnvironment]):
-        env = env_cls()
-        result, tools = _run(env.reset())
-        for _ in range(20):
-            tc = _random_env_call(tools)
-            step = _run(env.step(tc))
-            self.assertIsInstance(step, StepResult)
-            self.assertIsInstance(step.observation, str)
-            if step.done:
-                result, tools = _run(env.reset())
-        s = env.state()
-        self.assertGreaterEqual(s.step_count, 0)
+    @parameterized.expand([
+        (CounterEnv, {"target": 3}),
+        (GuessNumberEnv, {"min_val": 1, "max_val": 5}),
+    ])
+    def test_random_episode_completes(self, env_cls: type[RLEnvironment], kwargs: dict):
+        """Random actions should eventually terminate the episode."""
+        env = env_cls(**kwargs)
+        result, tools = _run(env.reset(task_id="3"))
+        for _ in range(500):
+            action = _random_env_call(tools)
+            result = _run(env.step(action))
+            self.assertIsInstance(result, StepResult)
+            self.assertIsInstance(result.observation, str)
+            if result.done:
+                break
+        self.assertTrue(result.done, f"{env_cls.__name__} didn't terminate within 500 steps")
+        self.assertTrue(env.state().done)
+
+    @parameterized.expand([
+        (CounterEnv, {"target": 2}),
+        (GuessNumberEnv, {"min_val": 1, "max_val": 5}),
+    ])
+    def test_multiple_episodes(self, env_cls: type[RLEnvironment], kwargs: dict):
+        """Can reset and run multiple episodes."""
+        env = env_cls(**kwargs)
+        for episode in range(3):
+            result, tools = _run(env.reset(task_id="3"))
+            self.assertFalse(result.done)
+            for _ in range(500):
+                action = _random_env_call(tools)
+                result = _run(env.step(action))
+                if result.done:
+                    break
+            self.assertTrue(result.done, f"Episode {episode} didn't terminate")
 
 
 class TestCounterEnv(unittest.TestCase):
