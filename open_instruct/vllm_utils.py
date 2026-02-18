@@ -1149,12 +1149,26 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
-    # ensure we use bundles on the same node where possible if tp>1.
+    # Ensure we use bundles on the same node where possible if tp>1.
+    # In hybrid single_gpu_mode, the incoming placement group can have fewer bundles
+    # than vLLM engines (e.g., one bundle with 2 GPUs and 2+ engines at 0.5 GPU each),
+    # so we may need to reuse bundle indices.
     bundle_indices_list = get_bundle_indices_list(pg)
+    if not bundle_indices_list:
+        raise ValueError("Placement group has no bundles available for vLLM engine scheduling.")
 
     for i in range(num_engines):
         if use_hybrid_engine:
-            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+            if tensor_parallel_size == 1:
+                # Reuse bundles round-robin when engines outnumber bundles.
+                bundle_indices = [bundle_indices_list[i % len(bundle_indices_list)]]
+            else:
+                bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+                if len(bundle_indices) < tensor_parallel_size:
+                    raise ValueError(
+                        "Insufficient placement-group bundles for requested vLLM tensor parallelism in hybrid mode. "
+                        f"Need {num_engines * tensor_parallel_size}, found {len(bundle_indices_list)}."
+                    )
         else:
             bundle_indices = [bundle_indices_list[i]]
 

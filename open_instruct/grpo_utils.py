@@ -104,8 +104,10 @@ class ExperimentConfig:
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
     # Ray
+    colocate_train_inference_mode: bool = False
+    """Whether to colocate trainer and vLLM inference actors on the same GPUs (mostly for debugging)."""
     single_gpu_mode: bool = False
-    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
+    """Deprecated alias for `colocate_train_inference_mode` (kept for backwards compatibility)."""
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
@@ -194,6 +196,11 @@ class ExperimentConfig:
     """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
+        # Backwards-compatible alias handling:
+        # `--single_gpu_mode` and `--colocate_train_inference_mode` are equivalent.
+        self.colocate_train_inference_mode = self.colocate_train_inference_mode or self.single_gpu_mode
+        self.single_gpu_mode = self.colocate_train_inference_mode
+
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "

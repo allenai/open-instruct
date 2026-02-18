@@ -1,7 +1,7 @@
 #!/bin/bash
 
 EXP_NAME="qwen25_05b_it_gsm8k_mathtemplate_pass0"
-MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
+MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8"
 BEAKER_IMAGE="michaeln/open_instruct"
 
@@ -40,7 +40,7 @@ uv run mason.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name qwen_instruct_math \
+    --chat_template_name "qwen_instruct_math" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 256000 \
@@ -51,8 +51,12 @@ uv run mason.py \
     --save_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
-    --num_learners_per_node 1 \
-    --vllm_num_engines 1 \
+    --num_learners_per_node 2 \
+    --colocate_train_inference_mode \
+    --vllm_num_engines 2 \
+    --vllm_enforce_eager \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.3 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \

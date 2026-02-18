@@ -904,6 +904,7 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
+        one_bundle_per_rank: bool,
         args: grpo_utils.ExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
@@ -913,6 +914,8 @@ class ModelGroup:
         self.pg = pg
         self.ray_process_cls = ray_process_cls
         self.num_gpus_per_node = num_gpus_per_node
+        self.single_gpu_mode = single_gpu_mode
+        self.one_bundle_per_rank = one_bundle_per_rank
         self.num_gpus_per_actor = 0.48 if single_gpu_mode else 1
         self.num_cpus_per_actor = 4
         self.models = []
@@ -931,26 +934,31 @@ class ModelGroup:
         )
         (master_addr, master_port) = results[0]
 
-        def get_bundle_index(rank, num_gpus_per_node):
-            """given a rank and a list of num_gpus_per_node, return the index of the bundle that the rank belongs to"""
+        def get_bundle_index_and_local_rank(rank, num_gpus_per_node):
+            """Given a rank and per-node counts, return (bundle_index, local_rank_within_bundle)."""
             bundle_idx = 0
             while rank >= num_gpus_per_node[bundle_idx]:
                 rank -= num_gpus_per_node[bundle_idx]
                 bundle_idx += 1
-            return bundle_idx
+            local_rank = rank
+            return bundle_idx, local_rank
 
-        assert get_bundle_index(0, [7, 8, 4]) == 0
-        assert get_bundle_index(1, [7, 8, 4]) == 0
-        assert get_bundle_index(7, [7, 8, 4]) == 1
-        assert get_bundle_index(8, [7, 8, 4]) == 1
-        assert get_bundle_index(9, [7, 8, 4]) == 1
-        assert get_bundle_index(16, [7, 8, 4]) == 2
+        assert get_bundle_index_and_local_rank(0, [7, 8, 4]) == (0, 0)
+        assert get_bundle_index_and_local_rank(1, [7, 8, 4]) == (0, 1)
+        assert get_bundle_index_and_local_rank(7, [7, 8, 4]) == (1, 0)
+        assert get_bundle_index_and_local_rank(8, [7, 8, 4]) == (1, 1)
+        assert get_bundle_index_and_local_rank(9, [7, 8, 4]) == (1, 2)
+        assert get_bundle_index_and_local_rank(16, [7, 8, 4]) == (2, 1)
 
         # Setup worker models
         for rank in range(1, world_size):
             logger.debug(f"{rank=}, {world_size=}, {rank=}, {master_addr=}, {master_port=}")
+            if self.one_bundle_per_rank:
+                bundle_index = rank
+            else:
+                bundle_index, _ = get_bundle_index_and_local_rank(rank, self.num_gpus_per_node)
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=self.pg, placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node)
+                placement_group=self.pg, placement_group_bundle_index=bundle_index
             )
             worker_policy = ray_process_cls.options(
                 num_cpus=self.num_cpus_per_actor,
@@ -1256,8 +1264,18 @@ def create_model_and_optimizer(
 ]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
-    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
-    pg = placement_group(bundles, strategy="SPREAD")
+    one_bundle_per_rank = args.single_gpu_mode and len(args.num_learners_per_node) == 1
+    if one_bundle_per_rank:
+        # In single-node single_gpu_mode, reserve one bundle per learner rank so Ray assigns
+        # fractional-GPU trainer actors to distinct GPUs.
+        world_size = sum(args.num_learners_per_node)
+        bundles = [{"GPU": 1, "CPU": 10} for _ in range(world_size)]
+        pg = placement_group(bundles, strategy="PACK")
+    else:
+        bundles = [
+            {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node
+        ]
+        pg = placement_group(bundles, strategy="SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     queues_to_monitor = {
@@ -1305,6 +1323,7 @@ def create_model_and_optimizer(
         PolicyTrainerRayProcess,
         args.num_learners_per_node,
         args.single_gpu_mode,
+        one_bundle_per_rank,
         args=args,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
