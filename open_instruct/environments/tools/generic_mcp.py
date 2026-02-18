@@ -18,7 +18,7 @@ from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
 from open_instruct.executable import ExecutableOutput
-from open_instruct.tools.utils import BaseToolConfig, Tool, log_tool_call
+from open_instruct.environments.tools.utils import BaseToolConfig, Tool, log_tool_call
 
 logger = logger_utils.setup_logger(__name__)
 

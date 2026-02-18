@@ -29,7 +29,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.grpo_fast import create_tools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.utils import ParsedToolConfig
+from open_instruct.environments.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 

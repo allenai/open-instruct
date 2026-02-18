@@ -12,8 +12,8 @@ from parameterized import parameterized
 
 from open_instruct import data_types
 from open_instruct.executable import ExecutableOutput
-from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
-from open_instruct.tools.tools import (
+from open_instruct.environments.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
+from open_instruct.environments.tools.tools import (
     TOOL_REGISTRY,
     Crawl4AIBrowseTool,
     Crawl4AIBrowseToolConfig,
@@ -26,7 +26,7 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
-from open_instruct.tools.utils import (
+from open_instruct.environments.tools.utils import (
     APIResponse,
     ParsedToolConfig,
     ToolsConfig,
@@ -120,7 +120,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         )
         self.assertEqual(result, expected)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_successful_execution(self, mock_api_request):
         """Test successful code execution."""
 
@@ -138,7 +138,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         self.assertFalse(result.timeout)
         self.assertGreater(result.runtime, 0)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_execution_with_error_response(self, mock_api_request):
         """Test code execution that returns an error from the API."""
 
@@ -154,7 +154,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         self.assertEqual(result.error, "NameError: name 'undefined_var' is not defined")
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_timeout_handling(self, mock_api_request):
         """Test timeout is handled correctly."""
 
@@ -169,7 +169,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         self.assertTrue(result.timeout)
         self.assertIn("Timeout after 3 seconds", result.output)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_api_connection_error(self, mock_api_request):
         """Test handling of API connection errors."""
 
@@ -185,7 +185,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         self.assertIn("Connection error", result.output)
         self.assertIn("Connection refused", result.output)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_execution_with_output_and_error(self, mock_api_request):
         """Test execution that produces both output and an error."""
 
@@ -201,7 +201,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         self.assertIn("Some warning or error", result.output)
         self.assertEqual(result.error, "Some warning or error")
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_custom_timeout(self, mock_api_request):
         """Test that custom timeout is passed to API."""
         tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=10)
@@ -264,7 +264,7 @@ class TestToolArgCoercion(unittest.TestCase):
     @parameterized.expand(
         [("bool_true", True, "True"), ("bool_false", False, "False"), ("int", 42, "42"), ("float", 3.14, "3.14")]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_wrong_type_coerced_to_string(self, name, wrong_type_value, expected_string, mock_api_request):
         """Test that wrong types (bool, int, float) are coerced to string when passed to safe_execute."""
 
@@ -285,7 +285,7 @@ class TestToolArgCoercion(unittest.TestCase):
         call_args = mock_api_request.call_args
         self.assertEqual(call_args[1]["json_payload"]["code"], expected_string)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_correct_string_type_unchanged(self, mock_api_request):
         """Test that correct string type is passed through unchanged."""
 
@@ -442,7 +442,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
             ),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_successful_fetch(self, name, api_data, expected_in_output, mock_api_request):
         """Test successful webpage fetch with various response types."""
 
@@ -460,7 +460,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
         self.assertTrue(result.called)
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_jina_api_error_response(self, mock_api_request):
         """Test handling of Jina API error response (code != 200)."""
 
@@ -488,7 +488,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
             ("http_error", {"error": "HTTP error: 403 Forbidden", "timed_out": False}, False, "HTTP error"),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
 
@@ -504,7 +504,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
         self.assertIn(expected_error_contains, result.error)
         self.assertIn(expected_error_contains, result.output)  # Error message also in output for model feedback
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_uses_get_method(self, mock_api_request):
         """Test that JinaBrowseTool uses GET method."""
 
@@ -608,7 +608,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
         )
         self.assertEqual(result, expected)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_successful_search(self, mock_api_request):
         """Test successful search with results."""
 
@@ -633,7 +633,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
         self.assertTrue(result.called)
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request):
         """Test query with no results returns an error."""
 
@@ -661,7 +661,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
             ("http_error", {"error": "HTTP error: 403 Forbidden", "timed_out": False}, False, "HTTP error"),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
 
@@ -677,7 +677,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
         self.assertIn(expected_error_contains, result.error)
         self.assertIn(expected_error_contains, result.output)  # Error message also in output for model feedback
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_uses_get_method(self, mock_api_request):
         """Test that S2SearchTool uses GET method."""
 
@@ -814,7 +814,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
             ),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_successful_search(self, name, api_data, expected_in_output, mock_api_request):
         """Test successful search with various response types."""
 
@@ -844,7 +844,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
             ("http_error", {"error": "HTTP error: 403 Forbidden", "timed_out": False}, False, "HTTP error"),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
 
@@ -860,7 +860,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
         self.assertIn(expected_error_contains, result.error)
         self.assertIn(expected_error_contains, result.output)  # Error message also in output for model feedback
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request):
         """Test query with no results returns an error."""
 
@@ -876,7 +876,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
         self.assertEqual(result.output, result.error)  # Error in output for model feedback
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_results_without_snippets_filtered_out(self, mock_api_request):
         """Test that results without snippets are filtered out."""
 
@@ -1090,7 +1090,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
             ),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_successful_fetch(self, name, api_data, expected_in_output, mock_api_request):
         """Test successful webpage fetch with various response types."""
 
@@ -1108,7 +1108,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         self.assertTrue(result.called)
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_crawl4ai_api_error_response(self, mock_api_request):
         """Test handling of Crawl4AI API error response (success=False)."""
 
@@ -1141,7 +1141,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
             ),
         ]
     )
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
 
@@ -1157,7 +1157,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         self.assertIn(expected_error_contains, result.error)
         self.assertIn(expected_error_contains, result.output)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_uses_post_method_and_correct_endpoint(self, mock_api_request):
         """Test that Crawl4AIBrowseTool uses POST method and correct endpoint."""
 
@@ -1172,7 +1172,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         call_args = mock_api_request.call_args
         self.assertEqual(call_args[1]["url"], "http://localhost:11235/crawl")
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_payload_contains_url(self, mock_api_request):
         """Test that the request payload contains the URL in a list."""
 
@@ -1187,7 +1187,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         call_args = mock_api_request.call_args
         self.assertEqual(call_args[1]["json_payload"]["urls"], ["https://example.com/page"])
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_api_key_in_headers(self, mock_api_request):
         """Test that API key is included in headers."""
 
@@ -1202,7 +1202,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         call_args = mock_api_request.call_args
         self.assertEqual(call_args[1]["headers"]["x-api-key"], "test_key")
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_content_truncation(self, mock_api_request):
         """Test that content is truncated when exceeding max_content_length."""
         tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=50)
@@ -1220,7 +1220,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         self.assertTrue(result.output.startswith("A" * 50))
         self.assertIn("[Content truncated]", result.output)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_no_truncation_when_under_limit(self, mock_api_request):
         """Test that content is not truncated when under max_content_length."""
         tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=100)
@@ -1237,7 +1237,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         self.assertEqual(result.output, short_content)
         self.assertNotIn("[Content truncated]", result.output)
 
-    @patch("open_instruct.tools.tools.make_api_request")
+    @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_no_truncation_when_limit_is_none(self, mock_api_request):
         """Test that content is not truncated when max_content_length is None."""
         tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=None)
@@ -1462,7 +1462,7 @@ def _run_with_mock_responses(responses: list, **request_kwargs):
 
     # Create a mock that properly handles nested async context managers
     async def run_test():
-        with patch("open_instruct.tools.utils.aiohttp.ClientSession") as mock_session_class:
+        with patch("open_instruct.environments.tools.utils.aiohttp.ClientSession") as mock_session_class:
             # Mock the ClientSession context manager
             mock_session = unittest.mock.MagicMock()
 
@@ -1578,7 +1578,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 class TestGenericMCPToolExecution(unittest.TestCase):
     """Tests for GenericMCPTool execution."""
 
-    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    @patch("open_instruct.environments.tools.generic_mcp._call_mcp_tool")
     def test_execute_success(self, mock_call):
         """Test successful tool execution."""
         mock_result = MagicMock()
@@ -1593,7 +1593,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
         self.assertEqual(result.output, "result text")
         self.assertEqual(result.error, "")
 
-    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    @patch("open_instruct.environments.tools.generic_mcp._call_mcp_tool")
     def test_execute_timeout(self, mock_call):
         """Test tool execution timeout."""
         mock_call.side_effect = asyncio.TimeoutError()

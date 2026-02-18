@@ -43,7 +43,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
-from open_instruct.tools.utils import ToolStatistics
+from open_instruct.environments.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)

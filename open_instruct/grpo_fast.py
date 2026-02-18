@@ -101,9 +101,9 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tools.parsers import create_tool_parser
-from open_instruct.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
+from open_instruct.environments.tools.parsers import create_tool_parser
+from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
+from open_instruct.environments.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
