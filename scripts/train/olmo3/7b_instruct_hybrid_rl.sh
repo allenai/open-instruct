@@ -30,7 +30,7 @@ uv run python mason.py \
         --pure_docker_mode \
         --image $BEAKER_IMAGE \
         --preemptible \
-        --num_nodes 3 \
+        --num_nodes 2 \
         --no_auto_dataset_cache \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env HOSTED_VLLM_API_BASE=$hosted_vllm \
@@ -68,7 +68,7 @@ uv run python mason.py \
         --total_episodes 1024000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 16 \
+        --vllm_num_engines 8 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --seed 1 \
