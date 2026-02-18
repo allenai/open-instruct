@@ -26,9 +26,6 @@ class StepResult(Observation):
     runtime: float = 0.0
 
 
-EnvironmentState = State
-
-
 class RLEnvironment(ABC):
     """Abstract base class for RL environments and tools.
 
@@ -64,6 +61,6 @@ class RLEnvironment(ABC):
         pass
 
     @abstractmethod
-    def state(self) -> EnvironmentState:
+    def state(self) -> State:
         """Return current episode state."""
         pass

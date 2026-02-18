@@ -2,7 +2,9 @@
 
 import random
 
-from .base import EnvCall, EnvironmentState, RLEnvironment, StepResult
+from openenv.core.env_server.types import State
+
+from .base import EnvCall, RLEnvironment, StepResult
 
 
 class CounterEnv(RLEnvironment):
@@ -92,8 +94,8 @@ class CounterEnv(RLEnvironment):
             "reached_target": 1.0 if self._current == self._target else 0.0,
         }
 
-    def state(self) -> EnvironmentState:
-        return EnvironmentState(episode_id=self._task_id, step_count=self._step_count)
+    def state(self) -> State:
+        return State(episode_id=self._task_id, step_count=self._step_count)
 
 
 class GuessNumberEnv(RLEnvironment):
@@ -175,5 +177,5 @@ class GuessNumberEnv(RLEnvironment):
     def get_metrics(self) -> dict[str, float]:
         return {"guesses": float(self._guesses)}
 
-    def state(self) -> EnvironmentState:
-        return EnvironmentState(episode_id=self._task_id, step_count=self._guesses)
+    def state(self) -> State:
+        return State(episode_id=self._task_id, step_count=self._guesses)

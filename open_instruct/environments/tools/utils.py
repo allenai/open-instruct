@@ -8,10 +8,11 @@ from typing import Any, ClassVar
 
 import aiohttp
 import backoff
+from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.environments.base import EnvironmentState, RLEnvironment, StepResult
+from open_instruct.environments.base import RLEnvironment, StepResult
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -416,8 +417,8 @@ class Tool(RLEnvironment):
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
         return StepResult(observation=""), [get_openai_tool_definitions(self)]
 
-    def state(self) -> EnvironmentState:
-        return EnvironmentState()
+    def state(self) -> State:
+        return State()
 
     # -- Utilities for tool implementations --
 
