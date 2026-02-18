@@ -81,9 +81,9 @@ class OlmoStyleModel(torch.nn.Module):
         self.linear = torch.nn.Linear(64, vocab_size)
 
     def forward(
-        self, input_ids: torch.Tensor, cu_doc_lens: torch.Tensor | None = None, max_doc_len: int | None = None
+        self, input_ids: torch.Tensor, doc_lens: torch.Tensor | None = None, max_doc_lens: list[int] | None = None
     ) -> torch.Tensor:
-        del cu_doc_lens, max_doc_len
+        del doc_lens, max_doc_lens
         return self.linear(self.embed(input_ids))
 
 

@@ -230,7 +230,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Reshard the dataset for a given epoch.
 
         Uses index-based shuffling to avoid copying the dataset.
-        Uses PyTorch RNG to match PyTorch DataLoader shuffle behavior.
         """
         generator = torch.Generator()
         generator.manual_seed(self.seed + epoch)
