@@ -95,25 +95,3 @@ class RLEnvironment(ABC):
     def state(self) -> EnvironmentState:
         """Return current episode state."""
         pass
-
-
-ENV_REGISTRY: dict[str, type[RLEnvironment]] = {}
-
-
-def register_env(name: str):
-    """Decorator to register an environment class."""
-
-    def decorator(cls: type[RLEnvironment]) -> type[RLEnvironment]:
-        if name in ENV_REGISTRY:
-            raise ValueError(f"Environment '{name}' already registered")
-        ENV_REGISTRY[name] = cls
-        return cls
-
-    return decorator
-
-
-def get_env_class(env_name: str) -> type[RLEnvironment]:
-    """Get environment class by registry name."""
-    if env_name not in ENV_REGISTRY:
-        raise ValueError(f"Environment '{env_name}' not found. Available: {list(ENV_REGISTRY.keys())}")
-    return ENV_REGISTRY[env_name]
