@@ -304,7 +304,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        drop_last=False,
+        drop_last=True,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size
@@ -322,7 +322,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        drop_last=False,
+        drop_last=True,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
