@@ -4,7 +4,8 @@ EXP_NAME="qwen25_05b_it_gsm8k"
 MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 2"
+# mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
 LOCAL_EVAL_SPLITS="train"
 
 export TORCH_COMPILE_DISABLE=1
@@ -13,6 +14,7 @@ export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 export VLLM_ATTENTION_BACKEND="FLASHINFER"
 uv run --active open_instruct/grpo_fast.py \
+    --dataset_skip_cache True \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
     --beta 0.0 \
@@ -22,7 +24,7 @@ uv run --active open_instruct/grpo_fast.py \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 8 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -34,7 +36,7 @@ uv run --active open_instruct/grpo_fast.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name qwen_instruct_gsm8k \
+    --chat_template_name qwen_instruct_math \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \

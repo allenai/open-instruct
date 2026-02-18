@@ -270,6 +270,23 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "qwen_instruct_math": (
+        "{% if messages[0]['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>system\nPlease reason step by step, and put your final answer within \\boxed{}.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     "qwen_instruct_gsm8k": (
         "{% for message in messages %}"
         "{% if message['role'] == 'user' %}"
