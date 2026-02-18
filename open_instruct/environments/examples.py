@@ -97,7 +97,7 @@ class CounterEnv(RLEnvironment):
             episode_id=self._task_id,
             step_count=self._step_count,
             done=self._done,
-            info={"current": self._current, "target": self._target},
+            metadata={"current": self._current, "target": self._target},
         )
 
 
@@ -170,7 +170,7 @@ class GuessNumberEnv(RLEnvironment):
                 observation=f"Correct! The number was {self._secret}. You got it in {self._guesses} guesses!",
                 reward=1.0,
                 done=True,
-                info={"guesses": self._guesses},
+                metadata={"guesses": self._guesses},
             )
         elif guess < self._secret:
             return StepResult(observation=f"{guess} is too low. Try higher.", reward=closeness_reward)
@@ -182,5 +182,5 @@ class GuessNumberEnv(RLEnvironment):
 
     def state(self) -> EnvironmentState:
         return EnvironmentState(
-            episode_id=self._task_id, step_count=self._guesses, done=self._done, info={"secret": self._secret}
+            episode_id=self._task_id, step_count=self._guesses, done=self._done, metadata={"secret": self._secret}
         )

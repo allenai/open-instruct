@@ -31,7 +31,6 @@ class EnvironmentState(State):
 
     rewards: list[float] = Field(default_factory=list)
     done: bool = False
-    info: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def final_reward(self) -> float:
