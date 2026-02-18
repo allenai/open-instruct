@@ -512,9 +512,7 @@ def word_class_ngrams(text: str, n: int = 6, min_repeats: int = 6) -> tuple[bool
 
     # Focus on n-grams with at least one marker
     marker_repeats = {
-        "".join(ng): count
-        for ng, count in ngram_counts.items()
-        if count >= effective_min_repeats and "M" in ng
+        "".join(ng): count for ng, count in ngram_counts.items() if count >= effective_min_repeats and "M" in ng
     }
 
     details = {
