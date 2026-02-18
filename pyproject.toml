@@ -192,7 +192,11 @@ include = [
     "open_instruct/rubrics/prompts.py",
     "open_instruct/rubrics/rubric_utils.py",
     "open_instruct/rubrics/run_utils.py",
-    "open_instruct/environments/tools/tools.py",
+    "open_instruct/environments/base.py",
+    "open_instruct/environments/examples.py",
     "open_instruct/environments/tools/generic_mcp.py",
+    "open_instruct/environments/tools/parsers.py",
+    "open_instruct/environments/tools/tools.py",
+    "open_instruct/environments/tools/utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
