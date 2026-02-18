@@ -417,7 +417,7 @@ class Tool(RLEnvironment):
         return StepResult(observation=""), [get_openai_tool_definitions(self)]
 
     def state(self) -> EnvironmentState:
-        return EnvironmentState(done=False)
+        return EnvironmentState()
 
     # -- Utilities for tool implementations --
 

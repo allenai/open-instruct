@@ -93,12 +93,7 @@ class CounterEnv(RLEnvironment):
         }
 
     def state(self) -> EnvironmentState:
-        return EnvironmentState(
-            episode_id=self._task_id,
-            step_count=self._step_count,
-            done=self._done,
-            metadata={"current": self._current, "target": self._target},
-        )
+        return EnvironmentState(episode_id=self._task_id, step_count=self._step_count)
 
 
 class GuessNumberEnv(RLEnvironment):
@@ -181,6 +176,4 @@ class GuessNumberEnv(RLEnvironment):
         return {"guesses": float(self._guesses)}
 
     def state(self) -> EnvironmentState:
-        return EnvironmentState(
-            episode_id=self._task_id, step_count=self._guesses, done=self._done, metadata={"secret": self._secret}
-        )
+        return EnvironmentState(episode_id=self._task_id, step_count=self._guesses)

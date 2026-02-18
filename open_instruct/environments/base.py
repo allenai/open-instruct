@@ -26,20 +26,7 @@ class StepResult(Observation):
     runtime: float = 0.0
 
 
-class EnvironmentState(State):
-    """Accumulated state from an environment rollout."""
-
-    rewards: list[float] = Field(default_factory=list)
-    done: bool = False
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @property
-    def final_reward(self) -> float:
-        return self.rewards[-1] if self.rewards else 0.0
-
-    @property
-    def total_reward(self) -> float:
-        return sum(self.rewards)
+EnvironmentState = State
 
 
 class RLEnvironment(ABC):
