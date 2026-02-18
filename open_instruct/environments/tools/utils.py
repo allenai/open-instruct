@@ -11,7 +11,7 @@ import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.environments.base import EnvCall, EnvironmentState, RLEnvironment, StepResult
+from open_instruct.environments.base import EnvironmentState, RLEnvironment, StepResult
 
 logger = logger_utils.setup_logger(__name__)
 

@@ -28,9 +28,9 @@ from open_instruct.environments.tools.tools import (
 )
 from open_instruct.environments.tools.utils import (
     APIResponse,
-    ParsedEnvConfig,
     EnvsConfig,
     EnvStatistics,
+    ParsedEnvConfig,
     coerce_args,
     get_openai_tool_definitions,
     make_api_request,
