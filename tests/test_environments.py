@@ -7,7 +7,7 @@ import pytest
 from open_instruct.environments import ENV_REGISTRY, get_env_class
 from open_instruct.environments.base import RLEnvironment, StepResult
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
-from open_instruct.environments.tools.utils import ToolCall
+from open_instruct.environments.base import EnvCall
 
 
 class TestRegistry:
@@ -51,7 +51,7 @@ class TestEnvCommon:
     async def test_unknown_action_continues(self, env_cls: type[RLEnvironment]):
         env = env_cls()
         await env.reset()
-        step = await env.step(ToolCall(id="", name="nonexistent_tool", args={}))
+        step = await env.step(EnvCall(id="", name="nonexistent_tool", args={}))
         assert not step.done
         assert step.reward == 0.0
 
@@ -59,7 +59,7 @@ class TestEnvCommon:
     async def test_state_tracks_steps(self, env_cls: type[RLEnvironment]):
         env = env_cls()
         _, tools = await env.reset(task_id="5")
-        await env.step(ToolCall(id="", name=tools[0]["function"]["name"], args=_fill_args(tools[0])))
+        await env.step(EnvCall(id="", name=tools[0]["function"]["name"], args=_fill_args(tools[0])))
         s = env.state()
         assert s.step_count >= 1
 
@@ -84,8 +84,8 @@ class TestCounterEnv:
         env = CounterEnv(target=3)
         await env.reset()
         for _ in range(3):
-            await env.step(ToolCall(id="", name="increment", args={}))
-        step = await env.step(ToolCall(id="", name="submit", args={}))
+            await env.step(EnvCall(id="", name="increment", args={}))
+        step = await env.step(EnvCall(id="", name="submit", args={}))
         assert step.done
         assert step.reward == 1.0
 
@@ -93,7 +93,7 @@ class TestCounterEnv:
     async def test_wrong_submit(self):
         env = CounterEnv(target=5)
         await env.reset()
-        step = await env.step(ToolCall(id="", name="submit", args={}))
+        step = await env.step(EnvCall(id="", name="submit", args={}))
         assert step.done
         assert step.reward == -0.5
 
@@ -101,9 +101,9 @@ class TestCounterEnv:
     async def test_decrement(self):
         env = CounterEnv(target=0)
         await env.reset()
-        await env.step(ToolCall(id="", name="increment", args={}))
-        await env.step(ToolCall(id="", name="decrement", args={}))
-        step = await env.step(ToolCall(id="", name="submit", args={}))
+        await env.step(EnvCall(id="", name="increment", args={}))
+        await env.step(EnvCall(id="", name="decrement", args={}))
+        step = await env.step(EnvCall(id="", name="submit", args={}))
         assert step.done
         assert step.reward == 1.0
 
@@ -117,9 +117,9 @@ class TestCounterEnv:
     async def test_metrics(self):
         env = CounterEnv(target=2)
         await env.reset()
-        await env.step(ToolCall(id="", name="increment", args={}))
-        await env.step(ToolCall(id="", name="increment", args={}))
-        await env.step(ToolCall(id="", name="submit", args={}))
+        await env.step(EnvCall(id="", name="increment", args={}))
+        await env.step(EnvCall(id="", name="increment", args={}))
+        await env.step(EnvCall(id="", name="submit", args={}))
         metrics = env.get_metrics()
         assert metrics["step_count"] == 3.0
         assert metrics["final_value"] == 2.0
@@ -131,7 +131,7 @@ class TestGuessNumberEnv:
     async def test_correct_guess(self):
         env = GuessNumberEnv()
         await env.reset(task_id="5")
-        result = await env.step(ToolCall(id="", name="guess", args={"number": 5}))
+        result = await env.step(EnvCall(id="", name="guess", args={"number": 5}))
         assert result.done
         assert result.reward == 1.0
 
@@ -139,7 +139,7 @@ class TestGuessNumberEnv:
     async def test_too_low(self):
         env = GuessNumberEnv()
         await env.reset(task_id="50")
-        result = await env.step(ToolCall(id="", name="guess", args={"number": 10}))
+        result = await env.step(EnvCall(id="", name="guess", args={"number": 10}))
         assert not result.done
         assert "too low" in result.observation
 
@@ -147,7 +147,7 @@ class TestGuessNumberEnv:
     async def test_too_high(self):
         env = GuessNumberEnv()
         await env.reset(task_id="50")
-        result = await env.step(ToolCall(id="", name="guess", args={"number": 90}))
+        result = await env.step(EnvCall(id="", name="guess", args={"number": 90}))
         assert not result.done
         assert "too high" in result.observation
 
@@ -155,17 +155,17 @@ class TestGuessNumberEnv:
     async def test_closeness_reward(self):
         env = GuessNumberEnv(min_val=1, max_val=100)
         await env.reset(task_id="50")
-        close_result = await env.step(ToolCall(id="", name="guess", args={"number": 49}))
+        close_result = await env.step(EnvCall(id="", name="guess", args={"number": 49}))
         await env.reset(task_id="50")
-        far_result = await env.step(ToolCall(id="", name="guess", args={"number": 1}))
+        far_result = await env.step(EnvCall(id="", name="guess", args={"number": 1}))
         assert close_result.reward > far_result.reward
 
     @pytest.mark.asyncio
     async def test_metrics(self):
         env = GuessNumberEnv()
         await env.reset(task_id="5")
-        await env.step(ToolCall(id="", name="guess", args={"number": 3}))
-        await env.step(ToolCall(id="", name="guess", args={"number": 5}))
+        await env.step(EnvCall(id="", name="guess", args={"number": 3}))
+        await env.step(EnvCall(id="", name="guess", args={"number": 5}))
         metrics = env.get_metrics()
         assert metrics["guesses"] == 2.0
 
@@ -181,7 +181,7 @@ def _fill_args(tool_def: dict) -> dict:
     return args
 
 
-def _random_tool_call(tools: list[dict]) -> ToolCall:
+def _random_tool_call(tools: list[dict]) -> EnvCall:
     """Pick a random tool and fill required args with random values."""
     tool = random.choice(tools)
     func = tool["function"]
@@ -193,4 +193,4 @@ def _random_tool_call(tools: list[dict]) -> ToolCall:
             args[name] = "test"
         else:
             args[name] = None
-    return ToolCall(id="", name=func["name"], args=args)
+    return EnvCall(id="", name=func["name"], args=args)

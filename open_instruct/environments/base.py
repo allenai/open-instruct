@@ -4,7 +4,28 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from open_instruct.executable import ToolCall
+
+@dataclass
+class EnvCall:
+    """Parsed action call from model output."""
+
+    id: str
+    name: str
+    args: dict[str, Any]
+
+
+@dataclass
+class EnvOutput:
+    """Output from a tool/environment execution."""
+
+    output: str
+    called: bool
+    error: str
+    timeout: bool
+    runtime: float
+    reward: float | None = None
+    done: bool = False
+    info: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -66,7 +87,7 @@ class RLEnvironment(ABC):
         pass
 
     @abstractmethod
-    async def step(self, tool_call: ToolCall) -> StepResult:
+    async def step(self, tool_call: EnvCall) -> StepResult:
         """Execute action, return observation, reward, done."""
         pass
 

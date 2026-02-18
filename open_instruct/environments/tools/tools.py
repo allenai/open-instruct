@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
-from open_instruct.executable import ExecutableOutput
+from open_instruct.environments.base import EnvOutput
 from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
 from open_instruct.environments.tools.utils import BaseToolConfig, Tool, log_tool_call, make_api_request
 
@@ -55,10 +55,10 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def _execute(self, code: str) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, code: str) -> EnvOutput:  # type: ignore[override]
         """Execute Python code via the API."""
         if not code or not code.strip():
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="",
                 error="Empty code. Please provide some code to execute.",
                 called=True,
@@ -74,7 +74,7 @@ class PythonCodeTool(Tool):
         )
 
         if api_response.error:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output=api_response.error,
                 called=True,
                 error=api_response.error,
@@ -85,7 +85,7 @@ class PythonCodeTool(Tool):
             output = api_response.data.get("output") or ""
             error = api_response.data.get("error") or ""
             full_output = output + ("\n" + error if error else "")
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output=full_output, called=True, error=error, timeout=False, runtime=time.time() - start_time
             )
 
@@ -129,10 +129,10 @@ class JinaBrowseTool(Tool):
         if not self.api_key:
             raise ValueError("Missing JINA_API_KEY environment variable.")
 
-    async def _execute(self, url: str) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, url: str) -> EnvOutput:  # type: ignore[override]
         """Fetch webpage content via Jina Reader API."""
         if not url or not url.strip():
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
             )
             log_tool_call(self.call_name, url or "", result)
@@ -151,7 +151,7 @@ class JinaBrowseTool(Tool):
         )
 
         if api_response.error:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output=api_response.error,
                 called=True,
                 error=api_response.error,
@@ -177,7 +177,7 @@ class JinaBrowseTool(Tool):
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
         output = error if error else content
-        result = ExecutableOutput(
+        result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
         log_tool_call(self.call_name, url, result)
@@ -217,10 +217,10 @@ class S2SearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing S2_API_KEY environment variable.")
 
-    async def _execute(self, query: str) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, query: str) -> EnvOutput:  # type: ignore[override]
         """Search Semantic Scholar for documents matching the query."""
         if not query or not query.strip():
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
             log_tool_call(self.call_name, query or "", result)
@@ -236,7 +236,7 @@ class S2SearchTool(Tool):
         )
 
         if api_response.error:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output=api_response.error,
                 called=True,
                 error=api_response.error,
@@ -253,7 +253,7 @@ class S2SearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n".join(snippets).strip() if snippets else error
 
-        result = ExecutableOutput(
+        result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
         log_tool_call(self.call_name, query, result)
@@ -294,10 +294,10 @@ class SerperSearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing SERPER_API_KEY environment variable.")
 
-    async def _execute(self, query: str) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, query: str) -> EnvOutput:  # type: ignore[override]
         """Search Google via Serper for documents matching the query."""
         if not query or not query.strip():
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
             log_tool_call(self.call_name, query or "", result)
@@ -312,7 +312,7 @@ class SerperSearchTool(Tool):
         )
 
         if api_response.error:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output=api_response.error,
                 called=True,
                 error=api_response.error,
@@ -345,7 +345,7 @@ class SerperSearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n\n".join(snippets).strip() if snippets else error
 
-        result = ExecutableOutput(
+        result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
         log_tool_call(self.call_name, query, result)
@@ -448,10 +448,10 @@ class Crawl4AIBrowseTool(Tool):
         with open(blocklist_path, encoding="utf-8") as f:
             self.blocklist = [line.strip() for line in f if line.strip()]
 
-    async def _execute(self, url: str) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, url: str) -> EnvOutput:  # type: ignore[override]
         """Fetch webpage content via Crawl4AI Docker API."""
         if not url or not url.strip():
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
             )
             log_tool_call(self.call_name, url or "", result)
@@ -487,7 +487,7 @@ class Crawl4AIBrowseTool(Tool):
         )
 
         if api_response.error:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output=api_response.error,
                 called=True,
                 error=api_response.error,
@@ -499,7 +499,7 @@ class Crawl4AIBrowseTool(Tool):
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
         output = error if error else content
-        result = ExecutableOutput(
+        result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
         log_tool_call(self.call_name, url, result)
@@ -566,9 +566,9 @@ class DrAgentMCPTool(Tool):
     def get_stop_strings(self) -> list[str]:
         return self.stop_strings
 
-    async def _execute(self, text: str) -> ExecutableOutput:  # type: ignore[override]
+    async def _execute(self, text: str) -> EnvOutput:  # type: ignore[override]
         if not text or not text.strip():
-            return ExecutableOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
+            return EnvOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
 
         start_time = time.time()
         outputs: list[str] = []
@@ -590,11 +590,11 @@ class DrAgentMCPTool(Tool):
                     errors.append(str(e))
 
         if not outputs:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time
             )
         else:
-            result = ExecutableOutput(
+            result = EnvOutput(
                 output="\n".join(outputs),
                 called=True,
                 error="; ".join(errors) if errors else "",

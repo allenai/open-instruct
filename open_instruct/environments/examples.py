@@ -2,7 +2,7 @@
 
 import random
 
-from .base import EnvironmentState, RLEnvironment, StepResult, ToolCall, register_env
+from .base import EnvCall, EnvironmentState, RLEnvironment, StepResult, register_env
 
 
 @register_env("counter")
@@ -62,7 +62,7 @@ class CounterEnv(RLEnvironment):
         )
         return result, self._tool_definitions
 
-    async def step(self, tool_call: ToolCall) -> StepResult:
+    async def step(self, tool_call: EnvCall) -> StepResult:
         self._step_count += 1
 
         if tool_call.name == "increment":
@@ -156,7 +156,7 @@ class GuessNumberEnv(RLEnvironment):
         )
         return result, self._tool_definitions
 
-    async def step(self, tool_call: ToolCall) -> StepResult:
+    async def step(self, tool_call: EnvCall) -> StepResult:
         self._guesses += 1
 
         if tool_call.name != "guess":

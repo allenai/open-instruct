@@ -13,7 +13,7 @@ import backoff
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
 from open_instruct.environments.base import EnvironmentState, RLEnvironment, StepResult
-from open_instruct.executable import ExecutableOutput, ToolCall
+from open_instruct.environments.base import EnvCall, EnvOutput
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -108,7 +108,7 @@ def truncate(text: str, max_length: int = 500) -> str:
     return text[:max_length] + f"... [{len(text) - max_length} more chars]"
 
 
-def log_tool_call(tool_name: str, input_text: str, output: ExecutableOutput) -> None:
+def log_tool_call(tool_name: str, input_text: str, output: EnvOutput) -> None:
     """Log a tool call at DEBUG level with truncated input/output."""
     logger.debug(
         f"Tool '{tool_name}' called:\n"
@@ -417,7 +417,7 @@ class Tool(RLEnvironment):
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
         return StepResult(observation=""), [get_openai_tool_definitions(self)]
 
-    async def step(self, tool_call: ToolCall) -> StepResult:
+    async def step(self, tool_call: EnvCall) -> StepResult:
         result = await self.safe_execute(**tool_call.args)
         return StepResult(
             observation=result.output,
@@ -452,20 +452,20 @@ class Tool(RLEnvironment):
         return get_openai_tool_definitions(self)
 
     @abstractmethod
-    async def _execute(self, **kwargs: Any) -> ExecutableOutput:
+    async def _execute(self, **kwargs: Any) -> EnvOutput:
         """Execute the tool. Must be implemented by subclasses."""
         raise NotImplementedError
 
-    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ExecutableOutput:
+    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> EnvOutput:
         """Coerce arguments to match parameter schema, then call _execute."""
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)
         except (ValueError, TypeError) as e:
-            return ExecutableOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
+            return EnvOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
         return await self._execute(*args, **coerced_kwargs)
 
-    async def __call__(self, *args: Any, **kwargs: Any) -> ExecutableOutput:
+    async def __call__(self, *args: Any, **kwargs: Any) -> EnvOutput:
         """Alias for safe_execute, useful for inference scripts."""
         return await self.safe_execute(*args, **kwargs)
 

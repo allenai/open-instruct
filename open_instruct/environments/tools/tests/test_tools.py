@@ -11,7 +11,7 @@ import aiohttp
 from parameterized import parameterized
 
 from open_instruct import data_types
-from open_instruct.executable import ExecutableOutput
+from open_instruct.environments.base import EnvOutput
 from open_instruct.environments.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
 from open_instruct.environments.tools.tools import (
     TOOL_REGISTRY,
@@ -115,7 +115,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
         """Test that empty/whitespace/None code returns an error without calling API."""
         result = asyncio.run(self.tool(code_input))
 
-        expected = ExecutableOutput(
+        expected = EnvOutput(
             output="", error="Empty code. Please provide some code to execute.", called=True, timeout=False, runtime=0
         )
         self.assertEqual(result, expected)
@@ -131,7 +131,7 @@ class TestPythonCodeToolExecution(unittest.TestCase):
 
         result = asyncio.run(self.tool("print('Hello, World!')"))
 
-        self.assertIsInstance(result, ExecutableOutput)
+        self.assertIsInstance(result, EnvOutput)
         self.assertEqual(result.output, "Hello, World!\n")
         self.assertEqual(result.error, "")
         self.assertTrue(result.called)
@@ -423,7 +423,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
         """Test that empty/whitespace/None URL returns an error without calling API."""
         result = asyncio.run(self.tool.safe_execute(url_input))
 
-        expected = ExecutableOutput(
+        expected = EnvOutput(
             output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
         )
         self.assertEqual(result, expected)
@@ -453,7 +453,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
 
         result = asyncio.run(self.tool.safe_execute("https://example.com"))
 
-        self.assertIsInstance(result, ExecutableOutput)
+        self.assertIsInstance(result, EnvOutput)
         for expected in expected_in_output:
             self.assertIn(expected, result.output)
         self.assertEqual(result.error, "")
@@ -603,7 +603,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
         """Test that empty/whitespace/None query returns an error without calling API."""
         result = asyncio.run(self.tool.safe_execute(query_input))
 
-        expected = ExecutableOutput(
+        expected = EnvOutput(
             output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
         )
         self.assertEqual(result, expected)
@@ -626,7 +626,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
 
         result = asyncio.run(self.tool.safe_execute("machine learning"))
 
-        self.assertIsInstance(result, ExecutableOutput)
+        self.assertIsInstance(result, EnvOutput)
         self.assertIn("First research paper snippet", result.output)
         self.assertIn("Second research paper snippet", result.output)
         self.assertEqual(result.error, "")
@@ -779,7 +779,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
         """Test that empty/whitespace/None query returns an error without calling API."""
         result = asyncio.run(self.tool.safe_execute(query_input))
 
-        expected = ExecutableOutput(
+        expected = EnvOutput(
             output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
         )
         self.assertEqual(result, expected)
@@ -825,7 +825,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
 
         result = asyncio.run(self.tool.safe_execute("test query"))
 
-        self.assertIsInstance(result, ExecutableOutput)
+        self.assertIsInstance(result, EnvOutput)
         for expected in expected_in_output:
             self.assertIn(expected, result.output)
         self.assertEqual(result.error, "")
@@ -1049,7 +1049,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
         """Test that empty/whitespace/None URL returns an error without calling API."""
         result = asyncio.run(self.tool.safe_execute(url_input))
 
-        self.assertIsInstance(result, ExecutableOutput)
+        self.assertIsInstance(result, EnvOutput)
         self.assertEqual(result.output, "")
         self.assertEqual(result.error, "Empty URL. Please provide a URL to fetch.")
         self.assertTrue(result.called)
@@ -1101,7 +1101,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         result = asyncio.run(self.tool.safe_execute("https://example.com"))
 
-        self.assertIsInstance(result, ExecutableOutput)
+        self.assertIsInstance(result, EnvOutput)
         for expected in expected_in_output:
             self.assertIn(expected, result.output)
         self.assertEqual(result.error, "")
