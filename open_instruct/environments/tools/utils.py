@@ -112,9 +112,9 @@ def log_env_call(tool_name: str, input_text: str, result: StepResult) -> None:
     logger.debug(
         f"Tool '{tool_name}' called:\n"
         f"  Input: {truncate(input_text)}\n"
-        f"  Output: {truncate(result.observation)}\n"
-        f"  Error: {result.error or 'None'}\n"
-        f"  Runtime: {result.runtime:.3f}s, Timeout: {result.timeout}"
+        f"  Output: {truncate(result.result)}\n"
+        f"  Error: {result.metadata.get('error', '') or 'None'}\n"
+        f"  Runtime: {result.metadata.get('runtime', 0):.3f}s, Timeout: {result.metadata.get('timeout', False)}"
     )
 
 
@@ -415,7 +415,7 @@ class Tool(RLEnvironment):
     # -- RLEnvironment defaults for stateless tools --
 
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
-        return StepResult(observation=""), [get_openai_tool_definitions(self)]
+        return StepResult(result=""), [get_openai_tool_definitions(self)]
 
     def state(self) -> State:
         return State()

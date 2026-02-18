@@ -60,7 +60,7 @@ class CounterEnv(RLEnvironment):
             self._target = int(task_id)
 
         return (
-            StepResult(observation=f"Counter is at {self._current}. Reach {self._target} to win."),
+            StepResult(result=f"Counter is at {self._current}. Reach {self._target} to win."),
             self._tool_definitions,
         )
 
@@ -69,23 +69,21 @@ class CounterEnv(RLEnvironment):
 
         if call.name == "increment":
             self._current += 1
-            return StepResult(observation=f"Counter is now {self._current}.", reward=-0.1)
+            return StepResult(result=f"Counter is now {self._current}.", reward=-0.1)
         elif call.name == "decrement":
             self._current -= 1
-            return StepResult(observation=f"Counter is now {self._current}.", reward=-0.1)
+            return StepResult(result=f"Counter is now {self._current}.", reward=-0.1)
         elif call.name == "submit":
             self._done = True
             if self._current == self._target:
                 return StepResult(
-                    observation=f"Success! Counter is {self._current}, target was {self._target}.",
-                    reward=1.0,
-                    done=True,
+                    result=f"Success! Counter is {self._current}, target was {self._target}.", reward=1.0, done=True
                 )
             return StepResult(
-                observation=f"Wrong! Counter is {self._current}, target was {self._target}.", reward=-0.5, done=True
+                result=f"Wrong! Counter is {self._current}, target was {self._target}.", reward=-0.5, done=True
             )
         else:
-            return StepResult(observation=f"Unknown action: {call.name}. Available: increment, decrement, submit.")
+            return StepResult(result=f"Unknown action: {call.name}. Available: increment, decrement, submit.")
 
     def get_metrics(self) -> dict[str, float]:
         return {
@@ -140,7 +138,7 @@ class GuessNumberEnv(RLEnvironment):
         self._done = False
 
         return (
-            StepResult(observation=f"Guess a number between {self._min_val} and {self._max_val}."),
+            StepResult(result=f"Guess a number between {self._min_val} and {self._max_val}."),
             self._tool_definitions,
         )
 
@@ -148,14 +146,14 @@ class GuessNumberEnv(RLEnvironment):
         self._guesses += 1
 
         if call.name != "guess":
-            return StepResult(observation=f"Unknown action: {call.name}. Use 'guess' with a number.")
+            return StepResult(result=f"Unknown action: {call.name}. Use 'guess' with a number.")
 
         guess = call.args.get("number", 0)
         if not isinstance(guess, int):
             try:
                 guess = int(guess)
             except (ValueError, TypeError):
-                return StepResult(observation=f"Invalid guess: {guess}. Please provide an integer.", reward=-0.1)
+                return StepResult(result=f"Invalid guess: {guess}. Please provide an integer.", reward=-0.1)
 
         distance = abs(guess - self._secret)
         max_distance = self._max_val - self._min_val
@@ -164,15 +162,15 @@ class GuessNumberEnv(RLEnvironment):
         if guess == self._secret:
             self._done = True
             return StepResult(
-                observation=f"Correct! The number was {self._secret}. You got it in {self._guesses} guesses!",
+                result=f"Correct! The number was {self._secret}. You got it in {self._guesses} guesses!",
                 reward=1.0,
                 done=True,
                 metadata={"guesses": self._guesses},
             )
         elif guess < self._secret:
-            return StepResult(observation=f"{guess} is too low. Try higher.", reward=closeness_reward)
+            return StepResult(result=f"{guess} is too low. Try higher.", reward=closeness_reward)
         else:
-            return StepResult(observation=f"{guess} is too high. Try lower.", reward=closeness_reward)
+            return StepResult(result=f"{guess} is too high. Try lower.", reward=closeness_reward)
 
     def get_metrics(self) -> dict[str, float]:
         return {"guesses": float(self._guesses)}

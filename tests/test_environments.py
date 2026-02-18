@@ -20,14 +20,14 @@ class TestEnvironments(unittest.TestCase):
         env = env_cls(**kwargs)
         result, tools = asyncio.run(env.reset(task_id="3"))
         self.assertIsInstance(result, StepResult)
-        self.assertTrue(result.observation)
+        self.assertTrue(result.result)
         self.assertGreater(len(tools), 0)
 
         for _ in range(20):
             action = _random_env_call(tools)
             result = asyncio.run(env.step(action))
             self.assertIsInstance(result, StepResult)
-            self.assertIsInstance(result.observation, str)
+            self.assertIsInstance(result.result, str)
             if result.done:
                 result, tools = asyncio.run(env.reset(task_id="3"))
 

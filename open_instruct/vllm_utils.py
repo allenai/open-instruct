@@ -955,19 +955,20 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             except (TypeError, ValueError) as e:
                 error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
                 logger.warning(error_msg)
-                tool_result = StepResult(observation="", error=error_msg, runtime=0.0)
+                tool_result = StepResult(result="", metadata={"error": error_msg})
 
-            timeout = timeout or tool_result.timeout
-            tool_error += tool_result.error or ""
-            tool_output += tool_result.observation
-            tool_runtime += tool_result.runtime
-            outputs.append(tool_result.observation)
+            meta = tool_result.metadata
+            timeout = timeout or meta.get("timeout", False)
+            tool_error += meta.get("error", "")
+            tool_output += tool_result.result
+            tool_runtime += meta.get("runtime", 0.0)
+            outputs.append(tool_result.result)
 
             tool_call_stats.append(
                 ToolCallStats(
                     tool_name=tool_call.name,
-                    success=not tool_result.error and not tool_result.timeout,
-                    runtime=tool_result.runtime,
+                    success=not meta.get("error") and not meta.get("timeout", False),
+                    runtime=meta.get("runtime", 0.0),
                 )
             )
 

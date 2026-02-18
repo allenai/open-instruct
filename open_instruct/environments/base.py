@@ -18,12 +18,8 @@ class EnvCall(Action):
 class StepResult(Observation):
     """Result from an environment step."""
 
-    observation: str = ""
+    result: str = ""
     reward: float = 0.0
-    called: bool = True
-    error: str = ""
-    timeout: bool = False
-    runtime: float = 0.0
 
 
 class RLEnvironment(ABC):
