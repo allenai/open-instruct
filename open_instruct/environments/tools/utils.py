@@ -423,18 +423,23 @@ class Tool(RLEnvironment):
     # -- Utilities for tool implementations --
 
     def get_observation_role(self) -> str:
+        """Return the role to use for observations in conversation."""
         return self.observation_role
 
     def get_call_name(self) -> str:
+        """Get the tool's call name (used when function calling)."""
         return self.call_name
 
     def get_description(self) -> str:
+        """Get the tool's description."""
         return self.description
 
     def get_parameters(self) -> dict[str, Any]:
+        """Get the tool's parameter schema."""
         return self.parameters
 
     def get_openai_tool_definitions(self) -> dict[str, Any]:
+        """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
 
 
