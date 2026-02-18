@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -12,8 +11,7 @@ import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.environments.base import EnvironmentState, RLEnvironment, StepResult
-from open_instruct.environments.base import EnvCall, EnvOutput
+from open_instruct.environments.base import EnvCall, EnvironmentState, RLEnvironment, StepResult
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -108,14 +106,14 @@ def truncate(text: str, max_length: int = 500) -> str:
     return text[:max_length] + f"... [{len(text) - max_length} more chars]"
 
 
-def log_env_call(tool_name: str, input_text: str, output: EnvOutput) -> None:
+def log_env_call(tool_name: str, input_text: str, result: StepResult) -> None:
     """Log a tool call at DEBUG level with truncated input/output."""
     logger.debug(
         f"Tool '{tool_name}' called:\n"
         f"  Input: {truncate(input_text)}\n"
-        f"  Output: {truncate(output.output)}\n"
-        f"  Error: {output.error or 'None'}\n"
-        f"  Runtime: {output.runtime:.3f}s, Timeout: {output.timeout}"
+        f"  Output: {truncate(result.observation)}\n"
+        f"  Error: {result.error or 'None'}\n"
+        f"  Runtime: {result.runtime:.3f}s, Timeout: {result.timeout}"
     )
 
 
@@ -385,7 +383,7 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
     """
     coerced = dict(kwargs)
     for name, value in kwargs.items():
-        if name not in properties:
+        if value is None or name not in properties:
             continue
         expected_type = properties[name].get("type")
         if expected_type not in _COERCERS:
@@ -397,8 +395,8 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
 class Tool(RLEnvironment):
     """Base class for stateless tools (e.g. code execution, web search).
 
-    Tools are a subset of RLEnvironment with trivial reset/state and a
-    single-action step that delegates to _execute().
+    Subclasses implement step() directly and return StepResult.
+    Use self.coerce_args(call.args) to coerce model args to the expected types.
     """
 
     config_name: str
@@ -412,62 +410,34 @@ class Tool(RLEnvironment):
     observation_role: str = "tool"
     """Role for observations/feedback in conversation."""
 
-    # -- RLEnvironment interface (default implementations for stateless tools) --
+    # -- RLEnvironment defaults for stateless tools --
 
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
         return StepResult(observation=""), [get_openai_tool_definitions(self)]
 
-    async def step(self, tool_call: EnvCall) -> StepResult:
-        result = await self.safe_execute(**tool_call.args)
-        return StepResult(
-            observation=result.output,
-            reward=0.0,
-            done=False,
-            info={"error": result.error, "timeout": result.timeout, "runtime": result.runtime},
-        )
-
     def state(self) -> EnvironmentState:
         return EnvironmentState(done=False)
 
-    # -- Tool-specific interface --
+    # -- Utilities for tool implementations --
+
+    def coerce_args(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Coerce args dict to match the parameter schema types."""
+        return coerce_args(self.parameters.get("properties", {}), args)
 
     def get_observation_role(self) -> str:
-        """Return the role to use for observations in conversation."""
         return self.observation_role
 
     def get_call_name(self) -> str:
-        """Get the tool's call name (used when function calling)."""
         return self.call_name
 
     def get_description(self) -> str:
-        """Get the tool's description."""
         return self.description
 
     def get_parameters(self) -> dict[str, Any]:
-        """Get the tool's parameter schema."""
         return self.parameters
 
     def get_openai_tool_definitions(self) -> dict[str, Any]:
-        """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
-
-    @abstractmethod
-    async def _execute(self, **kwargs: Any) -> EnvOutput:
-        """Execute the tool. Must be implemented by subclasses."""
-        raise NotImplementedError
-
-    async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> EnvOutput:
-        """Coerce arguments to match parameter schema, then call _execute."""
-        try:
-            properties = self.parameters.get("properties", {})
-            coerced_kwargs = coerce_args(properties, kwargs)
-        except (ValueError, TypeError) as e:
-            return EnvOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
-        return await self._execute(*args, **coerced_kwargs)
-
-    async def __call__(self, *args: Any, **kwargs: Any) -> EnvOutput:
-        """Alias for safe_execute, useful for inference scripts."""
-        return await self.safe_execute(*args, **kwargs)
 
 
 @dataclass

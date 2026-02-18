@@ -17,7 +17,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
-from open_instruct.environments.base import EnvOutput
+from open_instruct.environments.base import EnvCall, StepResult
 from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, log_env_call
 
 logger = logger_utils.setup_logger(__name__)
@@ -113,8 +113,9 @@ class GenericMCPTool(Tool):
         """Return the tool's parameter schema from MCP."""
         return self._tool_info.get("input_schema", {"type": "object", "properties": {}})
 
-    async def _execute(self, **kwargs: Any) -> EnvOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Call the MCP tool with retry logic."""
+        kwargs = self.coerce_args(call.args)
         if self.tool_name is None:
             raise ValueError("tool_name must be set before execute")
         start_time = time.time()
@@ -130,17 +131,14 @@ class GenericMCPTool(Tool):
 
                 output = _extract_mcp_result(raw_result)
 
-                result = EnvOutput(
-                    output=output, called=True, error="", timeout=False, runtime=time.time() - start_time
-                )
+                result = StepResult(observation=output, runtime=time.time() - start_time)
                 log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
             except asyncio.TimeoutError:
-                result = EnvOutput(
-                    output="",
+                result = StepResult(
+                    observation="",
                     error=f"Timeout after {self.timeout} seconds",
-                    called=True,
                     timeout=True,
                     runtime=time.time() - start_time,
                 )
@@ -159,17 +157,15 @@ class GenericMCPTool(Tool):
                     continue
 
             except Exception as e:
-                result = EnvOutput(
-                    output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time
+                result = StepResult(
+                    observation="", error=str(e), runtime=time.time() - start_time
                 )
                 log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
-        result = EnvOutput(
-            output="",
+        result = StepResult(
+            observation="",
             error=last_error or "Unknown error after retries",
-            called=True,
-            timeout=False,
             runtime=time.time() - start_time,
         )
         log_env_call(self.tool_name, str(kwargs), result)

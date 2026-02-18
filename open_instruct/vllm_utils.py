@@ -61,7 +61,7 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
-from open_instruct.environments.base import EnvOutput
+from open_instruct.environments.base import StepResult
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
@@ -951,20 +951,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 continue
 
             try:
-                tool_result: EnvOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
-                    **tool_call.args
-                )
+                tool_result: StepResult = await actor.tool_actor_map[tool_call.name].step.remote(tool_call)
             except TypeError as e:
-                # This can happen if the model generated a tool call with missing/wrong arguments
                 error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
                 logger.warning(error_msg)
-                tool_result = EnvOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
+                tool_result = StepResult(observation="", error=error_msg, runtime=0.0)
 
             timeout = timeout or tool_result.timeout
             tool_error += tool_result.error or ""
-            tool_output += tool_result.output
+            tool_output += tool_result.observation
             tool_runtime += tool_result.runtime
-            outputs.append(tool_result.output)
+            outputs.append(tool_result.observation)
 
             tool_call_stats.append(
                 ToolCallStats(

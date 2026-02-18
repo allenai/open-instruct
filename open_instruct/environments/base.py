@@ -15,26 +15,16 @@ class EnvCall:
 
 
 @dataclass
-class EnvOutput:
-    """Output from a tool/environment execution."""
-
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
-    reward: float | None = None
-    done: bool = False
-    info: dict = field(default_factory=dict)
-
-
-@dataclass
 class StepResult:
     """Result from an environment step."""
 
     observation: str
     reward: float = 0.0
     done: bool = False
+    called: bool = True
+    error: str = ""
+    timeout: bool = False
+    runtime: float = 0.0
     info: dict[str, Any] = field(default_factory=dict)
 
 
@@ -87,7 +77,7 @@ class RLEnvironment(ABC):
         pass
 
     @abstractmethod
-    async def step(self, tool_call: EnvCall) -> StepResult:
+    async def step(self, call: EnvCall) -> StepResult:
         """Execute action, return observation, reward, done."""
         pass
 

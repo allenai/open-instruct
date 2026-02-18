@@ -1,10 +1,9 @@
 """RL Environments for open-instruct."""
 
-from .base import EnvCall, EnvOutput, EnvironmentState, RLEnvironment, StepResult
+from .base import EnvCall, EnvironmentState, RLEnvironment, StepResult
 
 __all__ = [
     "EnvCall",
-    "EnvOutput",
     "EnvironmentState",
     "RLEnvironment",
     "StepResult",
