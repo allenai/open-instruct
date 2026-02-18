@@ -1,42 +1,37 @@
 """Base classes for RL environments."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from typing import Any
 
+from openenv.core.env_server.types import Action, Observation, State
+from pydantic import Field
 
-@dataclass
-class EnvCall:
+
+class EnvCall(Action):
     """Parsed action call from model output."""
 
     id: str
     name: str
-    args: dict[str, Any]
+    args: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass
-class StepResult:
+class StepResult(Observation):
     """Result from an environment step."""
 
-    observation: str
+    observation: str = ""
     reward: float = 0.0
-    done: bool = False
     called: bool = True
     error: str = ""
     timeout: bool = False
     runtime: float = 0.0
-    info: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class EnvironmentState:
+class EnvironmentState(State):
     """Accumulated state from an environment rollout."""
 
-    episode_id: str | None = None
-    rewards: list[float] = field(default_factory=list)
-    step_count: int = 0
+    rewards: list[float] = Field(default_factory=list)
     done: bool = False
-    info: dict[str, Any] = field(default_factory=dict)
+    info: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def final_reward(self) -> float:
