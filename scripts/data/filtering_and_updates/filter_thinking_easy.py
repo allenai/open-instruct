@@ -22,6 +22,7 @@ from typing import List, Literal
 import click
 import hdbscan
 import numpy as np
+import tqdm
 from datasets import Dataset, load_dataset
 from sentence_transformers import SentenceTransformer
 
@@ -129,7 +130,7 @@ def embed_dataset(
         "num_clusters": [],
     }
 
-    for idx in range(len(batch[messages_field])):
+    for idx in tqdm.trange(len(batch[messages_field])):
         assistant_messages = [msg for msg in batch[messages_field][idx] if msg["role"] == "assistant"]
         thinking_traces = [
             parsed for msg in assistant_messages if len(parsed := ThinkMessage.from_message(msg["content"])) > 0
