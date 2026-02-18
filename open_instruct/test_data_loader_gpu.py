@@ -13,7 +13,8 @@ from open_instruct import tensor_utils
 def single_example_collator(examples: list[dict]) -> dict:
     """Collator for batch_size=1 that extracts the single example."""
     assert len(examples) == 1
-    return examples[0]
+    example = examples[0]
+    return example | {"index": torch.tensor([example["index"]])}
 
 
 def batch_collator(examples: list[dict]) -> dict:
