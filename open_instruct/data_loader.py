@@ -43,7 +43,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
-from open_instruct.environments.tools.utils import ToolStatistics
+from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
@@ -1186,7 +1186,7 @@ class DataPreparationActor:
                     **batch_metrics_prefixed,
                 }
 
-                tool_stats = ToolStatistics(tool_names=self.tool_names)
+                tool_stats = EnvStatistics(tool_names=self.tool_names)
                 excess_calls = result.request_info.excess_tool_calls or [
                     {} for _ in range(len(result.request_info.tool_call_stats))
                 ]

@@ -28,9 +28,9 @@ from open_instruct.environments.tools.tools import (
 )
 from open_instruct.environments.tools.utils import (
     APIResponse,
-    ParsedToolConfig,
-    ToolsConfig,
-    ToolStatistics,
+    ParsedEnvConfig,
+    EnvsConfig,
+    EnvStatistics,
     coerce_args,
     get_openai_tool_definitions,
     make_api_request,
@@ -1283,12 +1283,12 @@ class TestCrawl4AIBrowseToolConfig(unittest.TestCase):
         self.assertEqual(Crawl4AIBrowseToolConfig.tool_class, Crawl4AIBrowseTool)
 
 
-class TestToolStatistics(unittest.TestCase):
-    """Tests for ToolStatistics class."""
+class TestEnvStatistics(unittest.TestCase):
+    """Tests for EnvStatistics class."""
 
     def test_add_rollout_without_excess_calls(self):
         """Test add_rollout works without excess_tool_calls."""
-        stats = ToolStatistics()
+        stats = EnvStatistics()
         stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)])
         stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=False, runtime=0.3)])
 
@@ -1300,7 +1300,7 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_add_rollout_with_excess_calls(self):
         """Test add_rollout correctly tracks excess_tool_calls."""
-        stats = ToolStatistics()
+        stats = EnvStatistics()
         stats.add_rollout(
             [data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)],
             excess_tool_calls={"python": 2, "search": 1},
@@ -1314,7 +1314,7 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_compute_metrics_includes_excess_calls(self):
         """Test compute_metrics includes avg_excess_calls_per_rollout."""
-        stats = ToolStatistics()
+        stats = EnvStatistics()
         # Rollout 1: 1 successful call, 2 excess python calls
         stats.add_rollout(
             [data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)], excess_tool_calls={"python": 2}
@@ -1332,7 +1332,7 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_compute_metrics_multiple_tools_with_excess(self):
         """Test compute_metrics with multiple tools having excess calls."""
-        stats = ToolStatistics()
+        stats = EnvStatistics()
         stats.add_rollout(
             [
                 data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5),
@@ -1355,7 +1355,7 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_compute_metrics_no_excess_calls(self):
         """Test compute_metrics when no excess calls occurred."""
-        stats = ToolStatistics()
+        stats = EnvStatistics()
         stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)])
         stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.3)])
 
@@ -1365,12 +1365,12 @@ class TestToolStatistics(unittest.TestCase):
         self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 0.0)
 
 
-class TestToolsConfig(unittest.TestCase):
-    """Tests for ToolsConfig dataclass."""
+class TestEnvsConfig(unittest.TestCase):
+    """Tests for EnvsConfig dataclass."""
 
     def test_no_tools_configured(self):
-        """Test ToolsConfig works when no tools are configured."""
-        config = ToolsConfig()
+        """Test EnvsConfig works when no tools are configured."""
+        config = EnvsConfig()
         self.assertEqual(config.tools, [])
         self.assertEqual(config.tool_configs, [])
         self.assertEqual(config._parsed_tools, [])
@@ -1378,53 +1378,53 @@ class TestToolsConfig(unittest.TestCase):
         self.assertFalse(config.enabled)
 
     def test_tools_with_default_configs(self):
-        """Test ToolsConfig sets default tool_configs when not provided."""
-        config = ToolsConfig(tools=["python", "search"])
+        """Test EnvsConfig sets default tool_configs when not provided."""
+        config = EnvsConfig(tools=["python", "search"])
         self.assertEqual(config.tools, ["python", "search"])
         self.assertEqual(config.tool_configs, ["{}", "{}"])
         self.assertEqual(
             config._parsed_tools,
             [
-                ParsedToolConfig(name="python", call_name="python", config={}),
-                ParsedToolConfig(name="search", call_name="search", config={}),
+                ParsedEnvConfig(name="python", call_name="python", config={}),
+                ParsedEnvConfig(name="search", call_name="search", config={}),
             ],
         )
         self.assertEqual(config.tool_call_names, ["python", "search"])
         self.assertTrue(config.enabled)
 
     def test_tools_with_custom_configs(self):
-        """Test ToolsConfig parses custom tool_configs from JSON strings."""
-        config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
+        """Test EnvsConfig parses custom tool_configs from JSON strings."""
+        config = EnvsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
         self.assertEqual(config.tool_configs, ['{"timeout": 10}', '{"num_results": 5}'])
         self.assertEqual(
             config._parsed_tools,
             [
-                ParsedToolConfig(name="python", call_name="python", config={"timeout": 10}),
-                ParsedToolConfig(name="search", call_name="search", config={"num_results": 5}),
+                ParsedEnvConfig(name="python", call_name="python", config={"timeout": 10}),
+                ParsedEnvConfig(name="search", call_name="search", config={"num_results": 5}),
             ],
         )
 
     def test_tools_with_custom_call_names(self):
-        """Test ToolsConfig allows custom tool_call_names."""
-        config = ToolsConfig(tools=["python", "search"], tool_call_names=["code", "web_search"])
+        """Test EnvsConfig allows custom tool_call_names."""
+        config = EnvsConfig(tools=["python", "search"], tool_call_names=["code", "web_search"])
         self.assertEqual(config.tool_call_names, ["code", "web_search"])
         self.assertEqual(config._parsed_tools[0].call_name, "code")
         self.assertEqual(config._parsed_tools[1].call_name, "web_search")
 
     def test_mismatched_tool_configs_length_raises(self):
-        """Test ToolsConfig raises when tool_configs length doesn't match tools."""
+        """Test EnvsConfig raises when tool_configs length doesn't match tools."""
         with self.assertRaisesRegex(ValueError, "tool_configs must have same length as tools"):
-            ToolsConfig(tools=["python", "search"], tool_configs=["{}"])
+            EnvsConfig(tools=["python", "search"], tool_configs=["{}"])
 
     def test_mismatched_tool_call_names_length_raises(self):
-        """Test ToolsConfig raises when tool_call_names length doesn't match tools."""
+        """Test EnvsConfig raises when tool_call_names length doesn't match tools."""
         with self.assertRaisesRegex(ValueError, "tool_call_names must have same length as tools"):
-            ToolsConfig(tools=["python", "search"], tool_call_names=["code"])
+            EnvsConfig(tools=["python", "search"], tool_call_names=["code"])
 
     def test_invalid_tool_config_json_raises(self):
-        """Test ToolsConfig raises on invalid JSON in tool_configs."""
+        """Test EnvsConfig raises on invalid JSON in tool_configs."""
         with self.assertRaisesRegex(ValueError, "Invalid tool_config for tool python"):
-            ToolsConfig(tools=["python"], tool_configs=["not valid json"])
+            EnvsConfig(tools=["python"], tool_configs=["not valid json"])
 
 
 def _run_with_mock_responses(responses: list, **request_kwargs):

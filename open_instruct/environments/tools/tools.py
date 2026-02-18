@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 from open_instruct import logger_utils
 from open_instruct.environments.base import EnvOutput
 from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseToolConfig, Tool, log_tool_call, make_api_request
+from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, log_env_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -65,7 +65,7 @@ class PythonCodeTool(Tool):
                 timeout=False,
                 runtime=0,
             )
-            log_tool_call(self.call_name, code or "", result)
+            log_env_call(self.call_name, code or "", result)
             return result
 
         start_time = time.time()
@@ -89,12 +89,12 @@ class PythonCodeTool(Tool):
                 output=full_output, called=True, error=error, timeout=False, runtime=time.time() - start_time
             )
 
-        log_tool_call(self.call_name, code, result)
+        log_env_call(self.call_name, code, result)
         return result
 
 
 @dataclass
-class PythonCodeToolConfig(BaseToolConfig):
+class PythonCodeToolConfig(BaseEnvConfig):
     """Configuration for the Python code execution tool."""
 
     tool_class: ClassVar[type[Tool]] = PythonCodeTool
@@ -135,7 +135,7 @@ class JinaBrowseTool(Tool):
             result = EnvOutput(
                 output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
             )
-            log_tool_call(self.call_name, url or "", result)
+            log_env_call(self.call_name, url or "", result)
             return result
 
         start_time = time.time()
@@ -158,7 +158,7 @@ class JinaBrowseTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            log_tool_call(self.call_name, url, result)
+            log_env_call(self.call_name, url, result)
             return result
 
         # Extract content from Jina response
@@ -180,12 +180,12 @@ class JinaBrowseTool(Tool):
         result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
-        log_tool_call(self.call_name, url, result)
+        log_env_call(self.call_name, url, result)
         return result
 
 
 @dataclass
-class JinaBrowseToolConfig(BaseToolConfig):
+class JinaBrowseToolConfig(BaseEnvConfig):
     """Configuration for the Jina Reader browse tool."""
 
     tool_class: ClassVar[type[Tool]] = JinaBrowseTool
@@ -223,7 +223,7 @@ class S2SearchTool(Tool):
             result = EnvOutput(
                 output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
-            log_tool_call(self.call_name, query or "", result)
+            log_env_call(self.call_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -243,7 +243,7 @@ class S2SearchTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            log_tool_call(self.call_name, query, result)
+            log_env_call(self.call_name, query, result)
             return result
 
         # Extract snippets from response
@@ -256,12 +256,12 @@ class S2SearchTool(Tool):
         result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
-        log_tool_call(self.call_name, query, result)
+        log_env_call(self.call_name, query, result)
         return result
 
 
 @dataclass
-class S2SearchToolConfig(BaseToolConfig):
+class S2SearchToolConfig(BaseEnvConfig):
     """Configuration for the Semantic Scholar search tool."""
 
     tool_class: ClassVar[type[Tool]] = S2SearchTool
@@ -300,7 +300,7 @@ class SerperSearchTool(Tool):
             result = EnvOutput(
                 output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
-            log_tool_call(self.call_name, query or "", result)
+            log_env_call(self.call_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -319,7 +319,7 @@ class SerperSearchTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            log_tool_call(self.call_name, query, result)
+            log_env_call(self.call_name, query, result)
             return result
 
         # Process the response data
@@ -348,12 +348,12 @@ class SerperSearchTool(Tool):
         result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
-        log_tool_call(self.call_name, query, result)
+        log_env_call(self.call_name, query, result)
         return result
 
 
 @dataclass
-class SerperSearchToolConfig(BaseToolConfig):
+class SerperSearchToolConfig(BaseEnvConfig):
     """Configuration for the Serper (Google Search) tool."""
 
     tool_class: ClassVar[type[Tool]] = SerperSearchTool
@@ -454,7 +454,7 @@ class Crawl4AIBrowseTool(Tool):
             result = EnvOutput(
                 output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
             )
-            log_tool_call(self.call_name, url or "", result)
+            log_env_call(self.call_name, url or "", result)
             return result
 
         start_time = time.time()
@@ -494,7 +494,7 @@ class Crawl4AIBrowseTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            log_tool_call(self.call_name, url, result)
+            log_env_call(self.call_name, url, result)
             return result
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
@@ -502,7 +502,7 @@ class Crawl4AIBrowseTool(Tool):
         result = EnvOutput(
             output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time
         )
-        log_tool_call(self.call_name, url, result)
+        log_env_call(self.call_name, url, result)
         return result
 
 
@@ -601,12 +601,12 @@ class DrAgentMCPTool(Tool):
                 timeout=any_timeout,
                 runtime=time.time() - start_time,
             )
-        log_tool_call(self.call_name, text, result)
+        log_env_call(self.call_name, text, result)
         return result
 
 
 @dataclass
-class Crawl4AIBrowseToolConfig(BaseToolConfig):
+class Crawl4AIBrowseToolConfig(BaseEnvConfig):
     """Configuration for the Crawl4AI browse tool."""
 
     tool_class: ClassVar[type[Tool]] = Crawl4AIBrowseTool
@@ -624,7 +624,7 @@ class Crawl4AIBrowseToolConfig(BaseToolConfig):
 
 
 @dataclass
-class DrAgentMCPToolConfig(BaseToolConfig):
+class DrAgentMCPToolConfig(BaseEnvConfig):
     """Config for MCP tools. Requires: uv sync --extra dr-tulu"""
 
     tool_class: ClassVar[type[Tool]] = DrAgentMCPTool
@@ -640,7 +640,7 @@ class DrAgentMCPToolConfig(BaseToolConfig):
 
 
 # Tool Registry: Maps tool names to their config classes
-TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
+TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,

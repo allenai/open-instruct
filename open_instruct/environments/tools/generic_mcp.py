@@ -18,7 +18,7 @@ from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
 from open_instruct.environments.base import EnvOutput
-from open_instruct.environments.tools.utils import BaseToolConfig, Tool, log_tool_call
+from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, log_env_call
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -133,7 +133,7 @@ class GenericMCPTool(Tool):
                 result = EnvOutput(
                     output=output, called=True, error="", timeout=False, runtime=time.time() - start_time
                 )
-                log_tool_call(self.tool_name, str(kwargs), result)
+                log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
             except asyncio.TimeoutError:
@@ -144,7 +144,7 @@ class GenericMCPTool(Tool):
                     timeout=True,
                     runtime=time.time() - start_time,
                 )
-                log_tool_call(self.tool_name, str(kwargs), result)
+                log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
             except retryable_exceptions as e:
@@ -162,7 +162,7 @@ class GenericMCPTool(Tool):
                 result = EnvOutput(
                     output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time
                 )
-                log_tool_call(self.tool_name, str(kwargs), result)
+                log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
         result = EnvOutput(
@@ -172,12 +172,12 @@ class GenericMCPTool(Tool):
             timeout=False,
             runtime=time.time() - start_time,
         )
-        log_tool_call(self.tool_name, str(kwargs), result)
+        log_env_call(self.tool_name, str(kwargs), result)
         return result
 
 
 @dataclass
-class GenericMCPToolConfig(BaseToolConfig):
+class GenericMCPToolConfig(BaseEnvConfig):
     """Configuration for generic MCP tools.
 
     Connects to an MCP server and exposes its tools. Use `tool_name` to specify

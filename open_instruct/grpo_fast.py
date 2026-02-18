@@ -103,7 +103,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
+from open_instruct.environments.tools.utils import BaseEnvConfig, ParsedEnvConfig, EnvsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1011,7 +1011,7 @@ def validate_configs(
 def setup_runtime_variables(
     args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    tools_config: ToolsConfig,
+    tools_config: EnvsConfig,
 ) -> grpo_utils.ExperimentConfig:
     """Set up runtime variables for the experiment."""
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
@@ -1163,7 +1163,7 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
+def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
@@ -1194,7 +1194,7 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
 
         # Collect (config, call_name, tool_class) tuples to process
         # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
-        configs_to_create: list[tuple[BaseToolConfig, str, type]] = []
+        configs_to_create: list[tuple[BaseEnvConfig, str, type]] = []
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
             logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
@@ -1238,7 +1238,7 @@ def create_model_and_optimizer(
     generation_config,
     data_prep_actor_state: dict | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
-    tools_config: ToolsConfig | None = None,
+    tools_config: EnvsConfig | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -2003,7 +2003,7 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
+def initialize_tools(tools_config: EnvsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
     """Initialize tool actors and get tool definitions and stop sequences.
 
     Args:
@@ -2037,7 +2037,7 @@ def main(
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
-    tools_config: ToolsConfig,
+    tools_config: EnvsConfig,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
@@ -2221,7 +2221,7 @@ if __name__ == "__main__":
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
-            ToolsConfig,
+            EnvsConfig,
         )
     )
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
@@ -2232,6 +2232,6 @@ if __name__ == "__main__":
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
-    assert isinstance(tools_config, ToolsConfig)
+    assert isinstance(tools_config, EnvsConfig)
 
     main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)

@@ -19,7 +19,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
-class ParsedToolConfig:
+class ParsedEnvConfig:
     """A parsed tool configuration combining name, call name, and config."""
 
     name: str
@@ -33,7 +33,7 @@ class ParsedToolConfig:
 
 
 @dataclass
-class ToolsConfig:
+class EnvsConfig:
     """Configuration for tools used during generation."""
 
     tools: list[str] = field(default_factory=list)
@@ -58,7 +58,7 @@ class ToolsConfig:
     pass_tools_to_chat_template: bool = True
     """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
 
-    _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
+    _parsed_tools: list[ParsedEnvConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
@@ -93,7 +93,7 @@ class ToolsConfig:
                 config = json.loads(config_str)
             except Exception as e:
                 raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
-            self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
+            self._parsed_tools.append(ParsedEnvConfig(name=tool_name, call_name=call_name, config=config))
 
     @property
     def enabled(self) -> bool:
@@ -108,7 +108,7 @@ def truncate(text: str, max_length: int = 500) -> str:
     return text[:max_length] + f"... [{len(text) - max_length} more chars]"
 
 
-def log_tool_call(tool_name: str, input_text: str, output: EnvOutput) -> None:
+def log_env_call(tool_name: str, input_text: str, output: EnvOutput) -> None:
     """Log a tool call at DEBUG level with truncated input/output."""
     logger.debug(
         f"Tool '{tool_name}' called:\n"
@@ -119,7 +119,7 @@ def log_tool_call(tool_name: str, input_text: str, output: EnvOutput) -> None:
     )
 
 
-class ToolStatistics:
+class EnvStatistics:
     """Manages aggregated tool call statistics across rollouts.
 
     Provides methods to add rollout stats and compute per-tool and aggregate metrics.
@@ -471,7 +471,7 @@ class Tool(RLEnvironment):
 
 
 @dataclass
-class BaseToolConfig:
+class BaseEnvConfig:
     """Base configuration class for individual tools.
 
     Subclasses must also define a config, which is used also used to instantiate the tool itself.
