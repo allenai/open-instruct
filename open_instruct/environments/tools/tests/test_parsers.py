@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from parameterized import parameterized
 
-from open_instruct.tools.parsers import (
+from open_instruct.environments.tools.parsers import (
     VLLM_PARSERS,
     DRTuluToolParser,
     OpenInstructLegacyToolParser,
@@ -62,7 +62,7 @@ class TestOpenInstructLegacyToolParser(unittest.TestCase):
 
     def setUp(self):
         """Set up mock actors for each test."""
-        self.patcher = patch("open_instruct.tools.parsers.ray")
+        self.patcher = patch("open_instruct.environments.tools.parsers.ray")
         self.mock_ray = self.patcher.start()
         # Make ray.get return the value directly (simulating sync behavior)
         self.mock_ray.get.side_effect = lambda x: x
@@ -269,7 +269,7 @@ class TestDRTuluToolParser(unittest.TestCase):
 
     def setUp(self):
         """Set up mock actors for each test."""
-        self.patcher = patch("open_instruct.tools.parsers.ray")
+        self.patcher = patch("open_instruct.environments.tools.parsers.ray")
         self.mock_ray = self.patcher.start()
         self.mock_ray.get.side_effect = lambda x: x if not isinstance(x, list) else [v for v in x]
 
@@ -473,7 +473,7 @@ class TestCreateToolParser(unittest.TestCase):
 
     def setUp(self):
         """Set up mock actors for each test."""
-        self.patcher = patch("open_instruct.tools.parsers.ray")
+        self.patcher = patch("open_instruct.environments.tools.parsers.ray")
         self.mock_ray = self.patcher.start()
         self.mock_ray.get.side_effect = lambda x: x
         self.mock_ray.exceptions.RayActorError = Exception
@@ -504,7 +504,7 @@ class TestCreateToolParser(unittest.TestCase):
         mock_actor = create_mock_tool_actor("search")
         mock_tokenizer = MagicMock()
 
-        with patch("open_instruct.tools.parsers.import_class_from_string") as mock_import:
+        with patch("open_instruct.environments.tools.parsers.import_class_from_string") as mock_import:
             mock_import.return_value = MagicMock()
             parser = create_tool_parser(parser_type, tokenizer=mock_tokenizer, tool_actors=[mock_actor])
             self.assertIsInstance(parser, VllmToolParser)

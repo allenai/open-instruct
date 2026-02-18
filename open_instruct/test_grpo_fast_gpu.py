@@ -56,10 +56,10 @@ from transformers import AutoTokenizer
 
 import open_instruct.vllm_utils as vllm_utils_module
 from open_instruct.data_types import GenerationResult, PromptRequest
+from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.grpo_fast import create_tools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -82,7 +82,7 @@ class TestGeneration(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
-            cwd="open_instruct/tools/servers/python_server",
+            cwd="open_instruct/environments/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -167,7 +167,7 @@ class TestGeneration(TestGrpoFastBase):
         tool_actors = None
         if use_tools:
             tool_actors, _ = create_tools(
-                [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
+                [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
             )
         max_tool_calls = 5 if use_tools else None
 

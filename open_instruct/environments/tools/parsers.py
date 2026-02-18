@@ -23,8 +23,8 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
+from open_instruct.environments.base import EnvCall
 from open_instruct.logger_utils import setup_logger
-from open_instruct.tools.utils import ToolCall
 from open_instruct.utils import import_class_from_string
 
 logger = setup_logger(__name__)
@@ -37,7 +37,7 @@ class ToolParser(ABC):
     """Stop strings this parser relies on."""
 
     @abstractmethod
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model outputs."""
         pass
 
@@ -89,7 +89,7 @@ class OpenInstructLegacyToolParser(ToolParser):
             for tool_name in self.tool_names
         }
 
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[EnvCall]:
         # Collect all matches with their positions for proper ordering
         matches: list[tuple[int, str, str]] = []  # (position, tool_name, content)
         for tool_name, tool_regex in self.tool_regexes.items():
@@ -99,10 +99,10 @@ class OpenInstructLegacyToolParser(ToolParser):
         # Sort by position in text to preserve order of tool calls
         matches.sort(key=lambda x: x[0])
 
-        tool_calls: list[ToolCall] = []
+        tool_calls: list[EnvCall] = []
         for _, tool_name, tool_content in matches:
             param_name = self.tool_param_names.get(tool_name, "text")
-            tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
+            tool_calls.append(EnvCall(id="", name=tool_name, args={param_name: tool_content}))
         return tool_calls
 
     def _format_tool_output(self, tool_output: str) -> str:
@@ -151,16 +151,16 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore[arg-type]
 
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.
 
         Args:
             text: The model output text to parse.
 
         Returns:
-            List of ToolCall objects extracted from the text.
+            List of EnvCall objects extracted from the text.
         """
         request = self._make_request()
         result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
@@ -171,7 +171,9 @@ class VllmToolParser(ToolParser):
         tool_calls = []
         for call in result.tool_calls:
             try:
-                tool_calls.append(ToolCall(name=call.function.name, args=json.loads(call.function.arguments)))
+                tool_calls.append(
+                    EnvCall(id=call.id or "", name=call.function.name, args=json.loads(call.function.arguments))
+                )
             except json.JSONDecodeError as e:
                 # the model may have mungled the tool call somehow, catch the error here.
                 logger.warning(
@@ -290,10 +292,10 @@ class DRTuluToolParser(ToolParser):
         # Use dict.fromkeys to deduplicate while preserving order
         self.stop_sequences = list(dict.fromkeys(stop_strings)) if stop_strings else []
 
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[EnvCall]:
         for stop in self.stop_sequences:
             if stop in text:
-                return [ToolCall(name=self.tool_call_name, args={"text": text})]
+                return [EnvCall(id="", name=self.tool_call_name, args={"text": text})]
         return []
 
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:

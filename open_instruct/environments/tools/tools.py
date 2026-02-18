@@ -10,8 +10,9 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
-from open_instruct.tools.generic_mcp import GenericMCPToolConfig
-from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call, make_api_request
+from open_instruct.environments.base import EnvCall, StepResult
+from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
+from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, coerce_args, log_env_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -54,17 +55,15 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def _execute(self, code: str) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Execute Python code via the API."""
+        args = coerce_args(self.parameters, call.args)
+        code = args.get("code", "")
         if not code or not code.strip():
-            result = ToolOutput(
-                output="",
-                error="Empty code. Please provide some code to execute.",
-                called=True,
-                timeout=False,
-                runtime=0,
+            result = StepResult(
+                result="", metadata={"error": "Empty code. Please provide some code to execute.", "runtime": 0}
             )
-            log_tool_call(self.call_name, code or "", result)
+            log_env_call(self.call_name, code or "", result)
             return result
 
         start_time = time.time()
@@ -73,27 +72,26 @@ class PythonCodeTool(Tool):
         )
 
         if api_response.error:
-            result = ToolOutput(
-                output=api_response.error,
-                called=True,
-                error=api_response.error,
-                timeout=api_response.timed_out,
-                runtime=time.time() - start_time,
+            result = StepResult(
+                result=api_response.error,
+                metadata={
+                    "error": api_response.error,
+                    "timeout": api_response.timed_out,
+                    "runtime": time.time() - start_time,
+                },
             )
         else:
             output = api_response.data.get("output") or ""
             error = api_response.data.get("error") or ""
             full_output = output + ("\n" + error if error else "")
-            result = ToolOutput(
-                output=full_output, called=True, error=error, timeout=False, runtime=time.time() - start_time
-            )
+            result = StepResult(result=full_output, metadata={"error": error, "runtime": time.time() - start_time})
 
-        log_tool_call(self.call_name, code, result)
+        log_env_call(self.call_name, code, result)
         return result
 
 
 @dataclass
-class PythonCodeToolConfig(BaseToolConfig):
+class PythonCodeToolConfig(BaseEnvConfig):
     """Configuration for the Python code execution tool."""
 
     tool_class: ClassVar[type[Tool]] = PythonCodeTool
@@ -128,13 +126,15 @@ class JinaBrowseTool(Tool):
         if not self.api_key:
             raise ValueError("Missing JINA_API_KEY environment variable.")
 
-    async def _execute(self, url: str) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Fetch webpage content via Jina Reader API."""
+        args = coerce_args(self.parameters, call.args)
+        url = args.get("url", "")
         if not url or not url.strip():
-            result = ToolOutput(
-                output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
+            result = StepResult(
+                result="", metadata={"error": "Empty URL. Please provide a URL to fetch.", "runtime": 0}
             )
-            log_tool_call(self.call_name, url or "", result)
+            log_env_call(self.call_name, url or "", result)
             return result
 
         start_time = time.time()
@@ -150,14 +150,15 @@ class JinaBrowseTool(Tool):
         )
 
         if api_response.error:
-            result = ToolOutput(
-                output=api_response.error,
-                called=True,
-                error=api_response.error,
-                timeout=api_response.timed_out,
-                runtime=time.time() - start_time,
+            result = StepResult(
+                result=api_response.error,
+                metadata={
+                    "error": api_response.error,
+                    "timeout": api_response.timed_out,
+                    "runtime": time.time() - start_time,
+                },
             )
-            log_tool_call(self.call_name, url, result)
+            log_env_call(self.call_name, url, result)
             return result
 
         # Extract content from Jina response
@@ -176,13 +177,13 @@ class JinaBrowseTool(Tool):
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
         output = error if error else content
-        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        log_tool_call(self.call_name, url, result)
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, url, result)
         return result
 
 
 @dataclass
-class JinaBrowseToolConfig(BaseToolConfig):
+class JinaBrowseToolConfig(BaseEnvConfig):
     """Configuration for the Jina Reader browse tool."""
 
     tool_class: ClassVar[type[Tool]] = JinaBrowseTool
@@ -214,13 +215,15 @@ class S2SearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing S2_API_KEY environment variable.")
 
-    async def _execute(self, query: str) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Search Semantic Scholar for documents matching the query."""
+        args = coerce_args(self.parameters, call.args)
+        query = args.get("query", "")
         if not query or not query.strip():
-            result = ToolOutput(
-                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
+            result = StepResult(
+                result="", metadata={"error": "Empty query. Please provide a search query.", "runtime": 0}
             )
-            log_tool_call(self.call_name, query or "", result)
+            log_env_call(self.call_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -233,14 +236,15 @@ class S2SearchTool(Tool):
         )
 
         if api_response.error:
-            result = ToolOutput(
-                output=api_response.error,
-                called=True,
-                error=api_response.error,
-                timeout=api_response.timed_out,
-                runtime=time.time() - start_time,
+            result = StepResult(
+                result=api_response.error,
+                metadata={
+                    "error": api_response.error,
+                    "timeout": api_response.timed_out,
+                    "runtime": time.time() - start_time,
+                },
             )
-            log_tool_call(self.call_name, query, result)
+            log_env_call(self.call_name, query, result)
             return result
 
         # Extract snippets from response
@@ -250,13 +254,13 @@ class S2SearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n".join(snippets).strip() if snippets else error
 
-        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        log_tool_call(self.call_name, query, result)
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, query, result)
         return result
 
 
 @dataclass
-class S2SearchToolConfig(BaseToolConfig):
+class S2SearchToolConfig(BaseEnvConfig):
     """Configuration for the Semantic Scholar search tool."""
 
     tool_class: ClassVar[type[Tool]] = S2SearchTool
@@ -289,13 +293,15 @@ class SerperSearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing SERPER_API_KEY environment variable.")
 
-    async def _execute(self, query: str) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Search Google via Serper for documents matching the query."""
+        args = coerce_args(self.parameters, call.args)
+        query = args.get("query", "")
         if not query or not query.strip():
-            result = ToolOutput(
-                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
+            result = StepResult(
+                result="", metadata={"error": "Empty query. Please provide a search query.", "runtime": 0}
             )
-            log_tool_call(self.call_name, query or "", result)
+            log_env_call(self.call_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -307,14 +313,15 @@ class SerperSearchTool(Tool):
         )
 
         if api_response.error:
-            result = ToolOutput(
-                output=api_response.error,
-                called=True,
-                error=api_response.error,
-                timeout=api_response.timed_out,
-                runtime=time.time() - start_time,
+            result = StepResult(
+                result=api_response.error,
+                metadata={
+                    "error": api_response.error,
+                    "timeout": api_response.timed_out,
+                    "runtime": time.time() - start_time,
+                },
             )
-            log_tool_call(self.call_name, query, result)
+            log_env_call(self.call_name, query, result)
             return result
 
         # Process the response data
@@ -340,13 +347,13 @@ class SerperSearchTool(Tool):
         error = "" if snippets else "Query returned no results."
         output = "\n\n".join(snippets).strip() if snippets else error
 
-        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        log_tool_call(self.call_name, query, result)
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, query, result)
         return result
 
 
 @dataclass
-class SerperSearchToolConfig(BaseToolConfig):
+class SerperSearchToolConfig(BaseEnvConfig):
     """Configuration for the Serper (Google Search) tool."""
 
     tool_class: ClassVar[type[Tool]] = SerperSearchTool
@@ -441,13 +448,15 @@ class Crawl4AIBrowseTool(Tool):
         with open(blocklist_path, encoding="utf-8") as f:
             self.blocklist = [line.strip() for line in f if line.strip()]
 
-    async def _execute(self, url: str) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Fetch webpage content via Crawl4AI Docker API."""
+        args = coerce_args(self.parameters, call.args)
+        url = args.get("url", "")
         if not url or not url.strip():
-            result = ToolOutput(
-                output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
+            result = StepResult(
+                result="", metadata={"error": "Empty URL. Please provide a URL to fetch.", "runtime": 0}
             )
-            log_tool_call(self.call_name, url or "", result)
+            log_env_call(self.call_name, url or "", result)
             return result
 
         start_time = time.time()
@@ -480,20 +489,21 @@ class Crawl4AIBrowseTool(Tool):
         )
 
         if api_response.error:
-            result = ToolOutput(
-                output=api_response.error,
-                called=True,
-                error=api_response.error,
-                timeout=api_response.timed_out,
-                runtime=time.time() - start_time,
+            result = StepResult(
+                result=api_response.error,
+                metadata={
+                    "error": api_response.error,
+                    "timeout": api_response.timed_out,
+                    "runtime": time.time() - start_time,
+                },
             )
-            log_tool_call(self.call_name, url, result)
+            log_env_call(self.call_name, url, result)
             return result
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
         output = error if error else content
-        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        log_tool_call(self.call_name, url, result)
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, url, result)
         return result
 
 
@@ -557,9 +567,11 @@ class DrAgentMCPTool(Tool):
     def get_stop_strings(self) -> list[str]:
         return self.stop_strings
 
-    async def _execute(self, text: str) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
+        args = coerce_args(self.parameters, call.args)
+        text = args.get("text", "")
         if not text or not text.strip():
-            return ToolOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
+            return StepResult(result="", metadata={"error": "Empty input", "runtime": 0})
 
         start_time = time.time()
         outputs: list[str] = []
@@ -581,23 +593,25 @@ class DrAgentMCPTool(Tool):
                     errors.append(str(e))
 
         if not outputs:
-            result = ToolOutput(
-                output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time
+            result = StepResult(
+                result="",
+                metadata={"called": False, "error": "No tool calls found", "runtime": time.time() - start_time},
             )
         else:
-            result = ToolOutput(
-                output="\n".join(outputs),
-                called=True,
-                error="; ".join(errors) if errors else "",
-                timeout=any_timeout,
-                runtime=time.time() - start_time,
+            result = StepResult(
+                result="\n".join(outputs),
+                metadata={
+                    "error": "; ".join(errors) if errors else "",
+                    "timeout": any_timeout,
+                    "runtime": time.time() - start_time,
+                },
             )
-        log_tool_call(self.call_name, text, result)
+        log_env_call(self.call_name, text, result)
         return result
 
 
 @dataclass
-class Crawl4AIBrowseToolConfig(BaseToolConfig):
+class Crawl4AIBrowseToolConfig(BaseEnvConfig):
     """Configuration for the Crawl4AI browse tool."""
 
     tool_class: ClassVar[type[Tool]] = Crawl4AIBrowseTool
@@ -615,7 +629,7 @@ class Crawl4AIBrowseToolConfig(BaseToolConfig):
 
 
 @dataclass
-class DrAgentMCPToolConfig(BaseToolConfig):
+class DrAgentMCPToolConfig(BaseEnvConfig):
     """Config for MCP tools. Requires: uv sync --extra dr-tulu"""
 
     tool_class: ClassVar[type[Tool]] = DrAgentMCPTool
@@ -631,7 +645,7 @@ class DrAgentMCPToolConfig(BaseToolConfig):
 
 
 # Tool Registry: Maps tool names to their config classes
-TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
+TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,

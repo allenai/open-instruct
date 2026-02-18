@@ -16,7 +16,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WEATHER_SERVER_DIR="$REPO_ROOT/open_instruct/tools/servers/weather_mcp_server"
+WEATHER_SERVER_DIR="$REPO_ROOT/open_instruct/environments/tools/servers/weather_mcp_server"
 WEATHER_SERVER_PORT=8765
 WEATHER_SERVER_URL="http://localhost:$WEATHER_SERVER_PORT/mcp"
 WEATHER_SERVER_PID=""

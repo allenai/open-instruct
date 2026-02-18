@@ -11,7 +11,7 @@ from open_instruct.data_types import PromptRequest
 from open_instruct.utils import ModelDims
 
 
-class TestTruncateToolOutputTokens(unittest.TestCase):
+class TestTruncateEnvOutputTokens(unittest.TestCase):
     @parameterized.expand(
         [
             ("no_truncation", [1, 2, 3, 4, 5], 10, 5, 100, 50, [1, 2, 3, 4, 5], 0),

@@ -17,7 +17,8 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
-from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call
+from open_instruct.environments.base import EnvCall, StepResult
+from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, coerce_args, log_env_call
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -112,8 +113,9 @@ class GenericMCPTool(Tool):
         """Return the tool's parameter schema from MCP."""
         return self._tool_info.get("input_schema", {"type": "object", "properties": {}})
 
-    async def _execute(self, **kwargs: Any) -> ToolOutput:
+    async def step(self, call: EnvCall) -> StepResult:
         """Call the MCP tool with retry logic."""
+        kwargs = coerce_args(self.parameters, call.args)
         if self.tool_name is None:
             raise ValueError("tool_name must be set before execute")
         start_time = time.time()
@@ -129,21 +131,20 @@ class GenericMCPTool(Tool):
 
                 output = _extract_mcp_result(raw_result)
 
-                result = ToolOutput(
-                    output=output, called=True, error="", timeout=False, runtime=time.time() - start_time
-                )
-                log_tool_call(self.tool_name, str(kwargs), result)
+                result = StepResult(result=output, metadata={"runtime": time.time() - start_time})
+                log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
             except asyncio.TimeoutError:
-                result = ToolOutput(
-                    output="",
-                    error=f"Timeout after {self.timeout} seconds",
-                    called=True,
-                    timeout=True,
-                    runtime=time.time() - start_time,
+                result = StepResult(
+                    result="",
+                    metadata={
+                        "error": f"Timeout after {self.timeout} seconds",
+                        "timeout": True,
+                        "runtime": time.time() - start_time,
+                    },
                 )
-                log_tool_call(self.tool_name, str(kwargs), result)
+                log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
             except retryable_exceptions as e:
@@ -158,25 +159,20 @@ class GenericMCPTool(Tool):
                     continue
 
             except Exception as e:
-                result = ToolOutput(
-                    output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time
-                )
-                log_tool_call(self.tool_name, str(kwargs), result)
+                result = StepResult(result="", metadata={"error": str(e), "runtime": time.time() - start_time})
+                log_env_call(self.tool_name, str(kwargs), result)
                 return result
 
-        result = ToolOutput(
-            output="",
-            error=last_error or "Unknown error after retries",
-            called=True,
-            timeout=False,
-            runtime=time.time() - start_time,
+        result = StepResult(
+            result="",
+            metadata={"error": last_error or "Unknown error after retries", "runtime": time.time() - start_time},
         )
-        log_tool_call(self.tool_name, str(kwargs), result)
+        log_env_call(self.tool_name, str(kwargs), result)
         return result
 
 
 @dataclass
-class GenericMCPToolConfig(BaseToolConfig):
+class GenericMCPToolConfig(BaseEnvConfig):
     """Configuration for generic MCP tools.
 
     Connects to an MCP server and exposes its tools. Use `tool_name` to specify

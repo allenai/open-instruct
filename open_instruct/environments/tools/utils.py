@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -9,15 +8,17 @@ from typing import Any, ClassVar
 
 import aiohttp
 import backoff
+from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
+from open_instruct.environments.base import RLEnvironment, StepResult
 
 logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
-class ParsedToolConfig:
+class ParsedEnvConfig:
     """A parsed tool configuration combining name, call name, and config."""
 
     name: str
@@ -31,7 +32,7 @@ class ParsedToolConfig:
 
 
 @dataclass
-class ToolsConfig:
+class EnvsConfig:
     """Configuration for tools used during generation."""
 
     tools: list[str] = field(default_factory=list)
@@ -56,7 +57,7 @@ class ToolsConfig:
     pass_tools_to_chat_template: bool = True
     """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
 
-    _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
+    _parsed_tools: list[ParsedEnvConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
@@ -91,21 +92,12 @@ class ToolsConfig:
                 config = json.loads(config_str)
             except Exception as e:
                 raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
-            self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
+            self._parsed_tools.append(ParsedEnvConfig(name=tool_name, call_name=call_name, config=config))
 
     @property
     def enabled(self) -> bool:
         """Return True if any tools are configured."""
         return bool(self.tools)
-
-
-@dataclass
-class ToolOutput:
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
 
 
 def truncate(text: str, max_length: int = 500) -> str:
@@ -115,18 +107,18 @@ def truncate(text: str, max_length: int = 500) -> str:
     return text[:max_length] + f"... [{len(text) - max_length} more chars]"
 
 
-def log_tool_call(tool_name: str, input_text: str, output: ToolOutput) -> None:
+def log_env_call(tool_name: str, input_text: str, result: StepResult) -> None:
     """Log a tool call at DEBUG level with truncated input/output."""
     logger.debug(
         f"Tool '{tool_name}' called:\n"
         f"  Input: {truncate(input_text)}\n"
-        f"  Output: {truncate(output.output)}\n"
-        f"  Error: {output.error or 'None'}\n"
-        f"  Runtime: {output.runtime:.3f}s, Timeout: {output.timeout}"
+        f"  Output: {truncate(result.result)}\n"
+        f"  Error: {result.metadata.get('error', '') or 'None'}\n"
+        f"  Runtime: {result.metadata.get('runtime', 0):.3f}s, Timeout: {result.metadata.get('timeout', False)}"
     )
 
 
-class ToolStatistics:
+class EnvStatistics:
     """Manages aggregated tool call statistics across rollouts.
 
     Provides methods to add rollout stats and compute per-tool and aggregate metrics.
@@ -207,12 +199,6 @@ class ToolStatistics:
         metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
 
         return metrics
-
-
-@dataclass
-class ToolCall:
-    name: str
-    args: dict[str, Any]
 
 
 @dataclass
@@ -383,12 +369,12 @@ _COERCERS: dict[str, Callable[[Any], Any]] = {
 }
 
 
-def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Coerce arguments to match the expected types in a JSON schema properties dict.
+def coerce_args(parameters: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    """Coerce arguments to match the expected types from a JSON schema.
 
     Args:
-        properties: The "properties" dict from a JSON schema.
-        kwargs: The keyword arguments to coerce.
+        parameters: A JSON schema dict (with a "properties" key).
+        args: The arguments to coerce.
 
     Returns:
         A new dict with coerced values.
@@ -396,9 +382,10 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
     Raises:
         ValueError or TypeError if coercion fails.
     """
-    coerced = dict(kwargs)
-    for name, value in kwargs.items():
-        if name not in properties:
+    properties = parameters.get("properties", {})
+    coerced = dict(args)
+    for name, value in args.items():
+        if value is None or name not in properties:
             continue
         expected_type = properties[name].get("type")
         if expected_type not in _COERCERS:
@@ -407,7 +394,13 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
     return coerced
 
 
-class Tool(ABC):
+class Tool(RLEnvironment):
+    """Base class for stateless tools (e.g. code execution, web search).
+
+    Subclasses implement step() directly and return StepResult.
+    Use coerce_args(self.parameters, call.args) to coerce model args to the expected types.
+    """
+
     config_name: str
     """Name used to specify the tool in the CLI."""
     description: str
@@ -416,17 +409,22 @@ class Tool(ABC):
     """Name used to identify the tool when function calling."""
     parameters: dict[str, Any]
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
+    observation_role: str = "tool"
+    """Role for observations/feedback in conversation."""
 
-    def __init__(self, config_name: str, description: str, call_name: str, parameters: dict[str, Any]) -> None:
-        self.config_name = config_name
-        self.description = description
-        self.call_name = call_name
-        self.parameters = parameters
-        # validate parameters are valid JSON
-        try:
-            json.loads(json.dumps(parameters))
-        except Exception as e:
-            raise ValueError(f"Invalid parameters: {e}") from e
+    # -- RLEnvironment defaults for stateless tools --
+
+    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+        return StepResult(result=""), [get_openai_tool_definitions(self)]
+
+    def state(self) -> State:
+        return State()
+
+    # -- Utilities for tool implementations --
+
+    def get_observation_role(self) -> str:
+        """Return the role to use for observations in conversation."""
+        return self.observation_role
 
     def get_call_name(self) -> str:
         """Get the tool's call name (used when function calling)."""
@@ -444,32 +442,9 @@ class Tool(ABC):
         """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
 
-    @abstractmethod
-    async def _execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Execute the tool. Must be implemented by subclasses."""
-        raise NotImplementedError("_execute must be implemented by subclasses.")
-
-    async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Coerce arguments and execute the tool.
-
-        This method coerces kwargs to match the tool's parameter schema types
-        before calling _execute(). Use this instead of _execute() when you want
-        automatic type coercion (e.g., when calling from Ray actors).
-        """
-        try:
-            properties = self.parameters.get("properties", {})
-            coerced_kwargs = coerce_args(properties, kwargs)
-        except (ValueError, TypeError) as e:
-            return ToolOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
-        return await self._execute(*args, **coerced_kwargs)
-
-    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Alias for safe_execute, useful for inference scripts."""
-        return await self.safe_execute(*args, **kwargs)
-
 
 @dataclass
-class BaseToolConfig:
+class BaseEnvConfig:
     """Base configuration class for individual tools.
 
     Subclasses must also define a config, which is used also used to instantiate the tool itself.
@@ -477,7 +452,3 @@ class BaseToolConfig:
 
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
-
-    max_concurrency: int = field(default=512, kw_only=True)
-    """Maximum number of concurrent requests the Ray actor can handle.
-    This controls how many parallel calls can be made to this tool across all workers."""
