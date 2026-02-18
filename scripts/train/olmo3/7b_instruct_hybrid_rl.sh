@@ -68,8 +68,7 @@ uv run python mason.py \
         --total_episodes 1024000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 28 \
-        --vllm_tensor_parallel_size 2 \
+        --vllm_num_engines 56 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --seed 1 \
