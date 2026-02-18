@@ -13,7 +13,8 @@ from open_instruct import tensor_utils
 def single_example_collator(examples: list[dict]) -> dict:
     """Collator for batch_size=1 that extracts the single example."""
     assert len(examples) == 1
-    return examples[0]
+    example = examples[0]
+    return example | {"index": torch.tensor([example["index"]])}
 
 
 def batch_collator(examples: list[dict]) -> dict:
@@ -78,7 +79,7 @@ class TestHFDataLoader(unittest.TestCase):
         for _dp_rank, loader in enumerate(loaders):
             rank_indices = []
             for batch in loader:
-                rank_indices.append(batch["index"])
+                rank_indices.extend(batch["index"].tolist())
             all_indices.append(set(rank_indices))
 
         for i in range(dp_world_size):
@@ -110,10 +111,10 @@ class TestHFDataLoader(unittest.TestCase):
             collator=single_example_collator,
         )
 
-        first_pass = [batch["index"] for batch in loader]
+        first_pass = [batch["index"].item() for batch in loader]
 
         loader.reshuffle()
-        second_pass = [batch["index"] for batch in loader]
+        second_pass = [batch["index"].item() for batch in loader]
 
         self.assertNotEqual(first_pass, second_pass)
         self.assertEqual(set(first_pass), set(second_pass))
@@ -176,14 +177,14 @@ class TestHFDataLoader(unittest.TestCase):
             collator=single_example_collator,
         )
 
-        indices1 = [batch["index"] for batch in loader1]
-        indices2 = [batch["index"] for batch in loader2]
+        indices1 = [batch["index"].item() for batch in loader1]
+        indices2 = [batch["index"].item() for batch in loader2]
         self.assertEqual(indices1, indices2)
 
         loader1.reshuffle(epoch=1)
         loader2.reshuffle(epoch=1)
-        indices1_epoch1 = [batch["index"] for batch in loader1]
-        indices2_epoch1 = [batch["index"] for batch in loader2]
+        indices1_epoch1 = [batch["index"].item() for batch in loader1]
+        indices2_epoch1 = [batch["index"].item() for batch in loader2]
         self.assertEqual(indices1_epoch1, indices2_epoch1)
 
         self.assertNotEqual(indices1, indices1_epoch1)
@@ -286,7 +287,7 @@ class TestHFDataLoader(unittest.TestCase):
         )
         new_loader.load_state_dict(state)
 
-        remaining = [batch["index"] for batch in new_loader]
+        remaining = [batch["index"].item() for batch in new_loader]
         self.assertEqual(len(remaining), 10)
 
     def test_infinite_loop_all_excluded(self):
@@ -304,7 +305,7 @@ class TestHFDataLoader(unittest.TestCase):
         )
 
         for batch in loader:
-            loader.exclude_index(batch["index"])
+            loader.exclude_index(batch["index"].item())
 
         with self.assertRaises(RuntimeError) as context:
             next(loader)
