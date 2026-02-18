@@ -61,7 +61,6 @@ uv run python mason.py \
         --model_name_or_path ${model_name_or_path} \
         --trust_remote_code \
         --vllm_enforce_eager \
-        --add_bos \
         --chat_template_name ${chat_template} \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
