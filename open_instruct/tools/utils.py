@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -11,18 +12,10 @@ import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.executable import Executable, ExecutableOutput
+from open_instruct.environments.base import EnvironmentState, RLEnvironment, StepResult
+from open_instruct.executable import ExecutableOutput, ToolCall
 
 logger = logger_utils.setup_logger(__name__)
-
-
-@dataclass
-class ToolCall:
-    """Parsed tool call from model output."""
-
-    id: str
-    name: str
-    args: dict[str, Any]
 
 
 @dataclass
@@ -401,8 +394,12 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
     return coerced
 
 
-class Tool(Executable):
-    """Base class for stateless tools (e.g. code execution, web search)."""
+class Tool(RLEnvironment):
+    """Base class for stateless tools (e.g. code execution, web search).
+
+    Tools are a subset of RLEnvironment with trivial reset/state and a
+    single-action step that delegates to _execute().
+    """
 
     config_name: str
     """Name used to specify the tool in the CLI."""
@@ -414,6 +411,25 @@ class Tool(Executable):
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
     observation_role: str = "tool"
     """Role for observations/feedback in conversation."""
+
+    # -- RLEnvironment interface (default implementations for stateless tools) --
+
+    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+        return StepResult(observation=""), [get_openai_tool_definitions(self)]
+
+    async def step(self, tool_call: ToolCall) -> StepResult:
+        result = await self.safe_execute(**tool_call.args)
+        return StepResult(
+            observation=result.output,
+            reward=0.0,
+            done=False,
+            info={"error": result.error, "timeout": result.timeout, "runtime": result.runtime},
+        )
+
+    def state(self) -> EnvironmentState:
+        return EnvironmentState(done=False)
+
+    # -- Tool-specific interface --
 
     def get_observation_role(self) -> str:
         """Return the role to use for observations in conversation."""
@@ -435,6 +451,11 @@ class Tool(Executable):
         """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
 
+    @abstractmethod
+    async def _execute(self, **kwargs: Any) -> ExecutableOutput:
+        """Execute the tool. Must be implemented by subclasses."""
+        raise NotImplementedError
+
     async def safe_execute(self, *args: Any, _name_: str = "", _id_: str = "", **kwargs: Any) -> ExecutableOutput:
         """Coerce arguments to match parameter schema, then call _execute."""
         try:
@@ -443,6 +464,10 @@ class Tool(Executable):
         except (ValueError, TypeError) as e:
             return ExecutableOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
         return await self._execute(*args, **coerced_kwargs)
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> ExecutableOutput:
+        """Alias for safe_execute, useful for inference scripts."""
+        return await self.safe_execute(*args, **kwargs)
 
 
 @dataclass
@@ -454,7 +479,3 @@ class BaseToolConfig:
 
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
-
-    max_concurrency: int = field(default=512, kw_only=True)
-    """Maximum number of concurrent requests the Ray actor can handle.
-    This controls how many parallel calls can be made to this tool across all workers."""

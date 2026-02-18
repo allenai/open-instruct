@@ -1,12 +1,10 @@
 """Base classes for RL environments."""
 
-import time
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from open_instruct.executable import Executable, ExecutableOutput
-from open_instruct.tools.utils import ToolCall
+from open_instruct.executable import ToolCall
 
 
 @dataclass
@@ -38,39 +36,29 @@ class EnvironmentState:
         return sum(self.rewards)
 
 
-class RLEnvironment(Executable):
-    """Abstract base class for RL environments (use as Ray actors via ray.remote).
+class RLEnvironment(ABC):
+    """Abstract base class for RL environments and tools.
 
-    Subclass this to implement your own environment, defining reset/state/step.
+    Subclass directly for stateful environments (games, sandboxes, etc.).
+    Subclass Tool for stateless tool-based environments (code exec, web search, etc.).
     """
 
-    async def _execute(self, _name_: str = "", _id_: str = "", **kwargs) -> ExecutableOutput:
-        """Delegates to step(), wrapping the result as ExecutableOutput."""
-        start = time.perf_counter()
-        tc = ToolCall(id=_id_, name=_name_, args=kwargs)
-        try:
-            result = await self.step(tc)
-            return ExecutableOutput(
-                output=result.observation or "",
-                called=True,
-                error="",
-                timeout=False,
-                runtime=time.perf_counter() - start,
-                reward=result.reward,
-                done=result.done,
-                info=result.info,
-            )
-        except Exception as e:
-            return ExecutableOutput(
-                output=f"Error: {e}",
-                called=True,
-                error=str(e),
-                timeout=False,
-                runtime=time.perf_counter() - start,
-                reward=0.0,
-                done=False,
-                info={},
-            )
+    async def setup(self) -> None:
+        """Called once at start of training for resource initialization."""
+        return
+
+    async def shutdown(self) -> None:
+        """Called once at end of training for resource cleanup."""
+        return
+
+    def get_metrics(self) -> dict[str, float]:
+        """Return custom metrics."""
+        return {}
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions in OpenAI format for prompt injection."""
+        return []
 
     @abstractmethod
     async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
