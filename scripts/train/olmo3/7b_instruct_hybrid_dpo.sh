@@ -56,7 +56,7 @@ do
             --learning_rate "$LR" \
             --lr_scheduler_type linear \
 	    --checkpointing_steps=500 \
-	    --keep_last_n_checkpoints=5 \
+	    --keep_last_n_checkpoints=-1 \
             --warmup_ratio 0.1 \
             --weight_decay 0.0 \
             --num_epochs 1 \
