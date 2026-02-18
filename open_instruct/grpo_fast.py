@@ -1587,6 +1587,9 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
+    if "time/weight_sync" in metrics and step_time > 0:
+        metrics["time/weight_sync_pct_total"] = metrics["time/weight_sync"] / step_time
+
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
