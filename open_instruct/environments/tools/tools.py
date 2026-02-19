@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
-from open_instruct.environments.base import EnvCall, StepResult
-from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
+from open_instruct.environments.base import BaseEnvConfig, EnvCall, StepResult
+from open_instruct.environments.examples import CounterEnvConfig, GuessNumberEnvConfig
 from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, coerce_args, log_env_call, make_api_request
+from open_instruct.environments.tools.utils import Tool, coerce_args, log_env_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -645,23 +645,6 @@ class DrAgentMCPToolConfig(BaseEnvConfig):
     num_results: int = 10
 
 
-@dataclass
-class CounterEnvConfig(BaseEnvConfig):
-    """Configuration for CounterEnv."""
-
-    tool_class: ClassVar[type] = CounterEnv
-    target: int = 5
-
-
-@dataclass
-class GuessNumberEnvConfig(BaseEnvConfig):
-    """Configuration for GuessNumberEnv."""
-
-    tool_class: ClassVar[type] = GuessNumberEnv
-    min_val: int = 1
-    max_val: int = 100
-
-
 # Tool Registry: Maps tool names to their config classes (both stateless tools and stateful environments)
 TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
@@ -671,6 +654,6 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
-    CounterEnvConfig.tool_class.config_name: CounterEnvConfig,
-    GuessNumberEnvConfig.tool_class.config_name: GuessNumberEnvConfig,
+    CounterEnvConfig.tool_class.config_name: CounterEnvConfig,  # type: ignore[attr-defined]
+    GuessNumberEnvConfig.tool_class.config_name: GuessNumberEnvConfig,  # type: ignore[attr-defined]
 }

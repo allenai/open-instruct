@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from openenv.core.env_server.types import Action, Observation, State
 from pydantic import Field
@@ -45,6 +45,8 @@ class RLEnvironment(ABC):
     Subclass Tool for stateless tool-based environments (code exec, web search, etc.).
     """
 
+    config_name: str = ""
+
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
         return
@@ -72,3 +74,15 @@ class RLEnvironment(ABC):
     def state(self) -> State:
         """Return current episode state."""
         pass
+
+
+@dataclass
+class BaseEnvConfig:
+    """Base configuration class for tools and environments.
+
+    Subclasses pair with a tool/env class via tool_class and hold
+    construction-time config (API endpoints, game parameters, etc.).
+    """
+
+    tool_class: ClassVar[type[RLEnvironment]]
+    """The RLEnvironment subclass this config creates."""

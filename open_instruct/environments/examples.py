@@ -1,11 +1,12 @@
 """Example environments for testing and demonstration."""
 
 import random
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from openenv.core.env_server.types import State
 
-from .base import EnvCall, RLEnvironment, StepResult
+from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
 
 
 class CounterEnv(RLEnvironment):
@@ -98,6 +99,14 @@ class CounterEnv(RLEnvironment):
         return State(episode_id=self._task_id, step_count=self._step_count)
 
 
+@dataclass
+class CounterEnvConfig(BaseEnvConfig):
+    """Configuration for CounterEnv."""
+
+    tool_class: ClassVar[type] = CounterEnv
+    target: int = 5
+
+
 class GuessNumberEnv(RLEnvironment):
     """Number guessing game. Guess a secret number between min and max."""
 
@@ -180,3 +189,12 @@ class GuessNumberEnv(RLEnvironment):
 
     def state(self) -> State:
         return State(episode_id=self._task_id, step_count=self._guesses)
+
+
+@dataclass
+class GuessNumberEnvConfig(BaseEnvConfig):
+    """Configuration for GuessNumberEnv."""
+
+    tool_class: ClassVar[type] = GuessNumberEnv
+    min_val: int = 1
+    max_val: int = 100

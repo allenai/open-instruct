@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any
 
 import aiohttp
 import backoff
@@ -428,14 +428,3 @@ class Tool(RLEnvironment):
     def get_openai_tool_definitions(self) -> dict[str, Any]:
         """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
-
-
-@dataclass
-class BaseEnvConfig:
-    """Base configuration class for individual tools.
-
-    Subclasses must also define a config, which is used also used to instantiate the tool itself.
-    """
-
-    tool_class: ClassVar[type[Tool]]
-    """Related tool class for this config."""

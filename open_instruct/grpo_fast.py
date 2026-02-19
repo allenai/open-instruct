@@ -90,10 +90,11 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
+from open_instruct.environments.base import BaseEnvConfig
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseEnvConfig, EnvsConfig, ParsedEnvConfig
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
