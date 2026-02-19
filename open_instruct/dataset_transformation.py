@@ -1404,6 +1404,49 @@ def rlvr_tokenize_v2(
     return row
 
 
+def _resolve_tools_for_sample(
+    row: dict[str, Any],
+    tool_definitions: list[dict[str, Any]] | None,
+    env_tool_map: dict[str, list[dict[str, Any]]] | None,
+    pass_tools: bool,
+) -> list[dict[str, Any]] | None:
+    """Resolve which tool definitions to inject into this sample's prompt.
+
+    Filters global tool_definitions by per-sample active_tools column,
+    then merges environment-specific tools from env_tool_map.
+    """
+    if not pass_tools:
+        return None
+
+    result: list[dict[str, Any]] | None = None
+
+    if tool_definitions:
+        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        if sample_active_tools is not None:
+            active_tool_names = set(sample_active_tools)
+            filtered = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            if filtered:
+                result = filtered
+        else:
+            result = tool_definitions
+
+    if env_tool_map:
+        sample_env_config = row.get(ENV_CONFIG_KEY)
+        if sample_env_config and isinstance(sample_env_config, dict):
+            env_name = sample_env_config.get("env_name")
+            if env_name and env_name in env_tool_map:
+                env_tools = env_tool_map[env_name]
+                if result is None:
+                    result = env_tools
+                else:
+                    existing_names = {t.get("function", {}).get("name") for t in result}
+                    to_add = [et for et in env_tools if et.get("function", {}).get("name") not in existing_names]
+                    if to_add:
+                        result = list(result) + to_add
+
+    return result
+
+
 def rlvr_tokenize_v3(
     row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1426,36 +1469,7 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    tools_for_template: list[dict[str, Any]] | None = None
-    if pass_tools_to_chat_template:
-        if tool_definitions:
-            sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-            if sample_active_tools is not None:
-                active_tool_names = set(sample_active_tools)
-                filtered_tools = [
-                    t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names
-                ]
-                if filtered_tools:
-                    tools_for_template = filtered_tools
-            else:
-                tools_for_template = tool_definitions
-
-        # Add environment-specific tools based on per-sample env_config.env_name
-        if env_tool_map:
-            sample_env_config = row.get(ENV_CONFIG_KEY)
-            if sample_env_config and isinstance(sample_env_config, dict):
-                env_name = sample_env_config.get("env_name")
-                if env_name and env_name in env_tool_map:
-                    env_tools = env_tool_map[env_name]
-                    if tools_for_template is None:
-                        tools_for_template = env_tools
-                    else:
-                        existing_names = {t.get("function", {}).get("name") for t in tools_for_template}
-                        tools_to_add = [
-                            et for et in env_tools if et.get("function", {}).get("name") not in existing_names
-                        ]
-                        if tools_to_add:
-                            tools_for_template = list(tools_for_template) + tools_to_add
+    tools_for_template = _resolve_tools_for_sample(row, tool_definitions, env_tool_map, pass_tools_to_chat_template)
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
