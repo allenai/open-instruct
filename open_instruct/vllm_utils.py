@@ -898,8 +898,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         task_id = env_config.get("task_id")
         reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
         if env_tools:
-            for t in env_tools:
-                name = t["function"]["name"]
+            env_tool_names = {t["function"]["name"] for t in env_tools}
+            clashes = env_tool_names & set(actor.pools.keys())
+            if clashes:
+                raise ValueError(
+                    f"Env '{env_name}' tool names clash with tool pool names: {sorted(clashes)}. "
+                    f"Rename one side to avoid ambiguous dispatch."
+                )
+            for name in env_tool_names:
                 actor_map[name] = env_actor
                 allowed_tools.add(name)
 
