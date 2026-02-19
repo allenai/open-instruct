@@ -645,7 +645,7 @@ class DrAgentMCPToolConfig(BaseEnvConfig):
     num_results: int = 10
 
 
-# Tool Registry: Maps tool names to their config classes (both stateless tools and stateful environments)
+# Tool Registry: Maps tool names to their config classes
 TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
