@@ -14,56 +14,48 @@ logger = logging.getLogger(__name__)
 class EnvironmentPool:
     """Pool of RLEnvironment Ray actors for concurrent rollouts."""
 
-    def __init__(self, pool_size: int, env_name: str, **env_kwargs: Any):
-        self.pool_size = pool_size
-        self.env_name = env_name
-        self.env_kwargs = env_kwargs
-        self._env_class: type[RLEnvironment] | None = None
-        self._actors: list[ray.actor.ActorHandle] = []
-        self._available: asyncio.Queue[ray.actor.ActorHandle] | None = None
-        self._initialized = False
+    def __init__(
+        self,
+        env_class: type[RLEnvironment],
+        actors: list[ray.actor.ActorHandle],
+        available: asyncio.Queue[ray.actor.ActorHandle],
+    ):
+        self._env_class = env_class
+        self._actors = actors
+        self._available = available
 
-    async def initialize(self) -> None:
-        """Create all environment actors and call setup() on each."""
-        if self._initialized:
-            return
+    @classmethod
+    async def create(cls, pool_size: int, env_name: str, **env_kwargs: Any) -> "EnvironmentPool":
+        """Create a pool of environment actors and call setup() on each."""
+        env_class = get_env_class(env_name)
+        actor_class = ray.remote(env_class)
 
-        self._env_class = get_env_class(self.env_name)
-        actor_class = ray.remote(self._env_class)
+        logger.info(f"Creating {pool_size} '{env_name}' environment actors")
+        actors = [actor_class.remote(**env_kwargs) for _ in range(pool_size)]
 
-        logger.info(f"Creating {self.pool_size} environment actors")
-        self._actors = [actor_class.remote(**self.env_kwargs) for _ in range(self.pool_size)]
-
-        logger.info("Running setup() on all environment actors...")
-        setup_tasks = [actor.setup.remote() for actor in self._actors]
+        setup_tasks = [actor.setup.remote() for actor in actors]
         try:
             await asyncio.to_thread(ray.get, setup_tasks)
         except Exception as e:
             logger.warning(f"Error during environment setup: {e}")
 
-        self._available = asyncio.Queue()
-        for actor in self._actors:
-            self._available.put_nowait(actor)
+        available: asyncio.Queue[ray.actor.ActorHandle] = asyncio.Queue()
+        for actor in actors:
+            available.put_nowait(actor)
 
-        self._initialized = True
-        logger.info(f"Environment pool initialized with {self.pool_size} actors")
+        logger.info(f"Environment pool initialized with {pool_size} '{env_name}' actors")
+        return cls(env_class, actors, available)
 
     async def acquire(self) -> ray.actor.ActorHandle:
         """Acquire an available environment actor (blocks until available)."""
-        if not self._initialized:
-            raise RuntimeError("Pool not initialized")
         return await self._available.get()
 
     def release(self, actor: ray.actor.ActorHandle) -> None:
         """Release an environment actor back to the pool."""
-        if self._available is not None:
-            self._available.put_nowait(actor)
+        self._available.put_nowait(actor)
 
     async def shutdown(self) -> None:
         """Call shutdown() on all actors and terminate them."""
-        if not self._initialized:
-            return
-
         logger.info("Shutting down environment pool...")
         shutdown_tasks = [actor.shutdown.remote() for actor in self._actors]
         try:
@@ -73,15 +65,12 @@ class EnvironmentPool:
 
         for actor in self._actors:
             ray.kill(actor)
-
         self._actors = []
-        self._available = None
-        self._initialized = False
         logger.info("Environment pool shutdown complete")
 
     @property
-    def env_class(self) -> type[RLEnvironment] | None:
+    def env_class(self) -> type[RLEnvironment]:
         return self._env_class
 
     def __len__(self) -> int:
-        return self.pool_size
+        return len(self._actors)

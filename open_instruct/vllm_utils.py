@@ -901,8 +901,7 @@ async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> Envir
             for k, v in env_config.items()
             if k not in ("env_name", "task_id", "max_steps", "pool_size")
         }
-        pool = EnvironmentPool(pool_size=pool_size, env_name=env_name, **env_kwargs)
-        await pool.initialize()
+        pool = await EnvironmentPool.create(pool_size=pool_size, env_name=env_name, **env_kwargs)
         actor.env_pools[env_name] = pool
         return actor.env_pools[env_name]
 
