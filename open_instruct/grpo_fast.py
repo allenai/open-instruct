@@ -82,7 +82,6 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
-    ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
@@ -1095,7 +1094,6 @@ def setup_datasets(
     tool_definitions: list[dict[str, Any]],
     pass_tools_to_chat_template: bool,
     configured_tool_call_names: list[str] | None = None,
-    env_tool_map: dict[str, list[dict[str, Any]]] | None = None,
 ):
     """Set up training and evaluation datasets.
 
@@ -1121,7 +1119,6 @@ def setup_datasets(
             "system_prompt_override": system_prompt_override,
             "tool_definitions": tool_definitions,
             "pass_tools_to_chat_template": pass_tools_to_chat_template,
-            "env_tool_map": env_tool_map or {},
         },
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
@@ -2016,57 +2013,21 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def _discover_env_names_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
-    """Scan datasets for unique env_names in their env_config columns."""
-    env_names: set[str] = set()
-
-    if len(dataset_mixer_list_splits) == 1:
-        splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
-    else:
-        splits = dataset_mixer_list_splits
-
-    for i in range(0, len(dataset_mixer_list), 2):
-        dataset_name = dataset_mixer_list[i]
-        split = splits[i]
-        try:
-            ds = datasets.load_dataset(dataset_name, split=split)
-        except Exception:
-            logger.warning(f"Could not load dataset {dataset_name} for env discovery, skipping")
-            continue
-        if ENV_CONFIG_KEY not in ds.column_names:
-            continue
-        for row in ds:
-            sample_env_config = row.get(ENV_CONFIG_KEY)
-            if sample_env_config and isinstance(sample_env_config, dict):
-                name = sample_env_config.get("env_name")
-                if name:
-                    env_names.add(name)
-
-    return env_names
-
-
 def initialize_tools_and_envs(
-    tools_config: EnvsConfig,
-    tokenizer,
-    dataset_mixer_list: list[str],
-    dataset_mixer_list_splits: list[str],
-    pool_size: int,
-) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str], dict[str, list[dict[str, Any]]]]:
+    tools_config: EnvsConfig, tokenizer, pool_size: int
+) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str]]:
     """Initialize all tool/env pools and collect tool definitions.
 
     Creates an EnvironmentPool for each tool specified via --tools CLI.
-    Also scans datasets for env_config columns to discover additional env tools
-    that need their definitions injected into prompts (env_tool_map).
 
     Returns:
-        Tuple of (pools, tool_definitions, stop_sequences, env_tool_map).
+        Tuple of (pools, tool_definitions, stop_sequences).
         Also mutates tools_config.tool_call_names in-place.
     """
-    # 1. Create pools for all --tools entries
     pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
     tools_config.tool_call_names = tool_call_names
 
-    # 2. Collect tool definitions from all pools (acquire one actor, get defs, release)
+    # Collect tool definitions from all pools (acquire one actor, get defs, release)
     tool_definitions: list[dict[str, Any]] = []
     for call_name, pool in pools.items():
         actor = ray.get(pool.acquire.remote())
@@ -2078,7 +2039,6 @@ def initialize_tools_and_envs(
         elif isinstance(defs, dict):
             tool_definitions.append(defs)
 
-    # 3. Get stop sequences from tool definitions
     stop_sequences: list[str] = []
     if pools:
         stop_sequences = create_tool_parser(
@@ -2088,38 +2048,12 @@ def initialize_tools_and_envs(
             tool_definitions=tool_definitions,
         ).stop_sequences
 
-    # 4. Discover env tool definitions from datasets (for prompt injection via env_tool_map)
-    env_tool_map: dict[str, list[dict[str, Any]]] = {}
-    dataset_env_names = _discover_env_names_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
-
-    for name in sorted(dataset_env_names):
-        if name not in TOOL_REGISTRY:
-            logger.warning(f"Dataset references env '{name}' but it's not in TOOL_REGISTRY, skipping")
-            continue
-        config_cls = TOOL_REGISTRY[name]
-        tool_cls = config_cls.tool_class
-        tool_defs = tool_cls.get_tool_definitions()
-        if tool_defs:
-            env_tool_map[name] = tool_defs
-            logger.info(
-                f"Discovered env '{name}' tools for prompt injection: {[t['function']['name'] for t in tool_defs]}"
-            )
-
-    # 5. Add env tool definitions to the global set (for parser)
-    seen_names = {t["function"]["name"] for t in tool_definitions}
-    for defs in env_tool_map.values():
-        for td in defs:
-            name = td["function"]["name"]
-            if name not in seen_names:
-                tool_definitions.append(td)
-                seen_names.add(name)
-
     logger.info(
         f"Initialized {len(pools)} tool pools (size={pool_size}). "
         f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
     )
 
-    return pools, tool_definitions, stop_sequences, env_tool_map
+    return pools, tool_definitions, stop_sequences
 
 
 def main(
@@ -2147,12 +2081,8 @@ def main(
     pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     logger.info(f"Pool size per tool: {pool_size} (num_unique_prompts * num_samples)")
 
-    pools, tool_definitions, tool_stop_sequences, env_tool_map = initialize_tools_and_envs(
-        tools_config,
-        tokenizer,
-        streaming_config.dataset_mixer_list,
-        streaming_config.dataset_mixer_list_splits,
-        pool_size=pool_size,
+    pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
+        tools_config, tokenizer, pool_size=pool_size
     )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
@@ -2166,7 +2096,6 @@ def main(
         tool_definitions,
         pass_tools_to_chat_template=tools_config.pass_tools_to_chat_template,
         configured_tool_call_names=tools_config.tool_call_names if tools_config.enabled else None,
-        env_tool_map=env_tool_map,
     )
 
     if len(train_dataset) < (
