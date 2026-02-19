@@ -78,7 +78,9 @@ def _get_request_info_for_sample(request_info: data_types.RequestInfo | None, i:
         "tool_outputs": request_info.tool_outputs[i] if i < len(request_info.tool_outputs) else "",
         "tool_runtimes": request_info.tool_runtimes[i] if i < len(request_info.tool_runtimes) else 0.0,
         "tool_calleds": request_info.tool_calleds[i] if i < len(request_info.tool_calleds) else False,
-        "tool_call_stats": request_info.tool_call_stats[i] if i < len(request_info.tool_call_stats) else [],
+        "tool_call_stats": (
+            [asdict(s) for s in request_info.tool_call_stats[i]] if i < len(request_info.tool_call_stats) else []
+        ),
         "rollout_state": request_info.rollout_states[i] if i < len(request_info.rollout_states) else {},
     }
 

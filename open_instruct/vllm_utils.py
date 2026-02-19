@@ -306,7 +306,10 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [rs.get("tool_output", "") for rs in rollout_states]
         tool_runtimes = [rs.get("tool_runtime", 0.0) for rs in rollout_states]
         tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
-        tool_call_stats = [rs.get("tool_call_stats", []) for rs in rollout_states]
+        tool_call_stats = [
+            [ToolCallStats(**s) if isinstance(s, dict) else s for s in rs.get("tool_call_stats", [])]
+            for rs in rollout_states
+        ]
     else:
         masks = [[1] * len(resp) for resp in response_ids]
         num_calls = [0] * len(response_ids)

@@ -38,7 +38,7 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
-    tool_call_stats: list[list[ToolCallStats | dict]] = field(default_factory=list)
+    tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
     rollout_states: list[dict] = field(default_factory=list)
     """Per-sample rollout state dicts (rewards, step_count, done, info) — always present."""
 
