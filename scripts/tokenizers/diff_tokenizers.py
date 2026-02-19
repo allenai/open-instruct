@@ -5,8 +5,8 @@ For tokenizer_config.json, extracts and pretty-prints the chat_template
 separately so the actual difference is easy to spot.
 
 Usage:
-    python scripts/utils/diff_tokenizers.py allenai/olmo-3-tokenizer-instruct-dev allenai/olmo-3-tokenizer-instruct-release
-    python scripts/utils/diff_tokenizers.py allenai/olmo-3.2-tokenizer-think-dev allenai/olmo-3.2-tokenizer-think-release
+    python scripts/tokenizers/diff_tokenizers.py allenai/olmo-3-tokenizer-instruct-dev allenai/olmo-3-tokenizer-instruct-release
+    python scripts/tokenizers/diff_tokenizers.py allenai/olmo-3.2-tokenizer-think-dev allenai/olmo-3.2-tokenizer-think-release
 """
 
 import argparse

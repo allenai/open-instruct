@@ -40,5 +40,5 @@ There are two main issues that lead to all the floating chat templates: one, the
 To verify that two tokenizer repos differ only where expected, use the diff tool:
 
 ```bash
-python scripts/utils/diff_tokenizers.py allenai/olmo-3-tokenizer-instruct-dev allenai/olmo-3-tokenizer-instruct-release
+python scripts/tokenizers/diff_tokenizers.py allenai/olmo-3-tokenizer-instruct-dev allenai/olmo-3-tokenizer-instruct-release
 ```
