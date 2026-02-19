@@ -1,6 +1,6 @@
 """Pool of Ray actors with acquire/release semantics."""
 
-import collections
+import asyncio
 from typing import Any
 
 import ray
@@ -14,8 +14,8 @@ logger = logger_utils.setup_logger(__name__)
 class EnvironmentPool:
     """Shared pool of RLEnvironment Ray actors for concurrent rollouts.
 
-    This is a Ray actor so it can be shared across multiple LLMRayActor engines.
-    Acquire/release are called via .remote() from the vLLM generation loop.
+    This is an async Ray actor. acquire() blocks until an actor is available
+    (no polling needed — release() wakes up waiting acquirers via asyncio.Queue).
     """
 
     def __init__(self, pool_size: int, actor_class: type, **actor_kwargs: Any):
@@ -30,21 +30,21 @@ class EnvironmentPool:
         except Exception as e:
             logger.warning(f"Error during actor setup: {e}")
 
-        self._available: collections.deque[ray.actor.ActorHandle] = collections.deque(self._actors)
+        self._available: asyncio.Queue[ray.actor.ActorHandle] = asyncio.Queue()
+        for actor in self._actors:
+            self._available.put_nowait(actor)
         logger.info(f"Pool ready: {pool_size} {actor_class.__name__} actors")
 
-    def acquire(self) -> ray.actor.ActorHandle | None:
-        """Return an available actor, or None if all are in use."""
-        if self._available:
-            return self._available.popleft()
-        return None
+    async def acquire(self) -> ray.actor.ActorHandle:
+        """Block until an actor is available, then return it."""
+        return await self._available.get()
 
-    def release(self, actor: ray.actor.ActorHandle) -> None:
-        """Return an actor to the pool."""
-        self._available.append(actor)
+    async def release(self, actor: ray.actor.ActorHandle) -> None:
+        """Return an actor to the pool, waking any waiting acquirers."""
+        await self._available.put(actor)
 
     def size(self) -> int:
         return len(self._actors)
 
     def available_count(self) -> int:
-        return len(self._available)
+        return self._available.qsize()
