@@ -1429,9 +1429,7 @@ def weight_sync_thread(
             engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
             if engine_update_refs:
                 ray_get_with_progress(
-                    engine_update_refs,
-                    desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
-                    enable=False,
+                    engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
                 )
 
             # Allow actors to resume
