@@ -35,7 +35,6 @@ python mason.py \
     --actor_num_gpus_per_node 4 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \

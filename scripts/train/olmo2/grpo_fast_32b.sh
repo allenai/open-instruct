@@ -41,7 +41,6 @@ python mason.py \
     --num_learners_per_node 8 8 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 40 \
     --lr_scheduler_type linear \
     --seed 1 \
     --local_eval_every 5 \

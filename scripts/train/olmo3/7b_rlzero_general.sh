@@ -61,7 +61,6 @@ python open_instruct/grpo_fast.py \
     --total_episodes 10000000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 32 \
     --vllm_tensor_parallel_size 1 \
     --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
     --llm_judge_timeout 600 \

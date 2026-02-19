@@ -288,7 +288,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
 @dataclass
 class VLLMConfig:
-    vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
     vllm_sync_backend: str = "nccl"

@@ -91,7 +91,6 @@ uv run python open_instruct/grpo_fast.py \
     --total_episodes 50 \
     --deepspeed_stage 3 \
     --num_learners_per_node 1 \
-    --vllm_num_engines 1 \
     --single_gpu_mode True \
     --vllm_gpu_memory_utilization 0.3 \
     --vllm_sync_backend gloo \
@@ -111,4 +110,3 @@ uv run python open_instruct/grpo_fast.py \
 echo "=============================================="
 echo "Test completed! Log saved to /tmp/evolving_rubric_test.log"
 echo "=============================================="
-

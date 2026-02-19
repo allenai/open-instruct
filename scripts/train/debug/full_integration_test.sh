@@ -56,7 +56,6 @@ for split_var in split_int_mix_3; do
         --total_episodes 10_000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \

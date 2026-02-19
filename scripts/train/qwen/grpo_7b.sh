@@ -43,7 +43,6 @@ python mason.py \
     --actor_num_gpus_per_node 8 4 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 4 \
     --lr_scheduler_type linear \
     --seed 1 \
     --num_evals 200 \

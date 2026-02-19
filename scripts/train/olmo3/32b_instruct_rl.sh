@@ -47,7 +47,6 @@ uv run python mason.py \
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 8 8 8 \
-        --vllm_num_engines 16 \
         --inference_batch_size 200 \
         --gather_whole_model False \
         --vllm_tensor_parallel_size 4 \
