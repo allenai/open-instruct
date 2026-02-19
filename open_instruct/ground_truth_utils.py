@@ -18,7 +18,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import requests
@@ -1216,7 +1216,7 @@ class RewardConfig:
     only_reward_good_outputs: bool = False
     additive_format_reward: bool = False
     verifier_functions: dict[str, VerifierFunction] = dataclasses.field(default_factory=dict)
-    reward_aggregator: str = "last"
+    reward_aggregator: Literal["last", "sum"] = "last"
     """How to combine per-turn rewards: 'last' (use last turn reward) or 'sum' (sum all rewards across turns)."""
 
     def build(self) -> Callable:

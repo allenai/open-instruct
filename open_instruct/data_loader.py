@@ -362,7 +362,7 @@ class StreamingDataLoaderConfig:
     remap_verifier: str | None = None
 
     # Reward aggregation
-    reward_aggregator: str = "last"
+    reward_aggregator: Literal["last", "sum"] = "last"
     """How to combine per-turn rewards: 'last' (use last turn reward) or 'sum' (sum all rewards across turns)."""
 
     # LLM judge verifier
