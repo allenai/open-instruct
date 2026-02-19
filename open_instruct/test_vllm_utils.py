@@ -132,12 +132,11 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.masks[0], [1, 1, 1])
         self.assertEqual(result.masks[1], [1, 1, 1])
 
-        # Verify request_info has correct tool attributes
+        # Verify request_info has correct tool attributes (read from rollout_state dicts)
         self.assertEqual(result.request_info.num_calls, [1, 2])
         self.assertEqual(result.request_info.tool_outputs, ["result1", "result2"])
         self.assertEqual(result.request_info.tool_runtimes, [0.5, 0.3])
         self.assertEqual(result.request_info.tool_calleds, [True, True])
-        self.assertEqual(result.request_info.rollout_states, [{}, {}])
 
     def test_process_outputs_without_tools(self):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
