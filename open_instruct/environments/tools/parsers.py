@@ -57,10 +57,6 @@ class OpenInstructLegacyToolParser(ToolParser):
     Only works for tools that take a single string parameter.
     """
 
-    # TODO: Refactor to accept tool_definitions (OpenAI dicts) instead of requiring tool_actors.
-    #   This would allow legacy/dr_tulu parsers to work with RL environments, which provide
-    #   tool definitions but don't have stateless tool actors. Extract tool_names and param
-    #   schemas from the dicts instead of calling actor.get_call_name/get_parameters.remote().
     def __init__(self, tool_actors: list[ray.actor.ActorHandle], output_wrap_name: str = "output"):
         """Initialize the parser.
 
