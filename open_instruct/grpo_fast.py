@@ -2137,8 +2137,10 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-    logger.info(f"Pool size per tool: {pool_size} (num_unique_prompts * num_samples)")
+    pool_size = tools_config.pool_size
+    if pool_size is None:
+        pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    logger.info(f"Pool size per tool: {pool_size}")
 
     pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
         tools_config,

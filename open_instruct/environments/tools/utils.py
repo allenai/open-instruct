@@ -57,6 +57,9 @@ class EnvsConfig:
     pass_tools_to_chat_template: bool = True
     """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
 
+    pool_size: int | None = None
+    """Number of actors per tool pool. Defaults to num_unique_prompts_rollout * num_samples_per_prompt_rollout."""
+
     _parsed_tools: list[ParsedEnvConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
