@@ -192,7 +192,7 @@ class ExperimentConfig:
     """Whether to freeze parameters matching the freeze_patterns."""
     freeze_patterns: list[str] | None = field(
         default_factory=lambda: [
-            "model.embed_tokens.*",
+            # "model.embed_tokens.*", # this breaks it sometimes?
             "model.layers.*.self_attn.*",
             "model.layers.*.post_attention_layernorm.*",
             "model.layers.*.post_feedforward_layernorm.*",
