@@ -2099,7 +2099,8 @@ def initialize_tools_and_envs(
     tool_definitions: list[dict[str, Any]] = []
     for call_name, pool in pools.items():
         actor = ray.get(pool.acquire.remote())
-        assert actor is not None, f"Pool for '{call_name}' is empty right after creation"
+        if actor is None:
+            raise RuntimeError(f"Pool for '{call_name}' returned None right after creation")
         defs = ray.get(actor.get_openai_tool_definitions.remote())
         pool.release.remote(actor)
         if isinstance(defs, list):

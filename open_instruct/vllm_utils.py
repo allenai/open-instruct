@@ -885,7 +885,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     if env_config is not None:
         env_name = env_config["env_name"]
         pool = actor.pools.get(env_name)
-        assert pool is not None, f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}"
+        if pool is None:
+            raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
         env_actor = await pool.acquire.remote()
         while env_actor is None:
             await asyncio.sleep(0.01)
