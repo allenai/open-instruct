@@ -25,7 +25,7 @@ class StepResult(Observation):
 
 @dataclass
 class RolloutState:
-    """Accumulated state from an environment rollout."""
+    """Accumulated state from a rollout (tools and/or environments)."""
 
     rewards: list[float] = field(default_factory=list)
     step_count: int = 0
@@ -54,7 +54,7 @@ class RLEnvironment(ABC):
         return []
 
     @abstractmethod
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         """Initialize episode. Returns (initial observation, tool definitions)."""
         pass
 
@@ -67,25 +67,3 @@ class RLEnvironment(ABC):
     def state(self) -> State:
         """Return current episode state."""
         pass
-
-
-ENV_REGISTRY: dict[str, type[RLEnvironment]] = {}
-
-
-def register_env(name: str):
-    """Decorator to register an environment class."""
-
-    def decorator(cls: type[RLEnvironment]) -> type[RLEnvironment]:
-        if name in ENV_REGISTRY:
-            raise ValueError(f"Environment '{name}' already registered")
-        ENV_REGISTRY[name] = cls
-        return cls
-
-    return decorator
-
-
-def get_env_class(env_name: str) -> type[RLEnvironment]:
-    """Get environment class by registry name."""
-    if env_name not in ENV_REGISTRY:
-        raise ValueError(f"Environment '{env_name}' not found. Available: {list(ENV_REGISTRY.keys())}")
-    return ENV_REGISTRY[env_name]

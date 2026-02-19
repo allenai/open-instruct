@@ -1,13 +1,13 @@
 """Example environments for testing and demonstration."""
 
 import random
+from typing import Any
 
 from openenv.core.env_server.types import State
 
-from .base import EnvCall, RLEnvironment, StepResult, register_env
+from .base import EnvCall, RLEnvironment, StepResult
 
 
-@register_env("counter")
 class CounterEnv(RLEnvironment):
     """Simple counter environment. Increment to reach target, then submit."""
 
@@ -40,7 +40,7 @@ class CounterEnv(RLEnvironment):
         },
     ]
 
-    def __init__(self, target: int = 5, **kwargs):
+    def __init__(self, target: int = 5, **kwargs: Any):
         self._target = target
         self._current = 0
         self._step_count = 0
@@ -51,7 +51,7 @@ class CounterEnv(RLEnvironment):
     def get_tool_definitions(cls) -> list[dict]:
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         self._current = 0
         self._step_count = 0
         self._done = False
@@ -97,7 +97,6 @@ class CounterEnv(RLEnvironment):
         return State(episode_id=self._task_id, step_count=self._step_count)
 
 
-@register_env("guess_number")
 class GuessNumberEnv(RLEnvironment):
     """Number guessing game. Guess a secret number between min and max."""
 
@@ -118,7 +117,7 @@ class GuessNumberEnv(RLEnvironment):
         }
     ]
 
-    def __init__(self, min_val: int = 1, max_val: int = 100, **kwargs):
+    def __init__(self, min_val: int = 1, max_val: int = 100, **kwargs: Any):
         self._min_val = min_val
         self._max_val = max_val
         self._secret = 0
@@ -130,7 +129,7 @@ class GuessNumberEnv(RLEnvironment):
     def get_tool_definitions(cls) -> list[dict]:
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         self._task_id = task_id
         if task_id and task_id.isdigit():
             self._secret = int(task_id)

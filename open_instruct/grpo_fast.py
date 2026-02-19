@@ -90,7 +90,6 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
-from open_instruct.environments.base import get_env_class
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
@@ -1168,22 +1167,22 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
-    """Create tool actors based on tool configuration using the TOOL_REGISTRY.
+def create_tool_pools(
+    parsed_tools: list[ParsedEnvConfig], pool_size: int
+) -> tuple[dict[str, ray.actor.ActorHandle], list[str]]:
+    """Create an EnvironmentPool for each tool/env in the registry.
 
     Args:
         parsed_tools: List of ParsedTool instances containing name, call_name, and config.
+        pool_size: Number of actors per pool.
 
     Returns:
-        A tuple of (tool_actors, tool_call_names) where:
-        - tool_actors: List of Ray actor handles for the requested tools.
-        - tool_call_names: List of call names for each tool (may differ from input for MCP tools, which decide their own call names).
-
-    Raises:
-        ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
+        A tuple of (pools, tool_call_names) where:
+        - pools: Dict mapping call_name -> EnvironmentPool Ray actor handle.
+        - tool_call_names: List of call names (may differ from input for MCP tools).
     """
-    tool_actors = []
-    tool_call_names = []
+    pools: dict[str, ray.actor.ActorHandle] = {}
+    tool_call_names: list[str] = []
 
     for parsed_tool in parsed_tools:
         if parsed_tool.name not in TOOL_REGISTRY:
@@ -1191,14 +1190,11 @@ def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.Ac
             raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
         tool_config_class = TOOL_REGISTRY[parsed_tool.name]
-        # Build config from dictionary
         try:
             config = tool_config_class(**parsed_tool.config)
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
-        # Collect (config, call_name, tool_class) tuples to process
-        # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
         configs_to_create: list[tuple[BaseEnvConfig, str, type]] = []
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
@@ -1213,11 +1209,15 @@ def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.Ac
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
-            _kwarg_dict = asdict(cfg) | {"call_name": call_name}
-            tool_actors.append(ray.remote(tool_class).remote(**_kwarg_dict))
+            kwargs = asdict(cfg) | {"call_name": call_name}
+            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
-    return tool_actors, tool_call_names
+    # Wait for all pools to initialize
+    if pools:
+        ray.get([pool.size.remote() for pool in pools.values()])
+
+    return pools, tool_call_names
 
 
 def create_model_and_optimizer(
@@ -1237,11 +1237,10 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-    tool_actors: list[ray.actor.ActorHandle] | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
     base_env_config: dict | None = None,
-    env_pools: dict[str, ray.actor.ActorHandle] | None = None,
+    pools: dict[str, ray.actor.ActorHandle] | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1321,12 +1320,11 @@ def create_model_and_optimizer(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tool_actors=tool_actors,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
         max_steps=tools_config.max_steps if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
-        env_pools=env_pools,
+        pools=pools,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2017,37 +2015,8 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools_and_envs(
-    tools_config: EnvsConfig,
-    tokenizer,
-    dataset_mixer_list: list[str],
-    dataset_mixer_list_splits: list[str],
-    pool_size: int | None = None,
-) -> tuple[list, list[dict[str, Any]], list[str], dict[str, list[dict[str, Any]]], dict[str, ray.actor.ActorHandle]]:
-    """Initialize tool actors, discover environment tool definitions, and return unified results.
-
-    Creates Ray actors for stateless tools, scans datasets for environment types,
-    merges all tool definitions and names, and creates shared EnvironmentPool actors.
-
-    Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences, env_tool_map, env_pools).
-        Also mutates tools_config.tool_call_names in-place (for MCP expansion + env names).
-    """
-    # 1. Create stateless tool actors
-    tool_actors, tool_call_names = create_tools(tools_config._parsed_tools)
-    tool_definitions: list[dict[str, Any]] = (
-        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
-    )
-    tools_config.tool_call_names = tool_call_names
-
-    stop_sequences: list[str] = []
-    if tool_actors:
-        stop_sequences = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
-        ).stop_sequences
-
-    # 2. Discover environment tool definitions from datasets and CLI --env_name
-    env_tool_map: dict[str, list[dict[str, Any]]] = {}
+def _discover_env_names_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
+    """Scan datasets for unique env_names in their env_config columns."""
     env_names: set[str] = set()
 
     if len(dataset_mixer_list_splits) == 1:
@@ -2072,58 +2041,84 @@ def initialize_tools_and_envs(
                 if name:
                     env_names.add(name)
 
-    if tools_config.env_name is not None:
-        env_names.add(tools_config.env_name)
+    return env_names
 
-    for name in sorted(env_names):
-        try:
-            env_cls = get_env_class(name)
-            tool_defs = env_cls.get_tool_definitions()
-            if tool_defs:
-                env_tool_map[name] = tool_defs
-                logger.info(f"Discovered env '{name}' tools: {[t['function']['name'] for t in tool_defs]}")
-        except Exception as e:
-            logger.warning(f"Could not get tool definitions for env '{name}': {e}")
 
-    # 3. Merge env tool definitions into the global set (deduplicated)
-    if env_tool_map:
-        if not tools_config.env_enabled:
-            first_env_name = next(iter(env_tool_map))
-            tools_config.env_name = first_env_name
-            logger.info(
-                f"Auto-enabled env from dataset discovery (env_name={first_env_name}). "
-                f"All discovered envs: {list(env_tool_map.keys())}"
-            )
-        tool_names = {t["function"]["name"] for t in tool_definitions}
-        env_names = {t["function"]["name"] for defs in env_tool_map.values() for t in defs}
-        clashes = tool_names & env_names
-        if clashes:
-            raise ValueError(
-                f"Tool name clash between stateless tools and environment tools: {sorted(clashes)}. "
-                f"Rename one side to avoid ambiguous dispatch."
-            )
-        for defs in env_tool_map.values():
+def initialize_tools_and_envs(
+    tools_config: EnvsConfig,
+    tokenizer,
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
+    pool_size: int,
+) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str], dict[str, list[dict[str, Any]]]]:
+    """Initialize all tool/env pools and collect tool definitions.
+
+    Creates an EnvironmentPool for each tool specified via --tools CLI.
+    Also scans datasets for env_config columns to discover additional env tools
+    that need their definitions injected into prompts (env_tool_map).
+
+    Returns:
+        Tuple of (pools, tool_definitions, stop_sequences, env_tool_map).
+        Also mutates tools_config.tool_call_names in-place.
+    """
+    # 1. Create pools for all --tools entries
+    pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
+    tools_config.tool_call_names = tool_call_names
+
+    # 2. Collect tool definitions from all pools (acquire one actor, get defs, release)
+    tool_definitions: list[dict[str, Any]] = []
+    for call_name, pool in pools.items():
+        actor = ray.get(pool.acquire.remote())
+        assert actor is not None, f"Pool for '{call_name}' is empty right after creation"
+        defs = ray.get(actor.get_openai_tool_definitions.remote())
+        pool.release.remote(actor)
+        if isinstance(defs, list):
             tool_definitions.extend(defs)
-        all_env_tool_names = [t["function"]["name"] for defs in env_tool_map.values() for t in defs]
-        new_names = [n for n in all_env_tool_names if n not in set(tools_config.tool_call_names)]
-        if new_names:
-            tools_config.tool_call_names = list(tools_config.tool_call_names) + new_names
-            logger.info(f"Added environment tool names: {new_names}")
+        elif isinstance(defs, dict):
+            tool_definitions.append(defs)
 
-    # 4. Create shared environment pools (one per env_name)
-    env_pools: dict[str, ray.actor.ActorHandle] = {}
-    if env_tool_map and pool_size is not None and pool_size > 0:
-        for env_name in env_tool_map:
-            env_pools[env_name] = EnvironmentPool.remote(pool_size=pool_size, env_name=env_name)
-        ray.get([pool.size.remote() for pool in env_pools.values()])
-        logger.info(f"Created environment pools (size={pool_size}): {list(env_pools.keys())}")
+    # 3. Get stop sequences from tool definitions
+    stop_sequences: list[str] = []
+    if pools:
+        stop_sequences = create_tool_parser(
+            parser_type=tools_config.tool_parser_type,
+            tool_actors=[],
+            tokenizer=tokenizer,
+            tool_definitions=tool_definitions,
+        ).stop_sequences
+
+    # 4. Discover env tool definitions from datasets (for prompt injection via env_tool_map)
+    env_tool_map: dict[str, list[dict[str, Any]]] = {}
+    dataset_env_names = _discover_env_names_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
+
+    for name in sorted(dataset_env_names):
+        if name not in TOOL_REGISTRY:
+            logger.warning(f"Dataset references env '{name}' but it's not in TOOL_REGISTRY, skipping")
+            continue
+        config_cls = TOOL_REGISTRY[name]
+        tool_cls = config_cls.tool_class
+        tool_defs = tool_cls.get_tool_definitions()
+        if tool_defs:
+            env_tool_map[name] = tool_defs
+            logger.info(
+                f"Discovered env '{name}' tools for prompt injection: {[t['function']['name'] for t in tool_defs]}"
+            )
+
+    # 5. Add env tool definitions to the global set (for parser)
+    seen_names = {t["function"]["name"] for t in tool_definitions}
+    for defs in env_tool_map.values():
+        for td in defs:
+            name = td["function"]["name"]
+            if name not in seen_names:
+                tool_definitions.append(td)
+                seen_names.add(name)
 
     logger.info(
-        f"Initialized {len(tool_actors)} tool actors, {len(env_tool_map)} envs. "
+        f"Initialized {len(pools)} tool pools (size={pool_size}). "
         f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
     )
 
-    return tool_actors, tool_definitions, stop_sequences, env_tool_map, env_pools
+    return pools, tool_definitions, stop_sequences, env_tool_map
 
 
 def main(
@@ -2148,23 +2143,15 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    env_pool_size = tools_config.env_pool_size
-    if env_pool_size is None:
-        env_pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-        logger.info(f"Auto-sized env_pool_size to {env_pool_size} (num_unique_prompts * num_samples)")
+    pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    logger.info(f"Pool size per tool: {pool_size} (num_unique_prompts * num_samples)")
 
-    tool_actors, tool_definitions, tool_stop_sequences, env_tool_map, env_pools = initialize_tools_and_envs(
+    pools, tool_definitions, tool_stop_sequences, env_tool_map = initialize_tools_and_envs(
         tools_config,
         tokenizer,
         streaming_config.dataset_mixer_list,
         streaming_config.dataset_mixer_list_splits,
-        pool_size=env_pool_size,
-    )
-    # TODO: Refactor legacy/dr_tulu parsers to accept tool_definitions dicts so they work with envs.
-    assert not (env_tool_map and tools_config.tool_parser_type in ("legacy", "dr_tulu")), (
-        f"RL environments require a vllm_* parser type, but got '{tools_config.tool_parser_type}'. "
-        f"Legacy/dr_tulu parsers derive tool names from tool_actors and don't support env-only tool definitions. "
-        f"Use e.g. --tool_parser_type vllm_hermes instead."
+        pool_size=pool_size,
     )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
@@ -2232,7 +2219,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = tools_config.to_env_config_dict() if tools_config.env_enabled else None
+    base_env_config = {"max_steps": tools_config.max_steps} if tools_config.enabled else None
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2251,11 +2238,10 @@ def main(
             reward_config,
             generation_configs["train"],
             data_prep_actor_state,
-            tool_actors,
             tool_definitions,
             tools_config,
             base_env_config,
-            env_pools,
+            pools,
         )
     )
 

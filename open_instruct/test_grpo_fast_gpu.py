@@ -58,7 +58,7 @@ import open_instruct.vllm_utils as vllm_utils_module
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import create_tools
+from open_instruct.grpo_fast import create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
@@ -101,7 +101,7 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tool_actors=None, max_steps=None, max_tokens=50):
+    def _setup_engine_and_generate(self, tokenizer_name, prompt, pools=None, max_steps=None, max_tokens=50):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -140,7 +140,7 @@ class TestGeneration(TestGrpoFastBase):
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
-            tool_actors=tool_actors,
+            pools=pools or {},
             max_steps=max_steps or 5,
             reward_config=reward_config,
             train_dataset=train_dataset,
@@ -164,19 +164,16 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-0.6B"
-        tool_actors = None
+        pools = None
         if use_tools:
-            tool_actors, _ = create_tools(
-                [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
+            pools, _ = create_tool_pools(
+                [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
+                pool_size=4,
             )
         max_steps = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
-            tokenizer_name=tokenizer_name,
-            prompt=prompt,
-            tool_actors=tool_actors,
-            max_steps=max_steps,
-            max_tokens=max_tokens,
+            tokenizer_name=tokenizer_name, prompt=prompt, pools=pools, max_steps=max_steps, max_tokens=max_tokens
         )
 
         if use_tools:

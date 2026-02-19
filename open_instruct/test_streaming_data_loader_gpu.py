@@ -28,7 +28,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import create_tools
+from open_instruct.grpo_fast import create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
@@ -186,8 +186,9 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
-        tool_actors, _ = create_tools(
-            [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
+        pools, _ = create_tool_pools(
+            [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
+            pool_size=4,
         )
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
@@ -209,7 +210,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
-            tool_actors=tool_actors,
+            pools=pools,
             max_steps=3,
             reward_config=RewardConfig(),
             train_dataset=train_dataset,

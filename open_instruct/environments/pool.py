@@ -1,12 +1,10 @@
-"""Pool of Ray environment actors with acquire/release semantics."""
+"""Pool of Ray actors with acquire/release semantics."""
 
 import collections
 import logging
 from typing import Any
 
 import ray
-
-from .base import get_env_class
 
 logger = logging.getLogger(__name__)
 
@@ -19,21 +17,20 @@ class EnvironmentPool:
     Acquire/release are called via .remote() from the vLLM generation loop.
     """
 
-    def __init__(self, pool_size: int, env_name: str, **env_kwargs: Any):
-        env_class = get_env_class(env_name)
-        actor_class = ray.remote(env_class)
+    def __init__(self, pool_size: int, actor_class: type, **actor_kwargs: Any):
+        remote_class = ray.remote(actor_class)
 
-        logger.info(f"Creating {pool_size} '{env_name}' environment actors")
-        self._actors = [actor_class.remote(**env_kwargs) for _ in range(pool_size)]
+        logger.info(f"Creating pool of {pool_size} {actor_class.__name__} actors")
+        self._actors = [remote_class.remote(**actor_kwargs) for _ in range(pool_size)]
 
         setup_tasks = [actor.setup.remote() for actor in self._actors]
         try:
             ray.get(setup_tasks)
         except Exception as e:
-            logger.warning(f"Error during environment setup: {e}")
+            logger.warning(f"Error during actor setup: {e}")
 
         self._available: collections.deque[ray.actor.ActorHandle] = collections.deque(self._actors)
-        logger.info(f"Environment pool ready: {pool_size} '{env_name}' actors")
+        logger.info(f"Pool ready: {pool_size} {actor_class.__name__} actors")
 
     def acquire(self) -> ray.actor.ActorHandle | None:
         """Return an available actor, or None if all are in use."""

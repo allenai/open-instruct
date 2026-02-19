@@ -99,29 +99,6 @@ class EnvsConfig:
         """Return True if any tools are configured."""
         return bool(self.tools)
 
-    # --- Stateful RL environment config ---
-
-    env_name: str | None = None
-    """Default environment for samples whose dataset doesn't specify one via env_config column
-    (e.g., 'counter', 'guess_number'). Datasets with per-sample env_config override this."""
-
-    env_pool_size: int | None = None
-    """Number of environment actors to pre-allocate per environment type.
-    Defaults to num_unique_prompts_rollout * num_samples_per_prompt_rollout (so vLLM never blocks)."""
-
-    env_timeout: int = 60
-    """Timeout in seconds for individual environment step() calls."""
-
-    @property
-    def env_enabled(self) -> bool:
-        """Return True if environment is configured."""
-        return self.env_name is not None
-
-    def to_env_config_dict(self) -> dict:
-        """Convert to dict format expected by PromptRequest.env_config."""
-        config = {"env_name": self.env_name, "max_steps": self.max_steps, "timeout": self.env_timeout}
-        return {k: v for k, v in config.items() if v is not None}
-
 
 def truncate(text: str, max_length: int = 500) -> str:
     """Truncate text for logging, adding ellipsis if needed."""
