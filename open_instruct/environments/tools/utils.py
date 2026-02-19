@@ -110,9 +110,6 @@ class EnvsConfig:
     env_timeout: int = 60
     """Timeout in seconds for environment operations."""
 
-    over_limit_penalty: float | None = None
-    """Penalty reward applied when max_steps is exceeded. None = no penalty (just stop)."""
-
     @property
     def env_enabled(self) -> bool:
         """Return True if environment is configured."""

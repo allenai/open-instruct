@@ -1323,7 +1323,6 @@ def create_model_and_optimizer(
         tool_definitions=tool_definitions,
         max_steps=tools_config.max_steps if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
-        over_limit_penalty=tools_config.over_limit_penalty if tools_config and tools_config.env_enabled else None,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,

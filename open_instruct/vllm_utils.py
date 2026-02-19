@@ -570,7 +570,6 @@ class LLMRayActor:
         tool_definitions: list[dict] | None = None,
         max_steps: int = 5,
         mask_tool_use: bool = True,
-        over_limit_penalty: float | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -585,7 +584,7 @@ class LLMRayActor:
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._init_config(
-            tool_actors, max_steps, mask_tool_use, over_limit_penalty, inflight_updates, reward_config,
+            tool_actors, max_steps, mask_tool_use, inflight_updates, reward_config,
             train_dataset, eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
@@ -605,7 +604,6 @@ class LLMRayActor:
         tool_actors: list[ray.actor.ActorHandle] | None,
         max_steps: int,
         mask_tool_use: bool,
-        over_limit_penalty: float | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
@@ -614,7 +612,6 @@ class LLMRayActor:
         self.tool_actors = tool_actors or []
         self.max_steps = max_steps
         self.mask_tool_use = mask_tool_use
-        self.over_limit_penalty = over_limit_penalty
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -939,7 +936,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     env_config = request_metadata.get("env_config")
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
-    over_limit_penalty = actor.over_limit_penalty
 
     configured_tools = set(actor.tool_actor_map.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
@@ -1006,9 +1002,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             observations: list[str] = []
             for tc in tool_calls:
                 if num_calls >= max_steps:
-                    if over_limit_penalty is not None:
-                        env_state.rewards.append(over_limit_penalty)
-                        env_state.done = True
                     break
                 num_calls += 1
                 tool_called = True
@@ -1163,7 +1156,6 @@ def create_vllm_engines(
     tool_definitions: list[dict] | None = None,
     max_steps: int = 5,
     mask_tool_use: bool = True,
-    over_limit_penalty: float | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -1251,7 +1243,6 @@ def create_vllm_engines(
                 tool_definitions=tool_definitions,
                 max_steps=max_steps,
                 mask_tool_use=mask_tool_use,
-                over_limit_penalty=over_limit_penalty,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
