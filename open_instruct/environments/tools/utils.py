@@ -65,6 +65,8 @@ class EnvsConfig:
 
     def __post_init__(self):
         self.max_steps = int(self.max_steps)
+        if self.max_steps < 1:
+            raise ValueError(f"max_steps must be >= 1, got {self.max_steps}")
 
         if not self.tools:
             return
