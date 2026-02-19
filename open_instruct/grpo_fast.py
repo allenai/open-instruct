@@ -1138,7 +1138,6 @@ def setup_datasets(
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
-    train_dataset = train_dataset.shuffle(seed=args.seed)
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
@@ -1156,8 +1155,6 @@ def setup_datasets(
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
-        if streaming_config.shuffle_eval_dataset:
-            eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
         eval_dataset = None
 
@@ -1344,10 +1341,10 @@ def create_model_and_optimizer(
             // vllm_config.vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
-            nodes_needed = (
+            nodes_needed = math.ceil(
                 streaming_config.num_unique_prompts_rollout
                 * streaming_config.num_samples_per_prompt_rollout
-                // kv_cache_max_concurrency
+                / kv_cache_max_concurrency
             )
             logger.warning(
                 f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
@@ -1590,7 +1587,9 @@ def maybe_save_checkpoint(
     wandb_url: str,
 ) -> float:
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (
+        (args.eval_on_step_0 and training_step == 1) or (training_step % args.save_freq == 0 and training_step > 1)
+    ):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
@@ -1906,9 +1905,12 @@ def run_training(
         health_check_time = time.perf_counter() - health_check_start
 
         if (
-            training_step % args.local_eval_every == 0
-            and eval_data_loader is not None
-            and (args.eval_on_step_0 or training_step > 1)
+            eval_data_loader is not None
+            and args.local_eval_every > 0
+            and (
+                (args.eval_on_step_0 and training_step == 1)
+                or (training_step % args.local_eval_every == 0 and training_step > 1)
+            )
         ):
             if not last_eval_collected:
                 logger.warning(
