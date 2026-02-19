@@ -101,7 +101,7 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tool_actors=None, max_tool_calls=None, max_tokens=50):
+    def _setup_engine_and_generate(self, tokenizer_name, prompt, tool_actors=None, max_steps=None, max_tokens=50):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -141,7 +141,7 @@ class TestGeneration(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             tool_actors=tool_actors,
-            max_tool_calls=max_tool_calls or 5,
+            max_steps=max_steps or 5,
             reward_config=reward_config,
             train_dataset=train_dataset,
         )
@@ -169,13 +169,13 @@ class TestGeneration(TestGrpoFastBase):
             tool_actors, _ = create_tools(
                 [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
             )
-        max_tool_calls = 5 if use_tools else None
+        max_steps = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,
             prompt=prompt,
             tool_actors=tool_actors,
-            max_tool_calls=max_tool_calls,
+            max_steps=max_steps,
             max_tokens=max_tokens,
         )
 

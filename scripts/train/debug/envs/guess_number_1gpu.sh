@@ -43,7 +43,7 @@ uv run python open_instruct/grpo_fast.py \
     --push_to_hub false \
     --save_traces \
     --env_pool_size 4 \
-    --env_max_steps 10 \
+    --max_steps 10 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --output_dir output/guess_number_debug

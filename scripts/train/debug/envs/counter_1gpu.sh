@@ -43,7 +43,7 @@ uv run python open_instruct/grpo_fast.py \
     --push_to_hub false \
     --save_traces \
     --env_pool_size 16 \
-    --env_max_steps 20 \
+    --max_steps 20 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \

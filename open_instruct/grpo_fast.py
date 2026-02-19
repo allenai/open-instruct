@@ -1321,7 +1321,7 @@ def create_model_and_optimizer(
         tool_actors=tool_actors,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
-        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
+        max_steps=tools_config.max_steps if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         over_limit_penalty=tools_config.over_limit_penalty if tools_config and tools_config.env_enabled else None,
         prompt_queue=prompt_Q,

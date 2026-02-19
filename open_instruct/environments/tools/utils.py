@@ -48,8 +48,8 @@ class EnvsConfig:
     tool_parser_type: str = "legacy"
     """Type of tool parser to use. See parsers.get_available_parsers() for valid options."""
 
-    max_tool_calls: int = 5
-    """Maximum number of tool calls allowed per generation."""
+    max_steps: int = 5
+    """Maximum number of tool calls or environment steps per generation."""
 
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
@@ -61,7 +61,7 @@ class EnvsConfig:
     """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
-        self.max_tool_calls = int(self.max_tool_calls)
+        self.max_steps = int(self.max_steps)
 
         if not self.tools:
             return
@@ -107,9 +107,6 @@ class EnvsConfig:
     env_pool_size: int = 64
     """Number of environment actors to create."""
 
-    env_max_steps: int = 50
-    """Maximum steps per episode before forcing done=True."""
-
     env_timeout: int = 60
     """Timeout in seconds for environment operations."""
 
@@ -125,7 +122,7 @@ class EnvsConfig:
         """Convert to dict format expected by PromptRequest.env_config."""
         config = {
             "env_name": self.env_name,
-            "max_steps": self.env_max_steps,
+            "max_steps": self.max_steps,
             "pool_size": self.env_pool_size,
             "timeout": self.env_timeout,
         }

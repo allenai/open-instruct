@@ -568,7 +568,7 @@ class LLMRayActor:
         tool_actors: list[ray.actor.ActorHandle] | None = None,
         tool_parser_type: str = "legacy",
         tool_definitions: list[dict] | None = None,
-        max_tool_calls: int = 5,
+        max_steps: int = 5,
         mask_tool_use: bool = True,
         over_limit_penalty: float | None = None,
         bundle_indices: list[int] | None = None,
@@ -585,7 +585,7 @@ class LLMRayActor:
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._init_config(
-            tool_actors, max_tool_calls, mask_tool_use, over_limit_penalty, inflight_updates, reward_config,
+            tool_actors, max_steps, mask_tool_use, over_limit_penalty, inflight_updates, reward_config,
             train_dataset, eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
@@ -603,7 +603,7 @@ class LLMRayActor:
     def _init_config(
         self,
         tool_actors: list[ray.actor.ActorHandle] | None,
-        max_tool_calls: int,
+        max_steps: int,
         mask_tool_use: bool,
         over_limit_penalty: float | None,
         inflight_updates: bool,
@@ -612,7 +612,7 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.tool_actors = tool_actors or []
-        self.max_tool_calls = max_tool_calls
+        self.max_steps = max_steps
         self.mask_tool_use = mask_tool_use
         self.over_limit_penalty = over_limit_penalty
         self.inflight_updates = inflight_updates
@@ -944,7 +944,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     configured_tools = set(actor.tool_actor_map.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
-    max_steps = env_config.get("max_steps", actor.max_tool_calls) if env_config else actor.max_tool_calls
+    max_steps = env_config.get("max_steps", actor.max_steps) if env_config else actor.max_steps
 
     # Set up environment if env_config is present
     env_pool: EnvironmentPool | None = None
@@ -1161,7 +1161,7 @@ def create_vllm_engines(
     tool_actors: list[ray.actor.ActorHandle] | None = None,
     tool_parser_type: str = "legacy",
     tool_definitions: list[dict] | None = None,
-    max_tool_calls: int = 5,
+    max_steps: int = 5,
     mask_tool_use: bool = True,
     over_limit_penalty: float | None = None,
     prompt_queue=None,
@@ -1249,7 +1249,7 @@ def create_vllm_engines(
                 tool_actors=tool_actors,
                 tool_parser_type=tool_parser_type,
                 tool_definitions=tool_definitions,
-                max_tool_calls=max_tool_calls,
+                max_steps=max_steps,
                 mask_tool_use=mask_tool_use,
                 over_limit_penalty=over_limit_penalty,
                 inflight_updates=inflight_updates,
