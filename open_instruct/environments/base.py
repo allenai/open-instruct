@@ -1,6 +1,5 @@
 """Base classes for RL environments."""
 
-import importlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -97,19 +96,8 @@ class RLEnvironment(ABC):
         pass
 
 
-def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:
-    """Get environment class by registry name or import path."""
-    if env_name is not None:
-        if env_name not in ENV_REGISTRY:
-            raise ValueError(f"Environment '{env_name}' not found. Available: {list(ENV_REGISTRY.keys())}")
-        return ENV_REGISTRY[env_name]
-
-    if env_class is not None:
-        module_path, class_name = env_class.rsplit(".", 1)
-        module = importlib.import_module(module_path)
-        cls = getattr(module, class_name)
-        if not issubclass(cls, RLEnvironment):
-            raise ValueError(f"{env_class} is not an RLEnvironment")
-        return cls
-
-    raise ValueError("Must provide env_name or env_class")
+def get_env_class(env_name: str) -> type[RLEnvironment]:
+    """Get environment class by registry name."""
+    if env_name not in ENV_REGISTRY:
+        raise ValueError(f"Environment '{env_name}' not found. Available: {list(ENV_REGISTRY.keys())}")
+    return ENV_REGISTRY[env_name]

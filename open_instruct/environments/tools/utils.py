@@ -99,16 +99,10 @@ class EnvsConfig:
         """Return True if any tools are configured."""
         return bool(self.tools)
 
-
-@dataclass
-class EnvConfig:
-    """Configuration for RL environments used during generation."""
+    # --- Stateful RL environment config ---
 
     env_name: str | None = None
     """Name of registered environment (e.g., 'counter', 'guess_number')."""
-
-    env_class: str | None = None
-    """Full class path for custom environment (e.g., 'mymodule.MyEnv')."""
 
     env_pool_size: int = 64
     """Number of environment actors to create."""
@@ -123,15 +117,14 @@ class EnvConfig:
     """Penalty reward applied when max_steps is exceeded. None = no penalty (just stop)."""
 
     @property
-    def enabled(self) -> bool:
+    def env_enabled(self) -> bool:
         """Return True if environment is configured."""
-        return self.env_name is not None or self.env_class is not None
+        return self.env_name is not None
 
     def to_env_config_dict(self) -> dict:
         """Convert to dict format expected by PromptRequest.env_config."""
         config = {
             "env_name": self.env_name,
-            "env_class": self.env_class,
             "max_steps": self.env_max_steps,
             "pool_size": self.env_pool_size,
             "timeout": self.env_timeout,

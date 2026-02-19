@@ -891,30 +891,28 @@ class LLMRayActor:
 
 async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> EnvironmentPool:
     """Get or create an environment pool for the given config."""
-    env_name = env_config.get("env_name")
-    env_class = env_config.get("env_class")
-    pool_key = env_name or env_class
+    env_name = env_config["env_name"]
 
-    if pool_key in actor.env_pools:
-        return actor.env_pools[pool_key]
+    if env_name in actor.env_pools:
+        return actor.env_pools[env_name]
 
     if actor._env_pool_lock is None:
         actor._env_pool_lock = asyncio.Lock()
 
     async with actor._env_pool_lock:
-        if pool_key in actor.env_pools:
-            return actor.env_pools[pool_key]
+        if env_name in actor.env_pools:
+            return actor.env_pools[env_name]
 
         pool_size = env_config.get("pool_size", 64)
         env_kwargs = {
             k: v
             for k, v in env_config.items()
-            if k not in ("env_name", "env_class", "task_id", "max_steps", "pool_size")
+            if k not in ("env_name", "task_id", "max_steps", "pool_size")
         }
-        pool = EnvironmentPool(pool_size=pool_size, env_name=env_name, env_class=env_class, **env_kwargs)
+        pool = EnvironmentPool(pool_size=pool_size, env_name=env_name, **env_kwargs)
         await pool.initialize()
-        actor.env_pools[pool_key] = pool
-        return actor.env_pools[pool_key]
+        actor.env_pools[env_name] = pool
+        return actor.env_pools[env_name]
 
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):

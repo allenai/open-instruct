@@ -93,7 +93,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.environments.base import get_env_class
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseEnvConfig, EnvConfig, EnvsConfig, ParsedEnvConfig
+from open_instruct.environments.tools.utils import BaseEnvConfig, EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -1323,7 +1323,7 @@ def create_model_and_optimizer(
         tool_definitions=tool_definitions,
         max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
-        over_limit_penalty=base_env_config.get("over_limit_penalty") if base_env_config else None,
+        over_limit_penalty=tools_config.over_limit_penalty if tools_config and tools_config.env_enabled else None,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2039,7 +2039,7 @@ def initialize_tools(tools_config: EnvsConfig, tokenizer) -> tuple[list, list, l
 
 
 def discover_env_tool_definitions(
-    dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str], env_config: EnvConfig
+    dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str], tools_config: EnvsConfig
 ) -> dict[str, list[dict[str, Any]]]:
     """Scan datasets for unique env_names and build a map of env_name -> tool definitions.
 
@@ -2071,31 +2071,18 @@ def discover_env_tool_definitions(
                 if name:
                     env_names.add(name)
 
-    if env_config.env_name is not None:
-        env_names.add(env_config.env_name)
+    if tools_config.env_name is not None:
+        env_names.add(tools_config.env_name)
 
     for name in sorted(env_names):
         try:
-            env_cls = get_env_class(env_name=name)
+            env_cls = get_env_class(name)
             tool_defs = env_cls.get_tool_definitions()
             if tool_defs:
                 env_tool_map[name] = tool_defs
                 logger.info(f"Discovered env '{name}' tools: {[t['function']['name'] for t in tool_defs]}")
         except Exception as e:
             logger.warning(f"Could not get tool definitions for env '{name}': {e}")
-
-    if env_config.env_class is not None and env_config.env_class not in env_tool_map:
-        try:
-            env_cls = get_env_class(env_class=env_config.env_class)
-            tool_defs = env_cls.get_tool_definitions()
-            if tool_defs:
-                env_tool_map[env_config.env_class] = tool_defs
-                logger.info(
-                    f"Discovered env class '{env_config.env_class}' tools: "
-                    f"{[t['function']['name'] for t in tool_defs]}"
-                )
-        except Exception as e:
-            logger.warning(f"Could not get tool definitions for env class '{env_config.env_class}': {e}")
 
     return env_tool_map
 
@@ -2107,7 +2094,6 @@ def main(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
-    env_config: EnvConfig | None = None,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
@@ -2137,14 +2123,14 @@ def main(
     env_tool_map = discover_env_tool_definitions(
         dataset_mixer_list=streaming_config.dataset_mixer_list,
         dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
-        env_config=env_config,
+        tools_config=tools_config,
     )
     if env_tool_map:
-        if not env_config.enabled:
+        if not tools_config.env_enabled:
             first_env_name = next(iter(env_tool_map))
-            env_config.env_name = first_env_name
+            tools_config.env_name = first_env_name
             logger.info(
-                f"Auto-enabled env_config from dataset discovery (env_name={first_env_name}). "
+                f"Auto-enabled env from dataset discovery (env_name={first_env_name}). "
                 f"All discovered envs: {list(env_tool_map.keys())}"
             )
         all_env_tool_defs = [td for defs in env_tool_map.values() for td in defs]
@@ -2222,7 +2208,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = env_config.to_env_config_dict() if env_config and env_config.enabled else None
+    base_env_config = tools_config.to_env_config_dict() if tools_config.env_enabled else None
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2324,10 +2310,9 @@ if __name__ == "__main__":
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
             EnvsConfig,
-            EnvConfig,
         )
     )
-    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config, env_config = (
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
         parser.parse_args_into_dataclasses()
     )
     assert isinstance(args, grpo_utils.ExperimentConfig)
@@ -2336,6 +2321,5 @@ if __name__ == "__main__":
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
     assert isinstance(tools_config, EnvsConfig)
-    assert isinstance(env_config, EnvConfig)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config, env_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)

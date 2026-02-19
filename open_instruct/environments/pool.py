@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 class EnvironmentPool:
     """Pool of RLEnvironment Ray actors for concurrent rollouts."""
 
-    def __init__(self, pool_size: int, env_name: str | None = None, env_class: str | None = None, **env_kwargs: Any):
+    def __init__(self, pool_size: int, env_name: str, **env_kwargs: Any):
         self.pool_size = pool_size
         self.env_name = env_name
-        self.env_class_path = env_class
         self.env_kwargs = env_kwargs
         self._env_class: type[RLEnvironment] | None = None
         self._actors: list[ray.actor.ActorHandle] = []
@@ -29,7 +28,7 @@ class EnvironmentPool:
         if self._initialized:
             return
 
-        self._env_class = get_env_class(env_name=self.env_name, env_class=self.env_class_path)
+        self._env_class = get_env_class(self.env_name)
         actor_class = ray.remote(self._env_class)
 
         logger.info(f"Creating {self.pool_size} environment actors")
