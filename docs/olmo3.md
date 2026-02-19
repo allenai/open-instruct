@@ -36,3 +36,9 @@ There are two main issues that lead to all the floating chat templates: one, the
 -  [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) is the primary chat template for tokenizing both instruct and think models that have tool use abilities.
 - For Instruct evaluation/training, use [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev). For release, use [`allenai/olmo-3-tokenizer-instruct-release`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-release) (adds Olmo identity).
 - For Think SFT tokenization, use [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) (avoids the `<think>` masking bug). For Think evaluation and post-SFT stages (DPO, RL), use [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev) (adds `<think>` to `add_generation_prompt`). For release, use [`allenai/olmo-3.2-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-release) (adds Olmo identity).
+
+To verify that two tokenizer repos differ only where expected, use the diff tool:
+
+```bash
+python scripts/utils/diff_tokenizers.py allenai/olmo-3-tokenizer-instruct-dev allenai/olmo-3-tokenizer-instruct-release
+```
