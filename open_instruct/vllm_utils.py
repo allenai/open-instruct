@@ -584,8 +584,14 @@ class LLMRayActor:
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._init_config(
-            tool_actors, max_steps, mask_tool_use, env_pools, inflight_updates, reward_config,
-            train_dataset, eval_dataset,
+            tool_actors,
+            max_steps,
+            mask_tool_use,
+            env_pools,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -1010,9 +1016,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     logger.warning(error_msg)
                     observations.append(error_msg)
                     tool_error += error_msg
-                    tool_call_stats.append(
-                        ToolCallStats(tool_name=tc.name, success=False, runtime=0.0)
-                    )
+                    tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
 
                 if rollout_state.done:
                     break

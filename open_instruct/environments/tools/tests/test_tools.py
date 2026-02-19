@@ -1316,10 +1316,12 @@ class TestEnvStatistics(unittest.TestCase):
     def test_compute_metrics_multiple_tools_with_excess(self):
         """Test compute_metrics with multiple tools having excess calls."""
         stats = EnvStatistics()
-        stats.add_rollout([
+        stats.add_rollout(
+            [
                 data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5),
                 data_types.ToolCallStats(tool_name="search", success=True, runtime=0.2),
-            ])
+            ]
+        )
         stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.4)])
 
         metrics = stats.compute_metrics()

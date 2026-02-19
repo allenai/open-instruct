@@ -1920,7 +1920,11 @@ def run_training(
                 )
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
-                    eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True,
+                    eval_example,
+                    0,
+                    prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
                     base_env_config=base_env_config,
                 )
 
@@ -2150,7 +2154,10 @@ def main(
         logger.info(f"Auto-sized env_pool_size to {env_pool_size} (num_unique_prompts * num_samples)")
 
     tool_actors, tool_definitions, tool_stop_sequences, env_tool_map, env_pools = initialize_tools_and_envs(
-        tools_config, tokenizer, streaming_config.dataset_mixer_list, streaming_config.dataset_mixer_list_splits,
+        tools_config,
+        tokenizer,
+        streaming_config.dataset_mixer_list,
+        streaming_config.dataset_mixer_list_splits,
         pool_size=env_pool_size,
     )
     # TODO: Refactor legacy/dr_tulu parsers to accept tool_definitions dicts so they work with envs.

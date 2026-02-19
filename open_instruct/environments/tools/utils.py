@@ -119,11 +119,7 @@ class EnvsConfig:
 
     def to_env_config_dict(self) -> dict:
         """Convert to dict format expected by PromptRequest.env_config."""
-        config = {
-            "env_name": self.env_name,
-            "max_steps": self.max_steps,
-            "timeout": self.env_timeout,
-        }
+        config = {"env_name": self.env_name, "max_steps": self.max_steps, "timeout": self.env_timeout}
         return {k: v for k, v in config.items() if v is not None}
 
 

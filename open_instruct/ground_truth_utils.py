@@ -193,7 +193,12 @@ class GSM8KVerifier(VerifierFunction):
         super().__init__("gsm8k", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
@@ -214,7 +219,12 @@ class MathVerifier(VerifierFunction):
         super().__init__("math", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -263,7 +273,12 @@ class StrictMathVerifier(VerifierFunction):
         super().__init__("strict_math", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -292,7 +307,12 @@ class IFEvalVerifier(VerifierFunction):
         super().__init__("ifeval", weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | dict, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | dict,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
@@ -333,7 +353,12 @@ class IFEvalVerifierOld(VerifierFunction):
         super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | dict, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | dict,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         constraint = label
         answer = remove_thinking_section(prediction)
@@ -394,7 +419,12 @@ class FlanVerifier(VerifierFunction):
         super().__init__("flan", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         answer_string = prediction.split("The answer is: ")[-1].strip()
         score = float(normalize_answer(answer_string) == normalize_answer(label))
@@ -412,7 +442,12 @@ class StringMatcherVerifier(VerifierFunction):
         super().__init__("string_matcher", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         if "<answer>" not in prediction or "</answer>" not in prediction:
             return VerificationResult(score=0.0)
@@ -435,7 +470,12 @@ class F1Verifier(VerifierFunction):
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | list[str],
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         prediction = remove_thinking_section(prediction)
         labels: list[str] = label if isinstance(label, list) else [label]
@@ -454,7 +494,12 @@ class PuzzleMatcherVerifier(VerifierFunction):
         super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         # remove answer tags from the prediction
         prediction = remove_thinking_section(prediction)
@@ -474,7 +519,12 @@ class ReSearchVerifierF1(VerifierFunction):
         super().__init__("re_search_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         try:
             label = json.loads(label)
@@ -514,7 +564,12 @@ class R1SearchVerifier(VerifierFunction):
         super().__init__(name="re_search", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | list[str],
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         # 1. Parse JSON label safely
         parsed_labels: list | str
@@ -563,7 +618,12 @@ class MaxLenVerifier(VerifierFunction):
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         desired_length = float(label)
         # return absolute difference between the length of the prediction and the max length
@@ -593,7 +653,12 @@ class UpToMaxLenVerifier(VerifierFunction):
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         desired_length = float(label)
         length_diff = len(tokenized_prediction) - desired_length
@@ -672,7 +737,12 @@ class LMJudgeVerifier(VerifierFunction):
         )
 
     async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
@@ -739,7 +809,14 @@ class LMJudgeVerifier(VerifierFunction):
                     await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
         return VerificationResult(score=0.0, cost=0.0, reasoning="Unknown error after all retries.")
 
-    def __call__(self, tokenized_prediction: list[int], prediction: str, label: str, query: str, rollout_state: dict | None = None) -> VerificationResult:
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
         """
         Evaluates the prediction based on an LLM's judgement.
 
@@ -835,7 +912,12 @@ class CodeVerifier(VerifierFunction):
         return cls._session_pool
 
     async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronously verify code execution against test cases.
@@ -897,7 +979,12 @@ class CodeVerifier(VerifierFunction):
             return VerificationResult(score=0.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Synchronously verify code execution against test cases.
@@ -935,7 +1022,12 @@ class PassthroughVerifier(VerifierFunction):
         super().__init__("passthrough", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         return VerificationResult(score=0.0)
 
@@ -992,7 +1084,12 @@ class RubricVerifier(VerifierFunction):
         self.config = verifier_config
 
     async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """Score response against all rubrics in the ground truth."""
         if isinstance(label, str):
@@ -1058,7 +1155,12 @@ class RubricVerifier(VerifierFunction):
         return VerificationResult(score=final_score)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None, rollout_state: dict | None = None,
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """Synchronous wrapper for async_call."""
         try:
