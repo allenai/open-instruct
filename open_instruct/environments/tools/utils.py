@@ -102,13 +102,14 @@ class EnvsConfig:
     # --- Stateful RL environment config ---
 
     env_name: str | None = None
-    """Name of registered environment (e.g., 'counter', 'guess_number')."""
+    """Default environment for samples whose dataset doesn't specify one via env_config column
+    (e.g., 'counter', 'guess_number'). Datasets with per-sample env_config override this."""
 
     env_pool_size: int = 64
-    """Number of environment actors to create."""
+    """Number of environment actors to pre-allocate per environment type."""
 
     env_timeout: int = 60
-    """Timeout in seconds for environment operations."""
+    """Timeout in seconds for individual environment step() calls."""
 
     @property
     def env_enabled(self) -> bool:
