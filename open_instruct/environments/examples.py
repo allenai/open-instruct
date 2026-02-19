@@ -11,6 +11,7 @@ from .base import EnvCall, RLEnvironment, StepResult
 class CounterEnv(RLEnvironment):
     """Simple counter environment. Increment to reach target, then submit."""
 
+    config_name = "counter"
     max_steps = 20
 
     _tool_definitions = [
@@ -100,6 +101,7 @@ class CounterEnv(RLEnvironment):
 class GuessNumberEnv(RLEnvironment):
     """Number guessing game. Guess a secret number between min and max."""
 
+    config_name = "guess_number"
     max_steps = 10
 
     _tool_definitions = [
