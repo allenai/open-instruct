@@ -32,14 +32,6 @@ class RolloutState:
     done: bool = False
     info: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def final_reward(self) -> float:
-        return self.rewards[-1] if self.rewards else 0.0
-
-    @property
-    def total_reward(self) -> float:
-        return sum(self.rewards)
-
 
 class RLEnvironment(ABC):
     """Abstract base class for RL environments and tools.
