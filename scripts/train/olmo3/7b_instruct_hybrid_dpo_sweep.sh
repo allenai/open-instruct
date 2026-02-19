@@ -25,12 +25,12 @@ SFT_MODELS=(
 )
 
 DPO_LRS=(
-    2e-6
-    # 1e-6
-    8.5e-7
-    7e-7
-    5e-7
-    2.5e-7
+    # 2e-6
+    1e-6
+    # 8.5e-7
+    # 7e-7
+    # 5e-7
+    # 2.5e-7
 )
 
 for MODEL_PATH in "${SFT_MODELS[@]}"; do
