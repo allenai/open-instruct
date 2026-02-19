@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-import torch
 from olmo_core.distributed.utils import get_rank
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
@@ -141,7 +140,6 @@ class PerfCallback(Callback):
     _interval_num_sequences: int = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
-    _prev_post_step_end: float = field(default=0.0, repr=False)
 
     def pre_train(self) -> None:
         self._start_time = time.perf_counter()
@@ -177,8 +175,6 @@ class PerfCallback(Callback):
             return
         total_tokens_step = int(token_count_metric.item())
 
-        host_end = time.perf_counter()
-        torch.cuda.synchronize()
         interval_end = time.perf_counter()
         training_time = interval_end - self._interval_start_time
         total_time_elapsed = interval_end - self._start_time
@@ -228,11 +224,7 @@ class PerfCallback(Callback):
                     reduce_type=None,
                 )
 
-        cuda_sync_ms = (interval_end - host_end) * 1000
-        host_step_time_ms = (host_end - self._pre_step_time) * 1000
         step_time_ms = (interval_end - self._pre_step_time) * 1000
-        self.trainer.record_metric("perf/cuda_sync_ms", cuda_sync_ms, reduce_type=None)
-        self.trainer.record_metric("perf/host_step_time_ms", host_step_time_ms, reduce_type=None)
         self.trainer.record_metric("perf/step_time_ms", step_time_ms, reduce_type=None)
         if self._prev_pre_step_time > 0:
             cycle_time_ms = (self._pre_step_time - self._prev_pre_step_time) * 1000
@@ -242,13 +234,6 @@ class PerfCallback(Callback):
             self.trainer.record_metric("perf/overhead_ms", overhead_ms, reduce_type=None)
             self.trainer.record_metric("perf/step_pct", step_pct, reduce_type=None)
 
-        if self._prev_post_step_end > 0:
-            post_to_preload_ms = (self._batch_load_start - self._prev_post_step_end) * 1000
-            load_to_prestep_ms = (self._pre_step_time - self._batch_load_start) * 1000
-            self.trainer.record_metric("perf/post_to_preload_ms", post_to_preload_ms, reduce_type=None)
-            self.trainer.record_metric("perf/load_to_prestep_ms", load_to_prestep_ms, reduce_type=None)
-
         self._interval_start_time = interval_end
         self._interval_num_sequences = 0
         self._last_step = self.step
-        self._prev_post_step_end = time.perf_counter()
