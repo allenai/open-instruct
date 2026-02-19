@@ -366,12 +366,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         if args.activation_memory_budget < 1.0 and args.compile_model
         else None
     )
-    tp_config = (
-        transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
-        if args.tensor_parallel_degree > 1
-        else None
-    )
-
     train_module = DPOTrainModule(
         model=model,
         optim=optim_config,
@@ -379,7 +373,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
-        tp_config=tp_config,
+        tp_config=(
+            transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+            if args.tensor_parallel_degree > 1
+            else None
+        ),
         ac_config=ac_config,
         compile_model=args.compile_model,
         max_grad_norm=max_grad_norm,
