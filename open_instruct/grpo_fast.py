@@ -1582,7 +1582,10 @@ def maybe_save_checkpoint(
     wandb_url: str,
 ) -> float:
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (
+        (args.eval_on_step_0 and training_step == 1)
+        or (training_step % args.save_freq == 0 and training_step > 1)
+    ):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
@@ -1896,10 +1899,9 @@ def run_training(
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
 
-        if (
-            training_step % args.local_eval_every == 0
-            and eval_data_loader is not None
-            and (args.eval_on_step_0 or training_step > 1)
+        if eval_data_loader is not None and (
+            (args.eval_on_step_0 and training_step == 1)
+            or (training_step % args.local_eval_every == 0 and training_step > 1)
         ):
             if not last_eval_collected:
                 logger.warning(
