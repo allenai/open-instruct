@@ -70,7 +70,9 @@ class DPOLMHead(LMHead):
                 .redistribute(placements=(Replicate(),))
                 .to_local()
             )
-        return LMOutputWithLoss(logits=None, loss=per_token_logps, ce_loss=per_token_logps.detach(), z_loss=None)
+        return LMOutputWithLoss(
+            logits=None, loss=per_token_logps, ce_loss=per_token_logps.detach().clone(), z_loss=None
+        )
 
 
 def split_batch_dpo(batch: dict[str, Any], num_microbatch_instances: int) -> list[dict[str, Any]]:
