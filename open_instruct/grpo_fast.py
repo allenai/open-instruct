@@ -2028,11 +2028,7 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         split = splits[i]
-        try:
-            ds = datasets.load_dataset(dataset_name, split=split)
-        except Exception:
-            logger.warning(f"Could not load dataset {dataset_name} for tool discovery, skipping")
-            continue
+        ds = datasets.load_dataset(dataset_name, split=split)
         if TOOLS_COLUMN_KEY in ds.column_names:
             for tools in ds[TOOLS_COLUMN_KEY]:
                 if tools:
