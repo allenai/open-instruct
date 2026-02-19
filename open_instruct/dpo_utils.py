@@ -38,18 +38,20 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, model_utils, padding_free_collator, tensor_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     compute_config_hash,
     load_dataset_configs,
 )
-from open_instruct.padding_free_collator import PAD_VALUES, calculate_per_token_logps, pad_to_length
+from open_instruct.padding_free_collator import calculate_per_token_logps
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
+
+PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
 
 
 def config_to_json_serializable(obj: object) -> object:
@@ -486,6 +488,25 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
+def _get_batch_stats(batch: dict) -> tuple[int, int, list[int], list[int]]:
+    """Extract token count, example count, and per-example lengths from a DPO batch.
+
+    Returns:
+        (batch_tokens, batch_size, chosen_lengths, rejected_lengths)
+    """
+    batch_size = len(batch["index"])
+    batch_tokens = padding_free_collator.get_num_tokens(batch)
+    if "chosen_cu_seq_lens_k" in batch:
+        chosen_cu = batch["chosen_cu_seq_lens_k"]
+        rejected_cu = batch["rejected_cu_seq_lens_k"]
+        chosen_lengths = (chosen_cu[1:] - chosen_cu[:-1]).tolist()
+        rejected_lengths = (rejected_cu[1:] - rejected_cu[:-1]).tolist()
+    else:
+        chosen_lengths = [batch["chosen_input_ids"].shape[1]] * batch_size
+        rejected_lengths = [batch["rejected_input_ids"].shape[1]] * batch_size
+    return batch_tokens, batch_size, chosen_lengths, rejected_lengths
+
+
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -498,6 +519,7 @@ def build_reference_logprobs_cache(
     model_dims: utils.ModelDims,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
+    forward_kwargs: dict | None = None,
 ) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
@@ -547,31 +569,20 @@ def build_reference_logprobs_cache(
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+                    chosen_logps, rejected_logps, _ = forward_fn(
+                        model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                    )
             else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+                chosen_logps, rejected_logps, _ = forward_fn(
+                    model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                )
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 
-            bs = len(batch["index"])
-            if "chosen_cu_seq_lens_k" in batch:
-                chosen_actual = batch["chosen_cu_seq_lens_k"][-1].item()
-                rejected_actual = batch["rejected_cu_seq_lens_k"][-1].item()
-                batch_tokens = chosen_actual + rejected_actual
-            else:
-                batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
             total_tokens += batch_tokens
-            total_examples += bs
-
-            if "chosen_cu_seq_lens_k" in batch:
-                chosen_cu = batch["chosen_cu_seq_lens_k"]
-                rejected_cu = batch["rejected_cu_seq_lens_k"]
-                chosen_lengths = (chosen_cu[1:] - chosen_cu[:-1]).tolist()
-                rejected_lengths = (rejected_cu[1:] - rejected_cu[:-1]).tolist()
-            else:
-                chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
-                rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            total_examples += batch_size
             pbar.set_postfix(
                 {
                     "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
@@ -845,16 +856,83 @@ def concatenated_inputs(batch: dict[str, list | torch.Tensor]) -> dict[str, torc
         if k.startswith("chosen") and isinstance(v, torch.Tensor):
             pad_value = -100 if "labels" in k else 0
             concatenated_key = k.replace("chosen", "concatenated")
-            concatenated_batch[concatenated_key] = pad_to_length(v, max_length, pad_value=pad_value)
+            concatenated_batch[concatenated_key] = tensor_utils.pad_to_length(v, max_length, pad_value=pad_value)
     for k in batch:
         v = batch[k]
         if k.startswith("rejected") and isinstance(v, torch.Tensor):
             pad_value = -100 if "labels" in k else 0
             concatenated_key = k.replace("rejected", "concatenated")
             concatenated_batch[concatenated_key] = torch.cat(
-                (concatenated_batch[concatenated_key], pad_to_length(v, max_length, pad_value=pad_value)), dim=0
+                (concatenated_batch[concatenated_key], tensor_utils.pad_to_length(v, max_length, pad_value=pad_value)),
+                dim=0,
             )
     return concatenated_batch
+
+
+def unpack_to_padded(
+    packed_logits: torch.Tensor, cu_doc_lens: torch.Tensor, batch_size: int, max_seq_len: int, pad_value: float = 0.0
+) -> torch.Tensor:
+    """Unpack packed logits back to padded format (batch_size, max_seq_len, vocab_size).
+
+    Args:
+        packed_logits: Packed logits of shape (1, total_tokens, vocab_size).
+        cu_doc_lens: Cumulative document lengths of shape (batch_size + 1,).
+        batch_size: Number of sequences in the batch.
+        max_seq_len: Maximum sequence length for padding.
+        pad_value: Value to use for padding (default 0.0).
+
+    Returns:
+        Padded logits of shape (batch_size, max_seq_len, vocab_size).
+    """
+    vocab_size = packed_logits.shape[-1]
+    padded = torch.full(
+        (batch_size, max_seq_len, vocab_size), pad_value, dtype=packed_logits.dtype, device=packed_logits.device
+    )
+    splits = cu_doc_lens.diff().tolist()
+    packed_list = torch.split(packed_logits.squeeze(0), splits, dim=0)
+    for i, doc_logits in enumerate(packed_list):
+        padded[i, : doc_logits.shape[0]] = doc_logits
+    return padded
+
+
+def pack_padded_sequences(
+    input_ids: torch.Tensor, labels: torch.Tensor, attention_mask: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    """Convert padded sequences to packed format with cumulative document lengths.
+
+    This is needed for OLMo-core models which don't support attention_mask but use
+    cu_doc_lens for intra-document attention masking.
+
+    Args:
+        input_ids: Padded input IDs of shape (batch_size, seq_len).
+        labels: Padded labels of shape (batch_size, seq_len).
+        attention_mask: Attention mask of shape (batch_size, seq_len), where 1 indicates
+            valid tokens and 0 indicates padding.
+
+    Returns:
+        Tuple of (packed_input_ids, packed_labels, cu_doc_lens, max_doc_len).
+        - packed_input_ids: Shape (1, total_tokens) with all sequences concatenated.
+        - packed_labels: Shape (1, total_tokens) with all labels concatenated.
+        - cu_doc_lens: Cumulative document lengths of shape (batch_size + 1,).
+        - max_doc_len: Maximum document length in the batch.
+    """
+    batch_size = input_ids.shape[0]
+    seq_lengths = attention_mask.sum(dim=1)
+    max_doc_len = int(seq_lengths.max().item())
+    cu_doc_lens = torch.zeros(batch_size + 1, dtype=torch.int32, device=input_ids.device)
+    cu_doc_lens[1:] = seq_lengths.cumsum(dim=0)
+
+    packed_input_ids_list = []
+    packed_labels_list = []
+    for i in range(batch_size):
+        length = seq_lengths[i].item()
+        packed_input_ids_list.append(input_ids[i, :length])
+        packed_labels_list.append(labels[i, :length])
+
+    packed_input_ids = torch.cat(packed_input_ids_list, dim=0).unsqueeze(0)
+    packed_labels = torch.cat(packed_labels_list, dim=0).unsqueeze(0)
+
+    return packed_input_ids, packed_labels, cu_doc_lens, max_doc_len
 
 
 def concatenated_forward(
@@ -1118,7 +1196,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             for key in ["input_ids", "attention_mask", "labels"]:
                 full_key = f"{prefix}{key}"
                 pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
-                result[full_key] = pad_to_length(result[full_key], max_len, pad_value)
+                result[full_key] = tensor_utils.pad_to_length(result[full_key], max_len, pad_value)
         result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
         result["attention_mask"] = torch.cat(
             [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0

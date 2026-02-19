@@ -119,7 +119,7 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     return scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int, model):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -222,11 +222,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_lora:
         raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
 
-    if args.tensor_parallel_degree > 1:
-        raise NotImplementedError(
-            "Tensor parallelism is not supported with DPO (DTensor view ops are incompatible with torch.compile)."
-        )
-
     if args.context_parallel_degree > 1:
         raise NotImplementedError(
             "Context parallelism is not supported with DPO (requires batch_shard_by_document integration)."
@@ -237,7 +232,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
-
 
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
@@ -397,6 +391,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
+        tp_config=tp_config,
         ac_config=ac_config,
         compile_model=args.compile_model,
         max_grad_norm=max_grad_norm,
@@ -421,7 +416,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.destroy_process_group()
         return
 
-    trainer_callbacks = _setup_callbacks(args, dp_world_size)
+    trainer_callbacks = _setup_callbacks(args, dp_world_size, train_module.model)
 
     if args.max_train_steps is not None:
         max_duration = train.Duration.steps(args.max_train_steps)
