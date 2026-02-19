@@ -243,8 +243,7 @@ def setup_vllm_engines(
     assert model_config.model_name_or_path is not None
 
     total_gpus = int(ray.cluster_resources().get("GPU", 0))
-    learner_gpus = sum(args.num_learners_per_node)
-    vllm_num_engines = (total_gpus - learner_gpus) // vllm_config.vllm_tensor_parallel_size
+    vllm_num_engines = total_gpus // vllm_config.vllm_tensor_parallel_size
 
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=vllm_num_engines,

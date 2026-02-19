@@ -296,6 +296,7 @@ class VLLMConfig:
     vllm_top_p: float = 1.0
 
     def __post_init__(self):
+        assert self.vllm_tensor_parallel_size >= 1, "vllm_tensor_parallel_size must be >= 1"
         if os.environ.get("VLLM_USE_V1") == "0":
             logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
             if self.vllm_enable_prefix_caching:
