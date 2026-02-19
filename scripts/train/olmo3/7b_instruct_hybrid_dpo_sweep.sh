@@ -49,7 +49,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --description "Hybrid 7B DPO sweep, SFT-${SFT_LR}, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
             --workspace ai2/olmo-instruct \
             --priority urgent \
-            --max_retries 1 \
+            --max_retries 0 \
             --preemptible \
             --image "$BEAKER_IMAGE" \
             --pure_docker_mode \
@@ -93,7 +93,6 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --use_flash_attn \
             --activation_memory_budget 0.5 \
             --chat_template_name olmo123 \
-            --with_tracking \
-            --send_slack_alerts
+            --with_tracking
     done
 done
