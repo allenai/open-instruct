@@ -1247,6 +1247,7 @@ async def apply_verifiable_reward(
     decoded_responses: list[str],
     ground_truths: list,
     datasets: list[str],
+    reward_mult: float = 1.0,
     queries: list[str] | None = None,
     rollout_states: list[dict | None] | None = None,
 ):
@@ -1296,7 +1297,7 @@ async def apply_verifiable_reward(
         reward_weight = metadata["reward_weight"]
 
         score = result.score if hasattr(result, "score") else result
-        weighted_reward = score * reward_weight
+        weighted_reward = reward_mult * score * reward_weight
 
         response_rewards[response_idx] += weighted_reward
         response_per_func_rewards[response_idx][dataset] = (
@@ -1313,6 +1314,7 @@ class RewardConfig:
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
     apply_verifiable_reward: bool = True
+    verification_reward: float = 10.0
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False
@@ -1364,6 +1366,7 @@ class RewardConfig:
                     decoded_responses,
                     ground_truths,
                     datasets,
+                    reward_mult=self.verification_reward,
                     queries=queries,
                     rollout_states=rollout_states,
                 )

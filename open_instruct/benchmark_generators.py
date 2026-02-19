@@ -264,6 +264,7 @@ def setup_vllm_engines(
         inflight_updates=streaming_config.inflight_updates,
         reward_config=RewardConfig(
             apply_verifiable_reward=streaming_config.apply_verifiable_reward,
+            verification_reward=streaming_config.verification_reward,
             verifier_functions=build_all_verifiers(args, streaming_config),
         ),
         train_dataset=dataset,
