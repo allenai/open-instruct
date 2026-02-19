@@ -614,7 +614,7 @@ class LLMRayActor:
             {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
         )
         self.reward_fn = reward_config.build() if reward_config else None
-        self.tool_parser: ToolParser | None = None  # Set in _init_tool_parser
+        self.tool_parser: ToolParser  # Set in _init_tool_parser
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
