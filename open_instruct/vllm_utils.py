@@ -61,7 +61,6 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
-from open_instruct.environments import EnvironmentPool
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
@@ -570,6 +569,7 @@ class LLMRayActor:
         tool_definitions: list[dict] | None = None,
         max_steps: int = 5,
         mask_tool_use: bool = True,
+        env_pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -584,7 +584,7 @@ class LLMRayActor:
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._init_config(
-            tool_actors, max_steps, mask_tool_use, inflight_updates, reward_config,
+            tool_actors, max_steps, mask_tool_use, env_pools, inflight_updates, reward_config,
             train_dataset, eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
@@ -604,6 +604,7 @@ class LLMRayActor:
         tool_actors: list[ray.actor.ActorHandle] | None,
         max_steps: int,
         mask_tool_use: bool,
+        env_pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
@@ -612,6 +613,7 @@ class LLMRayActor:
         self.tool_actors = tool_actors or []
         self.max_steps = max_steps
         self.mask_tool_use = mask_tool_use
+        self.env_pools: dict[str, ray.actor.ActorHandle] = env_pools or {}
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -632,10 +634,6 @@ class LLMRayActor:
         if self.tool_actors:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
-
-        # Environment pools (lazy-initialized) and lock to prevent race conditions
-        self.env_pools: dict[str, EnvironmentPool] = {}
-        self._env_pool_lock: asyncio.Lock | None = None
 
         self.tool_parser: ToolParser | None = None  # Set in _init_tool_parser
 
@@ -881,31 +879,6 @@ class LLMRayActor:
         return int(max_concurrency)
 
 
-async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> EnvironmentPool:
-    """Get or create an environment pool for the given config."""
-    env_name = env_config["env_name"]
-
-    if env_name in actor.env_pools:
-        return actor.env_pools[env_name]
-
-    if actor._env_pool_lock is None:
-        actor._env_pool_lock = asyncio.Lock()
-
-    async with actor._env_pool_lock:
-        if env_name in actor.env_pools:
-            return actor.env_pools[env_name]
-
-        pool_size = env_config.get("pool_size", 64)
-        env_kwargs = {
-            k: v
-            for k, v in env_config.items()
-            if k not in ("env_name", "task_id", "max_steps", "pool_size")
-        }
-        pool = await EnvironmentPool.create(pool_size=pool_size, env_name=env_name, **env_kwargs)
-        actor.env_pools[env_name] = pool
-        return actor.env_pools[env_name]
-
-
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool/environment support."""
     await _check_health(actor.server_port)
@@ -939,11 +912,19 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     max_steps = env_config.get("max_steps", actor.max_steps) if env_config else actor.max_steps
 
     # Set up environment if env_config is present
-    env_pool: EnvironmentPool | None = None
+    env_pool: ray.actor.ActorHandle | None = None
     env_actor: Any = None
     if env_config is not None:
-        env_pool = await _get_or_create_env_pool(actor, env_config)
-        env_actor = await env_pool.acquire()
+        env_name = env_config["env_name"]
+        env_pool = actor.env_pools.get(env_name)
+        if env_pool is None:
+            raise ValueError(f"No environment pool for '{env_name}'. Available: {list(actor.env_pools.keys())}")
+        env_actor = await env_pool.acquire.remote()
+        if env_actor is None:
+            logger.warning(f"Environment pool '{env_name}' exhausted, waiting...")
+            while env_actor is None:
+                await asyncio.sleep(0.01)
+                env_actor = await env_pool.acquire.remote()
         task_id = env_config.get("task_id")
         reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
         if env_tools:
@@ -1055,7 +1036,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     break
     finally:
         if env_pool is not None and env_actor is not None:
-            env_pool.release(env_actor)
+            env_pool.release.remote(env_actor)
 
     if len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
@@ -1134,6 +1115,7 @@ def create_vllm_engines(
     tool_definitions: list[dict] | None = None,
     max_steps: int = 5,
     mask_tool_use: bool = True,
+    env_pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -1221,6 +1203,7 @@ def create_vllm_engines(
                 tool_definitions=tool_definitions,
                 max_steps=max_steps,
                 mask_tool_use=mask_tool_use,
+                env_pools=env_pools,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,
                 train_dataset=train_dataset,

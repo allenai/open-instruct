@@ -105,8 +105,9 @@ class EnvsConfig:
     """Default environment for samples whose dataset doesn't specify one via env_config column
     (e.g., 'counter', 'guess_number'). Datasets with per-sample env_config override this."""
 
-    env_pool_size: int = 64
-    """Number of environment actors to pre-allocate per environment type."""
+    env_pool_size: int | None = None
+    """Number of environment actors to pre-allocate per environment type.
+    Defaults to num_unique_prompts_rollout * num_samples_per_prompt_rollout (so vLLM never blocks)."""
 
     env_timeout: int = 60
     """Timeout in seconds for individual environment step() calls."""
@@ -121,7 +122,6 @@ class EnvsConfig:
         config = {
             "env_name": self.env_name,
             "max_steps": self.max_steps,
-            "pool_size": self.env_pool_size,
             "timeout": self.env_timeout,
         }
         return {k: v for k, v in config.items() if v is not None}

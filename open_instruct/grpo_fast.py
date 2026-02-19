@@ -1240,6 +1240,7 @@ def create_model_and_optimizer(
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
     base_env_config: dict | None = None,
+    env_pools: dict[str, ray.actor.ActorHandle] | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1324,6 +1325,7 @@ def create_model_and_optimizer(
         tool_definitions=tool_definitions,
         max_steps=tools_config.max_steps if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
+        env_pools=env_pools,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2015,14 +2017,15 @@ def initialize_tools_and_envs(
     tokenizer,
     dataset_mixer_list: list[str],
     dataset_mixer_list_splits: list[str],
-) -> tuple[list, list[dict[str, Any]], list[str], dict[str, list[dict[str, Any]]]]:
+    pool_size: int | None = None,
+) -> tuple[list, list[dict[str, Any]], list[str], dict[str, list[dict[str, Any]]], dict[str, ray.actor.ActorHandle]]:
     """Initialize tool actors, discover environment tool definitions, and return unified results.
 
     Creates Ray actors for stateless tools, scans datasets for environment types,
-    and merges all tool definitions and names into a single set.
+    merges all tool definitions and names, and creates shared EnvironmentPool actors.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences, env_tool_map).
+        Tuple of (tool_actors, tool_definitions, stop_sequences, env_tool_map, env_pools).
         Also mutates tools_config.tool_call_names in-place (for MCP expansion + env names).
     """
     # 1. Create stateless tool actors
@@ -2102,12 +2105,22 @@ def initialize_tools_and_envs(
             tools_config.tool_call_names = list(tools_config.tool_call_names) + new_names
             logger.info(f"Added environment tool names: {new_names}")
 
+    # 4. Create shared environment pools (one per env_name)
+    env_pools: dict[str, ray.actor.ActorHandle] = {}
+    if env_tool_map and pool_size is not None and pool_size > 0:
+        from open_instruct.environments.pool import EnvironmentPool
+
+        for env_name in env_tool_map:
+            env_pools[env_name] = EnvironmentPool.remote(pool_size=pool_size, env_name=env_name)
+        ray.get([pool.size.remote() for pool in env_pools.values()])
+        logger.info(f"Created environment pools (size={pool_size}): {list(env_pools.keys())}")
+
     logger.info(
         f"Initialized {len(tool_actors)} tool actors, {len(env_tool_map)} envs. "
         f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
     )
 
-    return tool_actors, tool_definitions, stop_sequences, env_tool_map
+    return tool_actors, tool_definitions, stop_sequences, env_tool_map, env_pools
 
 
 def main(
@@ -2132,8 +2145,14 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    tool_actors, tool_definitions, tool_stop_sequences, env_tool_map = initialize_tools_and_envs(
+    env_pool_size = tools_config.env_pool_size
+    if env_pool_size is None:
+        env_pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        logger.info(f"Auto-sized env_pool_size to {env_pool_size} (num_unique_prompts * num_samples)")
+
+    tool_actors, tool_definitions, tool_stop_sequences, env_tool_map, env_pools = initialize_tools_and_envs(
         tools_config, tokenizer, streaming_config.dataset_mixer_list, streaming_config.dataset_mixer_list_splits,
+        pool_size=env_pool_size,
     )
     # TODO: Refactor legacy/dr_tulu parsers to accept tool_definitions dicts so they work with envs.
     assert not (env_tool_map and tools_config.tool_parser_type in ("legacy", "dr_tulu")), (
@@ -2230,6 +2249,7 @@ def main(
             tool_definitions,
             tools_config,
             base_env_config,
+            env_pools,
         )
     )
 

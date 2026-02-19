@@ -38,7 +38,6 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --save_traces \
-    --env_pool_size 16 \
     --max_steps 20 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
