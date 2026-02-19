@@ -39,6 +39,29 @@ def diff_files(path_a, path_b, name):
     return False
 
 
+import re
+
+
+def prettify_jinja(template):
+    """Format a one-line Jinja chat template into readable indented lines."""
+    # Split on Jinja block boundaries, keeping delimiters attached
+    tokens = re.split(r"(\{%-?\s.*?-?%\}|\{\{-?\s.*?-?\}\})", template)
+    lines = []
+    indent = 0
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        # Dedent for closing/transition blocks before printing
+        if re.match(r"\{%-?\s*(endif|endfor|else|elif)", token):
+            indent = max(indent - 1, 0)
+        lines.append("  " * indent + token)
+        # Indent after opening blocks
+        if re.match(r"\{%-?\s*(if|for|else|elif)\b", token) and "endif" not in token and "endfor" not in token:
+            indent += 1
+    return "\n".join(lines) + "\n"
+
+
 def diff_chat_templates(path_a, path_b, repo_a, repo_b):
     """Extract and diff just the chat_template from tokenizer_config.json."""
     with open(path_a) as f:
@@ -54,9 +77,8 @@ def diff_chat_templates(path_a, path_b, repo_a, repo_b):
         return True
 
     print(f"\n  chat_template diff ({repo_a} vs {repo_b}):")
-    # Pretty-print by splitting on template delimiters for readability
-    lines_a = template_a.replace("-%}", "-%}\n").replace("%}", "%}\n").splitlines(keepends=True)
-    lines_b = template_b.replace("-%}", "-%}\n").replace("%}", "%}\n").splitlines(keepends=True)
+    lines_a = prettify_jinja(template_a).splitlines(keepends=True)
+    lines_b = prettify_jinja(template_b).splitlines(keepends=True)
 
     diff = list(
         difflib.unified_diff(lines_a, lines_b, fromfile=repo_a, tofile=repo_b, lineterm="")
@@ -117,8 +139,15 @@ def main():
             path_b = os.path.join(dir_b, name)
 
             if name == "tokenizer_config.json":
-                identical = diff_files(path_a, path_b, name)
-                if not identical:
+                # Skip raw diff (unreadable for chat_template), show pretty version
+                with open(path_a) as f:
+                    raw_a = f.read()
+                with open(path_b) as f:
+                    raw_b = f.read()
+                if raw_a == raw_b:
+                    print(f"  {name}: identical")
+                else:
+                    print(f"  {name}: DIFFERENT (see chat_template diff below)")
                     diff_chat_templates(path_a, path_b, args.repo_a, args.repo_b)
                     all_identical = False
             else:
