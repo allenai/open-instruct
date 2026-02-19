@@ -637,8 +637,7 @@ class LLMRayActor:
         self.env_pools: dict[str, EnvironmentPool] = {}
         self._env_pool_lock: asyncio.Lock | None = None
 
-        # Tool parser (initialized in _init_tool_parser, may remain None for env-only mode)
-        self.tool_parser: ToolParser | None = None
+        self.tool_parser: ToolParser | None = None  # Set in _init_tool_parser
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -662,16 +661,12 @@ class LLMRayActor:
         if self.tool_actors:
             _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
 
-        # Create a tool parser if the parser type supports it.
-        # vllm parsers can work without tool definitions (for environment-only mode).
-        # Legacy/dr_tulu parsers require tool_actors, so skip them if no actors.
-        if tool_parser_type.startswith("vllm_") or self.tool_actors:
-            self.tool_parser = create_tool_parser(
-                parser_type=tool_parser_type,
-                tool_actors=self.tool_actors,
-                tokenizer=self.llm_engine.tokenizer,
-                tool_definitions=_tool_definitions,
-            )
+        self.tool_parser = create_tool_parser(
+            parser_type=tool_parser_type,
+            tool_actors=self.tool_actors,
+            tokenizer=self.llm_engine.tokenizer,
+            tool_definitions=_tool_definitions,
+        )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -994,11 +989,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 cumulative_logprob += logprob
             response_masks.extend([1] * len(model_tokens))
 
-            tool_calls = (
-                [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
-                if actor.tool_parser is not None
-                else []
-            )
+            tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
             if not tool_calls:
                 break
 
@@ -1046,7 +1037,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 if rollout_state.done:
                     break
 
-            if observations and actor.tool_parser is not None:
+            if observations:
                 tokens, logprobs, masks, excess = process_tool_tokens(
                     observations,
                     actor.tool_parser,
