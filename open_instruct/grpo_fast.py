@@ -1137,6 +1137,8 @@ def setup_datasets(
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
+    train_dataset = train_dataset.remove_columns(["index"]).add_column("index", list(range(len(train_dataset))))
+
     if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=streaming_config.dataset_mixer_eval_list,
@@ -1155,6 +1157,7 @@ def setup_datasets(
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
+            eval_dataset = eval_dataset.remove_columns(["index"]).add_column("index", list(range(len(eval_dataset))))
     else:
         eval_dataset = None
 

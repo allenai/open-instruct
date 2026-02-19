@@ -655,6 +655,11 @@ def accumulate_inference_batches(
         )
 
         example = dataset[result.index]
+        assert example["index"] == result.index, (
+            f"Dataset index mismatch: dataset[{result.index}] has index column value "
+            f"{example['index']}. This usually means the dataset was shuffled without "
+            f"re-indexing."
+        )
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
