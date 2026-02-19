@@ -363,7 +363,7 @@ class StreamingDataLoaderConfig:
 
     # Reward aggregation
     reward_aggregator: str = "last"
-    """How to combine per-turn rewards: 'last' (sparse) or 'sum' (dense)."""
+    """How to combine per-turn rewards: 'last' (use last turn reward) or 'sum' (sum all rewards across turns)."""
 
     # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"

@@ -1217,7 +1217,7 @@ class RewardConfig:
     additive_format_reward: bool = False
     verifier_functions: dict[str, VerifierFunction] = dataclasses.field(default_factory=dict)
     reward_aggregator: str = "last"
-    """How to combine per-turn rewards: 'last' (sparse) or 'sum' (dense)."""
+    """How to combine per-turn rewards: 'last' (use last turn reward) or 'sum' (sum all rewards across turns)."""
 
     def build(self) -> Callable:
         """Build and return the reward function."""
