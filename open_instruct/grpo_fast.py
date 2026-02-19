@@ -1509,12 +1509,21 @@ def weight_sync_thread(
             # First get the futures
             weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-            # Wait for all weight updates to complete and collect individual timings
-            _, actor_sync_times = ray_get_with_progress(
+            # Wait for all trainer-side broadcasts to finish and collect timing stats.
+            # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
+            weight_broadcast_results, actor_sync_times = ray_get_with_progress(
                 weight_broadcast_futures,
                 desc="[Weight Sync Thread] Waiting for weight updates to complete",
                 enable=args.verbose,
             )
+
+            # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+            # Without waiting here, should_stop may flip to False while updates are still queued.
+            engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+            if engine_update_refs:
+                ray_get_with_progress(
+                    engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
+                )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
