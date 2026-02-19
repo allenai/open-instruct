@@ -70,7 +70,7 @@ logger = logger_utils.setup_logger(__name__)
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
-SHOULD_STOP_TIMEOUT_S = 0.1
+SHOULD_STOP_TIMEOUT_S = 1.0
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
@@ -350,6 +350,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
+        model_step=metadata.get("model_step"),
     )
     return result, metadata["is_eval"]
 
@@ -445,12 +446,36 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    poll_timeout_s = 0.1
     while True:
+        has_pending_eval = actor.eval_prompt_queue is not None and actor.eval_prompt_queue.qsize() > 0
+
+        # Strict eval priority: when eval work is pending, stop admitting new train requests
+        # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
+        if has_pending_eval and len(actor.active_tasks) > 0:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
+
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        request = actor.prompt_queue.get()
+        # Prioritize eval requests so local evals don't starve behind train backlog.
+        # Use timed gets so this worker doesn't block forever on train queue when eval
+        # items arrive later (e.g., final-step eval after training prompts are drained).
+        request = None
+        if has_pending_eval and actor.eval_prompt_queue is not None:
+            try:
+                request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            try:
+                request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            continue
         add_request(actor, request)
 
 
@@ -462,6 +487,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "index": request.index,
         "prompt_id": request.prompt_id,
+        "model_step": actor.current_model_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
@@ -569,6 +595,7 @@ class LLMRayActor:
         mask_tool_use: bool = True,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
+        eval_prompt_queue: ray_queue.Queue | None = None,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
@@ -582,7 +609,7 @@ class LLMRayActor:
         self._init_config(
             tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
-        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_queues(prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -614,6 +641,7 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.current_model_step: int = 0
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -628,9 +656,10 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
-    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+    def _init_queues(self, prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
+        self.eval_prompt_queue = eval_prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
@@ -761,6 +790,8 @@ class LLMRayActor:
                 self._last_should_stop_update = time.perf_counter()
             else:
                 ray.cancel(should_stop_ref)
+                # Fail open to avoid deadlock from stale cached True value.
+                self._should_stop_value = False
         return self._should_stop_value
 
     def process_from_queue(self) -> None:
@@ -835,6 +866,20 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
+
+    def set_model_step(self, model_step: int) -> None:
+        self.current_model_step = model_step
+
+    def wait_for_no_active_tasks(self, timeout_s: float = 600.0) -> None:
+        start_time = time.perf_counter()
+        while len(self.active_tasks) > 0:
+            self.check_background_threads()
+            if time.perf_counter() - start_time > timeout_s:
+                raise RuntimeError(
+                    f"Timed out waiting for active vLLM tasks to drain after {timeout_s}s. "
+                    f"Remaining active tasks: {len(self.active_tasks)}"
+                )
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
@@ -1069,6 +1114,7 @@ def create_vllm_engines(
     max_tool_calls: int = 5,
     mask_tool_use: bool = True,
     prompt_queue=None,
+    eval_prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
@@ -1101,12 +1147,26 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
-    # ensure we use bundles on the same node where possible if tp>1.
+    # Ensure we use bundles on the same node where possible if tp>1.
+    # In hybrid single_gpu_mode, the incoming placement group can have fewer bundles
+    # than vLLM engines (e.g., one bundle with 2 GPUs and 2+ engines at 0.5 GPU each),
+    # so we may need to reuse bundle indices.
     bundle_indices_list = get_bundle_indices_list(pg)
+    if not bundle_indices_list:
+        raise ValueError("Placement group has no bundles available for vLLM engine scheduling.")
 
     for i in range(num_engines):
         if use_hybrid_engine:
-            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+            if tensor_parallel_size == 1:
+                # Reuse bundles round-robin when engines outnumber bundles.
+                bundle_indices = [bundle_indices_list[i % len(bundle_indices_list)]]
+            else:
+                bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+                if len(bundle_indices) < tensor_parallel_size:
+                    raise ValueError(
+                        "Insufficient placement-group bundles for requested vLLM tensor parallelism in hybrid mode. "
+                        f"Need {num_engines * tensor_parallel_size}, found {len(bundle_indices_list)}."
+                    )
         else:
             bundle_indices = [bundle_indices_list[i]]
 
@@ -1148,6 +1208,7 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
+                eval_prompt_queue=eval_prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,

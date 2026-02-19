@@ -104,8 +104,10 @@ class ExperimentConfig:
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
     # Ray
+    colocate_train_inference_mode: bool = False
+    """Whether to colocate trainer and vLLM inference actors on the same GPUs (mostly for debugging)."""
     single_gpu_mode: bool = False
-    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
+    """Deprecated alias for `colocate_train_inference_mode` (kept for backwards compatibility)."""
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
@@ -186,8 +188,19 @@ class ExperimentConfig:
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for pass@k metrics."""
+    eval_temperature: float | None = None
+    """Optional eval-only temperature override. If None, uses training temperature."""
+    eval_top_p: float | None = None
+    """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
+        # Backwards-compatible alias handling:
+        # `--single_gpu_mode` and `--colocate_train_inference_mode` are equivalent.
+        self.colocate_train_inference_mode = self.colocate_train_inference_mode or self.single_gpu_mode
+        self.single_gpu_mode = self.colocate_train_inference_mode
+
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
@@ -230,6 +243,10 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.eval_temperature is not None and self.eval_temperature < 0.0:
+            raise ValueError(f"`eval_temperature` must be >= 0.0, got {self.eval_temperature}")
+        if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
+            raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
 
 
 def compute_grpo_loss(

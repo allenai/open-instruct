@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 
+from jinja2 import Environment
 from parameterized import parameterized
 
 import open_instruct.dataset_transformation
@@ -204,6 +205,75 @@ class TestCachedDataset(unittest.TestCase):
         for row in dataset:
             dataset_hash.update(str(row[open_instruct.dataset_transformation.INPUT_IDS_PROMPT_KEY]).encode())
         self.assertEqual(dataset_hash.hexdigest(), GOLD_RLVR["hash"])
+
+
+class DummyTokenizer:
+    def __init__(self):
+        self.pad_token_id = None
+        self.calls = []
+
+    def apply_chat_template(self, messages, add_generation_prompt=False, tools=None):
+        self.calls.append({"messages": messages, "add_generation_prompt": add_generation_prompt, "tools": tools})
+        return [1, 2, 3]
+
+
+class TestSystemPromptOverride(unittest.TestCase):
+    def test_rlvr_tokenize_v1_system_prompt_remove_drops_system_message(self):
+        tokenizer = DummyTokenizer()
+        row = {
+            "messages": [
+                {"role": "system", "content": "original system"},
+                {"role": "user", "content": "what is 1+1?"},
+                {"role": "assistant", "content": "2"},
+            ],
+            "ground_truth": "2",
+            "dataset": "gsm8k",
+        }
+        output = open_instruct.dataset_transformation.rlvr_tokenize_v1(
+            row=row, tokenizer=tokenizer, system_prompt_override=""
+        )
+        prompt_call = tokenizer.calls[0]["messages"]
+        self.assertTrue(prompt_call)
+        self.assertEqual(prompt_call[0]["role"], "system")
+        self.assertEqual(prompt_call[0]["content"], "")
+        self.assertEqual(output[open_instruct.dataset_transformation.RAW_PROMPT_KEY].splitlines()[0], "system: ")
+
+    def test_rlvr_tokenize_v3_system_prompt_remove_drops_system_message(self):
+        tokenizer = DummyTokenizer()
+        row = {
+            "messages": [
+                {"role": "system", "content": "original system"},
+                {"role": "user", "content": "what is 1+1?"},
+            ],
+            "ground_truth": "2",
+            "dataset": "gsm8k",
+        }
+        output = open_instruct.dataset_transformation.rlvr_tokenize_v3(
+            row=row, tokenizer=tokenizer, system_prompt_override=""
+        )
+        prompt_call = tokenizer.calls[0]["messages"]
+        self.assertTrue(prompt_call)
+        self.assertEqual(prompt_call[0]["role"], "system")
+        self.assertEqual(prompt_call[0]["content"], "")
+        self.assertEqual(output[open_instruct.dataset_transformation.RAW_PROMPT_KEY].splitlines()[0], "system: ")
+
+
+class TestChatTemplateValidity(unittest.TestCase):
+    def test_qwen_instruct_math_template_renders(self):
+        template = open_instruct.dataset_transformation.CHAT_TEMPLATES["qwen_instruct_math"]
+        rendered = (
+            Environment()
+            .from_string(template)
+            .render(
+                messages=[{"role": "user", "content": "what is 1 + 1?"}],
+                add_generation_prompt=True,
+                eos_token="<|endoftext|>",
+            )
+        )
+        self.assertIn("<|im_start|>system", rendered)
+        self.assertIn("\\boxed{}", rendered)
+        self.assertIn("<|im_start|>user", rendered)
+        self.assertTrue(rendered.endswith("<|im_start|>assistant\n"))
 
 
 if __name__ == "__main__":

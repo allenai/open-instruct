@@ -77,7 +77,7 @@ COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
 COPY open_instruct open_instruct
-COPY oe-eval-interna[l] oe-eval-internal/
+COPY ../oe-eval-internal oe-eval-internal/
 
 ARG GIT_COMMIT="" \
     GIT_BRANCH=""

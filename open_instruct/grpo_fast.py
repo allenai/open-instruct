@@ -904,6 +904,7 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
+        one_bundle_per_rank: bool,
         args: grpo_utils.ExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
@@ -913,6 +914,8 @@ class ModelGroup:
         self.pg = pg
         self.ray_process_cls = ray_process_cls
         self.num_gpus_per_node = num_gpus_per_node
+        self.single_gpu_mode = single_gpu_mode
+        self.one_bundle_per_rank = one_bundle_per_rank
         self.num_gpus_per_actor = 0.48 if single_gpu_mode else 1
         self.num_cpus_per_actor = 4
         self.models = []
@@ -931,26 +934,31 @@ class ModelGroup:
         )
         (master_addr, master_port) = results[0]
 
-        def get_bundle_index(rank, num_gpus_per_node):
-            """given a rank and a list of num_gpus_per_node, return the index of the bundle that the rank belongs to"""
+        def get_bundle_index_and_local_rank(rank, num_gpus_per_node):
+            """Given a rank and per-node counts, return (bundle_index, local_rank_within_bundle)."""
             bundle_idx = 0
             while rank >= num_gpus_per_node[bundle_idx]:
                 rank -= num_gpus_per_node[bundle_idx]
                 bundle_idx += 1
-            return bundle_idx
+            local_rank = rank
+            return bundle_idx, local_rank
 
-        assert get_bundle_index(0, [7, 8, 4]) == 0
-        assert get_bundle_index(1, [7, 8, 4]) == 0
-        assert get_bundle_index(7, [7, 8, 4]) == 1
-        assert get_bundle_index(8, [7, 8, 4]) == 1
-        assert get_bundle_index(9, [7, 8, 4]) == 1
-        assert get_bundle_index(16, [7, 8, 4]) == 2
+        assert get_bundle_index_and_local_rank(0, [7, 8, 4]) == (0, 0)
+        assert get_bundle_index_and_local_rank(1, [7, 8, 4]) == (0, 1)
+        assert get_bundle_index_and_local_rank(7, [7, 8, 4]) == (1, 0)
+        assert get_bundle_index_and_local_rank(8, [7, 8, 4]) == (1, 1)
+        assert get_bundle_index_and_local_rank(9, [7, 8, 4]) == (1, 2)
+        assert get_bundle_index_and_local_rank(16, [7, 8, 4]) == (2, 1)
 
         # Setup worker models
         for rank in range(1, world_size):
             logger.debug(f"{rank=}, {world_size=}, {rank=}, {master_addr=}, {master_port=}")
+            if self.one_bundle_per_rank:
+                bundle_index = rank
+            else:
+                bundle_index, _ = get_bundle_index_and_local_rank(rank, self.num_gpus_per_node)
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=self.pg, placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node)
+                placement_group=self.pg, placement_group_bundle_index=bundle_index
             )
             worker_policy = ray_process_cls.options(
                 num_cpus=self.num_cpus_per_actor,
@@ -1018,7 +1026,8 @@ def setup_runtime_variables(
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    if args.eval_pass_at_k < 1:
+        raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():
@@ -1111,10 +1120,14 @@ def setup_datasets(
         with open(streaming_config.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+    elif streaming_config.system_prompt_remove:
+        system_prompt_override = ""
+        logger.info("System prompt removed")
 
     transform_fn_args = [
         {
             "system_prompt_override": system_prompt_override,
+            "user_prompt_transform": streaming_config.user_prompt_transform,
             "tool_definitions": tool_definitions,
             "pass_tools_to_chat_template": pass_tools_to_chat_template,
         },
@@ -1131,13 +1144,14 @@ def setup_datasets(
         hf_entity=args.hf_entity,
         dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
         dataset_skip_cache=streaming_config.dataset_skip_cache,
+        dataset_overwrite_cache=streaming_config.dataset_overwrite_cache,
         system_prompt_override=system_prompt_override,
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
-    if len(streaming_config.dataset_mixer_eval_list) > 0:
+    if streaming_config.dataset_mixer_eval_list is not None and len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=streaming_config.dataset_mixer_eval_list,
             dataset_mixer_list_splits=streaming_config.dataset_mixer_eval_list_splits,
@@ -1149,10 +1163,15 @@ def setup_datasets(
             dataset_config_hash=streaming_config.dataset_config_eval_hash,
             dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
             dataset_skip_cache=streaming_config.dataset_skip_cache,
+            dataset_overwrite_cache=streaming_config.dataset_overwrite_cache,
             system_prompt_override=system_prompt_override,
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
+        if "index" not in eval_dataset.column_names:
+            raise ValueError(
+                "eval_dataset must have an `index` column for stable prompt identity and per-index metrics."
+            )
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
@@ -1224,6 +1243,7 @@ def create_model_and_optimizer(
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
     prompt_Q: ray_queue.Queue,
+    eval_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1239,13 +1259,24 @@ def create_model_and_optimizer(
 ]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
-    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
-    pg = placement_group(bundles, strategy="STRICT_SPREAD")
+    one_bundle_per_rank = args.single_gpu_mode and len(args.num_learners_per_node) == 1
+    if one_bundle_per_rank:
+        # In single-node single_gpu_mode, reserve one bundle per learner rank so Ray assigns
+        # fractional-GPU trainer actors to distinct GPUs.
+        world_size = sum(args.num_learners_per_node)
+        bundles = [{"GPU": 1, "CPU": 10} for _ in range(world_size)]
+        pg = placement_group(bundles, strategy="PACK")
+    else:
+        bundles = [
+            {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node
+        ]
+        pg = placement_group(bundles, strategy="SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Prompt Queue": prompt_Q,
+        "Eval Prompt Queue": eval_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
@@ -1287,6 +1318,7 @@ def create_model_and_optimizer(
         PolicyTrainerRayProcess,
         args.num_learners_per_node,
         args.single_gpu_mode,
+        one_bundle_per_rank,
         args=args,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
@@ -1317,6 +1349,7 @@ def create_model_and_optimizer(
         max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
+        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -1382,15 +1415,46 @@ def create_generation_configs(
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, n=1)
+    eval_generation_config = dataclasses.replace(
+        generation_config,
+        n=args.eval_pass_at_k,
+        temperature=args.eval_temperature if args.eval_temperature is not None else generation_config.temperature,
+        top_p=args.eval_top_p if args.eval_top_p is not None else generation_config.top_p,
+    )
     return {"train": generation_config, "eval": eval_generation_config}
+
+
+class WeightSyncTrigger:
+    """Event-like trigger that also carries the latest target model step."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._step: int | None = None
+
+    def notify(self, step: int | None = None) -> None:
+        with self._lock:
+            if step is not None:
+                self._step = step
+        self._event.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout=timeout)
+
+    def clear(self) -> None:
+        self._event.clear()
+
+    def get_step(self) -> int | None:
+        with self._lock:
+            return self._step
 
 
 def weight_sync_thread(
     args: grpo_utils.ExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger_event: threading.Event,
+    weight_sync_trigger: WeightSyncTrigger,
     policy_group: ModelGroup,
+    vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1398,15 +1462,16 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+        weight_sync_trigger.notify(step=resume_training_step - 1)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
+        if not weight_sync_trigger.wait(timeout=1.0):
             continue
 
         # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
+        weight_sync_trigger.clear()
+        target_model_step = weight_sync_trigger.get_step()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1429,6 +1494,13 @@ def weight_sync_thread(
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+
+            if target_model_step is not None:
+                ray_get_with_progress(
+                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
+                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
+                    enable=args.verbose,
+                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1563,11 +1635,43 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging
+        # Convert array/list metrics to wandb histograms for logging.
+        # Handles arrays with missing values (None/NaN) by filtering to finite numeric values.
+        metrics_to_log = {}
+        per_index_solve_rates = metrics.pop("val/train_prompt_solve_rate_by_index_hist", None)
+        if per_index_solve_rates is not None:
+            values_iter = (
+                per_index_solve_rates.tolist()
+                if isinstance(per_index_solve_rates, np.ndarray)
+                else per_index_solve_rates
+            )
+            index_table = wandb.Table(columns=["index_pos", "solve_rate"])
+            for index_pos, solve_rate in enumerate(values_iter):
+                if isinstance(solve_rate, (int, float, np.integer, np.floating)) and np.isfinite(solve_rate):
+                    index_table.add_data(index_pos, float(solve_rate))
+                else:
+                    index_table.add_data(index_pos, None)
+            metrics_to_log["val/train_prompt_solve_rate_by_index_table"] = index_table
+            metrics_to_log["val/train_prompt_solve_rate_by_index_bar"] = wandb.plot.bar(
+                index_table, "index_pos", "solve_rate", title="Train Prompt Solve Rate By Index"
+            )
+
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=training_step)
+                values_iter = value.tolist() if isinstance(value, np.ndarray) else value
+
+                numeric_values = [
+                    float(v)
+                    for v in values_iter
+                    if isinstance(v, (int, float, np.integer, np.floating)) and np.isfinite(v)
+                ]
+                if len(numeric_values) > 0:
+                    metrics_to_log[key] = wandb.Histogram(numeric_values)
+                else:
+                    metrics_to_log[f"{key}/num_items"] = len(values_iter)
+            else:
+                metrics_to_log[key] = value
+        wandb.log(metrics_to_log, step=training_step)
 
     return num_step_tokens
 
@@ -1614,6 +1718,8 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
+    max_possible_score: float,
+    local_eval_start_time: float | None = None,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1625,23 +1731,42 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
-        # timeout 0.01 if this is not the last training step
-        # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if training_step < args.num_training_steps else 100
+        is_final_step = training_step >= args.num_training_steps
+        num_eval_prompts = len(eval_dataset)
+        # On non-final steps, only evaluate when we have a full batch ready.
+        # This avoids partially draining the queue and losing results.
+        if not is_final_step:
+            queued_results = evaluation_inference_results_Q.qsize()
+            if queued_results < num_eval_prompts:
+                logger.info(
+                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
+                    queued_results,
+                    num_eval_prompts,
+                )
+                return False
+
+        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
+        timeout = max(300, args.backend_timeout * 5) if is_final_step else 0.01
+
+        eval_dataset_index_map = {eval_dataset[i]["index"]: i for i in range(num_eval_prompts)}
+        sorted_eval_indices = sorted(eval_dataset_index_map.keys())
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=len(eval_dataset),
+            num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            dataset_index_map=eval_dataset_index_map,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            progress_bar_desc=f"Eval responses step {training_step}",
+            show_progress_bar=True,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1651,6 +1776,26 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        model_step_min = eval_reward_metrics.pop("eval/model_step_min", None)
+        model_step_max = eval_reward_metrics.pop("eval/model_step_max", None)
+        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean", None)
+        model_step_span = eval_reward_metrics.pop("eval/model_step_span", None)
+        eval_k = eval_generation_config.n
+        scores = np.array(eval_batch.scores)
+        pass_at_1 = None
+        pass_at_k = None
+        if max_possible_score <= 0:
+            logger.warning("Max possible score is %s; skipping pass@k metrics.", max_possible_score)
+        elif scores.size and scores.size % eval_k == 0:
+            scores_per_prompt = scores.reshape(-1, eval_k)
+            threshold = max_possible_score - 1e-8
+            pass_at_1 = (scores_per_prompt[:, 0] >= threshold).mean()
+            if eval_k > 1:
+                pass_at_k = (scores_per_prompt.max(axis=1) >= threshold).mean()
+        else:
+            logger.warning(
+                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
+            )
         eval_metrics = {
             "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
@@ -1659,11 +1804,52 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
+        if pass_at_1 is not None:
+            eval_metrics["eval/pass_at_1"] = pass_at_1
+        if pass_at_k is not None:
+            eval_metrics[f"eval/pass_at_{eval_k}"] = pass_at_k
+        if model_step_min is not None and model_step_max is not None and model_step_mean is not None:
+            assumed_step = float(training_step)
+            eval_metrics["eval/model_step_diff_min"] = model_step_min - assumed_step
+            eval_metrics["eval/model_step_diff_max"] = model_step_max - assumed_step
+            eval_metrics["eval/model_step_diff_avg"] = model_step_mean - assumed_step
+            if model_step_span is not None:
+                eval_metrics["eval/model_step_diff_span"] = model_step_span
+        if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
+            prompt_index_to_solve_rates: dict[int, list[float]] = {}
+            for prompt_index, prompt_solve_rate in zip(
+                eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
+            ):
+                prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
+
+            eval_index_to_hist_position = {
+                eval_index: position for position, eval_index in enumerate(sorted_eval_indices)
+            }
+            eval_prompt_solve_rate_by_index_hist: list[float | None] = [None] * len(sorted_eval_indices)
+            for prompt_index, rates in prompt_index_to_solve_rates.items():
+                hist_position = eval_index_to_hist_position.get(prompt_index)
+                if hist_position is not None:
+                    eval_prompt_solve_rate_by_index_hist[hist_position] = float(np.mean(rates))
+            eval_metrics["eval/prompt_solve_rate_by_index_hist"] = eval_prompt_solve_rate_by_index_hist
+            eval_metrics["eval/prompt_solve_rate_by_index_hist_non_null_count"] = int(
+                sum(value is not None for value in eval_prompt_solve_rate_by_index_hist)
+            )
+
+            dataset_to_solve_rates: dict[str, list[float]] = {}
+            for dataset_name, prompt_solve_rate in zip(
+                eval_batch_stats.prompt_datasets, eval_batch_stats.percent_solved_hist
+            ):
+                dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
+            for dataset_name, rates in dataset_to_solve_rates.items():
+                metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
+                eval_metrics[f"eval/prompt_solve_rate_mean_{metric_name}"] = float(np.mean(rates))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
         )
         eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+        if local_eval_start_time is not None:
+            eval_metrics["time/local_eval"] = time.perf_counter() - local_eval_start_time
 
         print_rich_single_line_metrics(eval_metrics)
 
@@ -1678,6 +1864,23 @@ def maybe_evaluate(
         df = pd.DataFrame(table)
 
         if args.with_tracking:
+            per_index_solve_rates = eval_metrics.pop("eval/prompt_solve_rate_by_index_hist", None)
+            if per_index_solve_rates is not None:
+                values_iter = (
+                    per_index_solve_rates.tolist()
+                    if isinstance(per_index_solve_rates, np.ndarray)
+                    else per_index_solve_rates
+                )
+                index_table = wandb.Table(columns=["index_pos", "solve_rate"])
+                for index_pos, solve_rate in enumerate(values_iter):
+                    if isinstance(solve_rate, (int, float, np.integer, np.floating)) and np.isfinite(solve_rate):
+                        index_table.add_data(index_pos, float(solve_rate))
+                    else:
+                        index_table.add_data(index_pos, None)
+                eval_metrics["eval/prompt_solve_rate_by_index_table"] = index_table
+                eval_metrics["eval/prompt_solve_rate_by_index_bar"] = wandb.plot.bar(
+                    index_table, "index_pos", "solve_rate", title="Eval Prompt Solve Rate By Index"
+                )
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
             wandb.log(eval_metrics, step=training_step)
         else:
@@ -1807,6 +2010,7 @@ def run_training(
     executor,
     inference_results_Q,
     prompt_Q,
+    eval_prompt_Q,
     evaluation_inference_results_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
@@ -1828,13 +2032,19 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
+    weight_sync_trigger = WeightSyncTrigger()
+    initial_model_step = resume_training_step - 1
+    ray_get_with_progress(
+        [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
+        desc=f"Initializing vLLM model step to {initial_model_step}",
+    )
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger_event,
+        weight_sync_trigger,
         policy_group,
+        vllm_engines,
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
@@ -1887,7 +2097,8 @@ def run_training(
         start_time=training_start_time,
         wandb_url=wandb_url,
     )
-    last_eval_collected = True
+    pending_local_eval_rounds = 0
+    local_eval_start_time = None
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -1896,18 +2107,28 @@ def run_training(
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
 
-        if (
+        should_schedule_local_eval = (
             training_step % args.local_eval_every == 0
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
-        ):
-            if not last_eval_collected:
+        )
+
+        if should_schedule_local_eval:
+            print("EVAL DATALOADING")
+            if local_eval_start_time is None:
+                local_eval_start_time = time.perf_counter()
+            if pending_local_eval_rounds > 0:
                 logger.warning(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
                     "Consider increasing local_eval_every."
                 )
-            for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+            for idx in range(len(eval_dataset)):
+                eval_example = eval_dataset[idx]
+                # Use training_step to keep eval prompt IDs unique across rounds.
+                add_prompt_to_generator(
+                    eval_example, training_step, eval_prompt_Q, generation_configs["eval"], is_eval=True
+                )
+            pending_local_eval_rounds += 1
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -1971,19 +2192,31 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        weight_sync_trigger.notify(step=training_step)
 
-        last_eval_collected = maybe_evaluate(
-            args,
-            training_step,
-            evaluation_inference_results_Q,
-            tokenizer,
-            episode,
-            eval_dataset,
-            generation_configs["eval"],
-            model_dims,
-            actor_manager,
-        )
+        # Collect at most one pending eval round per non-final step. On the final step,
+        # keep collecting until all pending rounds are drained (or timeout/no-results).
+        max_rounds_to_collect = pending_local_eval_rounds if training_step >= args.num_training_steps else 1
+        rounds_collected = 0
+        while pending_local_eval_rounds > 0 and rounds_collected < max_rounds_to_collect:
+            eval_collected = maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                episode,
+                eval_dataset,
+                generation_configs["eval"],
+                model_dims,
+                streaming_config.max_possible_score,
+                local_eval_start_time,
+                actor_manager,
+            )
+            if not eval_collected:
+                break
+            pending_local_eval_rounds -= 1
+            rounds_collected += 1
+            local_eval_start_time = None
 
         maybe_update_beaker_description(
             current_step=training_step,
@@ -2071,8 +2304,9 @@ def main(
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
     ):
-        raise ValueError(
-            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
+        logger.warning(
+            f"Train dataset has {len(train_dataset)} prompts, below the {needed} prompts needed to fully "
+            "prefill async steps without reuse. Continuing with prompt reuse across epochs."
         )
 
     if args.cache_dataset_only:
@@ -2088,6 +2322,7 @@ def main(
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    eval_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -2129,6 +2364,7 @@ def main(
             tokenizer,
             inference_results_Q,
             prompt_Q,
+            eval_prompt_Q,
             evaluation_inference_results_Q,
             streaming_config,
             vllm_config,
@@ -2170,6 +2406,7 @@ def main(
             executor,
             inference_results_Q,
             prompt_Q,
+            eval_prompt_Q,
             evaluation_inference_results_Q,
             weight_sync_metrics_Q,
             actor_manager,
@@ -2185,7 +2422,10 @@ def main(
         raise
     finally:
         cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
+            stop_event,
+            executor,
+            [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
+            actor_manager,
         )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we

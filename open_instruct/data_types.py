@@ -58,6 +58,7 @@ class GenerationResult:
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
+    model_step: int | None = None
 
 
 @dataclass
