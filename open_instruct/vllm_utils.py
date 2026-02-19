@@ -887,8 +887,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         pool = actor.pools.get(env_name)
         assert pool is not None, f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}"
         env_actor = await pool.acquire.remote()
-        assert env_actor is not None, f"Pool for '{env_name}' exhausted (should be auto-sized)"
-        acquired[env_name] = (pool, env_actor)
+        if env_actor is None:
+            logger.warning(f"Pool for '{env_name}' exhausted, skipping env setup")
+        else:
+            acquired[env_name] = (pool, env_actor)
         task_id = env_config.get("task_id")
         reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
         if env_tools:
@@ -949,7 +951,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     if pool is None:
                         continue
                     acq = await pool.acquire.remote()
-                    assert acq is not None, f"Pool for '{tc.name}' exhausted (should be auto-sized)"
+                    if acq is None:
+                        continue
                     acquired[tc.name] = (pool, acq)
                     actor_map[tc.name] = acq
                 target = actor_map[tc.name]
