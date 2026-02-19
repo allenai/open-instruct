@@ -2131,6 +2131,11 @@ def main(
     tool_actors, tool_definitions, tool_stop_sequences, env_tool_map = initialize_tools_and_envs(
         tools_config, tokenizer, streaming_config.dataset_mixer_list, streaming_config.dataset_mixer_list_splits,
     )
+    assert not (env_tool_map and tools_config.tool_parser_type in ("legacy", "dr_tulu")), (
+        f"RL environments require a vllm_* parser type, but got '{tools_config.tool_parser_type}'. "
+        f"Legacy/dr_tulu parsers derive tool names from tool_actors and don't support env-only tool definitions. "
+        f"Use e.g. --tool_parser_type vllm_hermes instead."
+    )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
