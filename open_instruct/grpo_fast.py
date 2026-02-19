@@ -82,6 +82,7 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
@@ -2013,12 +2014,48 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
+def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
+    """Scan datasets for tool names referenced in 'tools' and 'env_config' columns."""
+    tool_names: set[str] = set()
+
+    if len(dataset_mixer_list_splits) == 1:
+        splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    else:
+        splits = dataset_mixer_list_splits
+
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        split = splits[i]
+        try:
+            ds = datasets.load_dataset(dataset_name, split=split)
+        except Exception:
+            logger.warning(f"Could not load dataset {dataset_name} for tool discovery, skipping")
+            continue
+        if TOOLS_COLUMN_KEY in ds.column_names:
+            for tools in ds[TOOLS_COLUMN_KEY]:
+                if tools:
+                    tool_names.update(t for t in tools if t)
+        if ENV_CONFIG_KEY in ds.column_names:
+            for row in ds:
+                env_cfg = row.get(ENV_CONFIG_KEY)
+                if env_cfg and isinstance(env_cfg, dict) and env_cfg.get("env_name"):
+                    tool_names.add(env_cfg["env_name"])
+
+    return tool_names
+
+
 def initialize_tools_and_envs(
-    tools_config: EnvsConfig, tokenizer, pool_size: int
+    tools_config: EnvsConfig,
+    tokenizer,
+    pool_size: int,
+    dataset_mixer_list: list[str] | None = None,
+    dataset_mixer_list_splits: list[str] | None = None,
 ) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str]]:
     """Initialize all tool/env pools and collect tool definitions.
 
     Creates an EnvironmentPool for each tool specified via --tools CLI.
+    Also scans datasets for tool names and auto-creates pools for any
+    that exist in TOOL_REGISTRY but weren't in --tools.
 
     Returns:
         Tuple of (pools, tool_definitions, stop_sequences).
@@ -2027,7 +2064,31 @@ def initialize_tools_and_envs(
     pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
     tools_config.tool_call_names = tool_call_names
 
-    # Collect tool definitions from all pools (acquire one actor, get defs, release)
+    # Auto-discover tools from datasets and create pools for any in TOOL_REGISTRY but not in --tools
+    if dataset_mixer_list and dataset_mixer_list_splits:
+        dataset_tool_names = _discover_tools_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
+        for name in sorted(dataset_tool_names):
+            if name in pools:
+                continue
+            if name not in TOOL_REGISTRY:
+                continue
+            logger.info(f"Auto-creating pool for '{name}' (discovered from dataset)")
+            config_cls = TOOL_REGISTRY[name]
+            config = config_cls()
+            tool_cls = config_cls.tool_class
+            call_name = getattr(tool_cls, "call_name", name)
+            kwargs = asdict(config) | {"call_name": call_name}
+            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
+            tool_call_names.append(call_name)
+        if dataset_tool_names - set(pools.keys()):
+            extra = dataset_tool_names - set(pools.keys()) - set(TOOL_REGISTRY.keys())
+            if extra:
+                logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
+        # Wait for any newly created pools
+        ray.get([pool.size.remote() for pool in pools.values()])
+        tools_config.tool_call_names = tool_call_names
+
+    # Collect tool definitions from all pools
     tool_definitions: list[dict[str, Any]] = []
     for call_name, pool in pools.items():
         actor = ray.get(pool.acquire.remote())
@@ -2082,7 +2143,11 @@ def main(
     logger.info(f"Pool size per tool: {pool_size} (num_unique_prompts * num_samples)")
 
     pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
-        tools_config, tokenizer, pool_size=pool_size
+        tools_config,
+        tokenizer,
+        pool_size=pool_size,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
