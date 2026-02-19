@@ -887,10 +887,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         pool = actor.pools.get(env_name)
         assert pool is not None, f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}"
         env_actor = await pool.acquire.remote()
-        if env_actor is None:
-            logger.warning(f"Pool for '{env_name}' exhausted, skipping env setup")
-        else:
-            acquired[env_name] = (pool, env_actor)
+        while env_actor is None:
+            await asyncio.sleep(0.01)
+            env_actor = await pool.acquire.remote()
+        acquired[env_name] = (pool, env_actor)
         task_id = env_config.get("task_id")
         reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
         if env_tools:
@@ -951,8 +951,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     if pool is None:
                         continue
                     acq = await pool.acquire.remote()
-                    if acq is None:
-                        continue
+                    while acq is None:
+                        await asyncio.sleep(0.01)
+                        acq = await pool.acquire.remote()
                     acquired[tc.name] = (pool, acq)
                     actor_map[tc.name] = acq
                 target = actor_map[tc.name]
