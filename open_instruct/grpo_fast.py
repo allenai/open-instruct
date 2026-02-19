@@ -2085,13 +2085,16 @@ def initialize_tools_and_envs(
                 f"Auto-enabled env from dataset discovery (env_name={first_env_name}). "
                 f"All discovered envs: {list(env_tool_map.keys())}"
             )
-        seen_names = {t["function"]["name"] for t in tool_definitions}
+        tool_names = {t["function"]["name"] for t in tool_definitions}
+        env_names = {t["function"]["name"] for defs in env_tool_map.values() for t in defs}
+        clashes = tool_names & env_names
+        if clashes:
+            raise ValueError(
+                f"Tool name clash between stateless tools and environment tools: {sorted(clashes)}. "
+                f"Rename one side to avoid ambiguous dispatch."
+            )
         for defs in env_tool_map.values():
-            for td in defs:
-                name = td["function"]["name"]
-                if name not in seen_names:
-                    tool_definitions.append(td)
-                    seen_names.add(name)
+            tool_definitions.extend(defs)
         all_env_tool_names = [t["function"]["name"] for defs in env_tool_map.values() for t in defs]
         new_names = [n for n in all_env_tool_names if n not in set(tools_config.tool_call_names)]
         if new_names:
