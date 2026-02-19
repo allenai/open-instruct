@@ -2051,14 +2051,18 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    total_gpus = int(ray.cluster_resources().get("GPU", 0))
-    learner_gpus = sum(args.num_learners_per_node)
-    vllm_num_engines = (total_gpus - learner_gpus) // vllm_config.vllm_tensor_parallel_size
-    logger.info(
-        f"Auto-calculated vllm_num_engines={vllm_num_engines} "
-        f"(total_gpus={total_gpus}, learner_gpus={learner_gpus}, "
-        f"vllm_tensor_parallel_size={vllm_config.vllm_tensor_parallel_size})"
-    )
+    if args.single_gpu_mode:
+        vllm_num_engines = 1
+        logger.info("Auto-calculated vllm_num_engines=1 (single_gpu_mode)")
+    else:
+        total_gpus = int(ray.cluster_resources().get("GPU", 0))
+        learner_gpus = sum(args.num_learners_per_node)
+        vllm_num_engines = (total_gpus - learner_gpus) // vllm_config.vllm_tensor_parallel_size
+        logger.info(
+            f"Auto-calculated vllm_num_engines={vllm_num_engines} "
+            f"(total_gpus={total_gpus}, learner_gpus={learner_gpus}, "
+            f"vllm_tensor_parallel_size={vllm_config.vllm_tensor_parallel_size})"
+        )
     validate_configs(
         streaming_config, vllm_num_engines, tuple(args.num_learners_per_node), args.sequence_parallel_size
     )
