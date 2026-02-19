@@ -6,16 +6,12 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 
 echo "Starting GuessNumberEnv training (1 GPU, 48 episodes = 6 training steps)..."
 
-cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-guess-number-nothink 1.0 \
     --dataset_mixer_list_splits train \
