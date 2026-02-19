@@ -13,11 +13,11 @@ set -e
 
 BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 # Use v7 for models with transformers latest naming (DPO, HYBRID_INSTRUCT_SFT_8e-5, etc.)
-BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v7"
-# BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v6"
+# BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v7"
+BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v6"
 
 # Change this to select which path/name config to use (no commenting needed)
-MODEL_TYPE="dpo"  # think | think_yarn | think_ablation | instruct | instruct_0217 | dpo
+MODEL_TYPE="instruct_0218"  # think | think_yarn | think_ablation | instruct | instruct_0217 | instruct_0218 | dpo
 
 # PATHS
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_8e-5/step3256-hf
@@ -31,6 +31,7 @@ MODEL_TYPE="dpo"  # think | think_yarn | think_ablation | instruct | instruct_02
 # /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/hybrid-7b-DPO-SFT-8e-5-1e-6/
 
 MODELS=(
+    # --- Think SFT Models ---
     # "TEST_HYBRIC_SFT_LARGER_LR1e-4"
     # "TEST_HYBRIC_SFT_LARGER_LR5e-5"
     # "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
@@ -40,11 +41,13 @@ MODELS=(
     # "HYBRID_SFT_YARN_LR2.5e-5"
     # "ABLATE_HYBRID_THINK_SFT_0210_LR2.5e-5"
     # "ABLATE_HYBRID_THINK_SFT_0210_5e-5"
+
+    # --- Original Instruct SFT models (need v7 eval image) ---
     # "HYBRID_INSTRUCT_SFT_8e-5" # Needs v7 eval image with transformers latest naming 
     # "HYBRID_INSTRUCT_SFT_5e-5" # Needs v7 eval image with transformers latest naming 
 
     # --- DPO models (need v7 eval image) ---
-    "hybrid-7b-DPO-SFT-8e-5-1e-6"
+    # "hybrid-7b-DPO-SFT-8e-5-1e-6"
 
     # --- 0217 instruct SFT models (step3256) ---
     # "HYBRID_INSTRUCT_SFT_0217_8e-5"
@@ -54,6 +57,15 @@ MODELS=(
     # "HYBRID_INSTRUCT_SFT_0217_6e-5"
     # "HYBRID_INSTRUCT_SFT_0217_3e-5"
     # "HYBRID_INSTRUCT_SFT_0217_1.5e-5"
+
+    # --- 0218 instruct SFT models (step3256) ---
+    "HYBRID_INSTRUCT_SFT_0218_9e-5"
+    "HYBRID_INSTRUCT_SFT_0218_8e-5"
+    "HYBRID_INSTRUCT_SFT_0218_6e-5"
+    "HYBRID_INSTRUCT_SFT_0218_5e-5"
+    "HYBRID_INSTRUCT_SFT_0218_2.5e-5"
+    "HYBRID_INSTRUCT_SFT_0218_1e-4"
+
 )
 
 for MODEL in "${MODELS[@]}"; do
@@ -67,6 +79,11 @@ for MODEL in "${MODELS[@]}"; do
             # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-fix-hf"
             MODEL_NAME="0217-instruct-${MODEL}"
             ;;
+        instruct_0218)
+            GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
+            # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-fix-hf"
+            MODEL_NAME="0218-instruct-v2-${MODEL}"
+            ;;
         think_yarn)
             GCS_PATH="${BASE_PATH}/${MODEL}/step43110-hf"
             MODEL_NAME="0210-${MODEL}"
@@ -76,7 +93,8 @@ for MODEL in "${MODELS[@]}"; do
             MODEL_NAME="0208-${MODEL}"
             ;;
         dpo)
-            GCS_PATH="${BASE_PATH}/${MODEL}/"
+            GCS_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/${MODEL}/"
+            # GCS_PATH="${BASE_PATH}/${MODEL}/"
             MODEL_NAME="dpo-0218-${MODEL}"
             ;;
         instruct)
