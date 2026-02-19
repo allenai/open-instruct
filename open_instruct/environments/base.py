@@ -44,10 +44,6 @@ class RLEnvironment(ABC):
         """Called once at start of training for resource initialization."""
         return
 
-    async def shutdown(self) -> None:
-        """Called once at end of training for resource cleanup."""
-        return
-
     def get_metrics(self) -> dict[str, float]:
         """Return custom metrics."""
         return {}

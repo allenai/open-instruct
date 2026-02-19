@@ -54,20 +54,6 @@ class EnvironmentPool:
         """Release an environment actor back to the pool."""
         self._available.put_nowait(actor)
 
-    async def shutdown(self) -> None:
-        """Call shutdown() on all actors and terminate them."""
-        logger.info("Shutting down environment pool...")
-        shutdown_tasks = [actor.shutdown.remote() for actor in self._actors]
-        try:
-            await asyncio.to_thread(ray.get, shutdown_tasks)
-        except Exception as e:
-            logger.warning(f"Error during environment shutdown: {e}")
-
-        for actor in self._actors:
-            ray.kill(actor)
-        self._actors = []
-        logger.info("Environment pool shutdown complete")
-
     @property
     def env_class(self) -> type[RLEnvironment]:
         return self._env_class
