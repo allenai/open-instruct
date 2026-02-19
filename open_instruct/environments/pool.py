@@ -1,12 +1,13 @@
 """Pool of Ray actors with acquire/release semantics."""
 
 import collections
-import logging
 from typing import Any
 
 import ray
 
-logger = logging.getLogger(__name__)
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 
 @ray.remote
