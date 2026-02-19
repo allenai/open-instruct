@@ -929,7 +929,7 @@ def pack_padded_sequences(
     packed_input_ids_list = []
     packed_labels_list = []
     for i in range(batch_size):
-        length = seq_lengths[i].item()
+        length = int(seq_lengths[i].item())
         packed_input_ids_list.append(input_ids[i, :length])
         packed_labels_list.append(labels[i, :length])
 
