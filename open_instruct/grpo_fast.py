@@ -1333,10 +1333,10 @@ def create_model_and_optimizer(
             // vllm_config.vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
-            nodes_needed = (
+            nodes_needed = math.ceil(
                 streaming_config.num_unique_prompts_rollout
                 * streaming_config.num_samples_per_prompt_rollout
-                // kv_cache_max_concurrency
+                / kv_cache_max_concurrency
             )
             logger.warning(
                 f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
