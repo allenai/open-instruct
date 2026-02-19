@@ -103,7 +103,7 @@ class CounterEnv(RLEnvironment):
 class CounterEnvConfig(BaseEnvConfig):
     """Configuration for CounterEnv."""
 
-    tool_class: ClassVar[type] = CounterEnv
+    tool_class: ClassVar[type[RLEnvironment]] = CounterEnv
     target: int = 5
 
 
@@ -195,6 +195,6 @@ class GuessNumberEnv(RLEnvironment):
 class GuessNumberEnvConfig(BaseEnvConfig):
     """Configuration for GuessNumberEnv."""
 
-    tool_class: ClassVar[type] = GuessNumberEnv
+    tool_class: ClassVar[type[RLEnvironment]] = GuessNumberEnv
     min_val: int = 1
     max_val: int = 100

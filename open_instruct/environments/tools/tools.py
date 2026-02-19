@@ -654,6 +654,6 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
-    CounterEnvConfig.tool_class.config_name: CounterEnvConfig,  # type: ignore[attr-defined]
-    GuessNumberEnvConfig.tool_class.config_name: GuessNumberEnvConfig,  # type: ignore[attr-defined]
+    CounterEnvConfig.tool_class.config_name: CounterEnvConfig,
+    GuessNumberEnvConfig.tool_class.config_name: GuessNumberEnvConfig,
 }
