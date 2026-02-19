@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Clean up OLMo 3.X tokenizer docs: clarify think SFT tokenization workaround, add dev/release tokenizer matrix, create `allenai/olmo-3-tokenizer-instruct-release` (https://github.com/allenai/open-instruct/pull/PLACEHOLDER).
+- Clean up OLMo 3.X tokenizer docs: clarify think SFT tokenization workaround, add dev/release tokenizer matrix, create `allenai/olmo-3-tokenizer-instruct-release` (https://github.com/allenai/open-instruct/pull/1487).
 - RL environment abstraction: `RLEnvironment` base class with `Tool` as a subclass, unifying tools and environments under a single `step(EnvCall) -> StepResult` interface. Removes `Executable`/`EnvOutput`/`_execute`/`safe_execute` indirection. Moves tools under `open_instruct/environments/tools/`. Includes example environments (`CounterEnv`, `GuessNumberEnv`) (https://github.com/allenai/open-instruct/pull/1478).
 - Enable packing with torch.compile for DPO training, fix cu_seq_lens offset bug for padded chosen/rejected sequences, add tokens_per_second_per_gpu metric (https://github.com/allenai/open-instruct/pull/1466).
 - Production DPO script for OLMo3-7B hybrid (https://github.com/allenai/open-instruct/pull/1449).
