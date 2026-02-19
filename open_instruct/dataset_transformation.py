@@ -1451,9 +1451,11 @@ def rlvr_tokenize_v3(
                         tools_for_template = env_tools
                     else:
                         existing_names = {t.get("function", {}).get("name") for t in tools_for_template}
-                        for et in env_tools:
-                            if et.get("function", {}).get("name") not in existing_names:
-                                tools_for_template = list(tools_for_template) + [et]
+                        tools_to_add = [
+                            et for et in env_tools if et.get("function", {}).get("name") not in existing_names
+                        ]
+                        if tools_to_add:
+                            tools_for_template = list(tools_for_template) + tools_to_add
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
