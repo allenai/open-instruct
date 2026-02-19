@@ -334,7 +334,6 @@ class StreamingDataLoaderConfig:
     dataset_config_hash: str | None = None
     dataset_config_eval_hash: str | None = None
     dataset_skip_cache: bool = False
-    shuffle_eval_dataset: bool = False
     system_prompt_override_file: str | None = None
 
     # Generation
