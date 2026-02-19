@@ -4,9 +4,10 @@ import random
 
 from openenv.core.env_server.types import State
 
-from .base import EnvCall, RLEnvironment, StepResult
+from .base import EnvCall, RLEnvironment, StepResult, register_env
 
 
+@register_env("counter")
 class CounterEnv(RLEnvironment):
     """Simple counter environment. Increment to reach target, then submit."""
 
@@ -96,6 +97,7 @@ class CounterEnv(RLEnvironment):
         return State(episode_id=self._task_id, step_count=self._step_count)
 
 
+@register_env("guess_number")
 class GuessNumberEnv(RLEnvironment):
     """Number guessing game. Guess a secret number between min and max."""
 

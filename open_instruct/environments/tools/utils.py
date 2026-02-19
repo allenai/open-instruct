@@ -100,6 +100,45 @@ class EnvsConfig:
         return bool(self.tools)
 
 
+@dataclass
+class EnvConfig:
+    """Configuration for RL environments used during generation."""
+
+    env_name: str | None = None
+    """Name of registered environment (e.g., 'counter', 'guess_number')."""
+
+    env_class: str | None = None
+    """Full class path for custom environment (e.g., 'mymodule.MyEnv')."""
+
+    env_pool_size: int = 64
+    """Number of environment actors to create."""
+
+    env_max_steps: int = 50
+    """Maximum steps per episode before forcing done=True."""
+
+    env_timeout: int = 60
+    """Timeout in seconds for environment operations."""
+
+    over_limit_penalty: float | None = None
+    """Penalty reward applied when max_steps is exceeded. None = no penalty (just stop)."""
+
+    @property
+    def enabled(self) -> bool:
+        """Return True if environment is configured."""
+        return self.env_name is not None or self.env_class is not None
+
+    def to_env_config_dict(self) -> dict:
+        """Convert to dict format expected by PromptRequest.env_config."""
+        config = {
+            "env_name": self.env_name,
+            "env_class": self.env_class,
+            "max_steps": self.env_max_steps,
+            "pool_size": self.env_pool_size,
+            "timeout": self.env_timeout,
+        }
+        return {k: v for k, v in config.items() if v is not None}
+
+
 def truncate(text: str, max_length: int = 500) -> str:
     """Truncate text for logging, adding ellipsis if needed."""
     if len(text) <= max_length:
@@ -135,16 +174,12 @@ class EnvStatistics:
         self._counts: defaultdict[str, int] = defaultdict(int)
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
-        self._excess_calls: defaultdict[str, int] = defaultdict(int)
 
-    def add_rollout(
-        self, tool_call_stats: list[ToolCallStats], excess_tool_calls: dict[str, int] | None = None
-    ) -> None:
+    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
         """Add statistics from a single rollout.
 
         Args:
             tool_call_stats: List of ToolCallStats from a single rollout.
-            excess_tool_calls: Dict mapping tool name to count of calls that exceeded the limit.
         """
         self.num_rollouts += 1
         for s in tool_call_stats:
@@ -152,11 +187,6 @@ class EnvStatistics:
             self._counts[s.tool_name] += 1
             self._failures[s.tool_name] += not s.success
             self._runtimes[s.tool_name] += s.runtime
-
-        if excess_tool_calls:
-            for tool_name, count in excess_tool_calls.items():
-                self.tool_names.add(tool_name)
-                self._excess_calls[tool_name] += count
 
     def compute_metrics(self) -> dict[str, float]:
         """Compute per-tool and aggregate metrics.
@@ -166,11 +196,9 @@ class EnvStatistics:
             - tools/{name}/avg_calls_per_rollout
             - tools/{name}/failure_rate
             - tools/{name}/avg_runtime
-            - tools/{name}/avg_excess_calls_per_rollout
             - tools/aggregate/avg_calls_per_rollout
             - tools/aggregate/failure_rate
             - tools/aggregate/avg_runtime
-            - tools/aggregate/avg_excess_calls_per_rollout
         """
         if not self.num_rollouts or not self.tool_names:
             return {}
@@ -179,24 +207,19 @@ class EnvStatistics:
         total_calls = 0
         total_failures = 0
         total_runtime = 0.0
-        total_excess = 0
 
         for name in self.tool_names:
             calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
-            excess = self._excess_calls[name]
             metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
             metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
             metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
-            metrics[f"tools/{name}/avg_excess_calls_per_rollout"] = excess / self.num_rollouts
             total_calls += calls
             total_failures += failures
             total_runtime += runtime
-            total_excess += excess
 
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
         metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
         metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
-        metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
 
         return metrics
 
