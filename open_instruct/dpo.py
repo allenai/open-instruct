@@ -27,7 +27,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
-from open_instruct.olmo_core_train_modules import DPOLMHead, DPOTrainModule
+from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -102,7 +102,6 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         config_name_for_lookup, vocab_size, attn_backend=attn_backend
     )
     model = model_config.build(init_device="cpu")
-    model.lm_head.__class__ = DPOLMHead
 
     return model, model_config
 
@@ -119,15 +118,10 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     return scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int, model):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
-    device_name = utils.get_device_name(torch.cuda.get_device_name(0))
-    device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
-    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(args.max_seq_length), device_peak_flops=device_peak_flops
-    )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if slack_webhook_url:
@@ -144,9 +138,6 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int, model
     checkpointing_steps = int(args.checkpointing_steps)
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
-    # TODO(finbarr): MFU and TPS metrics should be reported per physical GPU so that
-    # results are comparable across different parallelism strategies. Currently uses
-    # dp_world_size which excludes TP GPUs, overestimating MFU when TP > 1.
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -416,7 +407,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.destroy_process_group()
         return
 
-    trainer_callbacks = _setup_callbacks(args, dp_world_size, train_module.model)
+    trainer_callbacks = _setup_callbacks(args, dp_world_size)
 
     if args.max_train_steps is not None:
         max_duration = train.Duration.steps(args.max_train_steps)

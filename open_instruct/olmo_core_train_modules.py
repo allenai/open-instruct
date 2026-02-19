@@ -5,7 +5,7 @@ OLMo-core's native training infrastructure.
 """
 
 import math
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.distributed as dist
@@ -41,14 +41,22 @@ class DPOLMHead(LMHead):
         *,
         labels: torch.Tensor | None = None,
         ignore_index: int = -100,
-        loss_reduction: str = "mean",
+        loss_reduction: Literal["mean", "sum", "none"] = "mean",
         z_loss_multiplier: float | None = None,
         loss_div_factor: torch.Tensor | float | None = None,
         return_logits: bool | None = None,
         logits_to_keep: int | torch.Tensor = 0,
     ) -> torch.Tensor | LMOutputWithLoss:
         if labels is None:
-            return super().forward(x, labels=labels)
+            return super().forward(
+                x,
+                labels=labels,
+                loss_reduction=loss_reduction,
+                z_loss_multiplier=z_loss_multiplier,
+                loss_div_factor=loss_div_factor,
+                return_logits=return_logits,
+                logits_to_keep=logits_to_keep,
+            )
 
         h = self.norm(x) if self.norm is not None else x
         logits = self.w_out(h)
@@ -111,6 +119,7 @@ class DPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
+        model.lm_head.__class__ = DPOLMHead
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
         super().__init__(
             model=model,

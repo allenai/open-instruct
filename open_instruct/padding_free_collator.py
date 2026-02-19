@@ -13,8 +13,7 @@ def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> tor
 
     logits = logits.to(torch.float32)
     safe = shifted_labels.clamp(min=0)
-    mask = (shifted_labels != -100).float()
-    return torch.gather(logits.log_softmax(-1), 2, safe.unsqueeze(2)).squeeze(2) * mask
+    return torch.gather(logits.log_softmax(-1), 2, safe.unsqueeze(2)).squeeze(2)
 
 
 def _collect_flattened_features(
