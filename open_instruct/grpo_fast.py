@@ -1167,7 +1167,6 @@ def setup_datasets(
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
-    train_dataset = train_dataset.shuffle(seed=args.seed)
 
     if streaming_config.dataset_mixer_eval_list is not None and len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
@@ -1190,8 +1189,6 @@ def setup_datasets(
             raise ValueError(
                 "eval_dataset must have an `index` column for stable prompt identity and per-index metrics."
             )
-        if streaming_config.shuffle_eval_dataset:
-            eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
         eval_dataset = None
 

@@ -24,6 +24,11 @@ All notable changes to this project will be documented in this file.
 - Changed default wandb x-axis from `episode` to `training_step` for grpo_fast (https://github.com/allenai/open-instruct/pull/1437).
 
 ### Fixed
+- Fixed silent prompt/ground-truth mismatch in RLVR caused by redundant dataset shuffle desyncing the `"index"` column from positional indices, leading to wrong rewards and wrong `exclude_index` exclusions (https://github.com/allenai/open-instruct/pull/1484).
+- Fixed test `single_example_collator` returning raw int for index, causing `TypeError` in `_iter_batches` (https://github.com/allenai/open-instruct/pull/1477).
+- Fixed SFT integration test failing due to missing `--try_launch_beaker_eval_jobs false` flag (https://github.com/allenai/open-instruct/pull/1470).
+- Fixed checkpoint cleanup race condition on shared filesystems by using `ignore_errors=True` and restricting cleanup to global rank 0 (https://github.com/allenai/open-instruct/pull/1468).
+- Fixed checkpoint resume failing on Beaker retries by removing non-deterministic timestamp from `exp_name` (https://github.com/allenai/open-instruct/pull/1468).
 - Fixed MFU calculation to count LM head FLOPs per token (https://github.com/allenai/open-instruct/pull/1457).
 - Fixed training hang when `inflight_updates` is disabled by waiting for weight sync to complete before health check (https://github.com/allenai/open-instruct/pull/1454).
 - Fixed evaluation responses being lost on timeout in grpo_fast by requeuing partial results (https://github.com/allenai/open-instruct/pull/1439).
