@@ -136,18 +136,21 @@ class EnvStatistics:
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
 
-    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
+    def add_rollout(self, tool_call_stats: list[ToolCallStats | dict]) -> None:
         """Add statistics from a single rollout.
 
         Args:
-            tool_call_stats: List of ToolCallStats from a single rollout.
+            tool_call_stats: List of ToolCallStats or dicts (from serialized rollout state).
         """
         self.num_rollouts += 1
         for s in tool_call_stats:
-            self.tool_names.add(s.tool_name)
-            self._counts[s.tool_name] += 1
-            self._failures[s.tool_name] += not s.success
-            self._runtimes[s.tool_name] += s.runtime
+            name = s.tool_name if isinstance(s, ToolCallStats) else s["tool_name"]
+            success = s.success if isinstance(s, ToolCallStats) else s["success"]
+            runtime = s.runtime if isinstance(s, ToolCallStats) else s["runtime"]
+            self.tool_names.add(name)
+            self._counts[name] += 1
+            self._failures[name] += not success
+            self._runtimes[name] += runtime
 
     def compute_metrics(self) -> dict[str, float]:
         """Compute per-tool and aggregate metrics.

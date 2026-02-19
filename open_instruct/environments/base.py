@@ -31,6 +31,11 @@ class RolloutState:
     step_count: int = 0
     done: bool = False
     info: dict[str, Any] = field(default_factory=dict)
+    tool_output: str = ""
+    tool_error: str = ""
+    tool_runtime: float = 0.0
+    timeout: bool = False
+    tool_call_stats: list = field(default_factory=list)
 
 
 class RLEnvironment(ABC):

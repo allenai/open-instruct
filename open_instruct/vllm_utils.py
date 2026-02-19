@@ -120,15 +120,8 @@ class CompletionOutput:
     finish_reason: str
     cumulative_logprob: float = 0.0
     mask: list[int] | None = None
-    num_calls: int = 0
-    timeout: bool = False
-    tool_error: str = ""
-    tool_output: str = ""
-    tool_runtime: float = 0.0
-    tool_called: bool = False
-    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
-    env_state: dict = dataclasses.field(default_factory=dict)
-    """Environment state dict (rewards, step_count, done, info) — always present."""
+    rollout_state: dict = dataclasses.field(default_factory=dict)
+    """Rollout state dict — rewards, step_count, done, tool_output, tool_error, etc."""
 
 
 @dataclasses.dataclass
@@ -303,20 +296,18 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         )
         logprobs.append(out.logprobs)
 
-    # Extract attributes based on whether tools are used
+    # Extract rollout state from each completion output
+    rollout_states = [getattr(out, "rollout_state", {}) for out in final_output.outputs]
     if use_tools:
-        # Extract tool-specific attributes from outputs
         masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in final_output.outputs]
-        num_calls = [getattr(out, "num_calls", 0) for out in final_output.outputs]
-        timeouts = [getattr(out, "timeout", False) for out in final_output.outputs]
-        tool_errors = [getattr(out, "tool_error", "") for out in final_output.outputs]
-        tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
-        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
-        tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
-        tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
-        rollout_states = [getattr(out, "env_state", {}) for out in final_output.outputs]
+        num_calls = [rs.get("step_count", 0) for rs in rollout_states]
+        timeouts = [rs.get("timeout", False) for rs in rollout_states]
+        tool_errors = [rs.get("tool_error", "") for rs in rollout_states]
+        tool_outputs = [rs.get("tool_output", "") for rs in rollout_states]
+        tool_runtimes = [rs.get("tool_runtime", 0.0) for rs in rollout_states]
+        tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
+        tool_call_stats = [rs.get("tool_call_stats", []) for rs in rollout_states]
     else:
-        # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
         num_calls = [0] * len(response_ids)
         timeouts = [False] * len(response_ids)
@@ -325,7 +316,6 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
         tool_call_stats = [[] for _ in response_ids]
-        rollout_states = [{} for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -872,14 +862,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     response_logprobs: list[float] = []
     response_masks: list[int] = []
     cumulative_logprob = 0.0
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
-    tool_call_stats: list[ToolCallStats] = []
-    rollout_state = RolloutState()
+    rollout = RolloutState()
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
@@ -916,8 +899,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     output = None
     try:
-        while num_calls < max_steps:
-            if rollout_state.done:
+        while rollout.step_count < max_steps:
+            if rollout.done:
                 break
 
             remaining_budget = sampling_params.max_tokens - len(response_masks)
@@ -956,10 +939,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             observations: list[str] = []
             for tc in tool_calls:
-                if num_calls >= max_steps:
+                if rollout.step_count >= max_steps:
                     break
-                num_calls += 1
-                tool_called = True
+                rollout.step_count += 1
 
                 # Lazily acquire from pool on first use of this tool name
                 if tc.name not in actor_map:
@@ -974,19 +956,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
                 try:
                     step_result: StepResult = await target.step.remote(
-                        EnvCall(id=str(num_calls), name=tc.name, args=tc.args)
+                        EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
                     )
                     observations.append(step_result.result)
-                    tool_output += step_result.result
-                    rollout_state.rewards.append(step_result.reward)
-                    rollout_state.step_count += 1
+                    rollout.tool_output += step_result.result
+                    rollout.rewards.append(step_result.reward)
                     if step_result.done:
-                        rollout_state.done = True
+                        rollout.done = True
                     meta = step_result.metadata or {}
-                    timeout = timeout or meta.get("timeout", False)
-                    tool_error += meta.get("error", "")
-                    tool_runtime += meta.get("runtime", 0.0)
-                    tool_call_stats.append(
+                    rollout.timeout = rollout.timeout or meta.get("timeout", False)
+                    rollout.tool_error += meta.get("error", "")
+                    rollout.tool_runtime += meta.get("runtime", 0.0)
+                    rollout.tool_call_stats.append(
                         ToolCallStats(
                             tool_name=tc.name,
                             success=not meta.get("error") and not meta.get("timeout", False),
@@ -997,10 +978,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
                     observations.append(error_msg)
-                    tool_error += error_msg
-                    tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
+                    rollout.tool_error += error_msg
+                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
 
-                if rollout_state.done:
+                if rollout.done:
                     break
 
             if observations:
@@ -1039,14 +1020,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         logprobs=response_logprobs,
         finish_reason=finish_reason,
         mask=response_masks,
-        num_calls=num_calls,
-        timeout=timeout,
-        tool_error=tool_error,
-        tool_output=tool_output,
-        tool_runtime=tool_runtime,
-        tool_called=tool_called,
-        tool_call_stats=tool_call_stats,
-        env_state=dataclasses.asdict(rollout_state),
+        rollout_state=dataclasses.asdict(rollout),
     )
 
     actor.active_tasks.pop(sub_request_id, None)
