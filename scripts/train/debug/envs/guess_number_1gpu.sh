@@ -41,6 +41,7 @@ uv run python open_instruct/grpo_fast.py \
     --max_steps 10 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
+    --dataset_skip_cache \
     --output_dir output/guess_number_debug
 
 echo "Training complete!"
