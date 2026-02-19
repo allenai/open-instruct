@@ -91,6 +91,7 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.environments.base import get_env_class
+from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
 from open_instruct.environments.tools.utils import BaseEnvConfig, EnvsConfig, ParsedEnvConfig
@@ -2108,8 +2109,6 @@ def initialize_tools_and_envs(
     # 4. Create shared environment pools (one per env_name)
     env_pools: dict[str, ray.actor.ActorHandle] = {}
     if env_tool_map and pool_size is not None and pool_size > 0:
-        from open_instruct.environments.pool import EnvironmentPool
-
         for env_name in env_tool_map:
             env_pools[env_name] = EnvironmentPool.remote(pool_size=pool_size, env_name=env_name)
         ray.get([pool.size.remote() for pool in env_pools.values()])
