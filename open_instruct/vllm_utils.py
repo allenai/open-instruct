@@ -62,7 +62,7 @@ from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.environments import EnvironmentPool
-from open_instruct.environments.base import EnvCall, EnvironmentState, StepResult
+from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
@@ -927,7 +927,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_runtime = 0.0
     tool_called = False
     tool_call_stats: list[ToolCallStats] = []
-    env_state = EnvironmentState()
+    rollout_state = RolloutState()
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
@@ -937,7 +937,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
 
-    configured_tools = set(actor.tool_actor_map.keys())
+    # Build unified actor map: tool_name -> ray actor handle
+    actor_map: dict[str, Any] = dict(actor.tool_actor_map)
+    configured_tools = set(actor_map.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
     max_steps = env_config.get("max_steps", actor.max_steps) if env_config else actor.max_steps
@@ -950,14 +952,16 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         env_actor = await env_pool.acquire()
         task_id = env_config.get("task_id")
         reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
-        # Env tools define which tool calls the environment handles
-        env_tool_names = {t["function"]["name"] for t in env_tools} if env_tools else set()
-        allowed_tools = allowed_tools | env_tool_names
+        if env_tools:
+            for t in env_tools:
+                name = t["function"]["name"]
+                actor_map[name] = env_actor
+                allowed_tools.add(name)
 
     output = None
     try:
         while num_calls < max_steps:
-            if env_state.done:
+            if rollout_state.done:
                 break
 
             remaining_budget = sampling_params.max_tokens - len(response_masks)
@@ -990,7 +994,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 cumulative_logprob += logprob
             response_masks.extend([1] * len(model_tokens))
 
-            # Parse tool calls from model output
             tool_calls = (
                 [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
                 if actor.tool_parser is not None
@@ -1006,56 +1009,41 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 num_calls += 1
                 tool_called = True
 
-                # Route to environment actor or regular tool actor
-                if env_actor is not None and tc.name in env_tool_names:
-                    try:
-                        env_call = EnvCall(id=str(num_calls), name=tc.name, args=tc.args)
-                        step_result: StepResult = await env_actor.step.remote(env_call)
-                        observations.append(step_result.result)
-                        env_state.rewards.append(step_result.reward)
-                        env_state.step_count += 1
-                        tool_output += step_result.result
-                        if step_result.done:
-                            env_state.done = True
-                        tool_call_stats.append(
-                            ToolCallStats(tool_name=tc.name, success=True, runtime=0.0)
-                        )
-                    except Exception as e:
-                        error_msg = f"Env call '{tc.name}' failed: {e}"
-                        logger.warning(error_msg)
-                        observations.append(error_msg)
-                        tool_error += error_msg
-                        env_state.done = True
-                        tool_call_stats.append(
-                            ToolCallStats(tool_name=tc.name, success=False, runtime=0.0)
-                        )
-                elif tc.name in actor.tool_actor_map:
-                    try:
-                        tool_result: StepResult = await actor.tool_actor_map[tc.name].step.remote(
-                            EnvCall(id=str(num_calls), name=tc.name, args=tc.args)
-                        )
-                        meta = tool_result.metadata
-                        timeout = timeout or meta.get("timeout", False)
-                        tool_error += meta.get("error", "")
-                        tool_output += tool_result.result
-                        tool_runtime += meta.get("runtime", 0.0)
-                        observations.append(tool_result.result)
-                        tool_call_stats.append(
-                            ToolCallStats(
-                                tool_name=tc.name,
-                                success=not meta.get("error") and not meta.get("timeout", False),
-                                runtime=meta.get("runtime", 0.0),
-                            )
-                        )
-                    except (TypeError, ValueError) as e:
-                        error_msg = f"Tool call '{tc.name}' failed: {e}. Args: {tc.args}"
-                        logger.warning(error_msg)
-                        observations.append("")
-                        tool_call_stats.append(
-                            ToolCallStats(tool_name=tc.name, success=False, runtime=0.0)
-                        )
+                target = actor_map.get(tc.name)
+                if target is None:
+                    continue
 
-                if env_state.done:
+                try:
+                    step_result: StepResult = await target.step.remote(
+                        EnvCall(id=str(num_calls), name=tc.name, args=tc.args)
+                    )
+                    observations.append(step_result.result)
+                    tool_output += step_result.result
+                    rollout_state.rewards.append(step_result.reward)
+                    rollout_state.step_count += 1
+                    if step_result.done:
+                        rollout_state.done = True
+                    meta = step_result.metadata or {}
+                    timeout = timeout or meta.get("timeout", False)
+                    tool_error += meta.get("error", "")
+                    tool_runtime += meta.get("runtime", 0.0)
+                    tool_call_stats.append(
+                        ToolCallStats(
+                            tool_name=tc.name,
+                            success=not meta.get("error") and not meta.get("timeout", False),
+                            runtime=meta.get("runtime", 0.0),
+                        )
+                    )
+                except Exception as e:
+                    error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
+                    logger.warning(error_msg)
+                    observations.append(error_msg)
+                    tool_error += error_msg
+                    tool_call_stats.append(
+                        ToolCallStats(tool_name=tc.name, success=False, runtime=0.0)
+                    )
+
+                if rollout_state.done:
                     break
 
             if observations and actor.tool_parser is not None:
@@ -1101,7 +1089,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         tool_runtime=tool_runtime,
         tool_called=tool_called,
         tool_call_stats=tool_call_stats,
-        env_state=dataclasses.asdict(env_state),
+        env_state=dataclasses.asdict(rollout_state),
     )
 
     actor.active_tasks.pop(sub_request_id, None)

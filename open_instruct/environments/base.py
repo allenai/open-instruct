@@ -24,7 +24,7 @@ class StepResult(Observation):
 
 
 @dataclass
-class EnvironmentState:
+class RolloutState:
     """Accumulated state from an environment rollout."""
 
     rewards: list[float] = field(default_factory=list)

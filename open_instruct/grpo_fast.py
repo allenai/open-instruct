@@ -2009,45 +2009,38 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(tools_config: EnvsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
-    """Initialize tool actors and get tool definitions and stop sequences.
+def initialize_tools_and_envs(
+    tools_config: EnvsConfig,
+    tokenizer,
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
+) -> tuple[list, list[dict[str, Any]], list[str], dict[str, list[dict[str, Any]]]]:
+    """Initialize tool actors, discover environment tool definitions, and return unified results.
 
-    Args:
-        tools_config: Configuration for tools.
-        tokenizer: Tokenizer for the model.
+    Creates Ray actors for stateless tools, scans datasets for environment types,
+    and merges all tool definitions and names into a single set.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences, tool_call_names).
-        Note: tool_call_names may differ from tools_config.tool_call_names if MCP
-        tools were auto-expanded.
+        Tuple of (tool_actors, tool_definitions, stop_sequences, env_tool_map).
+        Also mutates tools_config.tool_call_names in-place (for MCP expansion + env names).
     """
+    # 1. Create stateless tool actors
     tool_actors, tool_call_names = create_tools(tools_config._parsed_tools)
-    tool_definitions = (
+    tool_definitions: list[dict[str, Any]] = (
         ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
     )
+    tools_config.tool_call_names = tool_call_names
 
-    # Create parser temporarily to get stop sequences for generation config
-    # The actual parser used during generation will be created inside vLLM actors
-    stop_sequences = []
+    stop_sequences: list[str] = []
     if tool_actors:
         stop_sequences = create_tool_parser(
             parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
         ).stop_sequences
 
-    return tool_actors, tool_definitions, stop_sequences, tool_call_names
-
-
-def discover_env_tool_definitions(
-    dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str], tools_config: EnvsConfig
-) -> dict[str, list[dict[str, Any]]]:
-    """Scan datasets for unique env_names and build a map of env_name -> tool definitions.
-
-    This enables per-sample tool injection: each sample's prompt gets only the tools
-    for its environment type.
-    """
+    # 2. Discover environment tool definitions from datasets and CLI --env_name
     env_tool_map: dict[str, list[dict[str, Any]]] = {}
-
     env_names: set[str] = set()
+
     if len(dataset_mixer_list_splits) == 1:
         splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
     else:
@@ -2083,7 +2076,34 @@ def discover_env_tool_definitions(
         except Exception as e:
             logger.warning(f"Could not get tool definitions for env '{name}': {e}")
 
-    return env_tool_map
+    # 3. Merge env tool definitions into the global set (deduplicated)
+    if env_tool_map:
+        if not tools_config.env_enabled:
+            first_env_name = next(iter(env_tool_map))
+            tools_config.env_name = first_env_name
+            logger.info(
+                f"Auto-enabled env from dataset discovery (env_name={first_env_name}). "
+                f"All discovered envs: {list(env_tool_map.keys())}"
+            )
+        seen_names = {t["function"]["name"] for t in tool_definitions}
+        for defs in env_tool_map.values():
+            for td in defs:
+                name = td["function"]["name"]
+                if name not in seen_names:
+                    tool_definitions.append(td)
+                    seen_names.add(name)
+        all_env_tool_names = [t["function"]["name"] for defs in env_tool_map.values() for t in defs]
+        new_names = [n for n in all_env_tool_names if n not in set(tools_config.tool_call_names)]
+        if new_names:
+            tools_config.tool_call_names = list(tools_config.tool_call_names) + new_names
+            logger.info(f"Added environment tool names: {new_names}")
+
+    logger.info(
+        f"Initialized {len(tool_actors)} tool actors, {len(env_tool_map)} envs. "
+        f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
+
+    return tool_actors, tool_definitions, stop_sequences, env_tool_map
 
 
 def main(
@@ -2108,42 +2128,12 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    tool_actors, tool_definitions, tool_stop_sequences, tool_call_names = initialize_tools(tools_config, tokenizer)
-    logger.info(
-        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    tool_actors, tool_definitions, tool_stop_sequences, env_tool_map = initialize_tools_and_envs(
+        tools_config, tokenizer, streaming_config.dataset_mixer_list, streaming_config.dataset_mixer_list_splits,
     )
-    # Update tools_config with expanded tool call names (for MCP auto-expansion)
-    tools_config.tool_call_names = tool_call_names
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
-
-    # Discover environment tool definitions from datasets and CLI flags.
-    env_tool_map = discover_env_tool_definitions(
-        dataset_mixer_list=streaming_config.dataset_mixer_list,
-        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
-        tools_config=tools_config,
-    )
-    if env_tool_map:
-        if not tools_config.env_enabled:
-            first_env_name = next(iter(env_tool_map))
-            tools_config.env_name = first_env_name
-            logger.info(
-                f"Auto-enabled env from dataset discovery (env_name={first_env_name}). "
-                f"All discovered envs: {list(env_tool_map.keys())}"
-            )
-        all_env_tool_defs = [td for defs in env_tool_map.values() for td in defs]
-        seen_names = {t["function"]["name"] for t in tool_definitions}
-        for td in all_env_tool_defs:
-            name = td["function"]["name"]
-            if name not in seen_names:
-                tool_definitions = list(tool_definitions) + [td]
-                seen_names.add(name)
-        all_env_tool_names = [t["function"]["name"] for defs in env_tool_map.values() for t in defs]
-        new_names = [n for n in all_env_tool_names if n not in set(tools_config.tool_call_names)]
-        if new_names:
-            tools_config.tool_call_names = list(tools_config.tool_call_names) + new_names
-            logger.info(f"Added environment tool names: {new_names}")
 
     train_dataset, eval_dataset = setup_datasets(
         args,
