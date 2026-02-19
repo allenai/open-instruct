@@ -22,7 +22,10 @@ This document is a reference for the settings used for Olmo 3, based on the best
 
 **Olmo 3.X and future models:**
 
-- Tokenized with the same Instruct chat template  [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) (since no <think>, which is our hack for tokenization to make sure the model learns how to generate <think> and it isn't masked out), ideally evaluated with a chat template [here](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-reasoner-hybrid) that is the instruct chat template + think tokens (because new models should combine the tool use abilities from instruct chat template with the <think> for thinking models). Final models, if successfully trained, should likely release with [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-v5-lc-reasoner) which is the same as the evaluated one but with olmo identity.
+- **Think SFT data** is tokenized with the Instruct chat template [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev). This template does not include `<think>`, which prevents `<think>` from being masked out during tokenization so the model learns to generate it. (We plan to fix the underlying masking bug so this workaround is no longer needed.)
+- **Think evaluation** should use [`allenai/olmo-3-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-think-dev), which is the instruct chat template plus `<think>` in `add_generation_prompt` (new models should combine tool use abilities from the instruct template with `<think>` for reasoning). (TODO: check if this tokenizer should be renamed to `olmo-3.X-tokenizer-think-dev` since it includes function calling in the template, which differs from the original OLMo 3 think tokenizers.)
+- **Think release models** should use [`allenai/olmo-3-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3-tokenizer-think-release), which is the same as the think-dev template but with the Olmo identity system prompt.
+- **Instruct release models** should use [`allenai/olmo-3-tokenizer-instruct-release`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-release), which is the same as `instruct-dev` but with the Olmo identity system prompt. This is analogous to how `think-release` differs from `think-dev`.
 
 ---
 
@@ -31,5 +34,5 @@ There are two main issues that lead to all the floating chat templates: one, the
 **TLDR until these two issues are resolved:**
 
 -  [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) is the primary chat template for tokenizing both instruct and think models that have tool use abilities.
-- for Instruct, copy that chat template back after training (can be done before or after conversion to HuggingFace format, but confirm it is correct before evaluation and continued training).
-- for Think, copy [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-reasoner-hybrid) chat template back after training since we want the <think>. Consider releasing with [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-v5-lc-reasoner) chat template that also includes the "You are Olmo" identity.
+- For Instruct evaluation/training, use [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev). For release, use [`allenai/olmo-3-tokenizer-instruct-release`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-release) (adds Olmo identity).
+- For Think evaluation/training, use [`allenai/olmo-3-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-think-dev) (adds `<think>` to `add_generation_prompt`). For release, use [`allenai/olmo-3-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3-tokenizer-think-release) (adds Olmo identity).
