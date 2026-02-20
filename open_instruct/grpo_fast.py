@@ -1770,6 +1770,7 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            max_possible_score=max_possible_score,
             progress_bar_desc=f"Eval responses step {training_step}",
             show_progress_bar=True,
         )
@@ -1821,6 +1822,14 @@ def maybe_evaluate(
             if model_step_span is not None:
                 eval_metrics["eval/model_step_diff_span"] = model_step_span
         if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
+            logger.info(
+                "[Eval Debug] training_step=%s max_possible_score=%s raw_scores=%s raw_percent_solved_hist=%s prompt_indices=%s",
+                training_step,
+                max_possible_score,
+                np.asarray(eval_batch.scores, dtype=float).tolist(),
+                eval_batch_stats.percent_solved_hist.tolist(),
+                list(eval_batch_stats.prompt_indices),
+            )
             prompt_index_to_solve_rates: dict[int, list[float]] = {}
             for prompt_index, prompt_solve_rate in zip(
                 eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
@@ -1838,6 +1847,11 @@ def maybe_evaluate(
             eval_metrics["eval/prompt_solve_rate_by_index_hist"] = eval_prompt_solve_rate_by_index_hist
             eval_metrics["eval/prompt_solve_rate_by_index_hist_non_null_count"] = int(
                 sum(value is not None for value in eval_prompt_solve_rate_by_index_hist)
+            )
+            logger.info(
+                "[Eval Debug] eval_prompt_solve_rate_by_index_hist_non_null_count=%s eval_prompt_solve_rate_by_index_hist=%s",
+                eval_metrics["eval/prompt_solve_rate_by_index_hist_non_null_count"],
+                eval_prompt_solve_rate_by_index_hist,
             )
 
             dataset_to_solve_rates: dict[str, list[float]] = {}
