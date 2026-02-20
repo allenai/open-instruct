@@ -36,7 +36,6 @@ python mason.py \
     --num_learners_per_node 6 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 10 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \

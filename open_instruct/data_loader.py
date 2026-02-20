@@ -288,7 +288,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
 @dataclass
 class VLLMConfig:
-    vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
     vllm_sync_backend: str = "nccl"
@@ -297,6 +296,7 @@ class VLLMConfig:
     vllm_top_p: float = 1.0
 
     def __post_init__(self):
+        assert self.vllm_tensor_parallel_size >= 1, "vllm_tensor_parallel_size must be >= 1"
         if os.environ.get("VLLM_USE_V1") == "0":
             logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
             if self.vllm_enable_prefix_caching:

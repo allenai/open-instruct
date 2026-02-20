@@ -31,7 +31,6 @@ python open_instruct/grpo_fast.py \
     --num_mini_batches 2 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 1 \
     --lr_scheduler_type constant \
     --seed 1 \
     --local_eval_every 200 \

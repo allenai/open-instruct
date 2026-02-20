@@ -403,11 +403,8 @@ class PolicyTrainerRayProcess(RayProcess):
             with socket.socket() as sock:
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
-                self.vllm_config.vllm_num_engines,
-                self.vllm_config.vllm_tensor_parallel_size,
-            )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+            vllm_tensor_parallel_size = self.vllm_config.vllm_tensor_parallel_size
+            world_size = len(vllm_engines) * vllm_tensor_parallel_size + 1
             backend = self.vllm_config.vllm_sync_backend
             refs = [
                 engine.init_process_group.remote(
@@ -989,15 +986,15 @@ def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
 
 def validate_configs(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    vllm_config: data_loader_lib.VLLMConfig,
+    vllm_num_engines: int,
     num_learners_per_node: tuple[int, ...],
     sequence_parallel_size: int,
 ) -> None:
     """Validate cross-cutting config constraints."""
-    if streaming_config.num_unique_prompts_rollout < vllm_config.vllm_num_engines:
+    if streaming_config.num_unique_prompts_rollout < vllm_num_engines:
         logger.warning(
             f"With num_unique_prompts_rollout={streaming_config.num_unique_prompts_rollout} < "
-            f"vllm_num_engines={vllm_config.vllm_num_engines}, vllm will be generating data for multiple "
+            f"vllm_num_engines={vllm_num_engines}, vllm will be generating data for multiple "
             "batches simultaneously. This is fine but might be unexpected behaviour."
         )
     assert (
@@ -1224,6 +1221,7 @@ def create_model_and_optimizer(
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
+    vllm_num_engines: int,
     train_dataset: Dataset,
     eval_dataset,
     reward_config: RewardConfig,
@@ -1245,7 +1243,7 @@ def create_model_and_optimizer(
         "Prompt Queue": prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config)
 
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
@@ -1297,7 +1295,7 @@ def create_model_and_optimizer(
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils.create_vllm_engines(
-        vllm_config.vllm_num_engines,
+        vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
         vllm_config.vllm_enforce_eager,
         tc.tokenizer_name_or_path,
@@ -1327,10 +1325,11 @@ def create_model_and_optimizer(
     if vllm_engines:
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+        ray.get(actor_manager.set_num_engines.remote(len(vllm_engines)))
         expected_batch_size = (
             streaming_config.num_unique_prompts_rollout
             * streaming_config.num_samples_per_prompt_rollout
-            // vllm_config.vllm_num_engines
+            // vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
             nodes_needed = math.ceil(
@@ -1456,6 +1455,8 @@ def weight_sync_thread(
 def one_training_step(
     args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+    vllm_num_engines: int,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
@@ -1542,7 +1543,7 @@ def one_training_step(
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
         samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
-        num_engines=vllm_config.vllm_num_engines,
+        num_engines=vllm_num_engines,
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
@@ -1801,6 +1802,8 @@ def cleanup_training_resources(
 def run_training(
     args,
     streaming_config,
+    vllm_config,
+    vllm_num_engines,
     tokenizer,
     train_dataset,
     eval_dataset,
@@ -1933,6 +1936,8 @@ def run_training(
         num_step_tokens = one_training_step(
             args,
             streaming_config,
+            vllm_config,
+            vllm_num_engines,
             policy_group,
             tokenizer,
             data_thread_metrics,
@@ -2047,8 +2052,6 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
-    validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
-
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         for handler in logging.getLogger().handlers:
@@ -2058,6 +2061,22 @@ def main(
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+
+    if args.single_gpu_mode:
+        vllm_num_engines = 1
+        logger.info("Auto-calculated vllm_num_engines=1 (single_gpu_mode)")
+    else:
+        total_gpus = int(ray.cluster_resources().get("GPU", 0))
+        learner_gpus = sum(args.num_learners_per_node)
+        vllm_num_engines = (total_gpus - learner_gpus) // vllm_config.vllm_tensor_parallel_size
+        logger.info(
+            f"Auto-calculated vllm_num_engines={vllm_num_engines} "
+            f"(total_gpus={total_gpus}, learner_gpus={learner_gpus}, "
+            f"vllm_tensor_parallel_size={vllm_config.vllm_tensor_parallel_size})"
+        )
+    validate_configs(
+        streaming_config, vllm_num_engines, tuple(args.num_learners_per_node), args.sequence_parallel_size
+    )
 
     tool_actors, tool_definitions, tool_stop_sequences, tool_call_names = initialize_tools(tools_config, tokenizer)
     logger.info(
@@ -2143,6 +2162,7 @@ def main(
             evaluation_inference_results_Q,
             streaming_config,
             vllm_config,
+            vllm_num_engines,
             train_dataset,
             eval_dataset,
             reward_config,
@@ -2167,6 +2187,8 @@ def main(
         episode = run_training(
             args,
             streaming_config,
+            vllm_config,
+            vllm_num_engines,
             tokenizer,
             train_dataset,
             eval_dataset,

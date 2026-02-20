@@ -48,7 +48,6 @@ python mason.py \
             --deepspeed_stage 2 \
             --num_epochs 1 \
             --num_learners_per_node 8 \
-            --vllm_num_engines 8 \
             --vllm_tensor_parallel_size 1 \
             --beta 0.0 \
             --seed 3 \

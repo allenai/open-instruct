@@ -52,7 +52,6 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 1 \
     --beta 0.01 \
     --seed 3 \
     --local_eval_every 1 \

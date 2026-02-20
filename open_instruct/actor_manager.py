@@ -44,11 +44,7 @@ class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
     def __init__(
-        self,
-        queues: dict[str, ray_queue.Queue],
-        args: Any,
-        streaming_config: data_loader.StreamingDataLoaderConfig,
-        vllm_config: data_loader.VLLMConfig,
+        self, queues: dict[str, ray_queue.Queue], args: Any, streaming_config: data_loader.StreamingDataLoaderConfig
     ):
         self._should_stop = False
         self._last_updated = datetime.now()
@@ -63,9 +59,9 @@ class ActorManager:
         self._training_step_history = collections.deque(maxlen=self._sample_window)
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
         self._kv_cache_max_concurrency = 0
+        self._num_engines = None
         self._args = args
         self._streaming_config = streaming_config
-        self._vllm_config = vllm_config
         if self._args.enable_queue_dashboard:
             self._setup_queue_monitoring()
             self._start_dashboard()
@@ -122,7 +118,9 @@ class ActorManager:
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
                 "concurrency_per_engine": self._kv_cache_max_concurrency,
-                "total_concurrency": self._kv_cache_max_concurrency * self._vllm_config.vllm_num_engines,
+                "total_concurrency": self._kv_cache_max_concurrency * self._num_engines
+                if self._num_engines is not None
+                else None,
                 "batch_size": self._streaming_config.num_unique_prompts_rollout
                 * self._streaming_config.num_samples_per_prompt_rollout,
             }
@@ -187,6 +185,10 @@ class ActorManager:
     def set_kv_cache_max_concurrency(self, max_concurrency: int):
         """Set the KV cache max concurrency value."""
         self._kv_cache_max_concurrency = max_concurrency
+
+    def set_num_engines(self, num_engines: int):
+        """Set the number of vLLM engines."""
+        self._num_engines = num_engines
 
     def get_token_stats(self):
         """Calculate and return current token statistics."""

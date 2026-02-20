@@ -236,14 +236,17 @@ def setup_vllm_engines(
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config)
 
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
     assert tokenizer_name_or_path is not None
     assert model_config.model_name_or_path is not None
 
+    total_gpus = int(ray.cluster_resources().get("GPU", 0))
+    vllm_num_engines = total_gpus // vllm_config.vllm_tensor_parallel_size
+
     vllm_engines = vllm_utils.create_vllm_engines(
-        num_engines=vllm_config.vllm_num_engines,
+        num_engines=vllm_num_engines,
         tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
         enforce_eager=vllm_config.vllm_enforce_eager,
         tokenizer_name_or_path=tokenizer_name_or_path,
@@ -495,7 +498,7 @@ def run_benchmark(
                 "dataset_indices": all_dataset_indices,
             }
 
-            num_engines = vllm_config.vllm_num_engines
+            num_engines = len(vllm_engines)
             num_gpus_per_engine = vllm_config.vllm_tensor_parallel_size
             num_inference_gpus = num_engines * num_gpus_per_engine
 
