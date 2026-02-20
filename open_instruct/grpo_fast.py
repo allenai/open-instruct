@@ -2157,6 +2157,11 @@ def main(
         dataset_mixer_list=streaming_config.dataset_mixer_list,
         dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
+    if pools and tools_config.tool_parser_type in ("legacy", "dr_tulu"):
+        raise ValueError(
+            f"Parser type '{tools_config.tool_parser_type}' requires tool_actors which are "
+            f"no longer created (pools are used instead). Use --tool_parser_type vllm_hermes."
+        )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
