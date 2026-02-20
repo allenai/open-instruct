@@ -58,6 +58,3 @@ class EnvironmentPool:
 
     def size(self) -> int:
         return len(self._actors)
-
-    def available_count(self) -> int:
-        return self._available.qsize()
