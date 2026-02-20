@@ -296,9 +296,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         )
         logprobs.append(out.logprobs)
 
-    # Extract rollout state from each completion output
-    rollout_states = [out.rollout_state for out in final_output.outputs]
     if use_tools:
+        rollout_states = [out.rollout_state for out in final_output.outputs]
         masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in final_output.outputs]
         num_calls = [rs.get("step_count", 0) for rs in rollout_states]
         timeouts = [rs.get("timeout", False) for rs in rollout_states]
@@ -308,6 +307,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
         tool_call_stats = [[ToolCallStats(**s) for s in rs.get("tool_call_stats", [])] for rs in rollout_states]
     else:
+        rollout_states = [{} for _ in response_ids]
         masks = [[1] * len(resp) for resp in response_ids]
         num_calls = [0] * len(response_ids)
         timeouts = [False] * len(response_ids)
