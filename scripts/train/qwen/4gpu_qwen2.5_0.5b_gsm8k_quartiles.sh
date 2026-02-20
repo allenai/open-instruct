@@ -1,13 +1,16 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k_mathtemplate"
-MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
+EXP_NAME="qwen25_05b_it_gsm8k_noresample0875"
+MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
 BEAKER_IMAGE="michaeln/open_instruct"
 
+LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+LOCAL_EVAL_SPLITS="train"
+
 uv run mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ai2/saturn ai2/jupiter \
+    --cluster ai2/saturn ai2/jupiter ai2/neptune \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --pure_docker_mode \
@@ -22,6 +25,12 @@ uv run mason.py \
 \&\& uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
+    --eval_pass_at_k 32 \
+    --eval_top_p 0.95 \
+    --local_eval_every 100 \
+    --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
+    --no_resampling_pass_rate 0.875 \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
