@@ -86,9 +86,6 @@ def main():
 
     for name, create_fn, num_samples in env_datasets:
         samples = create_fn(num_samples)
-        if not samples:
-            continue
-
         local_name = name.replace("-", "_")
         save_jsonl(samples, data_dir / f"{local_name}_train.jsonl")
 
