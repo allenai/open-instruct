@@ -2066,10 +2066,8 @@ def initialize_tools_and_envs(
 
     Returns:
         Tuple of (pools, tool_definitions, stop_sequences).
-        Also mutates tools_config.tool_call_names in-place.
     """
     pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
-    tools_config.tool_call_names = tool_call_names
 
     # Auto-discover tools from datasets and create pools for any in TOOL_REGISTRY but not in --tools
     if dataset_mixer_list and dataset_mixer_list_splits:
@@ -2092,7 +2090,8 @@ def initialize_tools_and_envs(
             logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
         # Wait for any newly created pools
         ray.get([pool.size.remote() for pool in pools.values()])
-        tools_config.tool_call_names = tool_call_names
+
+    tools_config.tool_call_names = tool_call_names
 
     # Collect tool definitions from all pools
     tool_definitions: list[dict[str, Any]] = []
