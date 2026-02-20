@@ -271,7 +271,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "qwen_instruct_math": (
+    "qwen_instruct_boxed_math": (
         "{% if messages[0]['role'] == 'system' %}"
         "{{ '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}"
         "{% else %}"
