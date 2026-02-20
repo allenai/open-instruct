@@ -7,6 +7,8 @@ from typing import Any, ClassVar
 from openenv.core.env_server.types import Action, Observation, State
 from pydantic import Field
 
+from open_instruct.data_types import ToolCallStats
+
 
 class EnvCall(Action):
     """Parsed action call from model output."""
@@ -35,7 +37,7 @@ class RolloutState:
     tool_error: str = ""
     tool_runtime: float = 0.0
     timeout: bool = False
-    tool_call_stats: list = field(default_factory=list)
+    tool_call_stats: list[ToolCallStats] = field(default_factory=list)
 
 
 class RLEnvironment(ABC):
