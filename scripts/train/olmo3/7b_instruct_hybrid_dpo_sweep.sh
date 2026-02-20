@@ -25,12 +25,12 @@ SFT_MODELS=(
 )
 
 DPO_LRS=(
-    # 2e-6
-    1e-6
-    # 8.5e-7
-    # 7e-7
-    # 5e-7
-    # 2.5e-7
+    2e-6
+    # 1e-6
+    8.5e-7
+    7e-7
+    5e-7
+    2.5e-7
 )
 
 for MODEL_PATH in "${SFT_MODELS[@]}"; do
@@ -74,7 +74,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --exp_name "$EXP_NAME" \
             --model_name_or_path "$MODEL_PATH" \
             --trust_remote_code \
-            --mixer_list allenai/Dolci-Instruct-DPO 259922 \
+            --mixer_list allenai/Dolci-Instruct-DPO-fixed 259922 \
             --max_seq_length 16384 \
             --per_device_train_batch_size 1 \
             --gradient_accumulation_steps 4 \

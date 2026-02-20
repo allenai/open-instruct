@@ -46,8 +46,16 @@ MODELS=(
     # "HYBRID_INSTRUCT_SFT_8e-5" # Needs v7 eval image with transformers latest naming 
     # "HYBRID_INSTRUCT_SFT_5e-5" # Needs v7 eval image with transformers latest naming 
 
-    # --- DPO models (need v7 eval image) ---
+    # --- Finbarr DPO models (need v7 eval image) ---
     # "hybrid-7b-DPO-SFT-8e-5-1e-6"
+
+    # --- 0219 DPO sweep models (SFT-2.5e-5 base, need v7 eval image) ---
+    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-1e-6"
+    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-2e-6"
+    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-8.5e-7"
+    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-7e-7"
+    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-5e-7"
+    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-2.5e-7"
 
     # --- 0217 instruct SFT models (step3256) ---
     # "HYBRID_INSTRUCT_SFT_0217_8e-5"
@@ -93,9 +101,9 @@ for MODEL in "${MODELS[@]}"; do
             MODEL_NAME="0208-${MODEL}"
             ;;
         dpo)
-            GCS_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/${MODEL}/"
-            # GCS_PATH="${BASE_PATH}/${MODEL}/"
-            MODEL_NAME="dpo-0218-${MODEL}"
+            GCS_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/nathanl/${MODEL}/"
+            # GCS_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/${MODEL}/"
+            MODEL_NAME="dpo-0219-${MODEL}"
             ;;
         instruct)
             GCS_PATH="${BASE_PATH}/${MODEL}/step3256-fix-hf"
