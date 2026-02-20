@@ -2318,7 +2318,7 @@ def main(
     if args.cache_dataset_only:
         return
 
-    pprint([args, model_config, streaming_config, vllm_config, tools_config])
+    pprint([args, tc, model_config, streaming_config, vllm_config, tools_config])
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate

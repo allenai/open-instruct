@@ -288,18 +288,6 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "qwen_instruct_gsm8k": (
-        "{% for message in messages %}"
-        "{% if message['role'] == 'user' %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and write your final answer as an integer at the end.<|im_end|>\n' }}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
     "tulu_thinker": (
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
@@ -928,6 +916,13 @@ class TokenizerConfig:
     """columns name for the ground truth"""
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
     """columns name for the sft messages"""
+
+    def __post_init__(self):
+        if self.chat_template_name is not None and self.chat_template_name not in CHAT_TEMPLATES:
+            available_templates = ", ".join(sorted(CHAT_TEMPLATES.keys()))
+            raise ValueError(
+                f"Invalid chat_template_name='{self.chat_template_name}'. Expected one of: {available_templates}"
+            )
 
     @cached_property
     def tokenizer(self):
@@ -1697,6 +1692,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+    chat_template = getattr(tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()[:16]
+    tokenizer_files_hash = json.dumps(tc.tokenizer_files_hash, sort_keys=True)
 
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
@@ -1713,7 +1715,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+            (
+                f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:"
+                f"{tc.chat_template_name}:{tc.get_tokenizer_fn}:{tokenizer_files_hash}:{chat_template_hash}"
+            ).encode()
         ).hexdigest()[:16]
 
         # perform the transformation
@@ -1772,7 +1777,15 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    template_source_hash = None
+    if tc.chat_template_name in CHAT_TEMPLATES:
+        template_source_hash = hashlib.sha256(CHAT_TEMPLATES[tc.chat_template_name].encode()).hexdigest()
+    combined_dict = {
+        "cache_version": DATASET_CACHE_VERSION,
+        "dataset_configs": dc_dicts,
+        "tokenizer_config": tc_dict,
+        "chat_template_source_hash": template_source_hash,
+    }
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
