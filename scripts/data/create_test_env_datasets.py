@@ -56,7 +56,6 @@ def create_guess_number_samples(num_samples: int = 100, nothink: bool = False) -
 
 
 def save_jsonl(samples: list[dict], path: Path):
-    """Save samples as JSONL file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         for sample in samples:
@@ -65,7 +64,6 @@ def save_jsonl(samples: list[dict], path: Path):
 
 
 def upload_to_huggingface(samples: list[dict], repo_id: str):
-    """Upload dataset to HuggingFace Hub."""
     dataset = Dataset.from_list(samples)
     dataset.push_to_hub(repo_id, private=False)
     print(f"Uploaded to https://huggingface.co/datasets/{repo_id}")

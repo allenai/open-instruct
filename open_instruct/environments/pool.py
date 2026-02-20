@@ -42,7 +42,6 @@ class EnvironmentPool:
         logger.info(f"Pool ready: {pool_size} {actor_class.__name__} actors")
 
     async def acquire(self) -> ray.actor.ActorHandle:
-        """Block until an actor is available. Raises TimeoutError if not acquired within timeout."""
         try:
             return await asyncio.wait_for(self._available.get(), timeout=self._acquire_timeout)
         except asyncio.TimeoutError as e:
@@ -53,7 +52,6 @@ class EnvironmentPool:
             ) from e
 
     async def release(self, actor: ray.actor.ActorHandle) -> None:
-        """Return an actor to the pool, waking any waiting acquirers."""
         await self._available.put(actor)
 
     def size(self) -> int:
