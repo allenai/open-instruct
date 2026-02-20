@@ -25,10 +25,7 @@ class EnvironmentPool:
         self._actors = [remote_class.remote(**actor_kwargs) for _ in range(pool_size)]
 
         setup_tasks = [actor.setup.remote() for actor in self._actors]
-        try:
-            ray.get(setup_tasks)
-        except Exception as e:
-            logger.warning(f"Error during actor setup: {e}")
+        ray.get(setup_tasks)
 
         self._available: asyncio.Queue[ray.actor.ActorHandle] = asyncio.Queue()
         for actor in self._actors:
