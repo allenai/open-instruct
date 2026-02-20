@@ -1416,6 +1416,10 @@ def _resolve_tools_for_sample(
 
     sample_active_tools = row.get(TOOLS_COLUMN_KEY)
     if sample_active_tools is not None:
+        known_names = {t.get("function", {}).get("name") for t in tool_definitions}
+        unknown = set(sample_active_tools) - known_names
+        if unknown:
+            logger.warning(f"Sample references unknown tools: {sorted(unknown)}. Known: {sorted(known_names)}")
         filtered = [t for t in tool_definitions if t.get("function", {}).get("name") in sample_active_tools]
         return filtered or None
     return tool_definitions
