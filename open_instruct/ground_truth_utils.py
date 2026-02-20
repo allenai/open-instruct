@@ -1378,6 +1378,10 @@ class RewardConfig:
                         turn_rewards = list(rollout_states[i].get("rewards", []))
                         verifier_score = verifiable_rewards[i]
 
+                        # Fold verifier score into the last turn's reward before aggregation.
+                        # For "last" aggregator: result = env_reward[-1] + verifier_score.
+                        # For "sum" aggregator: result = sum(env_rewards) + verifier_score.
+                        # PassthroughVerifier returns 0.0, so this is a no-op for env-only tasks.
                         if turn_rewards:
                             turn_rewards[-1] += verifier_score
                         else:
