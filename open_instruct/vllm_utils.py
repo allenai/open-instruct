@@ -306,10 +306,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [rs.get("tool_output", "") for rs in rollout_states]
         tool_runtimes = [rs.get("tool_runtime", 0.0) for rs in rollout_states]
         tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
-        tool_call_stats = [
-            [ToolCallStats(**s) for s in rs.get("tool_call_stats", [])]
-            for rs in rollout_states
-        ]
+        tool_call_stats = [[ToolCallStats(**s) for s in rs.get("tool_call_stats", [])] for rs in rollout_states]
     else:
         masks = [[1] * len(resp) for resp in response_ids]
         num_calls = [0] * len(response_ids)
@@ -950,17 +947,21 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             for tc in tool_calls:
                 if rollout.step_count >= max_steps:
                     break
-                rollout.step_count += 1
 
                 # Lazily acquire from pool on first use of this tool name
                 if tc.name not in actor_map:
                     pool = actor.pools.get(tc.name)
                     if pool is None:
-                        continue
+                        raise ValueError(
+                            f"Model called tool '{tc.name}' but no pool exists for it. "
+                            f"Available pools: {list(actor.pools.keys())}"
+                        )
                     acq = await pool.acquire.remote()
                     acquired[tc.name] = (pool, acq)
                     actor_map[tc.name] = acq
                 target = actor_map[tc.name]
+
+                rollout.step_count += 1
 
                 try:
                     step_result: StepResult = await target.step.remote(
