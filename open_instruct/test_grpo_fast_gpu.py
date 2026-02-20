@@ -101,7 +101,16 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, pools=None, max_steps=None, max_tokens=50):
+    def _setup_engine_and_generate(
+        self,
+        tokenizer_name,
+        prompt,
+        pools=None,
+        tool_definitions=None,
+        tool_parser_type="legacy",
+        max_steps=None,
+        max_tokens=50,
+    ):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -141,6 +150,8 @@ class TestGeneration(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             pools=pools or {},
+            tool_parser_type=tool_parser_type,
+            tool_definitions=tool_definitions,
             max_steps=max_steps or 5,
             reward_config=reward_config,
             train_dataset=train_dataset,
@@ -165,15 +176,26 @@ class TestGeneration(TestGrpoFastBase):
 
         tokenizer_name = "Qwen/Qwen3-0.6B"
         pools = None
+        tool_definitions = None
         if use_tools:
             pools, _ = create_tool_pools(
                 [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
                 pool_size=4,
             )
+            # Collect tool definitions from pool for the parser
+            actor = ray.get(list(pools.values())[0].acquire.remote())
+            tool_definitions = ray.get(actor.get_tool_definitions.remote())
+            list(pools.values())[0].release.remote(actor)
         max_steps = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
-            tokenizer_name=tokenizer_name, prompt=prompt, pools=pools, max_steps=max_steps, max_tokens=max_tokens
+            tokenizer_name=tokenizer_name,
+            prompt=prompt,
+            pools=pools,
+            tool_definitions=tool_definitions,
+            tool_parser_type="vllm_hermes" if use_tools else "legacy",
+            max_steps=max_steps,
+            max_tokens=max_tokens,
         )
 
         if use_tools:

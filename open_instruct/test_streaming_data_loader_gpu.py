@@ -190,6 +190,10 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
             pool_size=4,
         )
+        # Collect tool definitions from pool for the parser
+        actor = ray.get(list(pools.values())[0].acquire.remote())
+        tool_definitions = ray.get(actor.get_tool_definitions.remote())
+        list(pools.values())[0].release.remote(actor)
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
@@ -211,6 +215,8 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             pools=pools,
+            tool_parser_type="vllm_hermes",
+            tool_definitions=tool_definitions,
             max_steps=3,
             reward_config=RewardConfig(),
             train_dataset=train_dataset,
