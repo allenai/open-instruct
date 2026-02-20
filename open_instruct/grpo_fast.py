@@ -2101,10 +2101,7 @@ def initialize_tools_and_envs(
         actor = ray.get(pool.acquire.remote())
         defs = ray.get(actor.get_openai_tool_definitions.remote())
         pool.release.remote(actor)
-        if isinstance(defs, list):
-            tool_definitions.extend(defs)
-        elif isinstance(defs, dict):
-            tool_definitions.append(defs)
+        tool_definitions.extend(defs)
 
     stop_sequences: list[str] = []
     if pools:
