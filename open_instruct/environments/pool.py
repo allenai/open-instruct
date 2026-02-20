@@ -9,6 +9,8 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
+DEFAULT_ACQUIRE_TIMEOUT_S = 300
+
 
 @ray.remote
 class EnvironmentPool:
@@ -18,7 +20,14 @@ class EnvironmentPool:
     (no polling needed — release() wakes up waiting acquirers via asyncio.Queue).
     """
 
-    def __init__(self, pool_size: int, actor_class: type, **actor_kwargs: Any):
+    def __init__(
+        self,
+        pool_size: int,
+        actor_class: type,
+        acquire_timeout: float = DEFAULT_ACQUIRE_TIMEOUT_S,
+        **actor_kwargs: Any,
+    ):
+        self._acquire_timeout = acquire_timeout
         remote_class = ray.remote(actor_class)
 
         logger.info(f"Creating pool of {pool_size} {actor_class.__name__} actors")
@@ -33,8 +42,15 @@ class EnvironmentPool:
         logger.info(f"Pool ready: {pool_size} {actor_class.__name__} actors")
 
     async def acquire(self) -> ray.actor.ActorHandle:
-        """Block until an actor is available, then return it."""
-        return await self._available.get()
+        """Block until an actor is available. Raises TimeoutError if not acquired within timeout."""
+        try:
+            return await asyncio.wait_for(self._available.get(), timeout=self._acquire_timeout)
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f"Pool acquire timed out after {self._acquire_timeout}s. "
+                f"Pool has {len(self._actors)} actors, {self._available.qsize()} available. "
+                f"An actor may have crashed without being released."
+            ) from e
 
     async def release(self, actor: ray.actor.ActorHandle) -> None:
         """Return an actor to the pool, waking any waiting acquirers."""
