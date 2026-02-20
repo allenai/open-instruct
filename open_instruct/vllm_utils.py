@@ -297,7 +297,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         logprobs.append(out.logprobs)
 
     # Extract rollout state from each completion output
-    rollout_states = [getattr(out, "rollout_state", {}) for out in final_output.outputs]
+    rollout_states = [out.rollout_state for out in final_output.outputs]
     if use_tools:
         masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in final_output.outputs]
         num_calls = [rs.get("step_count", 0) for rs in rollout_states]
@@ -307,7 +307,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [rs.get("tool_runtime", 0.0) for rs in rollout_states]
         tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
         tool_call_stats = [
-            [ToolCallStats(**s) if isinstance(s, dict) else s for s in rs.get("tool_call_stats", [])]
+            [ToolCallStats(**s) for s in rs.get("tool_call_stats", [])]
             for rs in rollout_states
         ]
     else:
@@ -895,7 +895,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             env_actor = await pool.acquire.remote()
             acquired[env_name] = (pool, env_actor)
             task_id = env_config.get("task_id")
-            reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
+            _, env_tools = await env_actor.reset.remote(task_id=task_id)
             if env_tools:
                 env_tool_names = {t["function"]["name"] for t in env_tools}
                 clashes = env_tool_names & set(actor.pools.keys())
