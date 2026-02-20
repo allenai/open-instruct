@@ -15,7 +15,6 @@ echo "Starting GuessNumberEnv training (1 GPU, 48 episodes = 6 training steps)..
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-guess-number-nothink 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list \
     --max_prompt_token_length 512 \
     --response_length 1024 \
     --pack_length 1536 \
