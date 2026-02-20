@@ -74,7 +74,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --exp_name "$EXP_NAME" \
             --model_name_or_path "$MODEL_PATH" \
             --trust_remote_code \
-            --mixer_list allenai/Dolci-Instruct-DPO-fixed 260000 \
+            --mixer_list allenai/Dolci-Instruct-DPO-fixed 259922 \
             --max_seq_length 16384 \
             --per_device_train_batch_size 1 \
             --gradient_accumulation_steps 4 \
