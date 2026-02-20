@@ -190,6 +190,8 @@ class ExperimentConfig:
     """Whether to run local evaluation at training step 0. Defaults to False."""
     eval_pass_at_k: int = 1
     """Number of completions per eval prompt for pass@k metrics."""
+    eval_only: bool = False
+    """Whether to run one local evaluation round and exit without training."""
     eval_temperature: float | None = None
     """Optional eval-only temperature override. If None, uses training temperature."""
     eval_top_p: float | None = None

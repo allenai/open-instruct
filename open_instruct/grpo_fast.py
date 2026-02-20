@@ -1044,6 +1044,10 @@ def setup_runtime_variables(
         )
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
+    if args.eval_only and (
+        streaming_config.dataset_mixer_eval_list is None or len(streaming_config.dataset_mixer_eval_list) == 0
+    ):
+        raise ValueError("`--eval_only` requires `--dataset_mixer_eval_list` to be set.")
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():
@@ -2016,6 +2020,59 @@ def cleanup_training_resources(
         logger.info("✅ Process group destroyed")
 
 
+def run_eval_only_round(
+    args: grpo_utils.ExperimentConfig,
+    resume_training_step: int,
+    episode: int,
+    eval_dataset: Dataset | None,
+    eval_prompt_Q: ray_queue.Queue,
+    evaluation_inference_results_Q: ray_queue.Queue,
+    generation_configs: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    model_dims: utils.ModelDims,
+    max_possible_score: float,
+    training_start_time: float,
+    wandb_url: str,
+    actor_manager: ActorManager,
+    health_check_fn,
+) -> int:
+    if eval_dataset is None:
+        raise ValueError("`--eval_only` requires a non-empty eval dataset.")
+
+    health_check_fn()
+    eval_step = max(resume_training_step, 1)
+    local_eval_start_time = time.perf_counter()
+    logger.info("Eval-only mode enabled: scheduling one local evaluation round and exiting.")
+
+    for idx in range(len(eval_dataset)):
+        eval_example = eval_dataset[idx]
+        add_prompt_to_generator(eval_example, eval_step, eval_prompt_Q, generation_configs["eval"], is_eval=True)
+
+    eval_collected = maybe_evaluate(
+        args,
+        max(eval_step, args.num_training_steps),
+        evaluation_inference_results_Q,
+        tokenizer,
+        episode,
+        eval_dataset,
+        generation_configs["eval"],
+        model_dims,
+        max_possible_score,
+        local_eval_start_time,
+        actor_manager,
+    )
+    if not eval_collected:
+        raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
+
+    maybe_update_beaker_description(
+        current_step=max(eval_step, args.num_training_steps),
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
+    return episode
+
+
 def run_training(
     args,
     streaming_config,
@@ -2122,6 +2179,24 @@ def run_training(
     )
     pending_local_eval_rounds = 0
     local_eval_start_time = None
+    if args.eval_only:
+        return run_eval_only_round(
+            args,
+            resume_training_step,
+            episode,
+            eval_dataset,
+            eval_prompt_Q,
+            evaluation_inference_results_Q,
+            generation_configs,
+            tokenizer,
+            model_dims,
+            streaming_config.max_possible_score,
+            training_start_time,
+            wandb_url,
+            actor_manager,
+            health_check_fn,
+        )
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
