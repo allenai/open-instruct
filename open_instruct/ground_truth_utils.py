@@ -1336,7 +1336,7 @@ class RewardConfig:
             tool_errors = infos.tool_errors
             tool_outputs = infos.tool_outputs
             tool_calleds = infos.tool_calleds
-            rollout_states = getattr(infos, "rollout_states", None) or [{}] * len(decoded_responses)
+            rollout_states = infos.rollout_states or [{}] * len(decoded_responses)
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
