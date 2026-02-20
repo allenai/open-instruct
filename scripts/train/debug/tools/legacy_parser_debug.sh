@@ -43,5 +43,5 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --tool_call_names code search browse \
     --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' '{}' \
     --tool_parser_type legacy \
-    --max_tool_calls 5 \
+    --max_steps 5 \
     --push_to_hub false

@@ -81,7 +81,7 @@ def _get_request_info_for_sample(request_info: data_types.RequestInfo | None, i:
         "tool_call_stats": (
             [asdict(s) for s in request_info.tool_call_stats[i]] if i < len(request_info.tool_call_stats) else []
         ),
-        "excess_tool_calls": request_info.excess_tool_calls[i] if i < len(request_info.excess_tool_calls) else {},
+        "rollout_state": request_info.rollout_states[i] if i < len(request_info.rollout_states) else {},
     }
 
 
