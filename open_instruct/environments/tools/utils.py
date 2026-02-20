@@ -424,6 +424,3 @@ class Tool(RLEnvironment):
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         return [get_openai_tool_definitions(self)]
-
-    def get_openai_tool_definitions(self) -> dict[str, Any]:
-        return get_openai_tool_definitions(self)
