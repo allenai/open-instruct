@@ -1,19 +1,16 @@
 #!/bin/bash
 
 EXP_NAME="qwen25_05b_it_gsm8k"
-MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
+MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
+BEAKER_IMAGE="michaeln/open_instruct"
 
 LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
 LOCAL_EVAL_SPLITS="train"
 
-
-BEAKER_IMAGE="michaeln/open_instruct"
-cluster="ai2/saturn ai2/jupiter"
-
 uv run mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ${cluster} \
+    --cluster ai2/saturn ai2/jupiter ai2/neptune \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --pure_docker_mode \
@@ -28,6 +25,11 @@ uv run mason.py \
 \&\& uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
+    --eval_pass_at_k 32 \
+    --eval_top_p 0.95 \
+    --local_eval_every 100 \
+    --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
@@ -41,13 +43,11 @@ uv run mason.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list $LOCAL_EVALS \
-    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 512 \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name qwen_instruct_gsm8k \
+    --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \
@@ -55,7 +55,6 @@ uv run mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
     --save_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
@@ -65,8 +64,6 @@ uv run mason.py \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy True \
-    --eval_pass_at_k 32 \
-    --eval_top_p 0.95 \
     --with_tracking \
     --push_to_hub False $@
 

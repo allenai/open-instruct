@@ -1,7 +1,8 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k_mathtemplate_pass0"
+EXP_NAME="qwen25_05b_it_gsm8k_pass0"
 MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
+# MODEL_NAME_OR_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen25_05b_it_gsm8k_mathtemplate"
 DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8"
 BEAKER_IMAGE="michaeln/open_instruct"
 
@@ -40,10 +41,10 @@ uv run mason.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name "qwen_instruct_math" \
+    --chat_template_name "qwen_instruct_boxed_math" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
+    --total_episodes 128000 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \

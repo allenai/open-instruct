@@ -1,11 +1,17 @@
 #!/bin/bash
 
 EXP_NAME="qwen25_05b_it_gsm8k"
-MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
+MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
+# MODEL_NAME_OR_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen25_05b_it_gsm8k_mathtemplate"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
-LOCAL_EVAL_SPLITS="train"
+# LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+# LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+# LOCAL_EVAL_SPLITS="train"
+    # --dataset_mixer_eval_list $LOCAL_EVALS \
+    # --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
+    # --local_eval_every 2 \
+    # --eval_pass_at_k 4 \
 
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
@@ -19,14 +25,10 @@ uv run --active open_instruct/grpo_fast.py \
     --async_steps 1 \
     --inflight_updates \
     --filter_zero_std_samples False \
-    --dataset_mixer_eval_list $LOCAL_EVALS \
-    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
-    --local_eval_every 25 \
-    --eval_pass_at_k 32 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 8 \
+    --num_unique_prompts_rollout 4 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -36,7 +38,7 @@ uv run --active open_instruct/grpo_fast.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name "qwen_instruct_math" \
+    --chat_template_name "qwen_instruct_boxed_math" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \
@@ -52,7 +54,7 @@ uv run --active open_instruct/grpo_fast.py \
     --vllm_num_engines 2 \
     --vllm_enforce_eager \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
+    --vllm_gpu_memory_utilization 0.5 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
