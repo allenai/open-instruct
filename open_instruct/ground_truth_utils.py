@@ -142,11 +142,11 @@ class VerifierFunction(ABC):
         Evaluate the given prediction against the ground truth (or constraint).
 
         Args:
-            tokenized_prediction: Tokenized representation (unused by most verifiers).
-            prediction: The model output.
-            label: The ground truth answer or evaluation constraint.
-            query: The original query.
-            rollout_state: Rollout state dict (rewards, step_count, done) for env verifiers.
+            tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
+            prediction (str): The model output.
+            label (Any): The ground truth answer or evaluation constraint.
+            query (Optional[str]): The original query
+            rollout_state (Optional[dict]): Rollout state dict (rewards, step_count, done) for env verifiers.
 
         Returns:
             VerificationResult
@@ -160,7 +160,21 @@ class VerifierFunction(ABC):
         query: str | None = None,
         rollout_state: dict | None = None,
     ) -> VerificationResult:
-        """Asynchronous version of __call__. Runs synchronous __call__ in a thread pool by default."""
+        """
+        Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
+        Subclasses can override this method for truly asynchronous implementation.
+
+        Args:
+            tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
+            prediction (str): The model output.
+            label (Any): The ground truth answer or evaluation constraint.
+            query (Optional[str]): The original query.
+            rollout_state (Optional[dict]): Rollout state dict for env verifiers.
+
+        Returns:
+            VerificationResult
+        """
+        # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state)
