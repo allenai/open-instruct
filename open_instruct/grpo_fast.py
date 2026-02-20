@@ -2152,6 +2152,12 @@ def main(
         dataset_mixer_list=streaming_config.dataset_mixer_list,
         dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
+    # TODO: Refactor DRTuluToolParser to work with tool_definitions instead of tool_actors.
+    if pools and tools_config.tool_parser_type == "dr_tulu":
+        raise ValueError(
+            "Parser type 'dr_tulu' requires tool_actors which are no longer created (pools are used instead). "
+            "Use --tool_parser_type legacy or --tool_parser_type vllm_hermes."
+        )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
