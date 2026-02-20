@@ -29,6 +29,10 @@ This document is a reference for the settings used for Olmo 3, based on the best
 
 ---
 
+**Note on `chat_template.jinja` vs `tokenizer_config.json`:** When a HuggingFace repo contains both a `chat_template.jinja` file and a `chat_template` field in `tokenizer_config.json`, `transformers` prioritizes `chat_template.jinja`. Keep both in sync, or only use one. The `diff_tokenizers.py` script compares both files.
+
+---
+
 There are two main issues that lead to all the floating chat templates: one, the <think> token chopping in the tokenization script where our code incorrectly masks the first <think> token as part of the prompt, and two, the identity issue which means we should train and release with different system prompts.
 
 **TLDR until these two issues are resolved:**
