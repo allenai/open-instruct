@@ -884,30 +884,30 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     acquired: dict[str, Any] = {}
     actor_map: dict[str, Any] = {}
 
-    # If env_config is present, acquire from the env's pool and call reset
-    if env_config is not None:
-        env_name = env_config["env_name"]
-        pool = actor.pools.get(env_name)
-        if pool is None:
-            raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
-        env_actor = await pool.acquire.remote()
-        acquired[env_name] = (pool, env_actor)
-        task_id = env_config.get("task_id")
-        reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
-        if env_tools:
-            env_tool_names = {t["function"]["name"] for t in env_tools}
-            clashes = env_tool_names & set(actor.pools.keys())
-            if clashes:
-                raise ValueError(
-                    f"Env '{env_name}' tool names clash with tool pool names: {sorted(clashes)}. "
-                    f"Rename one side to avoid ambiguous dispatch."
-                )
-            for name in env_tool_names:
-                actor_map[name] = env_actor
-                allowed_tools.add(name)
-
     output = None
     try:
+        # If env_config is present, acquire from the env's pool and call reset
+        if env_config is not None:
+            env_name = env_config["env_name"]
+            pool = actor.pools.get(env_name)
+            if pool is None:
+                raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
+            env_actor = await pool.acquire.remote()
+            acquired[env_name] = (pool, env_actor)
+            task_id = env_config.get("task_id")
+            reset_result, env_tools = await env_actor.reset.remote(task_id=task_id)
+            if env_tools:
+                env_tool_names = {t["function"]["name"] for t in env_tools}
+                clashes = env_tool_names & set(actor.pools.keys())
+                if clashes:
+                    raise ValueError(
+                        f"Env '{env_name}' tool names clash with tool pool names: {sorted(clashes)}. "
+                        f"Rename one side to avoid ambiguous dispatch."
+                    )
+                for name in env_tool_names:
+                    actor_map[name] = env_actor
+                    allowed_tools.add(name)
+
         while rollout.step_count < max_steps:
             if rollout.done:
                 break
