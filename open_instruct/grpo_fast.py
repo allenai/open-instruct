@@ -2157,6 +2157,7 @@ def main(
         dataset_mixer_list=streaming_config.dataset_mixer_list,
         dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
+    # TODO: Refactor legacy/dr_tulu parsers to work with pools instead of requiring tool_actors.
     if pools and tools_config.tool_parser_type in ("legacy", "dr_tulu"):
         raise ValueError(
             f"Parser type '{tools_config.tool_parser_type}' requires tool_actors which are "
