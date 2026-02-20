@@ -1204,12 +1204,6 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
 
-    # Backward compatibility: env_last and env_sum now use PassthroughVerifier
-    passthrough = verifiers.get("passthrough")
-    if passthrough is not None:
-        verifiers["env_last"] = passthrough
-        verifiers["env_sum"] = passthrough
-
     # if we have remap arg, remap!
     if streaming_config and streaming_config.remap_verifier:
         remap = streaming_config.remap_verifier.split("=")
