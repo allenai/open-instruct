@@ -2098,7 +2098,7 @@ def initialize_tools_and_envs(
     tool_definitions: list[dict[str, Any]] = []
     for pool in pools.values():
         actor = ray.get(pool.acquire.remote())
-        defs = ray.get(actor.get_openai_tool_definitions.remote())
+        defs = ray.get(actor.get_tool_definitions.remote())
         pool.release.remote(actor)
         tool_definitions.extend(defs)
 
