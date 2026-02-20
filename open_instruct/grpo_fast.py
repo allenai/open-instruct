@@ -137,6 +137,22 @@ def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
+def get_unique_final_output_dir(output_dir: str) -> str:
+    output_path = pathlib.Path(output_dir)
+    if not output_path.exists():
+        return output_dir
+
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    candidate = output_path.parent / f"{output_path.name}-final-{timestamp}-{time.time_ns() % 1_000_000:06d}"
+    counter = 0
+    while candidate.exists():
+        counter += 1
+        candidate = output_path.parent / f"{output_path.name}-final-{timestamp}-{counter}"
+
+    logger.warning(f"Final output directory {output_dir} already exists. Saving final model to {candidate}.")
+    return str(candidate)
+
+
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
@@ -1907,11 +1923,12 @@ def save_final_model(
     chat_template_name: str,
 ):
     """Save the final model and launch evaluation jobs if configured."""
-    logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
+    final_output_dir = get_unique_final_output_dir(args.output_dir)
+    logger.info(f"Saving final model at step {training_step} to {final_output_dir}")
     with Timer("[Main Thread] 🗡️ Saving model"):
         ray_get_with_progress(
             [
-                policy_group.models[i].save_model.remote(args.output_dir, chat_template_name, tokenizer)
+                policy_group.models[i].save_model.remote(final_output_dir, chat_template_name, tokenizer)
                 for i in range(args.world_size)
             ],
             desc="Saving final model",
@@ -1920,7 +1937,7 @@ def save_final_model(
             leaderboard_name = args.hf_repo_revision
             for i in range(args.world_size):
                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                    args.output_dir, leaderboard_name, wandb_url, training_step
+                    final_output_dir, leaderboard_name, wandb_url, training_step
                 )
 
 

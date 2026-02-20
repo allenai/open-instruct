@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k"
+EXP_NAME="qwen25_05b_it_gsm8k_noresampling0.875"
 MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
 BEAKER_IMAGE="michaeln/open_instruct"
@@ -30,6 +30,7 @@ uv run mason.py \
     --local_eval_every 100 \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
+    --no_resampling_pass_rate 0.875 \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \

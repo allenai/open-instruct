@@ -1,8 +1,9 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k_pass0"
-MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
-# MODEL_NAME_OR_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen25_05b_it_gsm8k_mathtemplate"
+EXP_NAME="qwen25_05b_postrl_gsm8k_pass0_newtemplate"
+# EXP_NAME="qwen25_05b_postrl_gsm8k_pass0_oldtemplate"
+# MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
+MODEL_NAME_OR_PATH="/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen25_05b_it_gsm8k_newtemplate"
 DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8"
 BEAKER_IMAGE="michaeln/open_instruct"
 
@@ -19,8 +20,8 @@ uv run mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
     --gpus 2 \
     --budget ai2/oe-adapt \
-    -- source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run --active open_instruct/grpo_fast.py \
+    -- \
+uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
     --beta 0.0 \
