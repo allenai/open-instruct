@@ -2087,10 +2087,9 @@ def initialize_tools_and_envs(
             kwargs = asdict(config) | {"call_name": call_name}
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
             tool_call_names.append(call_name)
-        if dataset_tool_names - set(pools.keys()):
-            extra = dataset_tool_names - set(pools.keys()) - set(TOOL_REGISTRY.keys())
-            if extra:
-                logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
+        extra = dataset_tool_names - set(pools.keys()) - set(TOOL_REGISTRY.keys())
+        if extra:
+            logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
         # Wait for any newly created pools
         ray.get([pool.size.remote() for pool in pools.values()])
         tools_config.tool_call_names = tool_call_names
