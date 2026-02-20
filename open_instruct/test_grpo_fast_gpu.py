@@ -193,7 +193,6 @@ class TestGeneration(TestGrpoFastBase):
             prompt=prompt,
             pools=pools,
             tool_definitions=tool_definitions,
-            tool_parser_type="vllm_hermes" if use_tools else "legacy",
             max_steps=max_steps,
             max_tokens=max_tokens,
         )

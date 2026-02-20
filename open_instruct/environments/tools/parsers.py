@@ -57,33 +57,45 @@ class OpenInstructLegacyToolParser(ToolParser):
     Only works for tools that take a single string parameter.
     """
 
-    def __init__(self, tool_actors: list[ray.actor.ActorHandle], output_wrap_name: str = "output"):
-        """Initialize the parser.
-
-        Args:
-            tool_actors: List of Ray actor handles for Tools.
-            output_wrap_name: Name to wrap tool outputs with.
-        """
-        # Fetch metadata from actors
-        self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
+    def __init__(
+        self,
+        tool_actors: list[ray.actor.ActorHandle] | None = None,
+        output_wrap_name: str = "output",
+        tool_definitions: list[dict[str, Any]] | None = None,
+    ):
         self.output_wrap_name = output_wrap_name
+
+        if tool_definitions:
+            self.tool_names = [td["function"]["name"] for td in tool_definitions]
+            self.tool_param_names: dict[str, str] = {}
+            for td in tool_definitions:
+                func = td["function"]
+                name = func["name"]
+                params = func.get("parameters", {})
+                required = params.get("required", [])
+                if required:
+                    self.tool_param_names[name] = required[0]
+                else:
+                    properties = params.get("properties", {})
+                    self.tool_param_names[name] = next(iter(properties)) if properties else "text"
+        elif tool_actors:
+            self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
+            self.tool_param_names = {}
+            for actor, tool_name in zip(tool_actors, self.tool_names):
+                params = ray.get(actor.get_parameters.remote())
+                required = params.get("required", [])
+                if required:
+                    self.tool_param_names[tool_name] = required[0]
+                else:
+                    properties = params.get("properties", {})
+                    self.tool_param_names[tool_name] = next(iter(properties)) if properties else "text"
+        else:
+            self.tool_names = []
+            self.tool_param_names = {}
+
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
         self.stop_sequences = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
-
-        self.tool_param_names: dict[str, str] = {}
-        for actor, tool_name in zip(tool_actors, self.tool_names):
-            params = ray.get(actor.get_parameters.remote())
-            required = params.get("required", [])
-            if required:
-                self.tool_param_names[tool_name] = required[0]
-            else:
-                properties = params.get("properties", {})
-                if properties:
-                    self.tool_param_names[tool_name] = next(iter(properties))
-                else:
-                    self.tool_param_names[tool_name] = "text"
-
         self.tool_regexes = {
             tool_name: re.compile(re.escape(f"<{tool_name}>") + r"(.*?)" + re.escape(f"</{tool_name}>"), re.DOTALL)
             for tool_name in self.tool_names
@@ -331,7 +343,9 @@ def create_tool_parser(
         ValueError: If parser_type is unknown.
     """
     if parser_type == "legacy":
-        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
+        return OpenInstructLegacyToolParser(
+            tool_actors=tool_actors, output_wrap_name="output", tool_definitions=tool_definitions
+        )
 
     if parser_type == "dr_tulu":
         return DRTuluToolParser(tool_actors)

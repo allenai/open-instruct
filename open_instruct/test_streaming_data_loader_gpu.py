@@ -215,7 +215,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             pools=pools,
-            tool_parser_type="vllm_hermes",
             tool_definitions=tool_definitions,
             max_steps=3,
             reward_config=RewardConfig(),
