@@ -22,6 +22,21 @@ import tempfile
 
 from huggingface_hub import snapshot_download
 
+# Only download tokenizer-related files, never model weights
+TOKENIZER_PATTERNS = [
+    "tokenizer_config.json",
+    "tokenizer.json",
+    "tokenizer.model",
+    "special_tokens_map.json",
+    "vocab.json",
+    "vocab.txt",
+    "merges.txt",
+    "generation_config.json",
+    "chat_template.jinja",
+    "fix_tokens.py",
+    "README.md",
+]
+
 
 def diff_files(path_a, path_b, name):
     """Diff two files, return True if identical."""
@@ -129,13 +144,13 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         print(f"Downloading {label_a}...")
-        dl_kwargs_a = {"repo_id": args.repo_a, "local_dir": os.path.join(tmpdir, "a")}
+        dl_kwargs_a = {"repo_id": args.repo_a, "local_dir": os.path.join(tmpdir, "a"), "allow_patterns": TOKENIZER_PATTERNS}
         if args.rev_a:
             dl_kwargs_a["revision"] = args.rev_a
         dir_a = snapshot_download(**dl_kwargs_a)
 
         print(f"Downloading {label_b}...")
-        dl_kwargs_b = {"repo_id": args.repo_b, "local_dir": os.path.join(tmpdir, "b")}
+        dl_kwargs_b = {"repo_id": args.repo_b, "local_dir": os.path.join(tmpdir, "b"), "allow_patterns": TOKENIZER_PATTERNS}
         if args.rev_b:
             dl_kwargs_b["revision"] = args.rev_b
         dir_b = snapshot_download(**dl_kwargs_b)
@@ -176,6 +191,22 @@ def main():
                 else:
                     print(f"  {name}: DIFFERENT (see chat_template diff below)")
                     diff_chat_templates(path_a, path_b, label_a, label_b)
+                    all_identical = False
+            elif name == "chat_template.jinja":
+                # Pretty-print jinja diff
+                with open(path_a) as f:
+                    raw_a = f.read()
+                with open(path_b) as f:
+                    raw_b = f.read()
+                if raw_a == raw_b:
+                    print(f"  {name}: identical")
+                else:
+                    print(f"  {name}: DIFFERENT")
+                    lines_a = prettify_jinja(raw_a).splitlines(keepends=True)
+                    lines_b = prettify_jinja(raw_b).splitlines(keepends=True)
+                    diff = list(difflib.unified_diff(lines_a, lines_b, fromfile=label_a, tofile=label_b, lineterm=""))
+                    for line in diff:
+                        print(f"    {line}")
                     all_identical = False
             else:
                 if not diff_files(path_a, path_b, name):
