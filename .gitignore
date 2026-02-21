@@ -163,3 +163,4 @@ scratch/
 
 *.o*
 wandb_api_key.txt
+mem-test/

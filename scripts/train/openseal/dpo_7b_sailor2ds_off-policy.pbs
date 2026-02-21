@@ -1,0 +1,90 @@
+#!/bin/bash
+#PBS -P CFP01-CF-060
+#PBS -j oe
+#PBS -k oed
+#PBS -N openseal_sft
+#PBS -q auto
+#PBS -l select=1:ngpus=8
+#PBS -l walltime=96:00:00
+
+cd $PBS_O_WORKDIR
+
+image="/app1/common/singularity-img/hopper/pytorch/pytorch_2.3.0_cuda_12.4_ngc_24.04.sif"
+
+module load singularity
+
+LOG_DIR='./logs/dpo/openseal_sailor2ds_off_policy_8gpu'
+mkdir -p $LOG_DIR
+
+singularity exec -e \
+--env HF_HOME=/scratch/e1583535/cache \
+--env HF_DATASETS_CACHE=/scratch/e1583535/cache/datasets \
+--env TRITON_CACHE_DIR=/scratch/e1583535/cache/triton \
+$image bash << EOF > $LOG_DIR/stdout.$PBS_JOBID.log 2> $LOG_DIR/stderr.$PBS_JOBID.log
+
+export WANDB_API_KEY=<api_key>
+
+# Ensure the open_instruct package (one level up from the package dir) is on PYTHONPATH
+export PYTHONPATH=/scratch/e1583535/open-instruct:${PYTHONPATH}
+
+if [ -d "/hpctmp/e1583535/virtualenvs/open-instruct" ]; then
+    source /hpctmp/e1583535/virtualenvs/open-instruct/bin/activate
+fi
+
+echo "Starting training at $(date)"
+echo "Running on host: $(hostname)"
+echo "GPU info:"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits || echo "No GPU detected"
+
+# Memory optimization for CUDA
+export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+# Set NCCL timeout to 1 hour (from default 30 min)
+export NCCL_DEBUG=INFO
+export TORCH_NCCL_BLOCKING_WAIT=1
+export NCCL_TIMEOUT=3600
+export TORCH_USE_CUDA_DSA=1
+
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+
+accelerate launch \
+    --mixed_precision bf16 \
+    --multi_gpu \
+    --num_processes 8 \
+    --num_machines 1 \
+    --dynamo_backend no \
+    /scratch/e1583535/open-instruct/open_instruct/dpo_tune_cache.py \
+    --exp_name openseal_DPOSailor2Stage1_8GPU \
+    --model_name_or_path /scratch/e1583535/llm/openseal-sft/openseal-sailor2ds-stage2 \
+    --tokenizer_name /scratch/e1583535/llm/openseal-sft/openseal-sailor2ds-stage2 \
+    --output_dir /scratch/e1583535/llm/openseal-dpo/openseal_dpo_sailor2_stage1_8gpu \
+    --do_not_randomize_output_dir True \
+    --local_cache_dir /scratch/e1583535/open-instruct/scripts/train/openseal/local_dataset_cache/openseal_dpo_sailor2_stage1_8gpu \
+    --use_slow_tokenizer False \
+    --mixer_list sailor2/sea-ultrafeedback 1.00 \
+    --use_flash_attn \
+    --max_seq_length 2048 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 8 \
+    --learning_rate 1e-6 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.1 \
+    --weight_decay 0.0 \
+    --num_epochs 1 \
+    --logging_steps 10 \
+    --beta 5 \
+    --checkpointing_steps 100 \
+    --keep_last_n_checkpoints -1 \
+    --push_to_hub False \
+    --try_launch_beaker_eval_jobs False \
+    --with_tracking True \
+    --report_to wandb \
+    --wandb_project openseal-posttraining \
+    --wandb_entity "tsangb34-national-university-of-singapore-students-union" \
+    --loss_type dpo_norm \
+    --packing True \
+    --gradient_checkpointing True \
+    2>&1
+
+echo "Training completed at $(date)"
+EOF
