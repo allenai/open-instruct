@@ -70,9 +70,10 @@ uv run python mason.py \
     --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero \
     --oe_eval_gpu_multiplier 4 \
     --use_value_model \
+    --whiten_advantages \
     --value_loss_coef 0.5 \
     --value_learning_rate 2e-6 \
-    --vf_clip_range 0.2 \
+    --vf_clip_range 0.0 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
     --value_warmup_steps 150 \

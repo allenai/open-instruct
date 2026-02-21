@@ -132,6 +132,9 @@ class ExperimentConfig:
     This balances bias-variance tradeoff for sequences of varying lengths."""
     length_adaptive_gae_alpha: float = 0.05
     """Alpha parameter for length-adaptive GAE. Higher values give higher lambda (more bias, less variance)."""
+    whiten_advantages: bool = False
+    """If True, whiten (zero-mean, unit-variance) GAE advantages within each minibatch.
+    Only applies when use_value_model=True. Standard in PPO to stabilize training."""
     value_warmup_steps: int = 0
     """Number of steps to train value model with frozen policy (VAPO value pretraining).
     During warmup, only the value model is updated using Monte Carlo returns.

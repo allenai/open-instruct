@@ -1051,6 +1051,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         # to state s_j (predicting token j+1). So we take [:, :-1] to align
                         # GAE positions 0..L-2 with shifted logprob indices 0..L-2.
                         advantages_for_loss = gae_advantages_BT[i][:, :-1]
+                        if self.args.whiten_advantages:
+                            # Whiten advantages within the minibatch (masked to response tokens only).
+                            # With sequence parallel, each rank holds a chunk, so we all-reduce
+                            # sum and count across the SP group to get global statistics.
+                            mask = response_mask_BT.bool()
+                            masked_adv = advantages_for_loss * mask
+                            local_sum = masked_adv.sum()
+                            local_sq_sum = (masked_adv ** 2).sum()
+                            local_count = mask.sum().float()
+
+                            if self.splitter is not None:
+                                stats = torch.stack([local_sum, local_sq_sum, local_count])
+                                torch.distributed.all_reduce(stats, group=self.splitter.sp_group)
+                                total_sum, total_sq_sum, total_count = stats[0], stats[1], stats[2]
+                            else:
+                                total_sum, total_sq_sum, total_count = local_sum, local_sq_sum, local_count
+
+                            if total_count > 1:
+                                mean = total_sum / total_count
+                                var = total_sq_sum / total_count - mean ** 2
+                                std = torch.clamp(var, min=0).sqrt()
+                                advantages_for_loss = (advantages_for_loss - mean) / (std + 1e-8)
                     else:
                         advantages_for_loss = data_BT.advantages[i][:, 1:]
 
