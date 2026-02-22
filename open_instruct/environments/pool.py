@@ -36,6 +36,7 @@ class EnvironmentPool:
         setup_tasks = [actor.setup.remote() for actor in self._actors]
         ray.get(setup_tasks)
 
+        self._actor_ids: set[str] = {actor._actor_id.hex() for actor in self._actors}
         self._available: asyncio.Queue[ray.actor.ActorHandle] = asyncio.Queue()
         for actor in self._actors:
             self._available.put_nowait(actor)
@@ -52,6 +53,8 @@ class EnvironmentPool:
             ) from e
 
     async def release(self, actor: ray.actor.ActorHandle) -> None:
+        if actor._actor_id.hex() not in self._actor_ids:
+            raise ValueError("Attempted to release an actor that doesn't belong to this pool")
         await self._available.put(actor)
 
     def size(self) -> int:
