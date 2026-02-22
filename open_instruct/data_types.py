@@ -39,8 +39,8 @@ class RequestInfo:
     tool_runtimes: list[float]
     tool_calleds: list[bool]
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
-    excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
-    """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
+    rollout_states: list[dict] = field(default_factory=list)
+    """Per-sample rollout state dicts (rewards, step_count, done, info) — always present."""
 
 
 @dataclass
@@ -76,6 +76,8 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
+    env_config: dict | None = None
+    """Environment config dict (env_name, task_id, max_steps). If set, uses environment."""
 
 
 @dataclass

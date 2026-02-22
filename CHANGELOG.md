@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Wire RL environments into vLLM generation loop and preprocessing: unified tool/env system with single `TOOL_REGISTRY`, pooled actors via shared `EnvironmentPool` Ray actor (async acquire/release, auto-sized to rollout concurrency), `RolloutState` tracks all per-rollout state, `PassthroughVerifier` + `RewardAggregator` for per-turn rewards (verifier score folded into last turn before aggregation), `BaseEnvConfig` in `environments/base.py`, `--max_steps` unified, `--pool_size` configurable, auto-discovery of tools from datasets, 1-GPU debug scripts for counter/guess_number envs (https://github.com/allenai/open-instruct/pull/1479).
 - RL environment abstraction: `RLEnvironment` base class with `Tool` as a subclass, unifying tools and environments under a single `step(EnvCall) -> StepResult` interface. Removes `Executable`/`EnvOutput`/`_execute`/`safe_execute` indirection. Moves tools under `open_instruct/environments/tools/`. Includes example environments (`CounterEnv`, `GuessNumberEnv`) (https://github.com/allenai/open-instruct/pull/1478).
 - Enable packing with torch.compile for DPO training, fix cu_seq_lens offset bug for padded chosen/rejected sequences, add tokens_per_second_per_gpu metric (https://github.com/allenai/open-instruct/pull/1466).
 - Production DPO script for OLMo3-7B hybrid (https://github.com/allenai/open-instruct/pull/1449).

@@ -91,7 +91,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --tools generic_mcp \
     --tool_configs '{"server_url": "http://localhost:8765/mcp", "transport": "http", "timeout": 30}' \
     --tool_parser_type vllm_hermes \
-    --max_tool_calls 3 \
+    --max_steps 3 \
     --verbose true \
     --push_to_hub false \
     --output_dir output/weather_mcp_debug \

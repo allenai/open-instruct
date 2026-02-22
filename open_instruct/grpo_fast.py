@@ -82,6 +82,7 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
@@ -89,9 +90,11 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
+from open_instruct.environments.base import BaseEnvConfig
+from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import BaseEnvConfig, EnvsConfig, ParsedEnvConfig
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -1160,22 +1163,22 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
-    """Create tool actors based on tool configuration using the TOOL_REGISTRY.
+def create_tool_pools(
+    parsed_tools: list[ParsedEnvConfig], pool_size: int
+) -> tuple[dict[str, ray.actor.ActorHandle], list[str]]:
+    """Create an EnvironmentPool for each tool/env in the registry.
 
     Args:
         parsed_tools: List of ParsedTool instances containing name, call_name, and config.
+        pool_size: Number of actors per pool.
 
     Returns:
-        A tuple of (tool_actors, tool_call_names) where:
-        - tool_actors: List of Ray actor handles for the requested tools.
-        - tool_call_names: List of call names for each tool (may differ from input for MCP tools, which decide their own call names).
-
-    Raises:
-        ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
+        A tuple of (pools, tool_call_names) where:
+        - pools: Dict mapping call_name -> EnvironmentPool Ray actor handle.
+        - tool_call_names: List of call names (may differ from input for MCP tools).
     """
-    tool_actors = []
-    tool_call_names = []
+    pools: dict[str, ray.actor.ActorHandle] = {}
+    tool_call_names: list[str] = []
 
     for parsed_tool in parsed_tools:
         if parsed_tool.name not in TOOL_REGISTRY:
@@ -1183,14 +1186,11 @@ def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.Ac
             raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
         tool_config_class = TOOL_REGISTRY[parsed_tool.name]
-        # Build config from dictionary
         try:
             config = tool_config_class(**parsed_tool.config)
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
-        # Collect (config, call_name, tool_class) tuples to process
-        # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
         configs_to_create: list[tuple[BaseEnvConfig, str, type]] = []
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
@@ -1205,11 +1205,15 @@ def create_tools(parsed_tools: list[ParsedEnvConfig]) -> tuple[list[ray.actor.Ac
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
-            _kwarg_dict = asdict(cfg) | {"call_name": call_name}
-            tool_actors.append(ray.remote(tool_class).remote(**_kwarg_dict))
+            kwargs = asdict(cfg) | {"call_name": call_name}
+            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
-    return tool_actors, tool_call_names
+    # Wait for all pools to initialize
+    if pools:
+        ray.get([pool.size.remote() for pool in pools.values()])
+
+    return pools, tool_call_names
 
 
 def create_model_and_optimizer(
@@ -1229,8 +1233,10 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-    tool_actors: list[ray.actor.ActorHandle] | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
+    base_env_config: dict | None = None,
+    pools: dict[str, ray.actor.ActorHandle] | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1273,6 +1279,7 @@ def create_model_and_optimizer(
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
+        base_env_config=base_env_config,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -1309,10 +1316,11 @@ def create_model_and_optimizer(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tool_actors=tool_actors,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
-        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
+        tool_definitions=tool_definitions,
+        max_steps=tools_config.max_steps if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
+        pools=pools,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -1820,6 +1828,7 @@ def run_training(
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
     checkpoint_state=None,
+    base_env_config: dict | None = None,
 ):
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
@@ -1918,7 +1927,14 @@ def run_training(
                     "Consider increasing local_eval_every."
                 )
             for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+                add_prompt_to_generator(
+                    eval_example,
+                    0,
+                    prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                    base_env_config=base_env_config,
+                )
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2009,32 +2025,97 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(tools_config: EnvsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
-    """Initialize tool actors and get tool definitions and stop sequences.
+def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
+    """Scan datasets for tool names referenced in 'tools' and 'env_config' columns."""
+    tool_names: set[str] = set()
 
-    Args:
-        tools_config: Configuration for tools.
-        tokenizer: Tokenizer for the model.
+    if len(dataset_mixer_list_splits) == 1:
+        splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    else:
+        splits = dataset_mixer_list_splits
+
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        split = splits[i // 2]
+        ds = datasets.load_dataset(dataset_name, split=split)
+        if TOOLS_COLUMN_KEY in ds.column_names:
+            for tools in ds[TOOLS_COLUMN_KEY]:
+                if tools:
+                    tool_names.update(t for t in tools if t)
+        if ENV_CONFIG_KEY in ds.column_names:
+            for row in ds:
+                env_cfg = row.get(ENV_CONFIG_KEY)
+                if env_cfg and env_cfg.get("env_name"):
+                    tool_names.add(env_cfg["env_name"])
+
+    return tool_names
+
+
+def initialize_tools_and_envs(
+    tools_config: EnvsConfig,
+    tokenizer,
+    pool_size: int,
+    dataset_mixer_list: list[str] | None = None,
+    dataset_mixer_list_splits: list[str] | None = None,
+) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str]]:
+    """Initialize all tool/env pools and collect tool definitions.
+
+    Creates an EnvironmentPool for each tool specified via --tools CLI.
+    Also scans datasets for tool names and auto-creates pools for any
+    that exist in TOOL_REGISTRY but weren't in --tools.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences, tool_call_names).
-        Note: tool_call_names may differ from tools_config.tool_call_names if MCP
-        tools were auto-expanded.
+        Tuple of (pools, tool_definitions, stop_sequences).
     """
-    tool_actors, tool_call_names = create_tools(tools_config._parsed_tools)
-    tool_definitions = (
-        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
-    )
+    pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
 
-    # Create parser temporarily to get stop sequences for generation config
-    # The actual parser used during generation will be created inside vLLM actors
-    stop_sequences = []
-    if tool_actors:
+    # Auto-discover tools from datasets and create pools for any in TOOL_REGISTRY but not in --tools
+    if dataset_mixer_list and dataset_mixer_list_splits:
+        dataset_tool_names = _discover_tools_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
+        for name in sorted(dataset_tool_names):
+            if name in pools:
+                continue
+            if name not in TOOL_REGISTRY:
+                continue
+            logger.info(f"Auto-creating pool for '{name}' (discovered from dataset)")
+            config_cls = TOOL_REGISTRY[name]
+            config = config_cls()
+            tool_cls = config_cls.tool_class
+            call_name = getattr(tool_cls, "call_name", name)
+            kwargs = asdict(config) | {"call_name": call_name}
+            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
+            tool_call_names.append(call_name)
+        extra = dataset_tool_names - set(pools.keys()) - set(TOOL_REGISTRY.keys())
+        if extra:
+            logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
+        # Wait for any newly created pools
+        ray.get([pool.size.remote() for pool in pools.values()])
+
+    tools_config.tool_call_names = tool_call_names
+
+    # Collect tool definitions from all pools
+    tool_definitions: list[dict[str, Any]] = []
+    for pool in pools.values():
+        actor = ray.get(pool.acquire.remote())
+        defs = ray.get(actor.get_tool_definitions.remote())
+        pool.release.remote(actor)
+        tool_definitions.extend(defs)
+
+    stop_sequences: list[str] = []
+    if pools:
         stop_sequences = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
+            parser_type=tools_config.tool_parser_type,
+            tool_actors=[],
+            tokenizer=tokenizer,
+            tool_definitions=tool_definitions,
         ).stop_sequences
 
-    return tool_actors, tool_definitions, stop_sequences, tool_call_names
+    logger.info(
+        f"Initialized {len(pools)} tool pools (size={pool_size}). "
+        f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
+
+    return pools, tool_definitions, stop_sequences
 
 
 def main(
@@ -2059,12 +2140,24 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    tool_actors, tool_definitions, tool_stop_sequences, tool_call_names = initialize_tools(tools_config, tokenizer)
-    logger.info(
-        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    pool_size = tools_config.pool_size
+    if pool_size is None:
+        pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    logger.info(f"Pool size per tool: {pool_size}")
+
+    pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
+        tools_config,
+        tokenizer,
+        pool_size=pool_size,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
-    # Update tools_config with expanded tool call names (for MCP auto-expansion)
-    tools_config.tool_call_names = tool_call_names
+    # TODO: Refactor DRTuluToolParser to work with tool_definitions instead of tool_actors.
+    if pools and tools_config.tool_parser_type == "dr_tulu":
+        raise ValueError(
+            "Parser type 'dr_tulu' requires tool_actors which are no longer created (pools are used instead). "
+            "Use --tool_parser_type legacy or --tool_parser_type vllm_hermes."
+        )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
@@ -2112,6 +2205,7 @@ def main(
         only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
+        reward_aggregator=streaming_config.reward_aggregator,
     )
 
     # AFTER potentially adding tool stop sequences, create generation configs
@@ -2130,6 +2224,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
+    base_env_config = {"max_steps": tools_config.max_steps} if tools_config.enabled else None
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2148,8 +2243,10 @@ def main(
             reward_config,
             generation_configs["train"],
             data_prep_actor_state,
-            tool_actors,
+            tool_definitions,
             tools_config,
+            base_env_config,
+            pools,
         )
     )
 
@@ -2186,6 +2283,7 @@ def main(
             actor_manager,
             model_dims,
             checkpoint_state,
+            base_env_config,
         )
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):

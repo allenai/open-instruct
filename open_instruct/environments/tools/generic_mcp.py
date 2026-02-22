@@ -17,8 +17,8 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
-from open_instruct.environments.base import EnvCall, StepResult
-from open_instruct.environments.tools.utils import BaseEnvConfig, Tool, coerce_args, log_env_call
+from open_instruct.environments.base import BaseEnvConfig, EnvCall, StepResult
+from open_instruct.environments.tools.utils import Tool, coerce_args, log_env_call
 
 logger = logger_utils.setup_logger(__name__)
 

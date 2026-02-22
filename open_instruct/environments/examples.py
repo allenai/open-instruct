@@ -1,15 +1,18 @@
 """Example environments for testing and demonstration."""
 
 import random
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from openenv.core.env_server.types import State
 
-from .base import EnvCall, RLEnvironment, StepResult
+from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
 
 
 class CounterEnv(RLEnvironment):
     """Simple counter environment. Increment to reach target, then submit."""
 
+    config_name = "counter"
     max_steps = 20
 
     _tool_definitions = [
@@ -39,7 +42,7 @@ class CounterEnv(RLEnvironment):
         },
     ]
 
-    def __init__(self, target: int = 5, **kwargs):
+    def __init__(self, target: int = 5, **kwargs: Any):
         self._target = target
         self._current = 0
         self._step_count = 0
@@ -50,7 +53,7 @@ class CounterEnv(RLEnvironment):
     def get_tool_definitions(cls) -> list[dict]:
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         self._current = 0
         self._step_count = 0
         self._done = False
@@ -96,9 +99,18 @@ class CounterEnv(RLEnvironment):
         return State(episode_id=self._task_id, step_count=self._step_count)
 
 
+@dataclass
+class CounterEnvConfig(BaseEnvConfig):
+    """Configuration for CounterEnv."""
+
+    tool_class: ClassVar[type[RLEnvironment]] = CounterEnv
+    target: int = 5
+
+
 class GuessNumberEnv(RLEnvironment):
     """Number guessing game. Guess a secret number between min and max."""
 
+    config_name = "guess_number"
     max_steps = 10
 
     _tool_definitions = [
@@ -116,7 +128,7 @@ class GuessNumberEnv(RLEnvironment):
         }
     ]
 
-    def __init__(self, min_val: int = 1, max_val: int = 100, **kwargs):
+    def __init__(self, min_val: int = 1, max_val: int = 100, **kwargs: Any):
         self._min_val = min_val
         self._max_val = max_val
         self._secret = 0
@@ -128,7 +140,7 @@ class GuessNumberEnv(RLEnvironment):
     def get_tool_definitions(cls) -> list[dict]:
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         self._task_id = task_id
         if task_id and task_id.isdigit():
             self._secret = int(task_id)
@@ -177,3 +189,12 @@ class GuessNumberEnv(RLEnvironment):
 
     def state(self) -> State:
         return State(episode_id=self._task_id, step_count=self._guesses)
+
+
+@dataclass
+class GuessNumberEnvConfig(BaseEnvConfig):
+    """Configuration for GuessNumberEnv."""
+
+    tool_class: ClassVar[type[RLEnvironment]] = GuessNumberEnv
+    min_val: int = 1
+    max_val: int = 100
