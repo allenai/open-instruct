@@ -141,6 +141,8 @@ class ExperimentConfig:
     This can help prevent stale momentum/variance estimates from the warmup phase."""
     value_num_mini_batches: int | None = None
     """Number of minibatches for value model training. If None, defaults to num_mini_batches."""
+    whiten_advantages: bool = False
+    """If True, normalize GAE advantages to zero-mean unit-variance across all workers before policy training."""
 
     # Ray
     single_gpu_mode: bool = False
