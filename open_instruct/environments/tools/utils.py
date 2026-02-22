@@ -422,5 +422,9 @@ class Tool(RLEnvironment):
         """Get the tool's parameter schema."""
         return self.parameters
 
+    def get_stop_strings(self) -> list[str]:
+        """Get stop strings for this tool. Override in subclasses that define custom stop sequences."""
+        return []
+
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         return [get_openai_tool_definitions(self)]

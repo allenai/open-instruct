@@ -556,6 +556,7 @@ class LLMRayActor:
         *args,
         tool_parser_type: str = "legacy",
         tool_definitions: list[dict] | None = None,
+        tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
@@ -572,6 +573,7 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
+        self._tool_stop_sequences = tool_stop_sequences
         self._init_config(
             max_steps, mask_tool_use, pools, inflight_updates, reward_config, train_dataset, eval_dataset
         )
@@ -636,9 +638,9 @@ class LLMRayActor:
     def _init_tool_parser(self, tool_parser_type: str) -> None:
         self.tool_parser = create_tool_parser(
             parser_type=tool_parser_type,
-            tool_actors=[],
             tokenizer=self.llm_engine.tokenizer,
             tool_definitions=self._tool_definitions,
+            stop_sequences=self._tool_stop_sequences,
         )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
@@ -1084,6 +1086,7 @@ def create_vllm_engines(
     pg: PlacementGroup | None = None,
     tool_parser_type: str = "legacy",
     tool_definitions: list[dict] | None = None,
+    tool_stop_sequences: list[str] | None = None,
     max_steps: int = 5,
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
@@ -1171,6 +1174,7 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tool_parser_type=tool_parser_type,
                 tool_definitions=tool_definitions,
+                tool_stop_sequences=tool_stop_sequences,
                 max_steps=max_steps,
                 mask_tool_use=mask_tool_use,
                 pools=pools,
