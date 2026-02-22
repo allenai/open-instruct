@@ -988,6 +988,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     logger.warning(error_msg)
                     observations.append(error_msg)
                     rollout.tool_error += error_msg
+                    rollout.rewards.append(0.0)
                     rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
 
                 if rollout.done:
