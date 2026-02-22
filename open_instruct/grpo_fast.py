@@ -1101,87 +1101,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_weights=tis_imp_ratio_BT,
                     )
 
-                    # Compute value loss if using value model
-                    value_loss_BT = None
-                    vf_clipfrac_BT = None
-                    if self.args.use_value_model:
-                        # Compute current value predictions (with gradient for value loss backprop)
-                        current_values_full = self.forward_value(
-                            data_BT.query_responses[i],
-                            data_BT.attention_masks[i],
-                            data_BT.position_ids[i],
-                            data_BT.response_masks[i],
-                            self.pad_token_id,
-                            use_grad=True,
-                        )
-                        # Align values with actions: V(s_t) at position t predicts value for
-                        # the action of generating token t+1. Take [:, :-1] to get positions
-                        # 0..L-2, matching the L-1 actions (same alignment as logprobs).
-                        current_values = current_values_full[:, :-1]
-                        target_returns = returns_BT[i][:, :-1]
-                        old_values = old_values_BT[i][:, :-1]
-
-                        # Value function loss with optional clipping
-                        if self.args.vf_clip_range > 0:
-                            # Clipped value function (similar to PPO)
-                            values_clipped = old_values + torch.clamp(
-                                current_values - old_values,
-                                -self.args.vf_clip_range,
-                                self.args.vf_clip_range,
-                            )
-                            vf_losses1 = (current_values - target_returns) ** 2
-                            vf_losses2 = (values_clipped - target_returns) ** 2
-                            value_loss_BT = 0.5 * torch.max(vf_losses1, vf_losses2)
-                            vf_clipfrac_BT = (vf_losses2 > vf_losses1).float()
-                        else:
-                            # Simple MSE loss
-                            value_loss_BT = 0.5 * (current_values - target_returns) ** 2
-                            vf_clipfrac_BT = torch.zeros_like(current_values)
-
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
                     policy_loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
-
-                    # we already took world size into account via the tokens
-                    # but deepspeed will try to average over ranks, so multiply back
-                    # up, adjusting for the sequence parallel size (adjust by dp world size).
                     policy_loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
 
-                    # During value warmup, skip policy backward/step (policy is frozen)
                     if not is_value_warmup:
                         self.model.backward(policy_loss)
 
-                    # Value model backward (through DeepSpeed engine)
-                    # value_loss_BT is (B, L-1) at positions 0..L-2. Mask by whether the STATE
-                    # at position t is a response position (response_masks[:, :-1]), not whether
-                    # the generated token at t+1 is response (response_masks[:, 1:]).
-                    if self.args.use_value_model and value_loss_BT is not None:
-                        value_mask_BT = data_BT.response_masks[i][:, :-1]
-                        value_loss = masked_mean(
-                            value_loss_BT,
-                            value_mask_BT,
-                            None,
-                            loss_denominator,
-                        ) * self.args.value_loss_coef
-                        self.value_model.backward(value_loss)
-
                     if (local_step + 1) % accumulation_steps == 0:
-                        # During value warmup, skip policy optimizer step
                         if not is_value_warmup:
                             self.model.step()
-                        # Step the value model optimizer
-                        if self.args.use_value_model:
-                            self.value_model.step()
 
-                    # Compute total loss for logging
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
-                    if self.args.use_value_model and value_loss_BT is not None:
-                        value_loss_for_log = masked_mean(
-                            value_loss_BT, value_mask_BT, None, loss_denominator
-                        ) * self.args.value_loss_coef
-                        loss = loss + value_loss_for_log
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -1198,9 +1131,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
-                        if self.args.use_value_model and value_loss_BT is not None:
-                            loss_stats_B["value_loss"][i] = masked_mean(value_loss_BT, value_mask_BT)
-                            loss_stats_B["vf_clipfrac"][i] = masked_mean(vf_clipfrac_BT, value_mask_BT)
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
