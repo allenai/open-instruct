@@ -1808,16 +1808,32 @@ def maybe_evaluate(
         model_step_span = eval_reward_metrics.pop("eval/model_step_span", None)
         eval_k = eval_generation_config.n
         scores = np.array(eval_batch.scores)
-        pass_at_1 = None
-        pass_at_k = None
+        pass_at_by_k: dict[int, float] = {}
+        dataset_pass_at_by_k: dict[str, dict[int, float]] = {}
         if max_possible_score <= 0:
             logger.warning("Max possible score is %s; skipping pass@k metrics.", max_possible_score)
         elif scores.size and scores.size % eval_k == 0:
             scores_per_prompt = scores.reshape(-1, eval_k)
             threshold = max_possible_score - 1e-8
-            pass_at_1 = (scores_per_prompt[:, 0] >= threshold).mean()
-            if eval_k > 1:
-                pass_at_k = (scores_per_prompt.max(axis=1) >= threshold).mean()
+            running_max_scores = np.maximum.accumulate(scores_per_prompt, axis=1)
+            for k in range(1, eval_k + 1):
+                pass_at_by_k[k] = float((running_max_scores[:, k - 1] >= threshold).mean())
+            if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == running_max_scores.shape[0]:
+                dataset_to_solved_rows: dict[str, list[np.ndarray]] = {}
+                for dataset_name, solved_row in zip(eval_batch_stats.prompt_datasets, running_max_scores):
+                    dataset_to_solved_rows.setdefault(dataset_name, []).append(solved_row >= threshold)
+                for dataset_name, solved_rows in dataset_to_solved_rows.items():
+                    metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
+                    solved_matrix = np.asarray(solved_rows, dtype=float)
+                    dataset_pass_at_by_k[metric_name] = {
+                        k: float(solved_matrix[:, k - 1].mean()) for k in range(1, eval_k + 1)
+                    }
+            elif eval_batch_stats is not None:
+                logger.warning(
+                    "Eval prompt_datasets size %s does not match prompts %s; skipping per-dataset pass@k metrics.",
+                    len(eval_batch_stats.prompt_datasets),
+                    running_max_scores.shape[0],
+                )
         else:
             logger.warning(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
@@ -1830,10 +1846,11 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
-        if pass_at_1 is not None:
-            eval_metrics["eval/pass_at_1"] = pass_at_1
-        if pass_at_k is not None:
-            eval_metrics[f"eval/pass_at_{eval_k}"] = pass_at_k
+        for k, pass_rate in pass_at_by_k.items():
+            eval_metrics[f"eval/pass_at_{k}"] = pass_rate
+        for metric_name, pass_rates in dataset_pass_at_by_k.items():
+            for k, pass_rate in pass_rates.items():
+                eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
         if model_step_min is not None and model_step_max is not None and model_step_mean is not None:
             assumed_step = float(training_step)
             eval_metrics["eval/model_step_diff_min"] = model_step_min - assumed_step
