@@ -1013,7 +1013,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     break
     finally:
         for pool, acq_actor in acquired.values():
-            pool.release.remote(acq_actor)
+            try:
+                ray.get(acq_actor.__ray_ready__.remote(), timeout=1)
+                pool.release.remote(acq_actor)
+            except Exception:
+                logger.warning("Actor crashed during rollout, not releasing back to pool")
+                pass
 
     if len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
