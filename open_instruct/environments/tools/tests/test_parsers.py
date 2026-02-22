@@ -366,13 +366,13 @@ class TestVllmParserRegistry(unittest.TestCase):
         """Test that a registered vLLM parser has valid configuration."""
         self.assertIsInstance(config, VllmParserConfig)
 
-        self.assertTrue(config.import_path, "missing import_path")
         parser_cls = import_class_from_string(config.import_path)
         self.assertTrue(callable(parser_cls))
 
-        self.assertTrue(config.output_template, "missing output_template")
-        formatted = config.output_template.format("test_output")
+        self.assertTrue(config.role_template, "missing role_template")
+        formatted = config.role_template.format(role="tool", output="test_output")
         self.assertIn("test_output", formatted)
+        self.assertIn("tool", formatted)
 
         self.assertGreaterEqual(len(config.stop_sequences), 0, "stop_sequences must be a sized iterable")
 
@@ -381,45 +381,50 @@ class TestVllmToolParser(unittest.TestCase):
     """Tests for VllmToolParser class."""
 
     def test_format_tool_outputs_single(self):
-        """Test formatting a single tool output."""
         mock_native = MagicMock()
         parser = VllmToolParser(
             tool_parser=mock_native,
-            output_formatter=lambda x: f"<result>{x}</result>",
             stop_sequences=["</tool_call>"],
-            output_prefix="",
-            output_postfix="<|assistant|>",
+            role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+            output_postfix="<|im_start|>assistant\n",
         )
 
         result = parser.format_tool_outputs(["test output"])
-        self.assertEqual(result, "<result>test output</result><|assistant|>")
+        self.assertEqual(result, "<|im_start|>tool\ntest output<|im_end|>\n<|im_start|>assistant\n")
 
     def test_format_tool_outputs_multiple(self):
-        """Test formatting multiple tool outputs."""
         mock_native = MagicMock()
         parser = VllmToolParser(
             tool_parser=mock_native,
-            output_formatter=lambda x: f"<result>{x}</result>\n",
-            stop_sequences=[],
-            output_prefix="<|tools|>",
-            output_postfix="<|assistant|>",
+            output_prefix="",
+            output_postfix="<|im_start|>assistant\n",
+            role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
         )
 
         result = parser.format_tool_outputs(["output1", "output2"])
-        self.assertEqual(result, "<|tools|><result>output1</result>\n<result>output2</result>\n<|assistant|>")
+        self.assertIn("output1", result)
+        self.assertIn("output2", result)
+        self.assertTrue(result.endswith("<|im_start|>assistant\n"))
+
+    def test_format_tool_outputs_with_role(self):
+        mock_native = MagicMock()
+        parser = VllmToolParser(
+            tool_parser=mock_native,
+            role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+            output_postfix="<|im_start|>assistant\n",
+        )
+
+        result = parser.format_tool_outputs(["hello"], role="user")
+        self.assertEqual(result, "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n")
 
     def test_stop_sequences_empty_by_default(self):
-        """Test that stop sequences can be empty for vLLM parsers."""
         mock_native = MagicMock()
-        parser = VllmToolParser(tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=[])
+        parser = VllmToolParser(tool_parser=mock_native, stop_sequences=[])
         self.assertEqual(parser.stop_sequences, [])
 
     def test_stop_sequences_custom(self):
-        """Test custom stop sequences."""
         mock_native = MagicMock()
-        parser = VllmToolParser(
-            tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=["</tool>", "<|end|>"]
-        )
+        parser = VllmToolParser(tool_parser=mock_native, stop_sequences=["</tool>", "<|end|>"])
         self.assertEqual(parser.stop_sequences, ["</tool>", "<|end|>"])
 
 

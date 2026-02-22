@@ -141,6 +141,7 @@ def process_tool_tokens(
     max_model_len: int,
     max_tokens: int,
     mask_tool_use: bool,
+    role: str = "tool",
 ) -> tuple[list[int], list[float], list[int], int]:
     """Format, tokenize, and truncate tool outputs.
 
@@ -153,11 +154,12 @@ def process_tool_tokens(
         max_model_len: Maximum model sequence length.
         max_tokens: Maximum response tokens.
         mask_tool_use: Whether to mask tool tokens in loss computation.
+        role: Chat role for formatting (e.g. "tool", "user" for text envs).
 
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
-    formatted_output = tool_parser.format_tool_outputs(tool_outputs)
+    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
     tokens, excess = truncate_tool_output_tokens(
@@ -883,6 +885,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     acquired: dict[str, Any] = {}
     actor_map: dict[str, Any] = {}
 
+    is_text_env = False
+    env_response_role = "tool"
+
     output = None
     try:
         # If env_config is present, acquire from the env's pool and call reset
@@ -895,6 +900,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             acquired[env_name] = (pool, env_actor)
             task_id = env_config.get("task_id")
             _, env_tools = await env_actor.reset.remote(task_id=task_id)
+            env_response_role = await env_actor.get_response_role.remote()
+            is_text_env = await env_actor.get_is_text_env.remote()
+
             if env_tools:
                 env_tool_names = {t["function"]["name"] for t in env_tools}
                 clashes = env_tool_names & set(actor.pools.keys())
@@ -906,6 +914,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 for name in env_tool_names:
                     actor_map[name] = env_actor
                     allowed_tools.add(name)
+
+            if is_text_env:
+                actor_map[env_name] = env_actor
+                allowed_tools.add(env_name)
 
         while rollout.step_count < max_steps:
             if rollout.done:
@@ -942,6 +954,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             response_masks.extend([1] * len(model_tokens))
 
             tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
+
+            # Text envs: inject a shadow tool call so dispatch handles it uniformly
+            if is_text_env:
+                tool_calls.append(EnvCall(id="", name=env_name, args={"text": output.text}))
+
             if not tool_calls:
                 break
 
@@ -1006,6 +1023,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     max_model_len,
                     sampling_params.max_tokens,
                     actor.mask_tool_use,
+                    role=env_response_role,
                 )
                 response_tokens.extend(tokens)
                 response_logprobs.extend(logprobs)

@@ -14,7 +14,6 @@ See: https://docs.vllm.ai/en/latest/features/tool_calling/
 import json
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,8 +40,13 @@ class ToolParser(ABC):
         pass
 
     @abstractmethod
-    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
-        """Format multiple tool outputs with any necessary prefixes/postfixes."""
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        """Format tool outputs with any necessary prefixes/postfixes.
+
+        Args:
+            tool_outputs: Raw output strings from tool/env calls.
+            role: The output role (e.g. "tool", "user" for text envs).
+        """
         pass
 
 
@@ -105,43 +109,39 @@ class OpenInstructLegacyToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
 
-    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
-        return "\n".join(self._format_tool_output(tool_output) for tool_output in tool_outputs)
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
 class VllmToolParser(ToolParser):
-    """
-    Wraps a vLLM tool parser to extract tool calls and format responses.
+    """Wraps a vLLM tool parser to extract tool calls and format responses.
 
-    This parser delegates to vLLM's native tool parsing implementations
-    (e.g., Hermes, Llama3, Qwen3) while providing a consistent interface.
+    Delegates tool-call extraction to vLLM's native parsers (Hermes, Llama3,
+    Qwen3, etc.) and formats outputs using a ``role_template`` with ``{role}``
+    and ``{output}`` placeholders.
+
+    Semantic roles (e.g. ``"tool"``) are remapped to model-specific tokens
+    via ``role_map`` (e.g. ``{"tool": "ipython"}`` for Llama 3).
+    Roles not in the map are passed through unchanged.
     """
 
     def __init__(
         self,
         tool_parser: VllmNativeToolParser,
-        output_formatter: Callable[[str], str],
         stop_sequences: list[str] | None = None,
         tool_definitions: list[dict[str, Any]] | None = None,
-        output_postfix: str = "",
         output_prefix: str = "",
+        output_postfix: str = "<|im_start|>assistant\n",
+        role_template: str = "<|im_start|>{role}\n{output}<|im_end|>\n",
+        role_map: dict[str, str] | None = None,
     ):
-        """Initialize the vLLM tool parser wrapper.
-
-        Args:
-            tool_parser: A vLLM native tool parser instance.
-            output_formatter: Function to format tool output strings.
-            stop_sequences: Stop sequences to use for this parser.
-            tool_definitions: Tool definitions in OpenAI format for parsing.
-            output_postfix: Postfix to add after all tool outputs (e.g., generation prompt).
-            output_prefix: Prefix to add before all tool outputs.
-        """
         self.tool_parser = tool_parser
-        self.output_formatter = output_formatter
         self.stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
-        self._output_postfix = output_postfix
         self._output_prefix = output_prefix
+        self._output_postfix = output_postfix
+        self._role_template = role_template
+        self._role_map = role_map or {}
 
     def _make_request(self) -> Any:
         """Create a dummy ChatCompletionRequest for vLLM parsers.
@@ -179,53 +179,70 @@ class VllmToolParser(ToolParser):
                 continue
         return tool_calls
 
-    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
-        """Format multiple tool outputs with prefix and postfix.
+    def _format_tool_output(self, tool_output: str, role: str = "tool") -> str:
+        resolved = self._role_map.get(role, role)
+        return self._role_template.format(role=resolved, output=tool_output)
 
-        Args:
-            tool_outputs: List of tool output strings to format.
-
-        Returns:
-            Formatted string with prefix, all tool outputs, and postfix.
-        """
-        return f"{self._output_prefix}{''.join(self.output_formatter(output) for output in tool_outputs)}{self._output_postfix}"
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        return f"{self._output_prefix}{''.join(self._format_tool_output(output, role) for output in tool_outputs)}{self._output_postfix}"
 
 
 @dataclass
 class VllmParserConfig:
-    """Configuration for a vLLM tool parser."""
+    """Configuration for a vLLM tool parser.
+
+    Each config pairs a vLLM native parser with a ``role_template`` that wraps
+    individual outputs.  The template must contain ``{role}`` and ``{output}``
+    placeholders.
+
+    ``role_map`` remaps semantic role names to model-specific tokens
+    (e.g. ``{"tool": "ipython"}`` for Llama 3).  Roles not in the map
+    are passed through unchanged.
+    """
 
     import_path: str
-    """Import path for the parser class (e.g., 'vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser')."""
-    output_template: str
-    """Template for formatting each tool output, uses {} as placeholder."""
+    """Dotted import path for the vLLM native parser class
+    (e.g. ``"vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser"``)."""
+
+    role_template: str
+    """Per-output template with ``{role}`` and ``{output}`` placeholders."""
+
     output_postfix: str
-    """Postfix to add after all tool outputs (includes generation prompt)."""
+    """String appended after all formatted outputs (typically starts the
+    assistant turn, e.g. ``"<|im_start|>assistant\\n"``)."""
+
+    role_map: dict[str, str] = field(default_factory=dict)
+    """Maps semantic roles to model-specific tokens.
+    E.g. ``{"tool": "ipython"}`` for Llama 3.  Unmapped roles pass through."""
+
     stop_sequences: list[str] = field(default_factory=list)
-    """Stop sequences to use for this parser. If empty, we rely on the model's native stop sequences."""
+    """Stop sequences for this parser."""
+
     output_prefix: str = ""
-    """Prefix to add before all tool outputs (for grouped tool responses)."""
+    """String prepended before all formatted outputs."""
 
 
 # Registry of available vLLM tool parsers
 VLLM_PARSERS: dict[str, VllmParserConfig] = {
-    # Hermes-style (also works for Qwen2.5/3)
+    # Hermes-style / ChatML (also works for Qwen2.5/3)
     "vllm_hermes": VllmParserConfig(
         import_path="vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
-        output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",
+        role_template="<|im_start|>{role}\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
         output_postfix="<|im_start|>assistant\n",
     ),
     # Llama 3.x JSON style
     "vllm_llama3_json": VllmParserConfig(
         import_path="vllm.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
-        output_template="<|start_header_id|>ipython<|end_header_id|>\n\n{}<|eot_id|>",
+        role_template="<|start_header_id|>{role}<|end_header_id|>\n\n{output}<|eot_id|>",
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
+        role_map={"tool": "ipython"},
     ),
     # Olmo 3
     "vllm_olmo3": VllmParserConfig(
         import_path="vllm.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
-        output_template="<|im_start|>environment\n{}<|im_end|>\n",
+        role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
         output_postfix="<|im_start|>assistant\n",
+        role_map={"tool": "environment"},
     ),
 }
 
@@ -233,18 +250,14 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
 def create_vllm_parser(
     parser_name: str,
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
-    output_template: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> VllmToolParser:
     """Create a VllmToolParser by name.
 
     Args:
-        parser_name: Name of the parser (e.g., "hermes", "llama3_json", "qwen3_coder").
+        parser_name: Name of the parser (e.g., "vllm_hermes", "vllm_llama3_json").
         tokenizer: The tokenizer for the model.
-        output_template: Optional custom output template. Uses {} for the tool output.
-                        If None, uses the default for this parser.
         tool_definitions: Optional list of tool definitions in OpenAI format.
-                         These are stored and used by default in get_tool_calls().
 
     Returns:
         VllmToolParser configured for the specified model family.
@@ -254,18 +267,17 @@ def create_vllm_parser(
         raise ValueError(f"Unknown parser: {parser_name}. Available: {available}")
 
     config = VLLM_PARSERS[parser_name]
-    template = output_template or config.output_template
-
     parser_cls = import_class_from_string(config.import_path)
     native_parser = parser_cls(tokenizer)
 
     return VllmToolParser(
         tool_parser=native_parser,
-        output_formatter=lambda x, t=template: t.format(x),
         stop_sequences=config.stop_sequences,
         tool_definitions=tool_definitions,
-        output_postfix=config.output_postfix,
         output_prefix=config.output_prefix,
+        output_postfix=config.output_postfix,
+        role_template=config.role_template,
+        role_map=config.role_map,
     )
 
 
@@ -297,8 +309,11 @@ class DRTuluToolParser(ToolParser):
                 return [EnvCall(id="", name=self.tool_call_name, args={"text": text})]
         return []
 
-    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
-        return "\n".join(f"<tool_output>\n{output}\n</tool_output>\n" for output in tool_outputs)
+    def _format_tool_output(self, tool_output: str) -> str:
+        return f"<tool_output>\n{tool_output}\n</tool_output>\n"
+
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
 def get_available_parsers() -> list[str]:

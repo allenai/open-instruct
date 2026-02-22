@@ -1,12 +1,13 @@
 """Example environments for testing and demonstration."""
 
 import random
+import re
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from openenv.core.env_server.types import State
 
-from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
+from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult, TextRLEnvironment
 
 
 class CounterEnv(RLEnvironment):
@@ -198,3 +199,173 @@ class GuessNumberEnvConfig(BaseEnvConfig):
     tool_class: ClassVar[type[RLEnvironment]] = GuessNumberEnv
     min_val: int = 1
     max_val: int = 100
+
+
+# Common 5-letter words for Wordle (subset for default random selection)
+_WORDLE_WORDS = [
+    "CRANE",
+    "SLATE",
+    "TRACE",
+    "CRATE",
+    "STARE",
+    "ARISE",
+    "IRATE",
+    "RAISE",
+    "ADIEU",
+    "AUDIO",
+    "HOUSE",
+    "MOUSE",
+    "PIANO",
+    "ABOUT",
+    "OTHER",
+    "GREAT",
+    "BRAIN",
+    "PLAIN",
+    "TRAIN",
+    "CHAIR",
+    "BEACH",
+    "DANCE",
+    "EARTH",
+    "FEAST",
+    "GHOST",
+    "HEART",
+    "JUICE",
+    "KNIFE",
+    "LEMON",
+    "MANGO",
+    "NIGHT",
+    "OCEAN",
+    "POWER",
+    "QUEEN",
+    "RIVER",
+    "SMILE",
+    "TIGER",
+    "ULTRA",
+    "VIVID",
+    "WASTE",
+    "YOUTH",
+    "ZEBRA",
+    "BLEND",
+    "CHARM",
+    "DRIFT",
+    "FLAME",
+    "GRAPE",
+    "HAVEN",
+]
+
+_GUESS_PATTERN = re.compile(r"<guess>\s*(\w{5})\s*</guess>", re.IGNORECASE)
+
+
+class WordleTextEnv(TextRLEnvironment):
+    """Wordle game as a text environment (TextArena Wordle-v0 compatible).
+
+    The model outputs guesses inside ``<guess>WORD</guess>`` XML tags.
+    Feedback uses positional G/Y/_ characters::
+
+        Feedback:
+        CRANE
+        G_Y__
+
+    Where G = correct position, Y = wrong position, _ = not in word.
+
+    Uses ``response_role="user"`` so feedback appears as a user message
+    in the conversation, creating a natural back-and-forth.
+    """
+
+    config_name = "wordle"
+    response_role = "user"
+
+    def __init__(self, max_guesses: int = 6, word_list: list[str] | None = None, **kwargs: Any):
+        self._max_guesses = max_guesses
+        self._word_list = [w.upper() for w in word_list] if word_list else _WORDLE_WORDS
+        self._secret_word = ""
+        self._guesses: list[str] = []
+        self._done = False
+        self._task_id: str | None = None
+
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+        self._guesses = []
+        self._done = False
+        self._task_id = task_id
+
+        if task_id and len(task_id) == 5 and task_id.isalpha():
+            self._secret_word = task_id.upper()
+        else:
+            self._secret_word = random.choice(self._word_list)
+
+        return (
+            StepResult(
+                result=(
+                    f"Let's play Wordle! Guess the 5-letter word.\n"
+                    f"You have {self._max_guesses} guesses.\n"
+                    f"Submit your guess inside <guess>...</guess> tags."
+                )
+            ),
+            [],
+        )
+
+    async def text_step(self, text: str) -> StepResult:
+        match = _GUESS_PATTERN.search(text)
+        if not match:
+            return StepResult(
+                result="I couldn't find a valid guess. Please submit a 5-letter word inside <guess>...</guess> tags."
+            )
+
+        guess = match.group(1).upper()
+        self._guesses.append(guess)
+        scoring = self._get_scoring(guess)
+        remaining = self._max_guesses - len(self._guesses)
+
+        if guess == self._secret_word:
+            self._done = True
+            return StepResult(
+                result=f"Feedback:\n{guess}\n{scoring}\nYou got it in {len(self._guesses)}/{self._max_guesses} guesses!",
+                reward=1.0,
+                done=True,
+            )
+
+        if remaining <= 0:
+            self._done = True
+            return StepResult(
+                result=f"Feedback:\n{guess}\n{scoring}\nGame over! The word was {self._secret_word}.", done=True
+            )
+
+        return StepResult(
+            result=f"Feedback:\n{guess}\n{scoring}\n{remaining} guess{'es' if remaining != 1 else ''} remaining."
+        )
+
+    def _get_scoring(self, guess: str) -> str:
+        """Produce G/Y/_ positional scoring string."""
+        result = ["_"] * 5
+        remaining = list(self._secret_word)
+
+        for i, (g, s) in enumerate(zip(guess, self._secret_word)):
+            if g == s:
+                result[i] = "G"
+                remaining[i] = ""
+
+        for i, g in enumerate(guess):
+            if result[i] == "G":
+                continue
+            if g in remaining:
+                result[i] = "Y"
+                remaining[remaining.index(g)] = ""
+
+        return "".join(result)
+
+    def get_metrics(self) -> dict[str, float]:
+        return {
+            "guesses": float(len(self._guesses)),
+            "solved": 1.0 if self._guesses and self._guesses[-1] == self._secret_word else 0.0,
+        }
+
+    def state(self) -> State:
+        return State(episode_id=self._task_id, step_count=len(self._guesses))
+
+
+@dataclass
+class WordleTextEnvConfig(BaseEnvConfig):
+    """Configuration for WordleTextEnv."""
+
+    tool_class: ClassVar[type[RLEnvironment]] = WordleTextEnv
+    max_guesses: int = 6
