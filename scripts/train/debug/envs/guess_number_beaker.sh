@@ -1,10 +1,8 @@
 #!/bin/bash
 # Beaker experiment for GuessNumberEnv — 50 training steps on 1 GPU.
+# Usage: bash scripts/train/build_image_and_launch.sh scripts/train/debug/envs/guess_number_beaker.sh
 
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-
-echo "Using Beaker image: $BEAKER_IMAGE"
+BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
