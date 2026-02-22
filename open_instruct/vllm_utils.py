@@ -1012,13 +1012,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 if excess > 0:
                     break
     finally:
+        # TODO: In future, health-check actors and gracefully degrade (skip dead actors)
+        # instead of crashing. For now, let RayActorError propagate if an actor died.
         for pool, acq_actor in acquired.values():
-            try:
-                ray.get(acq_actor.__ray_ready__.remote(), timeout=1)
-                pool.release.remote(acq_actor)
-            except Exception:
-                logger.warning("Actor crashed during rollout, not releasing back to pool")
-                pass
+            pool.release.remote(acq_actor)
 
     if len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
