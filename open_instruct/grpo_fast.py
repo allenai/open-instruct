@@ -1051,28 +1051,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         # to state s_j (predicting token j+1). So we take [:, :-1] to align
                         # GAE positions 0..L-2 with shifted logprob indices 0..L-2.
                         advantages_for_loss = gae_advantages_BT[i][:, :-1]
-                        if self.args.whiten_advantages:
-                            # Whiten advantages within the minibatch (masked to response tokens only).
-                            # With sequence parallel, each rank holds a chunk, so we all-reduce
-                            # sum and count across the SP group to get global statistics.
-                            mask = response_mask_BT.bool()
-                            masked_adv = advantages_for_loss * mask
-                            local_sum = masked_adv.sum()
-                            local_sq_sum = (masked_adv ** 2).sum()
-                            local_count = mask.sum().float()
-
-                            if self.splitter is not None:
-                                stats = torch.stack([local_sum, local_sq_sum, local_count])
-                                torch.distributed.all_reduce(stats, group=self.splitter.sp_group)
-                                total_sum, total_sq_sum, total_count = stats[0], stats[1], stats[2]
-                            else:
-                                total_sum, total_sq_sum, total_count = local_sum, local_sq_sum, local_count
-
-                            if total_count > 1:
-                                mean = total_sum / total_count
-                                var = total_sq_sum / total_count - mean ** 2
-                                std = torch.clamp(var, min=0).sqrt()
-                                advantages_for_loss = (advantages_for_loss - mean) / (std + 1e-8)
                     else:
                         advantages_for_loss = data_BT.advantages[i][:, 1:]
 
@@ -1177,11 +1155,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.backward(policy_loss)
 
                     # Value model backward (through DeepSpeed engine)
-                    # value_loss_BT is (B, L-1), aligned with response_mask_BT (B, L-1)
+                    # value_loss_BT is (B, L-1) at positions 0..L-2. Mask by whether the STATE
+                    # at position t is a response position (response_masks[:, :-1]), not whether
+                    # the generated token at t+1 is response (response_masks[:, 1:]).
                     if self.args.use_value_model and value_loss_BT is not None:
+                        value_mask_BT = data_BT.response_masks[i][:, :-1]
                         value_loss = masked_mean(
                             value_loss_BT,
-                            response_mask_BT,
+                            value_mask_BT,
                             None,
                             loss_denominator,
                         ) * self.args.value_loss_coef
@@ -1199,7 +1180,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
                     if self.args.use_value_model and value_loss_BT is not None:
                         value_loss_for_log = masked_mean(
-                            value_loss_BT, response_mask_BT, None, loss_denominator
+                            value_loss_BT, value_mask_BT, None, loss_denominator
                         ) * self.args.value_loss_coef
                         loss = loss + value_loss_for_log
                     local_step += 1
@@ -1219,8 +1200,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
                         if self.args.use_value_model and value_loss_BT is not None:
-                            loss_stats_B["value_loss"][i] = masked_mean(value_loss_BT, response_mask_BT)
-                            loss_stats_B["vf_clipfrac"][i] = masked_mean(vf_clipfrac_BT, response_mask_BT)
+                            loss_stats_B["value_loss"][i] = masked_mean(value_loss_BT, value_mask_BT)
+                            loss_stats_B["vf_clipfrac"][i] = masked_mean(vf_clipfrac_BT, value_mask_BT)
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
