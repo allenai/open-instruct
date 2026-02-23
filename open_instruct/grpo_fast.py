@@ -94,7 +94,7 @@ from open_instruct.environments.base import BaseEnvConfig
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig, Tool
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -2224,7 +2224,17 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = {"max_steps": tools_config.max_steps} if tools_config.enabled else None
+    base_env_config = None
+    if tools_config.enabled:
+        base_env_config = {"max_steps": tools_config.max_steps}
+        # TODO: Support multiple concurrent envs per rollout. Currently only one
+        # stateful environment is supported; the rollout loop acquires/resets a
+        # single env and maps its inner tool names to that actor.
+        for parsed in tools_config._parsed_tools:
+            config_cls = TOOL_REGISTRY.get(parsed.name)
+            if config_cls and not issubclass(config_cls.tool_class, Tool):
+                base_env_config["env_name"] = parsed.call_name
+                break
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
