@@ -31,8 +31,8 @@ uv run python mason.py \
     --response_length 30720 \
     --pack_length 32768 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 64 \
+    --num_samples_per_prompt_rollout 16 \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --temperature 1.0 \
     --learning_rate 5e-7 \
