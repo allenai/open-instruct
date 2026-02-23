@@ -2108,11 +2108,12 @@ def initialize_tools_and_envs(
         # Wait for any newly created pools
         ray.get([pool.size.remote() for pool in pools.values()])
 
-    # Update tool_call_names to include inner tool names from stateful environments.
+    # Use tool definition names (what the model actually calls) rather than pool keys.
     # For simple Tools, pool key == function name. For stateful envs (e.g., GenericSandboxEnv),
     # the pool key is the env name but function names are the inner tools (execute_bash, etc.).
+    # We only want the actual callable names, not env pool names.
     tool_def_names = [d["function"]["name"] for d in tool_definitions]
-    tools_config.tool_call_names = list(dict.fromkeys(tool_call_names + tool_def_names))
+    tools_config.tool_call_names = list(dict.fromkeys(tool_def_names))
 
     stop_sequences: list[str] = []
     if pools:
