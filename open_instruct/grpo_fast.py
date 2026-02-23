@@ -1042,8 +1042,6 @@ def setup_runtime_variables(
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
-    if args.eval_pass_at_k < 1:
-        raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     if args.eval_only and (
         streaming_config.dataset_mixer_eval_list is None or len(streaming_config.dataset_mixer_eval_list) == 0
     ):
@@ -1816,7 +1814,8 @@ def maybe_evaluate(
             scores_per_prompt = scores.reshape(-1, eval_k)
             threshold = max_possible_score - 1e-8
             running_max_scores = np.maximum.accumulate(scores_per_prompt, axis=1)
-            for k in range(1, eval_k + 1):
+            pass_at_ks = [2**i for i in range(eval_k.bit_length()) if 2**i <= eval_k]
+            for k in pass_at_ks:
                 pass_at_by_k[k] = float((running_max_scores[:, k - 1] >= threshold).mean())
             if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == running_max_scores.shape[0]:
                 dataset_to_solved_rows: dict[str, list[np.ndarray]] = {}
@@ -1825,9 +1824,7 @@ def maybe_evaluate(
                 for dataset_name, solved_rows in dataset_to_solved_rows.items():
                     metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
                     solved_matrix = np.asarray(solved_rows, dtype=float)
-                    dataset_pass_at_by_k[metric_name] = {
-                        k: float(solved_matrix[:, k - 1].mean()) for k in range(1, eval_k + 1)
-                    }
+                    dataset_pass_at_by_k[metric_name] = {k: float(solved_matrix[:, k - 1].mean()) for k in pass_at_ks}
             elif eval_batch_stats is not None:
                 logger.warning(
                     "Eval prompt_datasets size %s does not match prompts %s; skipping per-dataset pass@k metrics.",

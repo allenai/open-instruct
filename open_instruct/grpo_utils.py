@@ -249,6 +249,10 @@ class ExperimentConfig:
             raise ValueError(f"`eval_temperature` must be >= 0.0, got {self.eval_temperature}")
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.eval_pass_at_k < 1:
+            raise ValueError(f"`eval_pass_at_k` must be >= 1, got {self.eval_pass_at_k}")
+        if self.eval_pass_at_k & (self.eval_pass_at_k - 1) != 0:
+            raise ValueError(f"`eval_pass_at_k` must be a power of 2, got {self.eval_pass_at_k}")
 
 
 def compute_grpo_loss(

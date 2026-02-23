@@ -131,25 +131,25 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/model_step_diff_avg"], 3.0)
         self.assertEqual(logged["eval/model_step_diff_span"], 5.0)
 
-    def test_records_eval_pass_at_all_k(self):
+    def test_records_eval_pass_at_powers_of_two_k(self):
         args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120)
         eval_dataset = self._build_eval_dataset(num_prompts=2)
         eval_queue = _QueueWithSize(size=2)
-        eval_generation_config = SimpleNamespace(n=3)
+        eval_generation_config = SimpleNamespace(n=4)
         tokenizer = Mock()
-        tokenizer.batch_decode.return_value = ["prompt"] * 6
+        tokenizer.batch_decode.return_value = ["prompt"] * 8
         tokenizer.pad_token = "<pad>"
 
         eval_result = SimpleNamespace(
-            responses=[[1], [2], [3], [4], [5], [6]],
-            finish_reasons=["stop"] * 6,
-            token_statistics=SimpleNamespace(num_prompt_tokens=12, num_response_tokens=6, generation_time=2.0),
+            responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
+            finish_reasons=["stop"] * 8,
+            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
-            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-            queries=[[1, 2, 3]] * 6,
-            decoded_responses=[f"resp_{i}" for i in range(6)],
-            ground_truths=["42"] * 6,
+            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            queries=[[1, 2, 3]] * 8,
+            decoded_responses=[f"resp_{i}" for i in range(8)],
+            ground_truths=["42"] * 8,
             active_tools=None,
         )
 
@@ -176,9 +176,10 @@ class TestMaybeEvaluate(unittest.TestCase):
         logged = mock_print_metrics.call_args.args[0]
         self.assertEqual(logged["eval/pass_at_1"], 0.0)
         self.assertEqual(logged["eval/pass_at_2"], 0.5)
-        self.assertEqual(logged["eval/pass_at_3"], 0.5)
+        self.assertEqual(logged["eval/pass_at_4"], 1.0)
+        self.assertGreaterEqual(logged["eval/pass_at_4"], logged["eval/pass_at_2"])
 
-    def test_records_eval_pass_at_all_k_per_dataset_subset(self):
+    def test_records_eval_pass_at_powers_of_two_k_per_dataset_subset(self):
         args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120)
         eval_dataset = Dataset.from_dict(
             {
@@ -190,27 +191,25 @@ class TestMaybeEvaluate(unittest.TestCase):
             }
         )
         eval_queue = _QueueWithSize(size=2)
-        eval_generation_config = SimpleNamespace(n=3)
+        eval_generation_config = SimpleNamespace(n=4)
         tokenizer = Mock()
-        tokenizer.batch_decode.return_value = ["prompt"] * 6
+        tokenizer.batch_decode.return_value = ["prompt"] * 8
         tokenizer.pad_token = "<pad>"
 
         eval_result = SimpleNamespace(
-            responses=[[1], [2], [3], [4], [5], [6]],
-            finish_reasons=["stop"] * 6,
-            token_statistics=SimpleNamespace(num_prompt_tokens=12, num_response_tokens=6, generation_time=2.0),
+            responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
+            finish_reasons=["stop"] * 8,
+            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
-            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-            queries=[[1, 2, 3]] * 6,
-            decoded_responses=[f"resp_{i}" for i in range(6)],
-            ground_truths=["42"] * 6,
+            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            queries=[[1, 2, 3]] * 8,
+            decoded_responses=[f"resp_{i}" for i in range(8)],
+            ground_truths=["42"] * 8,
             active_tools=None,
         )
         eval_batch_stats = SimpleNamespace(
-            percent_solved_hist=np.array([1.0 / 3.0, 1.0 / 3.0]),
-            prompt_indices=[0, 1],
-            prompt_datasets=["subset/a", "subset b"],
+            percent_solved_hist=np.array([0.25, 0.25]), prompt_indices=[0, 1], prompt_datasets=["subset/a", "subset b"]
         )
 
         with (
@@ -236,10 +235,12 @@ class TestMaybeEvaluate(unittest.TestCase):
         logged = mock_print_metrics.call_args.args[0]
         self.assertEqual(logged["eval/subset_a/pass_at_1"], 0.0)
         self.assertEqual(logged["eval/subset_a/pass_at_2"], 1.0)
-        self.assertEqual(logged["eval/subset_a/pass_at_3"], 1.0)
+        self.assertEqual(logged["eval/subset_a/pass_at_4"], 1.0)
+        self.assertGreaterEqual(logged["eval/subset_a/pass_at_4"], logged["eval/subset_a/pass_at_2"])
         self.assertEqual(logged["eval/subset_b/pass_at_1"], 0.0)
         self.assertEqual(logged["eval/subset_b/pass_at_2"], 0.0)
-        self.assertEqual(logged["eval/subset_b/pass_at_3"], 1.0)
+        self.assertEqual(logged["eval/subset_b/pass_at_4"], 1.0)
+        self.assertGreaterEqual(logged["eval/subset_b/pass_at_4"], logged["eval/subset_b/pass_at_2"])
 
 
 if __name__ == "__main__":
