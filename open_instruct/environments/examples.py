@@ -275,8 +275,7 @@ class WordleTextEnv(TextRLEnvironment):
     config_name = "wordle"
     response_role = "user"
 
-    def __init__(self, max_guesses: int = 6, word_list: list[str] | None = None, **kwargs: Any):
-        self._max_guesses = max_guesses
+    def __init__(self, word_list: list[str] | None = None, **kwargs: Any):
         self._word_list = [w.upper() for w in word_list] if word_list else _WORDLE_WORDS
         self._secret_word = ""
         self._guesses: list[str] = []
@@ -296,9 +295,8 @@ class WordleTextEnv(TextRLEnvironment):
         return (
             StepResult(
                 result=(
-                    f"Let's play Wordle! Guess the 5-letter word.\n"
-                    f"You have {self._max_guesses} guesses.\n"
-                    f"Submit your guess inside <guess>...</guess> tags."
+                    "Let's play Wordle! Guess the 5-letter word.\n"
+                    "Submit your guess inside <guess>...</guess> tags."
                 )
             ),
             [],
@@ -314,25 +312,21 @@ class WordleTextEnv(TextRLEnvironment):
         guess = match.group(1).upper()
         self._guesses.append(guess)
         scoring = self._get_scoring(guess)
-        remaining = self._max_guesses - len(self._guesses)
+        n = len(self._guesses)
 
         if guess == self._secret_word:
             self._done = True
+            turn_efficiency = 1.0 / (n + 1)
             return StepResult(
-                result=f"Feedback:\n{guess}\n{scoring}\nYou got it in {len(self._guesses)}/{self._max_guesses} guesses!",
-                reward=1.0,
+                result=f"Feedback:\n{guess}\n{scoring}\nYou got it in {n} guesses!",
+                reward=1.0 + turn_efficiency,
                 done=True,
             )
 
-        if remaining <= 0:
-            self._done = True
-            return StepResult(
-                result=f"Feedback:\n{guess}\n{scoring}\nGame over! The word was {self._secret_word}.", done=True
-            )
-
-        return StepResult(
-            result=f"Feedback:\n{guess}\n{scoring}\n{remaining} guess{'es' if remaining != 1 else ''} remaining."
-        )
+        num_greens = scoring.count("G")
+        num_yellows = scoring.count("Y")
+        partial_credit = 0.2 * num_greens + 0.1 * num_yellows
+        return StepResult(result=f"Feedback:\n{guess}\n{scoring}", reward=partial_credit)
 
     def _get_scoring(self, guess: str) -> str:
         """Produce G/Y/_ positional scoring string."""
@@ -368,4 +362,3 @@ class WordleTextEnvConfig(BaseEnvConfig):
     """Configuration for WordleTextEnv."""
 
     tool_class: ClassVar[type[RLEnvironment]] = WordleTextEnv
-    max_guesses: int = 6

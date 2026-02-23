@@ -40,24 +40,35 @@ class TestWordleTextEnv(unittest.TestCase):
         return env
 
     @parameterized.expand([
-        ("correct", "<guess>CRANE</guess>", True, 1.0, "You got it"),
-        ("wrong", "<guess>HOUSE</guess>", False, 0.0, "remaining"),
-        ("case_insensitive", "<guess>crane</guess>", True, 1.0, "You got it"),
-        ("invalid_no_tags", "I guess CRANE", False, 0.0, "<guess>"),
+        ("correct_first", "<guess>CRANE</guess>", True, "You got it"),
+        ("wrong", "<guess>HOUSE</guess>", False, "Feedback:"),
+        ("case_insensitive", "<guess>crane</guess>", True, "You got it"),
+        ("invalid_no_tags", "I guess CRANE", False, "<guess>"),
     ])
-    def test_guess(self, _name, text, expect_done, expect_reward, expect_in_result):
+    def test_guess(self, _name, text, expect_done, expect_in_result):
         env = self._make_env()
         r = asyncio.run(env.text_step(text))
         self.assertEqual(r.done, expect_done)
-        self.assertEqual(r.reward, expect_reward)
         self.assertIn(expect_in_result, r.result)
 
-    def test_game_over(self):
-        env = self._make_env(max_guesses=2)
-        asyncio.run(env.text_step("<guess>HOUSE</guess>"))
-        r = asyncio.run(env.text_step("<guess>BRAIN</guess>"))
+    def test_unlimited_guesses(self):
+        env = self._make_env()
+        for _ in range(20):
+            r = asyncio.run(env.text_step("<guess>HOUSE</guess>"))
+            self.assertFalse(r.done)
+        r = asyncio.run(env.text_step("<guess>CRANE</guess>"))
         self.assertTrue(r.done)
-        self.assertIn("Game over", r.result)
+
+    def test_correct_reward_includes_turn_efficiency(self):
+        env = self._make_env()
+        r = asyncio.run(env.text_step("<guess>CRANE</guess>"))
+        self.assertAlmostEqual(r.reward, 1.0 + 1.0 / 2)
+
+        env2 = self._make_env()
+        asyncio.run(env2.text_step("<guess>HOUSE</guess>"))
+        asyncio.run(env2.text_step("<guess>BRAIN</guess>"))
+        r2 = asyncio.run(env2.text_step("<guess>CRANE</guess>"))
+        self.assertAlmostEqual(r2.reward, 1.0 + 1.0 / 4)
 
     def test_scoring_all_green(self):
         env = self._make_env()
