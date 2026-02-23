@@ -441,9 +441,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Replace the LM head with a newly initialized Linear(hidden_size, 1)
         hidden_size = self.value_model.config.hidden_size
-        value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+        value_head = torch.nn.Linear(hidden_size, 1, bias=True, dtype=torch.bfloat16)
         std = 1.0 / (hidden_size + 1) ** 0.5
         torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
+        torch.nn.init.constant_(value_head.bias, 0.0)
         self.value_model.lm_head = value_head
         logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
 
