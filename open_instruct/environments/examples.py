@@ -295,8 +295,7 @@ class WordleTextEnv(TextRLEnvironment):
         return (
             StepResult(
                 result=(
-                    "Let's play Wordle! Guess the 5-letter word.\n"
-                    "Submit your guess inside <guess>...</guess> tags."
+                    "Let's play Wordle! Guess the 5-letter word.\nSubmit your guess inside <guess>...</guess> tags."
                 )
             ),
             [],
