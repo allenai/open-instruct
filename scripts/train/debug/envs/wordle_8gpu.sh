@@ -25,18 +25,18 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1.0 \
+    --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1000 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 30720 \
-    --pack_length 32768 \
+    --response_length 8192 \
+    --pack_length 16384 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 64 \
     --num_samples_per_prompt_rollout 16 \
-    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
+    --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
     --temperature 1.0 \
     --learning_rate 5e-7 \
-    --total_episodes 3200 \
+    --total_episodes 102400 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 4 \
