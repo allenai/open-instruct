@@ -7,7 +7,12 @@ Core to training OLMo models (version 1 and 2) at least are to include the follo
 
 For more details on how to convert these to standard launch commands (without ai2 `mason.py`) see the `tulu3.md` docs.
 
-## Insturction Finetuning
+The time taken for each stage of training was approximately:
+1. SFT: 9 hours, 1 H100 node (8 GPUs).
+2. DPO: 2 hours, 1 H100 node.
+3. RLVR: 43 hours per stage for 2 million episodes on 2 H100 nodes (16 GPUs), totalling around 86 hours.
+
+## Instruction Finetuning
 
 ### 1B
 
@@ -64,10 +69,11 @@ accelerate launch \
     --exp_name olmo2_1b_v2_sft_lr3e-5_seed1  \
     --model_name_or_path allenai/OLMo-2-0425-1B \
     --model_revision main \
-    --tokenizer_name allenai/OLMo-2-1124-7B \
+    --tokenizer_name allenai/OLMo-2-0425-1B \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
     --add_bos \
+    --chat_template_name tulu \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
     --use_flash_attn \
     --max_seq_length 4096 \
@@ -96,7 +102,7 @@ accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage2_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name 0424_1B_dpo_onpol_lr_2.5e-6_seed_111 \
@@ -105,7 +111,7 @@ accelerate launch \
     --model_name_or_path allenai/OLMo-2-0425-1B-SFT \
     --model_revision main \
     --use_flash_attn \
-    --tokenizer_name_or_path allenai/OLMo-2-1124-13B \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B-SFT \
     --tokenizer_revision main \
     --max_seq_length 2048 \
     --per_device_train_batch_size 8 \
@@ -119,9 +125,10 @@ accelerate launch \
     --report_to wandb \
     --logging_steps 1 \
     --gradient_checkpointing \
-    --dataset_mixer_list allenai/olmo-2-0425-1b-preference-mix \
+    --dataset_mixer_list allenai/olmo-2-0425-1b-preference-mix 1.0 \
     --use_slow_tokenizer False \
     --add_bos \
+    --chat_template_name tulu \
     --use_lora False \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5
@@ -144,7 +151,7 @@ python mason.py \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage2_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name "0424_1B_dpo_onpol_lr_2.5e-6_seed_111" \
@@ -229,7 +236,54 @@ done
 
 ### 1B
 
-The 1B OLMo 2 model has two RL stages run in sequence. The first is on MATH, GSM8K, and IF constraints:
+The 1B OLMo 2 model has two RL stages run in sequence. The first is on MATH, GSM8K, and IF constraints. 
+A modern reproduction with commit 65fc1b99 would be:
+```
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1 
+python open_instruct/grpo_fast.py \
+    --add_bos \
+    --apply_verifiable_reward true \
+    --beta 0.01 \
+    --chat_template_name tulu \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --deepspeed_stage 2 \
+    --deepspeed_zpg 12 \
+    --exp_name 0423_grpo_seed_1_lr_5e-7 \
+    --gradient_checkpointing  \
+    --kl_estimator 3 \
+    --learning_rate 5e-7 \
+    --local_eval_every 5 \
+    --lr_scheduler_type constant \
+    --max_prompt_token_length 2048 \
+    --model_name_or_path allenai/OLMo-2-0425-1B-DPO \
+    --model_revision main \
+    --non_stop_penalty \
+    --non_stop_penalty_value 0.0 \
+    --num_epochs 1 \
+    --num_learners_per_node 4 8 \
+    --num_mini_batches 2 \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 48 \
+    --pack_length 4096 \
+    --per_device_train_batch_size 1 \
+    --remap_verifier ifeval=ifeval_old \
+    --response_length 2048 \
+    --save_freq 200 \
+    --seed 1 \
+    --stop_strings "</answer>" \
+    --temperature 1.0 \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B-DPO \
+    --tokenizer_revision main \
+    --total_episodes 2000000 \
+    --vllm_num_engines 1 \
+    --vllm_tensor_parallel_size 4 \
+    --with_tracking
+```
+
+The original command, run on an older version of open-instruct, was: 
 ```
 python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name 0423_grpo_seed_1_lr_7e-7 \
@@ -280,7 +334,51 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
 ```
 For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_instruct_internal/runs/80rvltbs/overview) or the [beaker job](https://beaker.allen.ai/orgs/ai2/workspaces/olmo-instruct/work/01JSPEYF1PGPNYGQ4NBEZPJA4W?taskId=01JSPEYF1S9EJHBG1ZS6ZXMPRA&jobId=01JSPEYF6JFZHCZRBCZSZSEM8T).
 
-Next, on MATH only:
+Next, on MATH only, the modern reproduction on commit 65fc1b99 would be
+```
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1 
+python open_instruct/grpo_fast.py \
+    --add_bos \
+    --apply_verifiable_reward true \
+    --beta 0.01 \
+    --chat_template_name tulu \
+    --dataset_mixer_eval_list allenai/RLVR-MATH 16 \
+    --dataset_mixer_eval_list_splits train \
+    --dataset_mixer_list allenai/RLVR-MATH 1.0 \
+    --dataset_mixer_list_splits train \
+    --deepspeed_stage 2 \
+    --deepspeed_zpg 12 \
+    --exp_name 0427_grpo_seed_1_lr_5e-7 \
+    --gradient_checkpointing  \
+    --kl_estimator 3 \
+    --learning_rate 5e-7 \
+    --local_eval_every 5 \
+    --lr_scheduler_type constant \
+    --max_prompt_token_length 2048 \
+    --model_name_or_path allenai/OLMo-2-0425-1B-RLVR1 \
+    --model_revision main \
+    --non_stop_penalty \
+    --non_stop_penalty_value 0.0 \
+    --num_epochs 1 \
+    --num_learners_per_node 4 8 \
+    --num_mini_batches 2 \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 48 \
+    --pack_length 4096 \
+    --per_device_train_batch_size 1 \
+    --response_length 2048 \
+    --save_freq 200 \
+    --seed 1 \
+    --stop_strings "</answer>" \
+    --temperature 1.0 \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B-RLVR1 \
+    --tokenizer_revision main \
+    --total_episodes 2000000 \
+    --vllm_num_engines 1 \
+    --vllm_tensor_parallel_size 4 \
+    --with_tracking
+```
+The older original commmand was:
 ```
 python open_instruct/grpo_vllm_thread_ray_gtrl.py \
 --exp_name 0427_grpo_seed_1_lr_9e-7 \
