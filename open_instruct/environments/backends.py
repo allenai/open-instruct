@@ -38,12 +38,19 @@ class SandboxBackend(ABC):
         """Initialize the sandbox. Must be called before other operations."""
 
     @abstractmethod
-    def run_code(self, code: str, language: str = "python") -> ExecutionResult:
-        """Execute code in the sandbox."""
-
-    @abstractmethod
     def run_command(self, command: str) -> ExecutionResult:
         """Execute a shell command in the sandbox."""
+
+    def run_code(self, code: str, language: str = "python") -> ExecutionResult:
+        """Write code to a temp file and execute it. Only Python is supported."""
+        if language != "python":
+            raise ValueError(f"Unsupported language: {language!r}. Only 'python' is currently supported.")
+        filename = f"/tmp/code_{uuid.uuid4().hex}.py"
+        self.write_file(filename, code)
+        try:
+            return self.run_command(f"python {filename}")
+        finally:
+            self.run_command(f"rm -f {filename}")
 
     @abstractmethod
     def write_file(self, path: str, content: str | bytes) -> None:
@@ -96,20 +103,6 @@ class DockerBackend(SandboxBackend):
             memswap_limit=self._mem_limit,
         )
         logger.info(f"Docker container started: {self._container.short_id}")
-
-    def run_code(self, code: str, language: str = "python") -> ExecutionResult:
-        if self._container is None:
-            raise RuntimeError("Container not started. Call start() first.")
-
-        if language != "python":
-            raise ValueError(f"Unsupported language: {language!r}. Only 'python' is currently supported.")
-
-        filename = f"/tmp/code_{uuid.uuid4().hex}.py"
-        self.write_file(filename, code)
-        try:
-            return self.run_command(f"python {filename}")
-        finally:
-            self.run_command(f"rm -f {filename}")
 
     def run_command(self, command: str) -> ExecutionResult:
         if self._container is None:

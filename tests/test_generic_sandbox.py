@@ -22,9 +22,6 @@ class MockBackend(SandboxBackend):
         self._files = {}
         self._cwd = "/testbed"
 
-    def run_code(self, code: str, language: str = "python") -> ExecutionResult:
-        return ExecutionResult(stdout="code output", stderr="", exit_code=0)
-
     def run_command(self, command: str) -> ExecutionResult:
         if "which git" in command:
             return ExecutionResult(stdout="", stderr="", exit_code=1)
