@@ -186,6 +186,8 @@ class ExperimentConfig:
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for pass@k metrics."""
 
     def __post_init__(self):
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:

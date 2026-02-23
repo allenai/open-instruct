@@ -634,6 +634,7 @@ def accumulate_inference_batches(
     all_active_tools = []
     all_scores = []
     all_percent_solved = []
+    all_model_steps = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -751,6 +752,8 @@ def accumulate_inference_batches(
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
+        if result.model_step is not None:
+            all_model_steps.append(result.model_step)
 
     if len(results) == 0:
         logging.warning(
@@ -848,6 +851,12 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    if all_model_steps:
+        model_steps_array = np.array(all_model_steps, dtype=float)
+        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+        combined_reward_metrics["model_step_span"] = float(model_steps_array.max() - model_steps_array.min())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
