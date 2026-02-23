@@ -2069,11 +2069,21 @@ def initialize_tools_and_envs(
     """
     pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
 
+    # Collect tool definitions from CLI-specified pools so we know inner tool names
+    # (e.g., GenericSandboxEnv exposes "execute_bash" and "str_replace_editor").
+    tool_definitions: list[dict[str, Any]] = []
+    for pool in pools.values():
+        actor = ray.get(pool.acquire.remote())
+        defs = ray.get(actor.get_tool_definitions.remote())
+        pool.release.remote(actor)
+        tool_definitions.extend(defs)
+    known_tool_names = set(tool_call_names) | {d["function"]["name"] for d in tool_definitions}
+
     # Auto-discover tools from datasets and create pools for any in TOOL_REGISTRY but not in --tools
     if dataset_mixer_list and dataset_mixer_list_splits:
         dataset_tool_names = _discover_tools_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
         for name in sorted(dataset_tool_names):
-            if name in pools:
+            if name in pools or name in known_tool_names:
                 continue
             if name not in TOOL_REGISTRY:
                 continue
@@ -2085,21 +2095,24 @@ def initialize_tools_and_envs(
             kwargs = asdict(config) | {"call_name": call_name}
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
             tool_call_names.append(call_name)
-        extra = dataset_tool_names - set(pools.keys()) - set(TOOL_REGISTRY.keys())
+            # Collect tool definitions from newly created pool
+            new_actor = ray.get(pools[call_name].acquire.remote())
+            new_defs = ray.get(new_actor.get_tool_definitions.remote())
+            pools[call_name].release.remote(new_actor)
+            tool_definitions.extend(new_defs)
+            known_tool_names.add(call_name)
+            known_tool_names.update(d["function"]["name"] for d in new_defs)
+        extra = dataset_tool_names - known_tool_names - set(TOOL_REGISTRY.keys())
         if extra:
             logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
         # Wait for any newly created pools
         ray.get([pool.size.remote() for pool in pools.values()])
 
-    tools_config.tool_call_names = tool_call_names
-
-    # Collect tool definitions from all pools
-    tool_definitions: list[dict[str, Any]] = []
-    for pool in pools.values():
-        actor = ray.get(pool.acquire.remote())
-        defs = ray.get(actor.get_tool_definitions.remote())
-        pool.release.remote(actor)
-        tool_definitions.extend(defs)
+    # Update tool_call_names to include inner tool names from stateful environments.
+    # For simple Tools, pool key == function name. For stateful envs (e.g., GenericSandboxEnv),
+    # the pool key is the env name but function names are the inner tools (execute_bash, etc.).
+    tool_def_names = [d["function"]["name"] for d in tool_definitions]
+    tools_config.tool_call_names = list(dict.fromkeys(tool_call_names + tool_def_names))
 
     stop_sequences: list[str] = []
     if pools:
