@@ -4,7 +4,6 @@ import io
 import os
 import shlex
 import tarfile
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -40,17 +39,6 @@ class SandboxBackend(ABC):
     @abstractmethod
     def run_command(self, command: str) -> ExecutionResult:
         """Execute a shell command in the sandbox."""
-
-    def run_code(self, code: str, language: str = "python") -> ExecutionResult:
-        """Write code to a temp file and execute it. Only Python is supported."""
-        if language != "python":
-            raise ValueError(f"Unsupported language: {language!r}. Only 'python' is currently supported.")
-        filename = f"/tmp/code_{uuid.uuid4().hex}.py"
-        self.write_file(filename, code)
-        try:
-            return self.run_command(f"python {filename}")
-        finally:
-            self.run_command(f"rm -f {filename}")
 
     @abstractmethod
     def write_file(self, path: str, content: str | bytes) -> None:
