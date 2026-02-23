@@ -21,7 +21,7 @@ uv run python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-0.6B \
+    --model_name_or_path PrimeIntellect/Qwen3-1.7B-Wordle-SFT \
     --temperature 1.0 \
     --learning_rate 3e-7 \
     --total_episodes 80 \
@@ -40,7 +40,6 @@ uv run python open_instruct/grpo_fast.py \
     --save_traces \
     --max_steps 20 \
     --tool_parser_type vllm_hermes \
-    --no_filter_zero_std_samples \
     --dataset_skip_cache \
     --output_dir output/wordle_debug
 

@@ -33,7 +33,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 64 \
     --num_samples_per_prompt_rollout 16 \
-    --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
+    --model_name_or_path PrimeIntellect/Qwen3-1.7B-Wordle-SFT \
     --temperature 1.0 \
     --learning_rate 5e-7 \
     --total_episodes 102400 \
