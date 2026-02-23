@@ -4,6 +4,7 @@ set -euo pipefail
 EXP_NAME="${EXP_NAME:-qwen25_05b_it_eval_only_gsm8k_quartiles}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
+BEAKER_IMAGE="michaeln/open_instruct"
 
 # Training data is unused in eval-only mode but still required by config parsing.
 DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8}"
@@ -21,7 +22,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 2 \
+    --gpus 1 \
     --budget ai2/oe-adapt \
     -- \
 uv run --active open_instruct/grpo_fast.py \
@@ -29,7 +30,7 @@ uv run --active open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 1 \
     --inflight_updates \
     --filter_zero_std_samples False \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -65,13 +66,15 @@ uv run --active open_instruct/grpo_fast.py \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.7 \
     --colocate_train_inference_mode \
-    --num_learners_per_node 2 \
-    --vllm_tensor_parallel_size 2 \
+    --num_learners_per_node 1\
+    --vllm_num_engines 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
-    --eval_on_step_0 True \
-    --eval_only True \
+    --eval_on_step_0 \
+    --eval_only \
+    --eval_temperature 1.0 \
+    --eval_top_p 0.95 \
     --eval_pass_at_k 128 \
-    --with_tracking True \
+    --with_tracking \
     --push_to_hub False "$@"

@@ -1,12 +1,13 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k_noresampling0.875"
-MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
-DATASETS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+EXP_NAME="${EXP_NAME:-qwen25_05b_it_gsm8k_quartiles}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
-LOCAL_EVAL_SPLITS="train"
+DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -23,9 +24,9 @@ uv run mason.py \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run --active open_instruct/grpo_fast.py \
-    --exp_name ${EXP_NAME} \
-    --run_name $EXP_NAME \
-    --eval_pass_at_k 32 \
+    --run_name "${RUN_NAME}" \
+    --exp_name "${EXP_NAME}" \
+    --eval_pass_at_k 128 \
     --eval_top_p 0.95 \
     --local_eval_every 100 \
     --dataset_mixer_eval_list $LOCAL_EVALS \
