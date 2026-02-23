@@ -63,7 +63,7 @@ uv run --active open_instruct/grpo_fast.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name qwen_instruct_gsm8k \
+    --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
     --vllm_top_p 1.0 \

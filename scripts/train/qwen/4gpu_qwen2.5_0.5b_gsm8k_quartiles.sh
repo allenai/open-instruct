@@ -27,11 +27,10 @@ uv run mason.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 128 \
-    --eval_top_p 0.95 \
+    --vllm_top_p 1.0 \
     --local_eval_every 100 \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
-    --no_resampling_pass_rate 0.875 \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
@@ -39,7 +38,7 @@ uv run mason.py \
     --log_train_solve_rate_metrics True \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
-    --num_samples_per_prompt_rollout 16 \
+    --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
@@ -53,7 +52,7 @@ uv run mason.py \
     --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 256000 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
