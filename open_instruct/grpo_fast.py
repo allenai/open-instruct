@@ -954,11 +954,70 @@ class PolicyTrainerRayProcess(RayProcess):
             self.local_metrics["val/adv_mean"] = adv_mean.item()
             self.local_metrics["val/adv_std"] = adv_std.item()
 
-        # Free memory before training loop
+        # Free memory before training loops
         torch.cuda.empty_cache()
 
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+        # ========================================================================
+        # Value training loop (separate from policy, matching ppo_fast.py)
+        # ========================================================================
+        if self.args.use_value_model:
+            effective_value_mini_batches = self.args.value_num_mini_batches or self.num_mini_batches
+            value_accumulation_steps = max(1, num_samples // effective_value_mini_batches)
+            with Timer("[Training Processes] Value loss calculation", noop=self.rank != 0):
+                value_loss_stats = torch.zeros(num_samples, device=device)
+                vf_clipfrac_stats = torch.zeros(num_samples, device=device)
+                local_value_step = 0
+                for epoch_idx in range(self.args.num_epochs):
+                    for i in range(num_samples):
+                        response_mask_BT = data_BT.response_masks[i][:, 1:]
+                        current_values = self.forward_value(
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i],
+                            data_BT.position_ids[i],
+                            data_BT.response_masks[i],
+                            self.pad_token_id,
+                            use_grad=True,
+                        )
+                        target_returns = returns_BT[i]
+                        old_values = old_values_BT[i]
+
+                        if self.args.vf_clip_range > 0:
+                            values_clipped = old_values + torch.clamp(
+                                current_values - old_values,
+                                -self.args.vf_clip_range,
+                                self.args.vf_clip_range,
+                            )
+                            vf_losses1 = (current_values - target_returns) ** 2
+                            vf_losses2 = (values_clipped - target_returns) ** 2
+                            vf_loss_BT = 0.5 * torch.max(vf_losses1, vf_losses2)
+                            vf_clipfrac_BT = (vf_losses2 > vf_losses1).float()
+                        else:
+                            vf_loss_BT = 0.5 * (current_values - target_returns) ** 2
+                            vf_clipfrac_BT = torch.zeros_like(current_values)
+
+                        value_loss = 0.5 * masked_mean(vf_loss_BT, response_mask_BT)
+                        value_loss = value_loss / value_accumulation_steps
+                        self.value_model.backward(value_loss)
+
+                        with torch.no_grad():
+                            value_loss_stats[i] = masked_mean(vf_loss_BT, response_mask_BT)
+                            vf_clipfrac_stats[i] = masked_mean(vf_clipfrac_BT, response_mask_BT)
+
+                        if (local_value_step + 1) % value_accumulation_steps == 0:
+                            self.value_model.step()
+                        if (local_value_step + 1) // value_accumulation_steps == effective_value_mini_batches:
+                            break
+                        local_value_step += 1
+
+                self.local_metrics["loss/value_avg"] = value_loss_stats.mean().item()
+                self.local_metrics["value/clipfrac_avg"] = vf_clipfrac_stats.mean().item()
+
+            torch.cuda.empty_cache()
+
+        # ========================================================================
+        # Policy training loop
+        # ========================================================================
+        with Timer("[Training Processes] Policy loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
                 "kl": torch.zeros(4, num_samples, device=device),
                 "kl_loss": torch.zeros(num_samples, device=device),
@@ -969,9 +1028,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 "entropy": torch.zeros(num_samples, device=device),
                 "token_count": token_counts_per_sample,
             }
-            if self.args.use_value_model:
-                loss_stats_B["value_loss"] = torch.zeros(num_samples, device=device)
-                loss_stats_B["vf_clipfrac"] = torch.zeros(num_samples, device=device)
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
