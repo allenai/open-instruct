@@ -11,7 +11,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "WordleTextEnv 8-GPU (4L/4E) Qwen3-4B 100-step test" \
+       --description "WordleTextEnv 8-GPU (4L/4E) Qwen3-1.7B 100-step test" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --preemptible \
