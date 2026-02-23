@@ -1661,23 +1661,12 @@ def one_training_step(
         # Convert array/list metrics to wandb histograms for logging.
         # Handles arrays with missing values (None/NaN) by filtering to finite numeric values.
         metrics_to_log = {}
-        per_index_solve_rates = metrics.pop("val/train_prompt_solve_rate_by_index_hist", None)
+        per_index_solve_rates = metrics.pop("val/train_prompt_solve_rate_by_dataset_index", None)
         if per_index_solve_rates is not None:
-            values_iter = (
-                per_index_solve_rates.tolist()
-                if isinstance(per_index_solve_rates, np.ndarray)
-                else per_index_solve_rates
-            )
-            index_table = wandb.Table(columns=["index_pos", "solve_rate"])
-            for index_pos, solve_rate in enumerate(values_iter):
-                if isinstance(solve_rate, (int, float, np.integer, np.floating)) and np.isfinite(solve_rate):
-                    index_table.add_data(index_pos, float(solve_rate))
-                else:
-                    index_table.add_data(index_pos, None)
+            index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
+            for dataset_index, solve_rate in per_index_solve_rates:
+                index_table.add_data(int(dataset_index), float(solve_rate))
             metrics_to_log["val/train_prompt_solve_rate_by_index_table"] = index_table
-            metrics_to_log["val/train_prompt_solve_rate_by_index_bar"] = wandb.plot.bar(
-                index_table, "index_pos", "solve_rate", title="Train Prompt Solve Rate By Index"
-            )
 
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
@@ -1777,7 +1766,6 @@ def maybe_evaluate(
         timeout = max(300, args.backend_timeout * 5) if is_final_step else 0.01
 
         eval_dataset_index_map = {eval_dataset[i]["index"]: i for i in range(num_eval_prompts)}
-        sorted_eval_indices = sorted(eval_dataset_index_map.keys())
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
@@ -1871,18 +1859,13 @@ def maybe_evaluate(
                 eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
             ):
                 prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
-
-            eval_index_to_hist_position = {
-                eval_index: position for position, eval_index in enumerate(sorted_eval_indices)
-            }
-            eval_prompt_solve_rate_by_index_hist: list[float | None] = [None] * len(sorted_eval_indices)
-            for prompt_index, rates in prompt_index_to_solve_rates.items():
-                hist_position = eval_index_to_hist_position.get(prompt_index)
-                if hist_position is not None:
-                    eval_prompt_solve_rate_by_index_hist[hist_position] = float(np.mean(rates))
-            eval_metrics["eval/prompt_solve_rate_by_index_hist"] = eval_prompt_solve_rate_by_index_hist
-            eval_metrics["eval/prompt_solve_rate_by_index_hist_non_null_count"] = int(
-                sum(value is not None for value in eval_prompt_solve_rate_by_index_hist)
+            eval_prompt_solve_rate_by_dataset_index = [
+                (int(prompt_index), float(np.mean(rates)))
+                for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
+            ]
+            eval_metrics["eval/prompt_solve_rate_by_dataset_index"] = eval_prompt_solve_rate_by_dataset_index
+            eval_metrics["eval/prompt_solve_rate_by_dataset_index_count"] = len(
+                eval_prompt_solve_rate_by_dataset_index
             )
 
             dataset_to_solve_rates: dict[str, list[float]] = {}
@@ -1914,23 +1897,12 @@ def maybe_evaluate(
         df = pd.DataFrame(table)
 
         if args.with_tracking:
-            per_index_solve_rates = eval_metrics.pop("eval/prompt_solve_rate_by_index_hist", None)
+            per_index_solve_rates = eval_metrics.pop("eval/prompt_solve_rate_by_dataset_index", None)
             if per_index_solve_rates is not None:
-                values_iter = (
-                    per_index_solve_rates.tolist()
-                    if isinstance(per_index_solve_rates, np.ndarray)
-                    else per_index_solve_rates
-                )
-                index_table = wandb.Table(columns=["index_pos", "solve_rate"])
-                for index_pos, solve_rate in enumerate(values_iter):
-                    if isinstance(solve_rate, (int, float, np.integer, np.floating)) and np.isfinite(solve_rate):
-                        index_table.add_data(index_pos, float(solve_rate))
-                    else:
-                        index_table.add_data(index_pos, None)
+                index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
+                for dataset_index, solve_rate in per_index_solve_rates:
+                    index_table.add_data(int(dataset_index), float(solve_rate))
                 eval_metrics["eval/prompt_solve_rate_by_index_table"] = index_table
-                eval_metrics["eval/prompt_solve_rate_by_index_bar"] = wandb.plot.bar(
-                    index_table, "index_pos", "solve_rate", title="Eval Prompt Solve Rate By Index"
-                )
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
             wandb.log(eval_metrics, step=training_step)
         else:
