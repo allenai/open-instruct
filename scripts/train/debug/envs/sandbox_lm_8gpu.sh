@@ -21,7 +21,7 @@ uv run python mason.py \
        --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout 3h \
+       --preemptible \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
