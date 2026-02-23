@@ -369,8 +369,8 @@ class TestVllmParserRegistry(unittest.TestCase):
         parser_cls = import_class_from_string(config.import_path)
         self.assertTrue(callable(parser_cls))
 
-        self.assertTrue(config.role_template, "missing role_template")
-        formatted = config.role_template.format(role="tool", output="test_output")
+        self.assertTrue(config.default_role_template, "missing default_role_template")
+        formatted = config.default_role_template.format(role="tool", output="test_output")
         self.assertIn("test_output", formatted)
         self.assertIn("tool", formatted)
 
@@ -385,7 +385,7 @@ class TestVllmToolParser(unittest.TestCase):
         parser = VllmToolParser(
             tool_parser=mock_native,
             stop_sequences=["</tool_call>"],
-            role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+            default_role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
             output_postfix="<|im_start|>assistant\n",
         )
 
@@ -398,7 +398,7 @@ class TestVllmToolParser(unittest.TestCase):
             tool_parser=mock_native,
             output_prefix="",
             output_postfix="<|im_start|>assistant\n",
-            role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+            default_role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
         )
 
         result = parser.format_tool_outputs(["output1", "output2"])
@@ -410,7 +410,7 @@ class TestVllmToolParser(unittest.TestCase):
         mock_native = MagicMock()
         parser = VllmToolParser(
             tool_parser=mock_native,
-            role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+            default_role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
             output_postfix="<|im_start|>assistant\n",
         )
 

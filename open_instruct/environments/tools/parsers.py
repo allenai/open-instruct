@@ -117,7 +117,7 @@ class VllmToolParser(ToolParser):
     """Wraps a vLLM tool parser to extract tool calls and format responses.
 
     Delegates tool-call extraction to vLLM's native parsers (Hermes, Llama3,
-    Qwen3, etc.) and formats outputs using a ``role_template`` with ``{role}``
+    Qwen3, etc.) and formats outputs using a ``default_role_template`` with ``{role}``
     and ``{output}`` placeholders.
 
     Semantic roles (e.g. ``"tool"``) are remapped to model-specific tokens
@@ -132,16 +132,18 @@ class VllmToolParser(ToolParser):
         tool_definitions: list[dict[str, Any]] | None = None,
         output_prefix: str = "",
         output_postfix: str = "<|im_start|>assistant\n",
-        role_template: str = "<|im_start|>{role}\n{output}<|im_end|>\n",
+        default_role_template: str = "<|im_start|>{role}\n{output}<|im_end|>\n",
         role_map: dict[str, str] | None = None,
+        role_templates: dict[str, str] | None = None,
     ):
         self.tool_parser = tool_parser
         self.stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
         self._output_prefix = output_prefix
         self._output_postfix = output_postfix
-        self._role_template = role_template
+        self._default_role_template = default_role_template
         self._role_map = role_map or {}
+        self._role_templates = role_templates or {}
 
     def _make_request(self) -> Any:
         """Create a dummy ChatCompletionRequest for vLLM parsers.
@@ -181,7 +183,8 @@ class VllmToolParser(ToolParser):
 
     def _format_tool_output(self, tool_output: str, role: str = "tool") -> str:
         resolved = self._role_map.get(role, role)
-        return self._role_template.format(role=resolved, output=tool_output)
+        template = self._role_templates.get(role, self._default_role_template)
+        return template.format(role=resolved, output=tool_output)
 
     def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return f"{self._output_prefix}{''.join(self._format_tool_output(output, role) for output in tool_outputs)}{self._output_postfix}"
@@ -191,7 +194,7 @@ class VllmToolParser(ToolParser):
 class VllmParserConfig:
     """Configuration for a vLLM tool parser.
 
-    Each config pairs a vLLM native parser with a ``role_template`` that wraps
+    Each config pairs a vLLM native parser with a ``default_role_template`` that wraps
     individual outputs.  The template must contain ``{role}`` and ``{output}``
     placeholders.
 
@@ -204,7 +207,7 @@ class VllmParserConfig:
     """Dotted import path for the vLLM native parser class
     (e.g. ``"vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser"``)."""
 
-    role_template: str
+    default_role_template: str
     """Per-output template with ``{role}`` and ``{output}`` placeholders."""
 
     output_postfix: str
@@ -221,26 +224,32 @@ class VllmParserConfig:
     output_prefix: str = ""
     """String prepended before all formatted outputs."""
 
+    role_templates: dict[str, str] = field(default_factory=dict)
+    """Per-role template overrides. Keys are role names (e.g. ``"user"``),
+    values are templates with ``{role}`` and ``{output}`` placeholders.
+    Falls back to ``default_role_template`` for roles not in this dict."""
+
 
 # Registry of available vLLM tool parsers
 VLLM_PARSERS: dict[str, VllmParserConfig] = {
     # Hermes-style / ChatML (also works for Qwen2.5/3)
     "vllm_hermes": VllmParserConfig(
         import_path="vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
-        role_template="<|im_start|>{role}\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
+        default_role_template="<|im_start|>{role}\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
         output_postfix="<|im_start|>assistant\n",
+        role_templates={"user": "<|im_start|>{role}\n{output}<|im_end|>\n"},
     ),
     # Llama 3.x JSON style
     "vllm_llama3_json": VllmParserConfig(
         import_path="vllm.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
-        role_template="<|start_header_id|>{role}<|end_header_id|>\n\n{output}<|eot_id|>",
+        default_role_template="<|start_header_id|>{role}<|end_header_id|>\n\n{output}<|eot_id|>",
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
         role_map={"tool": "ipython"},
     ),
     # Olmo 3
     "vllm_olmo3": VllmParserConfig(
         import_path="vllm.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
-        role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+        default_role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
         output_postfix="<|im_start|>assistant\n",
         role_map={"tool": "environment"},
     ),
@@ -276,8 +285,9 @@ def create_vllm_parser(
         tool_definitions=tool_definitions,
         output_prefix=config.output_prefix,
         output_postfix=config.output_postfix,
-        role_template=config.role_template,
+        default_role_template=config.default_role_template,
         role_map=config.role_map,
+        role_templates=config.role_templates,
     )
 
 
