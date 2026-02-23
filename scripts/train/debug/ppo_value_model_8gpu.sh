@@ -48,7 +48,7 @@ uv run python mason.py \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512256 \
+    --total_episodes 4096000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 \
     --sequence_parallel_size 1 \
@@ -76,7 +76,7 @@ uv run python mason.py \
     --vf_clip_range 0.2 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
-    --value_warmup_steps 150 \
+    --value_warmup_steps 50 \
     --reset_optimizer_after_value_warmup \
     --decoupled_gae \
     --length_adaptive_gae \
