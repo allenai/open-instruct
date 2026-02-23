@@ -57,7 +57,7 @@ uv run python mason.py \
     --save_traces \
     --apply_verifiable_reward true \
     --tools generic_sandbox \
-    --pool_size 8 \
+    --pool_size 16 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/sandbox_lm_system_prompt.txt \
