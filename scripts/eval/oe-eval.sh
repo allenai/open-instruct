@@ -75,6 +75,7 @@ while [[ "$#" -gt 0 ]]; do
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
+        --remote-output-dir) REMOTE_OUTPUT_DIR="$2"; shift ;;
         --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -168,6 +169,13 @@ if [[ -n "$REVISION" ]]; then
     REVISION_ARG="--revision $REVISION"
 else
     REVISION_ARG=""
+fi
+
+# Set REMOTE_OUTPUT_DIR_ARG if provided
+if [[ -n "$REMOTE_OUTPUT_DIR" ]]; then
+    REMOTE_OUTPUT_DIR_ARG="--remote-output-dir $REMOTE_OUTPUT_DIR"
+else
+    REMOTE_OUTPUT_DIR_ARG=""
 fi
 
 # Define default tasks if no custom tasks provided
@@ -378,7 +386,8 @@ for TASK in "${TASKS[@]}"; do
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
-            --datalake-tags "$DATALAKE_ARGS"
+            --datalake-tags "$DATALAKE_ARGS" \
+            ${REMOTE_OUTPUT_DIR_ARG}
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
@@ -400,6 +409,7 @@ for TASK in "${TASKS[@]}"; do
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
         --push-datalake \
-        --datalake-tags "$DATALAKE_ARGS"
+        --datalake-tags "$DATALAKE_ARGS" \
+        ${REMOTE_OUTPUT_DIR_ARG}
     fi
 done
