@@ -48,6 +48,8 @@ uv run python mason.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --seed 42 \
+    --inflight_updates True \
+    --async_steps 4 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub false \
