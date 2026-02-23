@@ -13,6 +13,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.grpo_fast import maybe_evaluate
+from open_instruct.grpo_utils import estimate_pass_at_k
 
 
 class _QueueWithSize:
@@ -174,7 +175,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/pass_at_1"], 0.0)
+        self.assertEqual(logged["eval/pass_at_1"], 0.25)
         self.assertEqual(logged["eval/pass_at_2"], 0.5)
         self.assertEqual(logged["eval/pass_at_4"], 1.0)
         self.assertGreaterEqual(logged["eval/pass_at_4"], logged["eval/pass_at_2"])
@@ -233,14 +234,20 @@ class TestMaybeEvaluate(unittest.TestCase):
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/subset_a/pass_at_1"], 0.0)
-        self.assertEqual(logged["eval/subset_a/pass_at_2"], 1.0)
+        self.assertEqual(logged["eval/subset_a/pass_at_1"], 0.25)
+        self.assertEqual(logged["eval/subset_a/pass_at_2"], 0.5)
         self.assertEqual(logged["eval/subset_a/pass_at_4"], 1.0)
         self.assertGreaterEqual(logged["eval/subset_a/pass_at_4"], logged["eval/subset_a/pass_at_2"])
-        self.assertEqual(logged["eval/subset_b/pass_at_1"], 0.0)
-        self.assertEqual(logged["eval/subset_b/pass_at_2"], 0.0)
+        self.assertEqual(logged["eval/subset_b/pass_at_1"], 0.25)
+        self.assertEqual(logged["eval/subset_b/pass_at_2"], 0.5)
         self.assertEqual(logged["eval/subset_b/pass_at_4"], 1.0)
         self.assertGreaterEqual(logged["eval/subset_b/pass_at_4"], logged["eval/subset_b/pass_at_2"])
+
+    def test_estimate_pass_at_k_matches_known_values(self):
+        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=0, k=1), 0.0)
+        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=1), 0.25)
+        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=2), 0.5)
+        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=4), 1.0)
 
 
 if __name__ == "__main__":

@@ -1732,6 +1732,11 @@ def maybe_save_checkpoint(
     return save_time
 
 
+def estimate_pass_at_k_array(num_samples: int, num_correct: np.ndarray, k: int) -> np.ndarray:
+    """Estimate pass@k for a vector of prompts with shared num_samples."""
+    return np.asarray([grpo_utils.estimate_pass_at_k(num_samples, int(c), k) for c in num_correct], dtype=float)
+
+
 def maybe_evaluate(
     args: grpo_utils.ExperimentConfig,
     training_step: int,
@@ -1813,23 +1818,28 @@ def maybe_evaluate(
         elif scores.size and scores.size % eval_k == 0:
             scores_per_prompt = scores.reshape(-1, eval_k)
             threshold = max_possible_score - 1e-8
-            running_max_scores = np.maximum.accumulate(scores_per_prompt, axis=1)
+            num_correct_per_prompt = (scores_per_prompt >= threshold).sum(axis=1)
             pass_at_ks = [2**i for i in range(eval_k.bit_length()) if 2**i <= eval_k]
-            for k in pass_at_ks:
-                pass_at_by_k[k] = float((running_max_scores[:, k - 1] >= threshold).mean())
-            if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == running_max_scores.shape[0]:
-                dataset_to_solved_rows: dict[str, list[np.ndarray]] = {}
-                for dataset_name, solved_row in zip(eval_batch_stats.prompt_datasets, running_max_scores):
-                    dataset_to_solved_rows.setdefault(dataset_name, []).append(solved_row >= threshold)
-                for dataset_name, solved_rows in dataset_to_solved_rows.items():
+            per_prompt_pass_at_by_k = np.asarray(
+                [estimate_pass_at_k_array(eval_k, num_correct_per_prompt, k) for k in pass_at_ks], dtype=float
+            ).T
+            for col, k in enumerate(pass_at_ks):
+                pass_at_by_k[k] = float(per_prompt_pass_at_by_k[:, col].mean())
+            if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == scores_per_prompt.shape[0]:
+                dataset_to_indices: dict[str, list[int]] = {}
+                for prompt_idx, dataset_name in enumerate(eval_batch_stats.prompt_datasets):
+                    dataset_to_indices.setdefault(dataset_name, []).append(prompt_idx)
+                for dataset_name, dataset_indices in dataset_to_indices.items():
                     metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
-                    solved_matrix = np.asarray(solved_rows, dtype=float)
-                    dataset_pass_at_by_k[metric_name] = {k: float(solved_matrix[:, k - 1].mean()) for k in pass_at_ks}
+                    dataset_prompt_pass_at = per_prompt_pass_at_by_k[np.asarray(dataset_indices, dtype=int)]
+                    dataset_pass_at_by_k[metric_name] = {
+                        k: float(dataset_prompt_pass_at[:, col].mean()) for col, k in enumerate(pass_at_ks)
+                    }
             elif eval_batch_stats is not None:
                 logger.warning(
                     "Eval prompt_datasets size %s does not match prompts %s; skipping per-dataset pass@k metrics.",
                     len(eval_batch_stats.prompt_datasets),
-                    running_max_scores.shape[0],
+                    scores_per_prompt.shape[0],
                 )
         else:
             logger.warning(

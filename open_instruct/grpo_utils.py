@@ -1,4 +1,5 @@
 import enum
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -253,6 +254,21 @@ class ExperimentConfig:
             raise ValueError(f"`eval_pass_at_k` must be >= 1, got {self.eval_pass_at_k}")
         if self.eval_pass_at_k & (self.eval_pass_at_k - 1) != 0:
             raise ValueError(f"`eval_pass_at_k` must be a power of 2, got {self.eval_pass_at_k}")
+
+
+def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
+    """Estimate pass@k for one prompt."""
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
+    if not (0 <= num_correct <= num_samples):
+        raise ValueError(
+            f"num_correct must satisfy 0 <= num_correct <= num_samples, got {num_correct} with {num_samples}."
+        )
+    if not (1 <= k <= num_samples):
+        raise ValueError(f"k must satisfy 1 <= k <= num_samples, got {k} with {num_samples}.")
+    if num_samples - num_correct < k:
+        return 1.0
+    return 1.0 - (math.comb(num_samples - num_correct, k) / math.comb(num_samples, k))
 
 
 def compute_grpo_loss(

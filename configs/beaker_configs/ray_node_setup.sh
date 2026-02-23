@@ -19,9 +19,33 @@ RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
 ray stop --force
 
+# Ray can leave stale metadata in /tmp/ray briefly after stop; clear it before start.
+rm -rf /tmp/ray/session_* /tmp/ray/ray_current_cluster 2>/dev/null || true
+
+# Give process teardown a short window to finish before starting a new head.
+for _ in 1 2 3 4 5; do
+    if ! pgrep -fa "raylet|gcs_server|dashboard|monitor.py" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
-    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
+    for attempt in 1 2 3; do
+        if ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0; then
+            export RAY_ADDRESS="127.0.0.1:${RAY_NODE_PORT}"
+            break
+        fi
+        echo "[ray_node_setup] Ray head start failed on attempt ${attempt}; retrying after cleanup"
+        ray stop --force >/dev/null 2>&1 || true
+        rm -rf /tmp/ray/session_* /tmp/ray/ray_current_cluster 2>/dev/null || true
+        sleep 2
+        if [ "$attempt" -eq 3 ]; then
+            echo "[ray_node_setup] Failed to start Ray head after ${attempt} attempts"
+            exit 1
+        fi
+    done
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
