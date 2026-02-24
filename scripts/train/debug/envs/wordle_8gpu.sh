@@ -36,7 +36,6 @@ uv run python mason.py \
     --model_name_or_path PrimeIntellect/Qwen3-1.7B-Wordle-SFT \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --weight_decay 0.01 \
     --lr_scheduler_type constant \
     --total_episodes 204800 \
     --deepspeed_stage 2 \
