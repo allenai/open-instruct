@@ -197,7 +197,7 @@ class GuessNumberEnvConfig(BaseEnvConfig):
     max_val: int = 100
 
 
-_GUESS_PATTERN = re.compile(r"<guess>\s*(\w{5})\s*</guess>", re.IGNORECASE)
+_GUESS_PATTERN = re.compile(r"<guess>\s*\[?(\w{5})\]?\s*</guess>", re.IGNORECASE)
 
 
 class WordleTextEnv(TextRLEnvironment):
