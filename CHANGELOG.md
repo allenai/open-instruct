@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fixed `dataset_mixer_list_splits` validation in `dataset_transformation` when multiple splits are provided, and prevent `combined_dataset` index-column conflicts by dropping an existing `index` column before adding a new one (https://github.com/allenai/open-instruct/pull/1494).
 - Fixed weight sync thread hang when `inflight_updates=False`: wait for all vLLM `engine.update_weight` RPCs to complete before unpausing actors, preventing `health_check_fn` from blocking indefinitely (https://github.com/allenai/open-instruct/pull/1480).
 - Fixed `nodes_needed` calculation in `grpo_fast` `kv_cache_max_concurrency` warning using `math.ceil()` instead of floor division to avoid undercounting required inference nodes (https://github.com/allenai/open-instruct/pull/1474).
 - Fixed `eval_on_step_0` never triggering in `grpo_fast` because it was gated behind the `training_step % local_eval_every == 0` modulo check; also guard `local_eval_every <= 0` to prevent accidental every-step eval or `ZeroDivisionError` (https://github.com/allenai/open-instruct/pull/1485).
