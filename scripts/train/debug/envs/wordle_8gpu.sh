@@ -25,7 +25,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1000 \
+    --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
