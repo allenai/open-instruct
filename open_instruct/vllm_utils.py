@@ -1034,6 +1034,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     finally:
         if env_config is not None and env_name in acquired:
             _, env_act = acquired[env_name]
+            rollout.info["env_name"] = env_name
             try:
                 rollout.info.update(await env_act.get_metrics.remote())
             except Exception as e:
