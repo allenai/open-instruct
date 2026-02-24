@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fixed `grpo_fast` local eval rounds enqueueing 0 prompts after the first run by resetting `eval_data_loader` after each eval pass (stateful `DataLoaderBase` requires reset after epoch exhaustion); also switched eval prompt ID prefix from constant `0` to `training_step` to avoid cross-round metadata key collisions in vLLM request tracking (https://github.com/allenai/open-instruct/pull/1493).
 - Fixed weight sync thread hang when `inflight_updates=False`: wait for all vLLM `engine.update_weight` RPCs to complete before unpausing actors, preventing `health_check_fn` from blocking indefinitely (https://github.com/allenai/open-instruct/pull/1480).
 - Fixed `nodes_needed` calculation in `grpo_fast` `kv_cache_max_concurrency` warning using `math.ceil()` instead of floor division to avoid undercounting required inference nodes (https://github.com/allenai/open-instruct/pull/1474).
 - Fixed `eval_on_step_0` never triggering in `grpo_fast` because it was gated behind the `training_step % local_eval_every == 0` modulo check; also guard `local_eval_every <= 0` to prevent accidental every-step eval or `ZeroDivisionError` (https://github.com/allenai/open-instruct/pull/1485).
