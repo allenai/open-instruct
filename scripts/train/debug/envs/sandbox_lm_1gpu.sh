@@ -2,7 +2,7 @@
 # Debug script for testing GRPO with SandboxLM environment (local 1 GPU)
 #
 # SandboxLM: Coding environment with execute_bash + str_replace_editor tools.
-# Mirrors the llm-in-sandbox tool interface for code generation tasks.
+# System prompt and tools modified from https://github.com/llm-in-sandbox/llm-in-sandbox
 #
 # Requirements:
 # - Docker running (uses python:3.12-slim image)

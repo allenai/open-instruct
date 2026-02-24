@@ -2,6 +2,7 @@
 # Beaker experiment for SandboxLM environment — 8 GPUs (4 learners, 4 inference engines)
 #
 # SandboxLM: Coding environment with execute_bash + str_replace_editor tools.
+# System prompt and tools modified from https://github.com/llm-in-sandbox/llm-in-sandbox
 # Uses Qwen3-4B-Instruct with 32k context for code generation tasks.
 #
 # Requirements:

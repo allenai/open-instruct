@@ -1,4 +1,7 @@
-"""Generic sandbox environment — provides execute_bash + str_replace_editor tools."""
+"""Generic sandbox environment — provides execute_bash + str_replace_editor tools.
+
+Modified from https://github.com/llm-in-sandbox/llm-in-sandbox
+"""
 
 import contextlib
 import shlex
