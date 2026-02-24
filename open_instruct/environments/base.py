@@ -70,7 +70,7 @@ class RLEnvironment(ABC):
         return []
 
     @abstractmethod
-    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         """Initialize episode. Returns (initial observation, tool definitions)."""
         pass
 
@@ -108,13 +108,13 @@ class TextRLEnvironment(RLEnvironment):
         pass
 
     @abstractmethod
-    async def _reset(self, task_id: str | None = None, **kwargs: Any) -> StepResult:
+    async def _reset(self, **kwargs: Any) -> StepResult:
         """Subclass hook: initialize episode and return the initial observation."""
         pass
 
-    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         """Initialize episode. Always returns empty tool list for text envs."""
-        result = await self._reset(task_id=task_id, **kwargs)
+        result = await self._reset(**kwargs)
         return result, []
 
     async def step(self, call: EnvCall) -> StepResult:

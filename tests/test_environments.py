@@ -15,8 +15,8 @@ class TestEnvironmentReset(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("counter", CounterEnv, {"target": 3}, {"task_id": "3"}),
-            ("guess_number", GuessNumberEnv, {"min_val": 1, "max_val": 10}, {"task_id": "5"}),
+            ("counter", CounterEnv, {"target": 3}, {"target": "3"}),
+            ("guess_number", GuessNumberEnv, {"min_val": 1, "max_val": 10}, {"number": "5"}),
             ("wordle", WordleTextEnv, {}, {"word": "CRANE"}),
         ]
     )
@@ -33,10 +33,13 @@ class TestEnvironmentReset(unittest.TestCase):
 
 
 class TestEnvironments(unittest.TestCase):
-    @parameterized.expand([(CounterEnv, {"target": 3}), (GuessNumberEnv, {"min_val": 1, "max_val": 10})])
-    def test_20_random_steps(self, env_cls: type[RLEnvironment], kwargs: dict):
+    @parameterized.expand([
+        (CounterEnv, {"target": 3}, {"target": "3"}),
+        (GuessNumberEnv, {"min_val": 1, "max_val": 10}, {"number": "3"}),
+    ])
+    def test_20_random_steps(self, env_cls: type[RLEnvironment], kwargs: dict, reset_kwargs: dict):
         env = env_cls(**kwargs)
-        result, tools = asyncio.run(env.reset(task_id="3"))
+        result, tools = asyncio.run(env.reset(**reset_kwargs))
         self.assertIsInstance(result, StepResult)
         self.assertTrue(result.result)
         self.assertGreater(len(tools), 0)
@@ -47,7 +50,7 @@ class TestEnvironments(unittest.TestCase):
             self.assertIsInstance(result, StepResult)
             self.assertIsInstance(result.result, str)
             if result.done:
-                result, tools = asyncio.run(env.reset(task_id="3"))
+                result, tools = asyncio.run(env.reset(**reset_kwargs))
 
 
 class TestWordleTextEnv(unittest.TestCase):

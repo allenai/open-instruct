@@ -398,7 +398,7 @@ class Tool(RLEnvironment):
 
     # -- RLEnvironment defaults for stateless tools --
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs) -> tuple[StepResult, list[dict]]:
         return StepResult(result=""), [get_openai_tool_definitions(self)]
 
     def state(self) -> State:

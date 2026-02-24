@@ -134,11 +134,11 @@ class GenericSandboxEnv(RLEnvironment):
     def get_tool_definitions(cls) -> list[dict]:
         return list(cls._tool_definitions)
 
-    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         last_error = None
         for attempt in range(3):
             try:
-                return self._do_reset(task_id, **kwargs)
+                return self._do_reset(**kwargs)
             except Exception as e:
                 last_error = e
                 logger.warning(f"GenericSandboxEnv.reset attempt {attempt + 1} failed: {e}. Retrying...")
@@ -151,7 +151,8 @@ class GenericSandboxEnv(RLEnvironment):
         else:
             raise RuntimeError("Reset failed without capturing an error.")
 
-    def _do_reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    def _do_reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+        task_id = kwargs.get("task_id")
         if self._backend is not None:
             self._backend.close()
         bkwargs = dict(self._backend_kwargs)

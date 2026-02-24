@@ -48,20 +48,18 @@ class CounterEnv(RLEnvironment):
         self._current = 0
         self._step_count = 0
         self._done = False
-        self._task_id: str | None = None
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         self._current = 0
         self._step_count = 0
         self._done = False
-        self._task_id = task_id
 
-        if task_id and task_id.isdigit():
-            self._target = int(task_id)
+        if "target" in kwargs:
+            self._target = int(kwargs["target"])
 
         return (
             StepResult(result=f"Counter is at {self._current}. Reach {self._target} to win."),
@@ -97,7 +95,7 @@ class CounterEnv(RLEnvironment):
         }
 
     def state(self) -> State:
-        return State(episode_id=self._task_id, step_count=self._step_count)
+        return State(step_count=self._step_count)
 
 
 @dataclass
@@ -135,16 +133,14 @@ class GuessNumberEnv(RLEnvironment):
         self._secret = 0
         self._guesses = 0
         self._done = False
-        self._task_id: str | None = None
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
-        self._task_id = task_id
-        if task_id and task_id.isdigit():
-            self._secret = int(task_id)
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+        if "number" in kwargs:
+            self._secret = int(kwargs["number"])
         else:
             self._secret = random.randint(self._min_val, self._max_val)
         self._guesses = 0
@@ -189,7 +185,7 @@ class GuessNumberEnv(RLEnvironment):
         return {"guesses": float(self._guesses)}
 
     def state(self) -> State:
-        return State(episode_id=self._task_id, step_count=self._guesses)
+        return State(step_count=self._guesses)
 
 
 @dataclass
@@ -228,12 +224,10 @@ class WordleTextEnv(TextRLEnvironment):
         self._secret_word = ""
         self._guesses: list[str] = []
         self._done = False
-        self._task_id: str | None = None
 
-    async def _reset(self, task_id: str | None = None, **kwargs: Any) -> StepResult:
+    async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
         self._done = False
-        self._task_id = task_id
 
         if "word" not in kwargs:
             raise ValueError("WordleTextEnv requires 'word' in env_config (e.g. {'word': 'crane'})")
@@ -323,7 +317,7 @@ class WordleTextEnv(TextRLEnvironment):
         }
 
     def state(self) -> State:
-        return State(episode_id=self._task_id, step_count=len(self._guesses))
+        return State(step_count=len(self._guesses))
 
 
 @dataclass
