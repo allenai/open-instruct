@@ -35,7 +35,7 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 16 \
     --model_name_or_path PrimeIntellect/Qwen3-1.7B-Wordle-SFT \
     --temperature 1.0 \
-    --learning_rate 5e-7 \
+    --learning_rate 1e-6 \
     --total_episodes 102400 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
