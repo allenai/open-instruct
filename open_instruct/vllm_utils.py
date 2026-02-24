@@ -1032,8 +1032,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 if excess > 0:
                     break
     finally:
-        # TODO: In future, health-check actors and gracefully degrade (skip dead actors)
-        # instead of crashing. For now, let RayActorError propagate if an actor died.
+        if env_config is not None and env_name in acquired:
+            _, env_act = acquired[env_name]
+            try:
+                rollout.info.update(await env_act.get_metrics.remote())
+            except Exception as e:
+                logger.debug(f"Failed to collect env metrics: {e}")
         for pool, acq_actor in acquired.values():
             pool.release.remote(acq_actor)
 

@@ -1227,6 +1227,14 @@ class DataPreparationActor:
                     tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
 
+                env_metrics: dict[str, list[float]] = {}
+                for rs in result.request_info.rollout_states:
+                    for k, v in rs.get("info", {}).items():
+                        if isinstance(v, (int, float)):
+                            env_metrics.setdefault(k, []).append(float(v))
+                for k, vals in env_metrics.items():
+                    step_metrics[f"env/{k}"] = np.mean(vals)
+
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
