@@ -92,16 +92,16 @@ class TestWordleTextEnv(unittest.TestCase):
     def test_scoring_all_green(self):
         env = self._make_env()
         r = asyncio.run(env.text_step("<guess>CRANE</guess>"))
-        self.assertIn("GGGGG", r.result)
+        self.assertIn("G G G G G", r.result)
 
     def test_scoring_yellow_and_miss(self):
         env = self._make_env()
-        r = asyncio.run(env.text_step("<guess>NXXXX</guess>"))
+        r = asyncio.run(env.text_step("<guess>NZZZZ</guess>"))
         self.assertIn("Feedback:", r.result)
         lines = r.result.split("Feedback:\n")[1].split("\n")
-        self.assertEqual(lines[0], "NXXXX")
+        self.assertEqual(lines[0], "N Z Z Z Z")
         self.assertIn("Y", lines[1])
-        self.assertIn("_", lines[1])
+        self.assertIn("X", lines[1])
 
     def test_step_delegates_to_text_step(self):
         env = self._make_env()

@@ -260,13 +260,13 @@ class WordleTextEnv(TextRLEnvironment):
     """Wordle game as a text environment (TextArena Wordle-v0 compatible).
 
     The model outputs guesses inside ``<guess>WORD</guess>`` XML tags.
-    Feedback uses positional G/Y/_ characters::
+    Feedback uses spaced positional G/Y/X characters::
 
         Feedback:
-        CRANE
-        G_Y__
+        C R A N E
+        G X Y X X
 
-    Where G = correct position, Y = wrong position, _ = not in word.
+    Where G = correct position, Y = wrong position, X = not in word.
 
     Uses ``response_role="user"`` so feedback appears as a user message
     in the conversation, creating a natural back-and-forth.
@@ -295,9 +295,13 @@ class WordleTextEnv(TextRLEnvironment):
 
         return StepResult(
             result=(
-                f"Let's play Wordle! Guess the 5-letter word.\n"
-                f"You have {self._max_guesses} guesses.\n"
-                f"Submit your guess inside <guess>...</guess> tags."
+                f"You are playing Wordle. A secret 5-letter word has been chosen. "
+                f"You have {self._max_guesses} attempts to guess it.\n"
+                f"Submit your guess inside <guess>...</guess> tags.\n"
+                f"Feedback for each letter will be given as follows:\n"
+                f" - G (green): correct letter in the correct position\n"
+                f" - Y (yellow): letter exists in the word but in the wrong position\n"
+                f" - X (wrong): letter is not in the word"
             )
         )
 
@@ -310,17 +314,17 @@ class WordleTextEnv(TextRLEnvironment):
 
         guess = match.group(1).upper()
         self._guesses.append(guess)
-        scoring = self._get_scoring(guess)
+        scoring = self._get_scoring(guess, self._secret_word)
         n = len(self._guesses)
         remaining = self._max_guesses - n
+
+        feedback = self._format_feedback(guess, scoring)
 
         if guess == self._secret_word:
             self._done = True
             turn_efficiency = 1.0 / (n + 1)
             return StepResult(
-                result=f"Feedback:\n{guess}\n{scoring}\nYou got it in {n} guesses!",
-                reward=1.0 + turn_efficiency,
-                done=True,
+                result=f"Feedback:\n{feedback}\nYou got it in {n} guesses!", reward=1.0 + turn_efficiency, done=True
             )
 
         if remaining <= 0:
@@ -329,7 +333,7 @@ class WordleTextEnv(TextRLEnvironment):
             num_yellows = scoring.count("Y")
             partial_credit = 0.2 * num_greens + 0.1 * num_yellows
             return StepResult(
-                result=f"Feedback:\n{guess}\n{scoring}\nGame over! The word was {self._secret_word}.",
+                result=f"Feedback:\n{feedback}\nGame over! The word was {self._secret_word}.",
                 reward=partial_credit,
                 done=True,
             )
@@ -338,16 +342,21 @@ class WordleTextEnv(TextRLEnvironment):
         num_yellows = scoring.count("Y")
         partial_credit = 0.2 * num_greens + 0.1 * num_yellows
         return StepResult(
-            result=f"Feedback:\n{guess}\n{scoring}\n{remaining} guess{'es' if remaining != 1 else ''} remaining.",
+            result=f"Feedback:\n{feedback}\n{remaining} guess{'es' if remaining != 1 else ''} remaining.",
             reward=partial_credit,
         )
 
-    def _get_scoring(self, guess: str) -> str:
-        """Produce G/Y/_ positional scoring string."""
-        result = ["_"] * 5
-        remaining = list(self._secret_word)
+    @staticmethod
+    def _format_feedback(guess: str, scoring: list[str]) -> str:
+        return f"{' '.join(guess)}\n{' '.join(scoring)}"
 
-        for i, (g, s) in enumerate(zip(guess, self._secret_word)):
+    @staticmethod
+    def _get_scoring(guess: str, secret: str) -> list[str]:
+        """Produce G/Y/X positional scoring list."""
+        result = ["X"] * len(guess)
+        remaining = list(secret)
+
+        for i, (g, s) in enumerate(zip(guess, secret)):
             if g == s:
                 result[i] = "G"
                 remaining[i] = ""
@@ -359,7 +368,7 @@ class WordleTextEnv(TextRLEnvironment):
                 result[i] = "Y"
                 remaining[remaining.index(g)] = ""
 
-        return "".join(result)
+        return result
 
     def get_metrics(self) -> dict[str, float]:
         return {
