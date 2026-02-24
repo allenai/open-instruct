@@ -2,7 +2,7 @@
 # Debug script for testing GRPO with SWERL Sandbox environment (local 1 GPU)
 #
 # SWERL Sandbox: Per-sample Docker tasks with submit-based evaluation.
-# Extends GenericSandboxEnv with per-task instruction, seeds, and test scripts.
+# Provides execute_bash, str_replace_editor, and submit tools.
 #
 # Requirements:
 # - Docker running (uses python:3.12-slim image by default)
@@ -11,16 +11,12 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 
 echo "Starting SWERL Sandbox environment training (1 GPU)..."
 
-cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
@@ -48,7 +44,7 @@ uv run python open_instruct/grpo_fast.py \
     --push_to_hub false \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs '{"task_data_dir": "'"$REPO_ROOT"'/data/swerl_sandbox_test", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --tool_configs '{"task_data_dir": "data/swerl_sandbox_test", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 4 \
     --max_steps 20 \
     --tool_parser_type vllm_hermes \
