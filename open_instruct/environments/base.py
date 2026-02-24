@@ -107,6 +107,16 @@ class TextRLEnvironment(RLEnvironment):
         """Process the model's full output text and return an observation."""
         pass
 
+    @abstractmethod
+    async def _reset(self, task_id: str | None = None, **kwargs: Any) -> StepResult:
+        """Subclass hook: initialize episode and return the initial observation."""
+        pass
+
+    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+        """Initialize episode. Always returns empty tool list for text envs."""
+        result = await self._reset(task_id=task_id, **kwargs)
+        return result, []
+
     async def step(self, call: EnvCall) -> StepResult:
         """Extract ``args["text"]`` from the shadow EnvCall and forward to text_step."""
         return await self.text_step(call.args["text"])
