@@ -53,8 +53,6 @@ uv run python mason.py \
     --save_traces \
     --max_steps 200 \
     --tool_parser_type vllm_hermes \
-    --no_filter_zero_std_samples \
-
     --dataset_skip_cache \
     --reward_aggregator last \
     --advantage_normalization_type centered \
