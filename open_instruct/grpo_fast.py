@@ -1931,12 +1931,13 @@ def run_training(
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
                     eval_example,
-                    0,
+                    training_step,
                     prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
                     base_env_config=base_env_config,
                 )
+            eval_data_loader.reset()
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
