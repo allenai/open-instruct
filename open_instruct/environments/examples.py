@@ -223,10 +223,12 @@ class WordleTextEnv(TextRLEnvironment):
         self._max_guesses = max_guesses
         self._secret_word = ""
         self._guesses: list[str] = []
+        self._invalid_attempts = 0
         self._done = False
 
     async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
+        self._invalid_attempts = 0
         self._done = False
 
         if "word" not in kwargs:
@@ -248,6 +250,7 @@ class WordleTextEnv(TextRLEnvironment):
     async def text_step(self, text: str) -> StepResult:
         match = _GUESS_PATTERN.search(text)
         if not match:
+            self._invalid_attempts += 1
             return StepResult(
                 result="I couldn't find a valid guess. Please submit a 5-letter word inside <guess>...</guess> tags."
             )
@@ -311,9 +314,16 @@ class WordleTextEnv(TextRLEnvironment):
         return result
 
     def get_metrics(self) -> dict[str, float]:
+        solved = self._guesses and self._guesses[-1] == self._secret_word
+        scorings = [self._get_scoring(g, self._secret_word) for g in self._guesses]
+        total_greens = sum(s.count("G") for s in scorings)
+        total_yellows = sum(s.count("Y") for s in scorings)
         return {
             "guesses": float(len(self._guesses)),
-            "solved": 1.0 if self._guesses and self._guesses[-1] == self._secret_word else 0.0,
+            "invalid_attempts": float(self._invalid_attempts),
+            "solved": 1.0 if solved else 0.0,
+            "total_greens": float(total_greens),
+            "total_yellows": float(total_yellows),
         }
 
     def state(self) -> State:

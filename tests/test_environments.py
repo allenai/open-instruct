@@ -121,9 +121,14 @@ class TestWordleTextEnv(unittest.TestCase):
 
     def test_metrics(self):
         env = self._make_env()
+        asyncio.run(env.text_step("no tags here"))
         asyncio.run(env.text_step("<guess>HOUSE</guess>"))
         asyncio.run(env.text_step("<guess>CRANE</guess>"))
-        self.assertEqual(env.get_metrics(), {"guesses": 2.0, "solved": 1.0})
+        m = env.get_metrics()
+        self.assertEqual(m["guesses"], 2.0)
+        self.assertEqual(m["invalid_attempts"], 1.0)
+        self.assertEqual(m["solved"], 1.0)
+        self.assertGreater(m["total_greens"], 0)
 
 
 def _random_env_call(tools: list[dict]) -> EnvCall:
