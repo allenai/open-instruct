@@ -28,14 +28,15 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1000 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 4096 \
-    --pack_length 8192 \
+    --response_length 8192 \
+    --pack_length 16384 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 64 \
     --num_samples_per_prompt_rollout 16 \
     --model_name_or_path PrimeIntellect/Qwen3-1.7B-Wordle-SFT \
     --temperature 1.0 \
     --learning_rate 1e-6 \
+    --weight_decay 0.01 \
     --lr_scheduler_type constant \
     --total_episodes 204800 \
     --deepspeed_stage 2 \
