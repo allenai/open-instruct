@@ -247,7 +247,7 @@ class SWERLSandboxEnv(RLEnvironment):
                     rel_path = os.path.relpath(src_path, seeds_dir)
                     container_path = f"/workspace/{rel_path}"
                     parent = os.path.dirname(container_path)
-                    if parent and parent != "/workspace":
+                    if parent != "/workspace":
                         self._backend.run_command(f"mkdir -p {parent}")
                     with open(src_path) as f:
                         content = f.read()
@@ -262,7 +262,7 @@ class SWERLSandboxEnv(RLEnvironment):
                     rel_path = os.path.relpath(src_path, tests_dir)
                     container_path = f"/tests/{rel_path}"
                     parent = os.path.dirname(container_path)
-                    if parent and parent != "/tests":
+                    if parent != "/tests":
                         self._backend.run_command(f"mkdir -p {parent}")
                     with open(src_path) as f:
                         content = f.read()
