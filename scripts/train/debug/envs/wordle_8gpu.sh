@@ -55,7 +55,7 @@ uv run python mason.py \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \
-    --reward_aggregator sum \
+    --reward_aggregator last \
     --advantage_normalization_type centered \
     --vllm_enable_prefix_caching \
     --output_dir output/wordle_8gpu
