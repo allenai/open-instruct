@@ -128,7 +128,7 @@ class GenericSandboxEnv(RLEnvironment):
         self._backend_kwargs = backend_kwargs
         self._backend: SandboxBackend | None = None
         self._step_count = 0
-        self._task_id: str | None = None
+        self._task_prompt: str | None = None
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
@@ -152,7 +152,7 @@ class GenericSandboxEnv(RLEnvironment):
             raise RuntimeError("Reset failed without capturing an error.")
 
     def _do_reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
-        task_id = kwargs.get("task_id")
+        task_prompt = kwargs.get("task_prompt")
         if self._backend is not None:
             self._backend.close()
         bkwargs = dict(self._backend_kwargs)
@@ -160,7 +160,7 @@ class GenericSandboxEnv(RLEnvironment):
         self._backend = create_backend(self._backend_type, **bkwargs)
         self._backend.start()
         self._step_count = 0
-        self._task_id = task_id
+        self._task_prompt = task_prompt
 
         self._backend.run_command("mkdir -p /testbed/input /testbed/output")
         if self._backend.run_command("which git").exit_code == 0:
@@ -173,15 +173,15 @@ class GenericSandboxEnv(RLEnvironment):
         self._backend.run_command("chmod +x /tmp/.sandbox_bash_wrapper.sh")
         self._backend.run_command("echo /testbed > /tmp/.sandbox_cwd")
 
-        if self._write_prompt_file and task_id:
-            self._backend.write_file("/root/prompt.txt", task_id)
+        if self._write_prompt_file and task_prompt:
+            self._backend.write_file("/root/prompt.txt", task_prompt)
 
         observation = "Sandbox ready."
-        if task_id:
-            observation = f"[Task: {task_id}] {observation}"
+        if task_prompt:
+            observation = f"[Task: {task_prompt}] {observation}"
 
         return (
-            StepResult(result=observation, metadata={"task_id": task_id, "backend": self._backend_type}),
+            StepResult(result=observation, metadata={"task_prompt": task_prompt, "backend": self._backend_type}),
             list(self._tool_definitions),
         )
 
@@ -334,7 +334,7 @@ class GenericSandboxEnv(RLEnvironment):
         return {"step_count": float(self._step_count)}
 
     def state(self) -> State:
-        return State(episode_id=self._task_id, step_count=self._step_count)
+        return State(episode_id=self._task_prompt, step_count=self._step_count)
 
     async def close(self) -> None:
         if self._backend is not None:

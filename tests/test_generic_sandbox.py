@@ -91,7 +91,7 @@ def _make_env(**kwargs) -> GenericSandboxEnv:
     """Create a GenericSandboxEnv that uses MockBackend instead of Docker."""
     with patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend):
         env = GenericSandboxEnv(backend="docker", **kwargs)
-        asyncio.run(env.reset(task_id="test-task"))
+        asyncio.run(env.reset(task_prompt="test-task"))
     return env
 
 
@@ -106,7 +106,7 @@ class TestGenericSandboxReset(unittest.TestCase):
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_reset_returns_observation_and_tools(self, _mock):
         env = GenericSandboxEnv(backend="docker")
-        result, tools = asyncio.run(env.reset(task_id="my-task"))
+        result, tools = asyncio.run(env.reset(task_prompt="my-task"))
 
         self.assertIsInstance(result, StepResult)
         self.assertIn("Sandbox ready", result.result)
@@ -116,7 +116,7 @@ class TestGenericSandboxReset(unittest.TestCase):
         self.assertEqual(tool_names, {"execute_bash", "str_replace_editor"})
 
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
-    def test_reset_without_task_id(self, _mock):
+    def test_reset_without_task_prompt(self, _mock):
         env = GenericSandboxEnv(backend="docker")
         result, tools = asyncio.run(env.reset())
 
@@ -139,7 +139,7 @@ class TestGenericSandboxReset(unittest.TestCase):
         mock_create.side_effect = create_side_effect
 
         env = GenericSandboxEnv(backend="docker")
-        result, tools = asyncio.run(env.reset(task_id="retry-test"))
+        result, tools = asyncio.run(env.reset(task_prompt="retry-test"))
         self.assertIn("Sandbox ready", result.result)
         self.assertEqual(call_count, 3)
 
@@ -339,7 +339,7 @@ class TestMetricsAndState(unittest.TestCase):
         _step(env, "execute_bash", {"command": "echo world"})
         self.assertEqual(env.get_metrics()["step_count"], 2.0)
 
-    def test_state_returns_task_id(self):
+    def test_state_returns_task_prompt(self):
         env = _make_env()
         state = env.state()
         self.assertEqual(state.episode_id, "test-task")
@@ -350,7 +350,7 @@ class TestConfigurablePenalty(unittest.TestCase):
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_custom_penalty(self, _mock):
         env = GenericSandboxEnv(backend="docker", penalty=-0.1)
-        asyncio.run(env.reset(task_id="penalty-test"))
+        asyncio.run(env.reset(task_prompt="penalty-test"))
 
         result = _step(env, "execute_bash", {"command": "exit 1"})
         self.assertEqual(result.reward, -0.1)
@@ -364,13 +364,13 @@ class TestCloseAndShutdown(unittest.TestCase):
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_close(self, _mock):
         env = GenericSandboxEnv(backend="docker")
-        asyncio.run(env.reset(task_id="close-test"))
+        asyncio.run(env.reset(task_prompt="close-test"))
         asyncio.run(env.close())
         self.assertIsNone(env._backend)
 
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_shutdown(self, _mock):
         env = GenericSandboxEnv(backend="docker")
-        asyncio.run(env.reset(task_id="shutdown-test"))
+        asyncio.run(env.reset(task_prompt="shutdown-test"))
         asyncio.run(env.shutdown())
         self.assertIsNone(env._backend)
