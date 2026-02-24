@@ -235,17 +235,7 @@ class WordleTextEnv(TextRLEnvironment):
             raise ValueError("WordleTextEnv requires 'word' in env_config (e.g. {'word': 'crane'})")
         self._secret_word = kwargs["word"].upper()
 
-        return StepResult(
-            result=(
-                f"You are playing Wordle. A secret 5-letter word has been chosen. "
-                f"You have {self._max_guesses} attempts to guess it.\n"
-                f"Submit your guess inside <guess>...</guess> tags.\n"
-                f"Feedback for each letter will be given as follows:\n"
-                f" - G (green): correct letter in the correct position\n"
-                f" - Y (yellow): letter exists in the word but in the wrong position\n"
-                f" - X (wrong): letter is not in the word"
-            )
-        )
+        return StepResult(result="")
 
     async def text_step(self, text: str) -> StepResult:
         match = _GUESS_PATTERN.search(text)
@@ -267,7 +257,9 @@ class WordleTextEnv(TextRLEnvironment):
             self._done = True
             turn_efficiency = 1.0 / (n + 1)
             return StepResult(
-                result=f"Feedback:\n{feedback}\nYou got it in {n} guesses!", reward=1.0 + turn_efficiency, done=True
+                result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!",
+                reward=1.0 + turn_efficiency,
+                done=True,
             )
 
         if remaining <= 0:
@@ -276,7 +268,7 @@ class WordleTextEnv(TextRLEnvironment):
             num_yellows = scoring.count("Y")
             partial_credit = 0.2 * num_greens + 0.1 * num_yellows
             return StepResult(
-                result=f"Feedback:\n{feedback}\nGame over! The word was {self._secret_word}.",
+                result=f"\n{feedback}\n\nYou used all {self._max_guesses} guesses. The word was {self._secret_word}.",
                 reward=partial_credit,
                 done=True,
             )
@@ -284,10 +276,7 @@ class WordleTextEnv(TextRLEnvironment):
         num_greens = scoring.count("G")
         num_yellows = scoring.count("Y")
         partial_credit = 0.2 * num_greens + 0.1 * num_yellows
-        return StepResult(
-            result=f"Feedback:\n{feedback}\n{remaining} guess{'es' if remaining != 1 else ''} remaining.",
-            reward=partial_credit,
-        )
+        return StepResult(result=f"\n{feedback}\n\nYou have {remaining} guesses left.", reward=partial_credit)
 
     @staticmethod
     def _format_feedback(guess: str, scoring: list[str]) -> str:

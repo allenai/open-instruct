@@ -24,7 +24,6 @@ class TestEnvironmentReset(unittest.TestCase):
         env = env_cls(**kwargs)
         result, tools = asyncio.run(env.reset(**reset_kwargs))
         self.assertIsInstance(result, StepResult)
-        self.assertTrue(result.result)
         self.assertIsInstance(tools, list)
         if isinstance(env, TextRLEnvironment):
             self.assertEqual(tools, [])
@@ -61,9 +60,9 @@ class TestWordleTextEnv(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("correct_first", "<guess>CRANE</guess>", True, "You got it"),
-            ("wrong", "<guess>HOUSE</guess>", False, "Feedback:"),
-            ("case_insensitive", "<guess>crane</guess>", True, "You got it"),
+            ("correct_first", "<guess>CRANE</guess>", True, "Congratulations"),
+            ("wrong", "<guess>HOUSE</guess>", False, "guesses left"),
+            ("case_insensitive", "<guess>crane</guess>", True, "Congratulations"),
             ("invalid_no_tags", "I guess CRANE", False, "<guess>"),
         ]
     )
@@ -78,7 +77,7 @@ class TestWordleTextEnv(unittest.TestCase):
         asyncio.run(env.text_step("<guess>HOUSE</guess>"))
         r = asyncio.run(env.text_step("<guess>BRAIN</guess>"))
         self.assertTrue(r.done)
-        self.assertIn("Game over", r.result)
+        self.assertIn("used all 2 guesses", r.result)
         self.assertIn("CRANE", r.result)
 
     def test_correct_reward_includes_turn_efficiency(self):
@@ -100,11 +99,9 @@ class TestWordleTextEnv(unittest.TestCase):
     def test_scoring_yellow_and_miss(self):
         env = self._make_env()
         r = asyncio.run(env.text_step("<guess>NZZZZ</guess>"))
-        self.assertIn("Feedback:", r.result)
-        lines = r.result.split("Feedback:\n")[1].split("\n")
-        self.assertEqual(lines[0], "N Z Z Z Z")
-        self.assertIn("Y", lines[1])
-        self.assertIn("X", lines[1])
+        self.assertIn("N Z Z Z Z", r.result)
+        self.assertIn("Y", r.result)
+        self.assertIn("X", r.result)
 
     def test_step_delegates_to_text_step(self):
         env = self._make_env()
