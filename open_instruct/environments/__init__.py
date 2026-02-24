@@ -4,6 +4,7 @@ from .backends import DockerBackend, ExecutionResult, SandboxBackend, create_bac
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, RolloutState, StepResult
 from .generic_sandbox import GenericSandboxEnv, GenericSandboxEnvConfig
 from .pool import EnvironmentPool
+from .swerl_sandbox import SWERLSandboxEnv, SWERLSandboxEnvConfig
 
 __all__ = [
     "BaseEnvConfig",
@@ -18,4 +19,6 @@ __all__ = [
     "create_backend",
     "GenericSandboxEnv",
     "GenericSandboxEnvConfig",
+    "SWERLSandboxEnv",
+    "SWERLSandboxEnvConfig",
 ]
