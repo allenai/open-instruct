@@ -1035,10 +1035,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         if env_config is not None and env_name in acquired:
             _, env_act = acquired[env_name]
             rollout.info["env_name"] = env_name
-            try:
-                rollout.info.update(await env_act.get_metrics.remote())
-            except Exception as e:
-                logger.debug(f"Failed to collect env metrics: {e}")
+            rollout.info.update(await env_act.get_metrics.remote())
         for pool, acq_actor in acquired.values():
             pool.release.remote(acq_actor)
 
