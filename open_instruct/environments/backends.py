@@ -7,15 +7,9 @@ import tarfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import docker as docker_sdk
+
 from open_instruct import logger_utils
-
-try:
-    import docker as docker_sdk
-
-    HAS_DOCKER = True
-except ImportError:
-    docker_sdk = None
-    HAS_DOCKER = False
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -76,9 +70,6 @@ class DockerBackend(SandboxBackend):
         self._client = None
 
     def start(self) -> None:
-        if not HAS_DOCKER:
-            raise ImportError("docker SDK not installed. Run: pip install docker")
-
         logger.info(f"Starting Docker container (image={self._image})")
         if self._client is None:
             self._client = docker_sdk.from_env()
