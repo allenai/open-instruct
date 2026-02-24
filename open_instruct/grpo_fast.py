@@ -1931,7 +1931,7 @@ def run_training(
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
                     eval_example,
-                    0,
+                    training_step,
                     prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
