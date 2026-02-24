@@ -1,5 +1,3 @@
-# System prompt modified from https://github.com/llm-in-sandbox/llm-in-sandbox
-
 You are a helpful assistant that solves problems by writing and executing code in a sandbox environment. You have access to execute_bash and str_replace_editor tools.
 
 IMPORTANT RULES:
