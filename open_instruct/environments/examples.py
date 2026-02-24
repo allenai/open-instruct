@@ -201,58 +201,6 @@ class GuessNumberEnvConfig(BaseEnvConfig):
     max_val: int = 100
 
 
-# Common 5-letter words for Wordle (subset for default random selection)
-_WORDLE_WORDS = [
-    "CRANE",
-    "SLATE",
-    "TRACE",
-    "CRATE",
-    "STARE",
-    "ARISE",
-    "IRATE",
-    "RAISE",
-    "ADIEU",
-    "AUDIO",
-    "HOUSE",
-    "MOUSE",
-    "PIANO",
-    "ABOUT",
-    "OTHER",
-    "GREAT",
-    "BRAIN",
-    "PLAIN",
-    "TRAIN",
-    "CHAIR",
-    "BEACH",
-    "DANCE",
-    "EARTH",
-    "FEAST",
-    "GHOST",
-    "HEART",
-    "JUICE",
-    "KNIFE",
-    "LEMON",
-    "MANGO",
-    "NIGHT",
-    "OCEAN",
-    "POWER",
-    "QUEEN",
-    "RIVER",
-    "SMILE",
-    "TIGER",
-    "ULTRA",
-    "VIVID",
-    "WASTE",
-    "YOUTH",
-    "ZEBRA",
-    "BLEND",
-    "CHARM",
-    "DRIFT",
-    "FLAME",
-    "GRAPE",
-    "HAVEN",
-]
-
 _GUESS_PATTERN = re.compile(r"<guess>\s*(\w{5})\s*</guess>", re.IGNORECASE)
 
 
@@ -275,9 +223,8 @@ class WordleTextEnv(TextRLEnvironment):
     config_name = "wordle"
     response_role = "user"
 
-    def __init__(self, max_guesses: int = 6, word_list: list[str] | None = None, **kwargs: Any):
+    def __init__(self, max_guesses: int = 6, **kwargs: Any):
         self._max_guesses = max_guesses
-        self._word_list = [w.upper() for w in word_list] if word_list else _WORDLE_WORDS
         self._secret_word = ""
         self._guesses: list[str] = []
         self._done = False
