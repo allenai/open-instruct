@@ -15,14 +15,14 @@ class TestEnvironmentReset(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("counter", CounterEnv, {"target": 3}, "3"),
-            ("guess_number", GuessNumberEnv, {"min_val": 1, "max_val": 10}, "5"),
-            ("wordle", WordleTextEnv, {}, "CRANE"),
+            ("counter", CounterEnv, {"target": 3}, {"task_id": "3"}),
+            ("guess_number", GuessNumberEnv, {"min_val": 1, "max_val": 10}, {"task_id": "5"}),
+            ("wordle", WordleTextEnv, {}, {"word": "CRANE"}),
         ]
     )
-    def test_reset_returns_result_and_tools(self, _name, env_cls, kwargs, task_id):
+    def test_reset_returns_result_and_tools(self, _name, env_cls, kwargs, reset_kwargs):
         env = env_cls(**kwargs)
-        result, tools = asyncio.run(env.reset(task_id=task_id))
+        result, tools = asyncio.run(env.reset(**reset_kwargs))
         self.assertIsInstance(result, StepResult)
         self.assertTrue(result.result)
         self.assertIsInstance(tools, list)
@@ -53,7 +53,7 @@ class TestEnvironments(unittest.TestCase):
 class TestWordleTextEnv(unittest.TestCase):
     def _make_env(self, word: str = "CRANE", **kwargs) -> WordleTextEnv:
         env = WordleTextEnv(**kwargs)
-        asyncio.run(env.reset(task_id=word))
+        asyncio.run(env.reset(word=word))
         return env
 
     @parameterized.expand(
@@ -110,7 +110,7 @@ class TestWordleTextEnv(unittest.TestCase):
 
     def test_reset_no_tools(self):
         env = WordleTextEnv()
-        _, tools = asyncio.run(env.reset(task_id="CRANE"))
+        _, tools = asyncio.run(env.reset(word="CRANE"))
         self.assertEqual(tools, [])
 
     def test_response_role(self):
