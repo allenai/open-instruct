@@ -82,6 +82,8 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+    "authlib",
+    "scipy",
 ]
 
 [tool.uv]

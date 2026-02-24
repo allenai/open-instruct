@@ -1237,6 +1237,7 @@ def create_model_and_optimizer(
     tools_config: EnvsConfig | None = None,
     base_env_config: dict | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
+    tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1318,6 +1319,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
+        tool_stop_sequences=tool_stop_sequences,
         max_steps=tools_config.max_steps if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
@@ -2108,20 +2110,43 @@ def initialize_tools_and_envs(
         # Wait for any newly created pools
         ray.get([pool.size.remote() for pool in pools.values()])
 
+    # Collect tool definitions and stop strings from all pools (batched for parallelism)
+    acquire_refs = [pool.acquire.remote() for pool in pools.values()]
+    actors = ray.get(acquire_refs)
+
+    def_refs = [actor.get_tool_definitions.remote() for actor in actors]
+    stop_refs = (
+        [actor.get_stop_strings.remote() for actor in actors] if tools_config.tool_parser_type == "dr_tulu" else []
+    )
+    all_results = ray.get(def_refs + stop_refs)
+    def_results = all_results[: len(def_refs)]
+    stop_results = all_results[len(def_refs) :]
+
+    tool_definitions: list[dict[str, Any]] = []
+    for defs in def_results:
+        tool_definitions.extend(defs)
+
     # Use tool definition names (what the model actually calls) rather than pool keys.
     # For simple Tools, pool key == function name. For stateful envs (e.g., GenericSandboxEnv),
     # the pool key is the env name but function names are the inner tools (execute_bash, etc.).
-    # We only want the actual callable names, not env pool names.
     tool_def_names = [d["function"]["name"] for d in tool_definitions]
     tools_config.tool_call_names = list(dict.fromkeys(tool_def_names))
+
+    tool_stop_strings: list[str] = []
+    for stop_strings in stop_results:
+        if stop_strings:
+            tool_stop_strings.extend(stop_strings)
+
+    for pool, actor in zip(pools.values(), actors):
+        pool.release.remote(actor)
 
     stop_sequences: list[str] = []
     if pools:
         stop_sequences = create_tool_parser(
             parser_type=tools_config.tool_parser_type,
-            tool_actors=[],
             tokenizer=tokenizer,
             tool_definitions=tool_definitions,
+            stop_sequences=tool_stop_strings,
         ).stop_sequences
 
     logger.info(
@@ -2166,12 +2191,6 @@ def main(
         dataset_mixer_list=streaming_config.dataset_mixer_list,
         dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
-    # TODO: Refactor DRTuluToolParser to work with tool_definitions instead of tool_actors.
-    if pools and tools_config.tool_parser_type == "dr_tulu":
-        raise ValueError(
-            "Parser type 'dr_tulu' requires tool_actors which are no longer created (pools are used instead). "
-            "Use --tool_parser_type legacy or --tool_parser_type vllm_hermes."
-        )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
@@ -2271,6 +2290,7 @@ def main(
             tools_config,
             base_env_config,
             pools,
+            tool_stop_sequences,
         )
     )
 
