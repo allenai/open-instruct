@@ -94,7 +94,7 @@ from open_instruct.environments.base import BaseEnvConfig
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig, Tool
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -2071,11 +2071,21 @@ def initialize_tools_and_envs(
     """
     pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
 
+    # Collect tool definitions from CLI-specified pools so we know inner tool names
+    # (e.g., GenericSandboxEnv exposes "execute_bash" and "str_replace_editor").
+    tool_definitions: list[dict[str, Any]] = []
+    for pool in pools.values():
+        actor = ray.get(pool.acquire.remote())
+        defs = ray.get(actor.get_tool_definitions.remote())
+        pool.release.remote(actor)
+        tool_definitions.extend(defs)
+    known_tool_names = set(tool_call_names) | {d["function"]["name"] for d in tool_definitions}
+
     # Auto-discover tools from datasets and create pools for any in TOOL_REGISTRY but not in --tools
     if dataset_mixer_list and dataset_mixer_list_splits:
         dataset_tool_names = _discover_tools_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
         for name in sorted(dataset_tool_names):
-            if name in pools:
+            if name in pools or name in known_tool_names:
                 continue
             if name not in TOOL_REGISTRY:
                 continue
@@ -2087,13 +2097,18 @@ def initialize_tools_and_envs(
             kwargs = asdict(config) | {"call_name": call_name}
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
             tool_call_names.append(call_name)
-        extra = dataset_tool_names - set(pools.keys()) - set(TOOL_REGISTRY.keys())
+            # Collect tool definitions from newly created pool
+            new_actor = ray.get(pools[call_name].acquire.remote())
+            new_defs = ray.get(new_actor.get_tool_definitions.remote())
+            pools[call_name].release.remote(new_actor)
+            tool_definitions.extend(new_defs)
+            known_tool_names.add(call_name)
+            known_tool_names.update(d["function"]["name"] for d in new_defs)
+        extra = dataset_tool_names - known_tool_names - set(TOOL_REGISTRY.keys())
         if extra:
             logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
         # Wait for any newly created pools
         ray.get([pool.size.remote() for pool in pools.values()])
-
-    tools_config.tool_call_names = tool_call_names
 
     # Collect tool definitions and stop strings from all pools (batched for parallelism)
     acquire_refs = [pool.acquire.remote() for pool in pools.values()]
@@ -2110,6 +2125,12 @@ def initialize_tools_and_envs(
     tool_definitions: list[dict[str, Any]] = []
     for defs in def_results:
         tool_definitions.extend(defs)
+
+    # Use tool definition names (what the model actually calls) rather than pool keys.
+    # For simple Tools, pool key == function name. For stateful envs (e.g., GenericSandboxEnv),
+    # the pool key is the env name but function names are the inner tools (execute_bash, etc.).
+    tool_def_names = [d["function"]["name"] for d in tool_definitions]
+    tools_config.tool_call_names = list(dict.fromkeys(tool_def_names))
 
     tool_stop_strings: list[str] = []
     for stop_strings in stop_results:
@@ -2236,7 +2257,17 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = {"max_steps": tools_config.max_steps} if tools_config.enabled else None
+    base_env_config = None
+    if tools_config.enabled:
+        base_env_config = {"max_steps": tools_config.max_steps}
+        # TODO: Support multiple concurrent envs per rollout. Currently only one
+        # stateful environment is supported; the rollout loop acquires/resets a
+        # single env and maps its inner tool names to that actor.
+        for parsed in tools_config._parsed_tools:
+            config_cls = TOOL_REGISTRY.get(parsed.name)
+            if config_cls and not issubclass(config_cls.tool_class, Tool):
+                base_env_config["env_name"] = parsed.call_name
+                break
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
