@@ -899,7 +899,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             env_actor = await pool.acquire.remote()
             acquired[env_name] = (pool, env_actor)
             task_id = env_config.get("task_id")
-            _, env_tools = await env_actor.reset.remote(task_id=task_id)
+            env_kwargs = {k: v for k, v in env_config.items() if k not in ("env_name", "task_id", "max_steps", "pool_size")}
+            _, env_tools = await env_actor.reset.remote(task_id=task_id, **env_kwargs)
             env_response_role = await env_actor.get_response_role.remote()
             is_text_env = await env_actor.get_is_text_env.remote()
 

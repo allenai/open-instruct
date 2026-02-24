@@ -288,7 +288,10 @@ class WordleTextEnv(TextRLEnvironment):
         self._done = False
         self._task_id = task_id
 
-        if task_id and len(task_id) == 5 and task_id.isalpha():
+        word = kwargs.get("word")
+        if word and len(word) == 5 and word.isalpha():
+            self._secret_word = word.upper()
+        elif task_id and len(task_id) == 5 and task_id.isalpha():
             self._secret_word = task_id.upper()
         else:
             self._secret_word = random.choice(self._word_list)
