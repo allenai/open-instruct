@@ -11,7 +11,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "WordleTextEnv 8-GPU (2L/6E) Qwen3-1.7B Wordle" \
+       --description "WordleTextEnv 8-GPU (4L/4E) Qwen3-1.7B Wordle" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --preemptible \
@@ -40,8 +40,8 @@ uv run python mason.py \
     --total_episodes 204800 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --seed 42 \
