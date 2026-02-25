@@ -101,9 +101,6 @@ class ExperimentConfig:
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
-    temperature: float = field(default=1.0, init=False)
-    """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
-
     # Ray
     colocate_train_inference_mode: bool = False
     """Whether to colocate trainer and vLLM inference actors on the same GPUs (mostly for debugging)."""
