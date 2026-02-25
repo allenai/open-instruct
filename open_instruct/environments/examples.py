@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+import nltk
+from nltk.corpus import words as nltk_words
 from openenv.core.env_server.types import State
 
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult, TextRLEnvironment
@@ -197,7 +199,7 @@ class GuessNumberEnvConfig(BaseEnvConfig):
     max_val: int = 100
 
 
-_GUESS_PATTERN = re.compile(r"<guess>\s*\[?(\w+)\]?\s*</guess>", re.IGNORECASE)
+_GUESS_PATTERN = re.compile(r"<guess>\s*\[?([^<\]]+)\]?\s*</guess>", re.IGNORECASE)
 
 
 class WordleTextEnv(TextRLEnvironment):
@@ -219,6 +221,15 @@ class WordleTextEnv(TextRLEnvironment):
     config_name = "wordle"
     response_role = "user"
 
+    _valid_words: ClassVar[set[str] | None] = None
+
+    @classmethod
+    def _load_valid_words(cls) -> set[str]:
+        if cls._valid_words is None:
+            nltk.download("words", quiet=True)
+            cls._valid_words = {w.lower() for w in nltk_words.words()}
+        return cls._valid_words
+
     def __init__(self, max_guesses: int = 6, error_allowance: int = 1, **kwargs: Any):
         self._max_guesses = max_guesses
         self._error_allowance = error_allowance
@@ -226,6 +237,7 @@ class WordleTextEnv(TextRLEnvironment):
         self._guesses: list[str] = []
         self._consecutive_errors = 0
         self._done = False
+        self._words = self._load_valid_words()
 
     async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
@@ -267,7 +279,11 @@ class WordleTextEnv(TextRLEnvironment):
         if not match:
             return self._handle_invalid("Please submit a 5-letter word inside <guess>...</guess> tags.")
 
-        raw_guess = match.group(1)
+        raw_guess = match.group(1).strip()
+        if not raw_guess.isalpha():
+            return self._handle_invalid(
+                f"Your guess '{raw_guess}' contains invalid characters. Please submit a single word."
+            )
         if len(raw_guess) != 5:
             return self._handle_invalid(
                 f"Your guess '{raw_guess}' is {len(raw_guess)} letters. Please submit a 5-letter word."
@@ -277,6 +293,9 @@ class WordleTextEnv(TextRLEnvironment):
 
         if guess in self._guesses:
             return self._handle_invalid(f"You have already guessed '{guess}' before. Please try a different word.")
+
+        if guess.lower() not in self._words:
+            return self._handle_invalid(f"'{guess}' is not an English word.")
 
         # Valid move — reset consecutive error count
         self._consecutive_errors = 0
