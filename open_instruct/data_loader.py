@@ -770,6 +770,7 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
     combined_tool_call_stats = []
+    combined_rollout_states = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -791,6 +792,7 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
         combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_rollout_states.extend(result.request_info.rollout_states)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -820,6 +822,7 @@ def accumulate_inference_batches(
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
         tool_call_stats=combined_tool_call_stats,
+        rollout_states=combined_rollout_states,
     )
 
     combined_result = data_types.GenerationResult(
