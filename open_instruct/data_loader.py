@@ -1056,10 +1056,12 @@ class DataPreparationActor:
             if self.shutdown_requested:
                 return
 
-            # Block if too far ahead of training (async_steps bounds the gap)
             while step - self._last_consumed_step > self.config.async_steps:
                 if self.shutdown_requested:
                     return
+                logger.info(
+                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                )
                 time.sleep(0.1)
 
             logger.info(
