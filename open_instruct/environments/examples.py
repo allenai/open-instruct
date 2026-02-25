@@ -253,12 +253,14 @@ class WordleTextEnv(TextRLEnvironment):
 
         feedback = self._format_feedback(guess, scoring)
 
+        format_reward = 0.2
+
         if guess == self._secret_word:
             self._done = True
-            turn_efficiency = 1.0 / (n + 1)
+            # correct_answer (1.0) + length_bonus (1.0/n) + format_reward
             return StepResult(
                 result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!",
-                reward=1.0 + turn_efficiency,
+                reward=1.0 + 1.0 / n + format_reward,
                 done=True,
             )
 
@@ -266,17 +268,20 @@ class WordleTextEnv(TextRLEnvironment):
             self._done = True
             num_greens = scoring.count("G")
             num_yellows = scoring.count("Y")
-            partial_credit = 0.2 * num_greens + 0.1 * num_yellows
+            # partial_answer + format_reward (no correct_answer or length_bonus)
             return StepResult(
                 result=f"\n{feedback}\n\nYou used all {self._max_guesses} guesses. The word was {self._secret_word}.",
-                reward=partial_credit,
+                reward=0.2 * num_greens + 0.1 * num_yellows + format_reward,
                 done=True,
             )
 
+        # Intermediate guess: partial credit + format reward
         num_greens = scoring.count("G")
         num_yellows = scoring.count("Y")
-        partial_credit = 0.2 * num_greens + 0.1 * num_yellows
-        return StepResult(result=f"\n{feedback}\n\nYou have {remaining} guesses left.", reward=partial_credit)
+        return StepResult(
+            result=f"\n{feedback}\n\nYou have {remaining} guesses left.",
+            reward=0.2 * num_greens + 0.1 * num_yellows + format_reward,
+        )
 
     @staticmethod
     def _format_feedback(guess: str, scoring: list[str]) -> str:

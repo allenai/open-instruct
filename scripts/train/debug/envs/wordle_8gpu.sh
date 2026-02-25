@@ -51,7 +51,7 @@ uv run python mason.py \
     --with_tracking \
     --push_to_hub false \
     --save_traces \
-    --max_steps 200 \
+    --max_steps 20 \
     --tool_parser_type vllm_hermes \
     --dataset_skip_cache \
     --reward_aggregator last \
