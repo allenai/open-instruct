@@ -197,7 +197,7 @@ class GuessNumberEnvConfig(BaseEnvConfig):
     max_val: int = 100
 
 
-_GUESS_PATTERN = re.compile(r"<guess>\s*\[?(\w{5})\]?\s*</guess>", re.IGNORECASE)
+_GUESS_PATTERN = re.compile(r"<guess>\s*\[?(\w+)\]?\s*</guess>", re.IGNORECASE)
 
 
 class WordleTextEnv(TextRLEnvironment):
@@ -238,14 +238,30 @@ class WordleTextEnv(TextRLEnvironment):
         return StepResult(result="")
 
     async def text_step(self, text: str) -> StepResult:
-        match = _GUESS_PATTERN.search(text)
+        matches = list(_GUESS_PATTERN.finditer(text))
+        match = matches[-1] if matches else None
         if not match:
             self._invalid_attempts += 1
             return StepResult(
                 result="I couldn't find a valid guess. Please submit a 5-letter word inside <guess>...</guess> tags."
             )
 
-        guess = match.group(1).upper()
+        raw_guess = match.group(1)
+        if len(raw_guess) != 5:
+            self._invalid_attempts += 1
+            return StepResult(
+                result=f"Your guess '{raw_guess}' is {len(raw_guess)} letters. Please submit a 5-letter word.",
+                reward=0.2,
+            )
+
+        guess = raw_guess.upper()
+
+        if guess in self._guesses:
+            self._invalid_attempts += 1
+            return StepResult(
+                result=f"You have already guessed '{guess}' before. Please try a different word.", reward=0.2
+            )
+
         self._guesses.append(guess)
         scoring = self._get_scoring(guess, self._secret_word)
         n = len(self._guesses)
