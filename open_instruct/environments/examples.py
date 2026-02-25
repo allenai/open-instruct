@@ -219,19 +219,18 @@ class WordleTextEnv(TextRLEnvironment):
     config_name = "wordle"
     response_role = "user"
 
-    def __init__(self, max_guesses: int = 6, **kwargs: Any):
+    def __init__(self, max_guesses: int = 6, error_allowance: int = 1, **kwargs: Any):
         self._max_guesses = max_guesses
+        self._error_allowance = error_allowance
         self._secret_word = ""
         self._guesses: list[str] = []
-        self._invalid_attempts = 0
+        self._consecutive_errors = 0
         self._done = False
-        self._last_valid_reward = 0.0
 
     async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
-        self._invalid_attempts = 0
+        self._consecutive_errors = 0
         self._done = False
-        self._last_valid_reward = 0.0
 
         if "word" not in kwargs:
             raise ValueError("WordleTextEnv requires 'word' in env_config (e.g. {'word': 'crane'})")
@@ -239,32 +238,34 @@ class WordleTextEnv(TextRLEnvironment):
 
         return StepResult(result="")
 
+    def _handle_invalid(self, reason: str) -> StepResult:
+        """Handle an invalid move: allow one retry, then end the game (matches TextArena error_allowance=1)."""
+        self._consecutive_errors += 1
+        if self._consecutive_errors <= self._error_allowance:
+            return StepResult(result=f"Invalid move: {reason} Please resubmit a valid move.")
+        # Exceeded error allowance — game over
+        self._done = True
+        return StepResult(result=f"Invalid move: {reason}", done=True)
+
     async def text_step(self, text: str) -> StepResult:
         matches = list(_GUESS_PATTERN.finditer(text))
         match = matches[-1] if matches else None
         if not match:
-            self._invalid_attempts += 1
-            return StepResult(
-                result="I couldn't find a valid guess. Please submit a 5-letter word inside <guess>...</guess> tags.",
-                reward=self._last_valid_reward,
-            )
+            return self._handle_invalid("Please submit a 5-letter word inside <guess>...</guess> tags.")
 
         raw_guess = match.group(1)
         if len(raw_guess) != 5:
-            self._invalid_attempts += 1
-            return StepResult(
-                result=f"Your guess '{raw_guess}' is {len(raw_guess)} letters. Please submit a 5-letter word.",
-                reward=self._last_valid_reward,
+            return self._handle_invalid(
+                f"Your guess '{raw_guess}' is {len(raw_guess)} letters. Please submit a 5-letter word."
             )
 
         guess = raw_guess.upper()
 
         if guess in self._guesses:
-            self._invalid_attempts += 1
-            return StepResult(
-                result=f"You have already guessed '{guess}' before. Please try a different word.",
-                reward=self._last_valid_reward,
-            )
+            return self._handle_invalid(f"You have already guessed '{guess}' before. Please try a different word.")
+
+        # Valid move — reset consecutive error count
+        self._consecutive_errors = 0
 
         self._guesses.append(guess)
         scoring = self._get_scoring(guess, self._secret_word)
@@ -277,16 +278,15 @@ class WordleTextEnv(TextRLEnvironment):
 
         if guess == self._secret_word:
             self._done = True
-            reward = 1.0 + 1.0 / n + format_reward
-            self._last_valid_reward = reward
             return StepResult(
-                result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!", reward=reward, done=True
+                result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!",
+                reward=1.0 + 1.0 / n + format_reward,
+                done=True,
             )
 
         num_greens = scoring.count("G")
         num_yellows = scoring.count("Y")
         reward = 0.2 * num_greens + 0.1 * num_yellows + format_reward
-        self._last_valid_reward = reward
 
         if remaining <= 0:
             self._done = True
@@ -330,7 +330,7 @@ class WordleTextEnv(TextRLEnvironment):
         total_yellows = sum(s.count("Y") for s in scorings)
         return {
             "guesses": float(len(self._guesses)),
-            "invalid_attempts": float(self._invalid_attempts),
+            "invalid_attempts": float(self._consecutive_errors),
             "solved": 1.0 if solved else 0.0,
             "total_greens": float(total_greens),
             "total_yellows": float(total_yellows),
