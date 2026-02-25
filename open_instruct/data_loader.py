@@ -536,6 +536,13 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: 
 
 @dataclass
 class BatchStatistics:
+    """Container for per-prompt statistics from accumulation.
+
+    `prompt_datasets` is aligned with prompts (length = num_prompts), matching
+    `percent_solved_hist` and `prompt_indices`. Values are sanitized metric-safe
+    dataset keys.
+    """
+
     prompt_lengths: list[int]
     response_lengths: list[int]
     filtered_prompts: int
@@ -678,7 +685,7 @@ def accumulate_inference_batches(
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
-        prompt_dataset_key = _normalize_dataset_metric_key(dataset_name)
+        prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
@@ -1176,8 +1183,8 @@ class DataPreparationActor:
                 stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 
                 batch_metrics_dict = asdict(batch_stats)
-                # Avoid logging raw dataset-name lists as metrics.
-                batch_metrics_dict.pop("prompt_datasets", None)
+                # Keep dataset names as internal metadata for downstream metric aggregation.
+                prompt_datasets = batch_metrics_dict.pop("prompt_datasets", None)
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
@@ -1206,6 +1213,8 @@ class DataPreparationActor:
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
+                if prompt_datasets is not None:
+                    step_metrics["batch/prompt_datasets"] = prompt_datasets
                 solve_rates = batch_stats.percent_solved_hist
                 if solve_rates.size > 0:
                     step_metrics["val/train_prompt_solve_rate_count"] = int(solve_rates.size)
@@ -1235,8 +1244,7 @@ class DataPreparationActor:
                     ):
                         dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
                     for dataset_name, rates in dataset_to_solve_rates.items():
-                        metric_name = _sanitize_metric_name(dataset_name)
-                        step_metrics[f"val/train_prompt_solve_rate_mean_{metric_name}"] = float(np.mean(rates))
+                        step_metrics[f"val/train_prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
 
                 tool_stats = ToolStatistics(tool_names=self.tool_names)
                 excess_calls = result.request_info.excess_tool_calls or [

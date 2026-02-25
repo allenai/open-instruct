@@ -210,7 +210,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             active_tools=None,
         )
         eval_batch_stats = SimpleNamespace(
-            percent_solved_hist=np.array([0.25, 0.25]), prompt_indices=[0, 1], prompt_datasets=["subset/a", "subset b"]
+            percent_solved_hist=np.array([0.25, 0.25]), prompt_indices=[0, 1], prompt_datasets=["subset_a", "subset_b"]
         )
 
         with (

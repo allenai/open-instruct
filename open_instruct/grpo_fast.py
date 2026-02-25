@@ -1815,9 +1815,8 @@ def maybe_evaluate(
                 for prompt_idx, dataset_name in enumerate(eval_batch_stats.prompt_datasets):
                     dataset_to_indices.setdefault(dataset_name, []).append(prompt_idx)
                 for dataset_name, dataset_indices in dataset_to_indices.items():
-                    metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
                     dataset_prompt_pass_at = per_prompt_pass_at_by_k[np.asarray(dataset_indices, dtype=int)]
-                    dataset_pass_at_by_k[metric_name] = {
+                    dataset_pass_at_by_k[dataset_name] = {
                         k: float(dataset_prompt_pass_at[:, col].mean()) for col, k in enumerate(pass_at_ks)
                     }
             elif eval_batch_stats is not None:
@@ -1871,8 +1870,7 @@ def maybe_evaluate(
             ):
                 dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
             for dataset_name, rates in dataset_to_solve_rates.items():
-                metric_name = data_loader_lib._sanitize_metric_name(dataset_name)
-                eval_metrics[f"eval/prompt_solve_rate_mean_{metric_name}"] = float(np.mean(rates))
+                eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
