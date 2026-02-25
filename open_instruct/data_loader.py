@@ -1018,6 +1018,7 @@ class DataPreparationActor:
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
         self.metrics: dict[int, dict] = {}
         self.current_prepared_step = -1
+        self._last_consumed_step = -1
         self.lock = threading.Lock()
         self.shutdown_requested = False
         self.training_step = 0
@@ -1054,6 +1055,12 @@ class DataPreparationActor:
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
                 return
+
+            # Block if too far ahead of training (async_steps bounds the gap)
+            while step - self._last_consumed_step > self.config.async_steps:
+                if self.shutdown_requested:
+                    return
+                time.sleep(0.1)
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1250,6 +1257,7 @@ class DataPreparationActor:
                 if step <= self.current_prepared_step:
                     batch_data = self.prepared_data[step][rank]
                     result = {"batch": batch_data, "metrics": self.metrics[step]}
+                    self._last_consumed_step = max(self._last_consumed_step, step)
                     self._cleanup_old_steps(step)
                     logger.info(
                         f"[DataPreparationActor.get_data] rank={rank} got data for step={step} after {wait_count} waits"
