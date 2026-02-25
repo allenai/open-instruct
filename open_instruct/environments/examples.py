@@ -238,14 +238,28 @@ class WordleTextEnv(TextRLEnvironment):
 
         return StepResult(result="")
 
+    def _rubric_reward_on_error(self) -> float:
+        """Compute reward as prime-rl's rubric would on error termination.
+
+        partial_answer: 0.2*greens + 0.1*yellows from the last valid guess's scoring.
+        format_reward: 0.2 * (valid_guesses / total_messages) where total includes error turns.
+        """
+        partial = 0.0
+        if self._guesses:
+            last_scoring = self._get_scoring(self._guesses[-1], self._secret_word)
+            partial = 0.2 * last_scoring.count("G") + 0.1 * last_scoring.count("Y")
+        total_messages = len(self._guesses) + self._consecutive_errors
+        fmt = 0.2 * (len(self._guesses) / total_messages) if total_messages > 0 else 0.0
+        return partial + fmt
+
     def _handle_invalid(self, reason: str) -> StepResult:
         """Handle an invalid move: allow one retry, then end the game (matches TextArena error_allowance=1)."""
         self._consecutive_errors += 1
         if self._consecutive_errors <= self._error_allowance:
             return StepResult(result=f"Invalid move: {reason} Please resubmit a valid move.")
-        # Exceeded error allowance — game over
+        # Exceeded error allowance — game over with rubric-style partial credit
         self._done = True
-        return StepResult(result=f"Invalid move: {reason}", done=True)
+        return StepResult(result=f"Invalid move: {reason}", reward=self._rubric_reward_on_error(), done=True)
 
     async def text_step(self, text: str) -> StepResult:
         matches = list(_GUESS_PATTERN.finditer(text))
