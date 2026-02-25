@@ -15,31 +15,41 @@ echo PATH=$PATH
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
-RAY_NODE_PORT=8888
+RAY_INSTANCE_KEY="${RAY_INSTANCE_KEY:-${BEAKER_EXPERIMENT_ID:-${BEAKER_JOB_ID:-${BEAKER_TASK_ID:-${BEAKER_WORKLOAD_ID:-${HOSTNAME}}}}}}"
+RAY_KEY_HASH=$(echo -n "${RAY_INSTANCE_KEY}" | cksum | awk '{print $1}')
+RAY_NODE_PORT="${RAY_NODE_PORT:-$((18000 + RAY_KEY_HASH % 20000))}"
+RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-$((RAY_NODE_PORT + 1))}"
+export RAY_TMPDIR="${RAY_TMPDIR:-/tmp/ray_${RAY_INSTANCE_KEY}}"
+
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
-ray stop --force
+mkdir -p "${RAY_TMPDIR}"
 
-# Ray can leave stale metadata in /tmp/ray briefly after stop; clear it before start.
-rm -rf /tmp/ray/session_* /tmp/ray/ray_current_cluster 2>/dev/null || true
-
-# Give process teardown a short window to finish before starting a new head.
-for _ in 1 2 3 4 5; do
-    if ! pgrep -fa "raylet|gcs_server|dashboard|monitor.py" >/dev/null 2>&1; then
-        break
-    fi
-    sleep 1
-done
+echo "[ray_node_setup] RAY_INSTANCE_KEY=${RAY_INSTANCE_KEY}"
+echo "[ray_node_setup] RAY_NODE_PORT=${RAY_NODE_PORT}"
+echo "[ray_node_setup] RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT}"
+echo "[ray_node_setup] RAY_TMPDIR=${RAY_TMPDIR}"
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
+    # Best-effort: stop any stale Ray process from this job instance only.
+    ray stop --force >/dev/null 2>&1 || true
+
+    # Clear only this job's Ray metadata, not the global /tmp/ray.
+    rm -rf "${RAY_TMPDIR}/session_"* "${RAY_TMPDIR}/ray_current_cluster" 2>/dev/null || true
+
     for attempt in 1 2 3; do
-        if ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0; then
+        if ray start \
+            --head \
+            --port="${RAY_NODE_PORT}" \
+            --dashboard-host=0.0.0.0 \
+            --dashboard-port="${RAY_DASHBOARD_PORT}" \
+            --temp-dir="${RAY_TMPDIR}"; then
             export RAY_ADDRESS="127.0.0.1:${RAY_NODE_PORT}"
             break
         fi
         echo "[ray_node_setup] Ray head start failed on attempt ${attempt}; retrying after cleanup"
         ray stop --force >/dev/null 2>&1 || true
-        rm -rf /tmp/ray/session_* /tmp/ray/ray_current_cluster 2>/dev/null || true
+        rm -rf "${RAY_TMPDIR}/session_"* "${RAY_TMPDIR}/ray_current_cluster" 2>/dev/null || true
         sleep 2
         if [ "$attempt" -eq 3 ]; then
             echo "[ray_node_setup] Failed to start Ray head after ${attempt} attempts"
@@ -50,7 +60,7 @@ else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
     # Start worker without --block so we can control lifecycle and exit code.
-    ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0
+    ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0 --temp-dir="${RAY_TMPDIR}"
 
     cleanup() {
         echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting 0"
