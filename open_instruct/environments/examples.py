@@ -225,11 +225,13 @@ class WordleTextEnv(TextRLEnvironment):
         self._guesses: list[str] = []
         self._invalid_attempts = 0
         self._done = False
+        self._last_valid_reward = 0.0
 
     async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
         self._invalid_attempts = 0
         self._done = False
+        self._last_valid_reward = 0.0
 
         if "word" not in kwargs:
             raise ValueError("WordleTextEnv requires 'word' in env_config (e.g. {'word': 'crane'})")
@@ -243,7 +245,8 @@ class WordleTextEnv(TextRLEnvironment):
         if not match:
             self._invalid_attempts += 1
             return StepResult(
-                result="I couldn't find a valid guess. Please submit a 5-letter word inside <guess>...</guess> tags."
+                result="I couldn't find a valid guess. Please submit a 5-letter word inside <guess>...</guess> tags.",
+                reward=self._last_valid_reward,
             )
 
         raw_guess = match.group(1)
@@ -251,7 +254,7 @@ class WordleTextEnv(TextRLEnvironment):
             self._invalid_attempts += 1
             return StepResult(
                 result=f"Your guess '{raw_guess}' is {len(raw_guess)} letters. Please submit a 5-letter word.",
-                reward=0.2,
+                reward=self._last_valid_reward,
             )
 
         guess = raw_guess.upper()
@@ -259,7 +262,8 @@ class WordleTextEnv(TextRLEnvironment):
         if guess in self._guesses:
             self._invalid_attempts += 1
             return StepResult(
-                result=f"You have already guessed '{guess}' before. Please try a different word.", reward=0.2
+                result=f"You have already guessed '{guess}' before. Please try a different word.",
+                reward=self._last_valid_reward,
             )
 
         self._guesses.append(guess)
@@ -273,31 +277,27 @@ class WordleTextEnv(TextRLEnvironment):
 
         if guess == self._secret_word:
             self._done = True
-            # correct_answer (1.0) + length_bonus (1.0/n) + format_reward
+            reward = 1.0 + 1.0 / n + format_reward
+            self._last_valid_reward = reward
             return StepResult(
-                result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!",
-                reward=1.0 + 1.0 / n + format_reward,
-                done=True,
+                result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!", reward=reward, done=True
             )
+
+        num_greens = scoring.count("G")
+        num_yellows = scoring.count("Y")
+        reward = 0.2 * num_greens + 0.1 * num_yellows + format_reward
+        self._last_valid_reward = reward
 
         if remaining <= 0:
             self._done = True
-            num_greens = scoring.count("G")
-            num_yellows = scoring.count("Y")
-            # partial_answer + format_reward (no correct_answer or length_bonus)
             return StepResult(
                 result=f"\n{feedback}\n\nYou used all {self._max_guesses} guesses. The word was {self._secret_word}.",
-                reward=0.2 * num_greens + 0.1 * num_yellows + format_reward,
+                reward=reward,
                 done=True,
             )
 
         # Intermediate guess: partial credit + format reward
-        num_greens = scoring.count("G")
-        num_yellows = scoring.count("Y")
-        return StepResult(
-            result=f"\n{feedback}\n\nYou have {remaining} guesses left.",
-            reward=0.2 * num_greens + 0.1 * num_yellows + format_reward,
-        )
+        return StepResult(result=f"\n{feedback}\n\nYou have {remaining} guesses left.", reward=reward)
 
     @staticmethod
     def _format_feedback(guess: str, scoring: list[str]) -> str:
