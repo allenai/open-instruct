@@ -1096,13 +1096,6 @@ class RewardConfig:
             metrics: dict[str, Any] = {}
             format_scores: list[float] = []
 
-            if self.spurious_reward_mode:
-                random_binary_scores = np.random.randint(0, 2, size=len(decoded_responses)).astype(float)
-                spurious_scores = random_binary_scores * float(self.verification_reward)
-                metrics["objective/spurious_reward"] = spurious_scores.mean()
-                metrics["objective/spurious_correct_rate"] = (spurious_scores > 0.0).mean()
-                return spurious_scores.tolist(), metrics
-
             if self.apply_r1_style_format_reward:
                 format_scores = soft_format_reward_func(decoded_responses, self.r1_style_format_reward)
                 if len(format_scores) != len(scores):
@@ -1148,6 +1141,14 @@ class RewardConfig:
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = self.non_stop_penalty_value
+
+            if self.spurious_reward_mode:
+                random_binary_scores = np.random.randint(0, 2, size=len(decoded_responses)).astype(float)
+                spurious_scores = random_binary_scores * float(self.verification_reward)
+                scores = spurious_scores.tolist()
+
+                metrics["objective/spurious_reward"] = spurious_scores.mean()
+                metrics["objective/spurious_correct_rate"] = (spurious_scores > 0.0).mean()
 
             return scores, metrics
 

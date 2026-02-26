@@ -5,7 +5,9 @@ Test script for verifier functionality in Python
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
+import numpy as np
 from parameterized import parameterized
 
 from open_instruct.data_types import RequestInfo
@@ -178,6 +180,50 @@ class TestRewardConfig(unittest.TestCase):
         self.assertTrue(all(score in {0.0, float(verification_reward)} for score in scores))
         self.assertIn("objective/spurious_reward", metrics)
         self.assertIn("objective/spurious_correct_rate", metrics)
+
+    def test_spurious_reward_mode_logs_spurious_metrics(self):
+        verification_reward = 10
+        n = 4
+        reward_fn = RewardConfig(
+            apply_r1_style_format_reward=False,
+            apply_verifiable_reward=True,
+            non_stop_penalty=False,
+            spurious_reward_mode=True,
+            verification_reward=verification_reward,
+            verifier_functions={},
+        ).build()
+
+        with (
+            patch(
+                "open_instruct.ground_truth_utils.apply_verifiable_reward",
+                return_value=([0.0, 10.0, 10.0, 0.0], [{}, {}, {}, {}]),
+            ),
+            patch("open_instruct.ground_truth_utils.np.random.randint", return_value=np.array([1, 0, 1, 0])),
+        ):
+            scores, metrics = asyncio.run(
+                reward_fn(
+                    responses=[[1, 2, 3] for _ in range(n)],
+                    decoded_responses=["x"] * n,
+                    ground_truths=["y"] * n,
+                    datasets=["gsm8k"] * n,
+                    finish_reasons=["stop"] * n,
+                    infos=RequestInfo(
+                        num_calls=[0] * n,
+                        timeouts=[0] * n,
+                        tool_errors=[""] * n,
+                        tool_outputs=[""] * n,
+                        tool_runtimes=[0.0] * n,
+                        tool_calleds=[False] * n,
+                    ),
+                    queries=["q"] * n,
+                )
+            )
+
+        self.assertEqual(scores, [10.0, 0.0, 10.0, 0.0])
+        self.assertNotIn("objective/true_objective_reward", metrics)
+        self.assertNotIn("objective/true_objective_correct_rate", metrics)
+        self.assertEqual(metrics["objective/spurious_reward"], 5.0)
+        self.assertEqual(metrics["objective/spurious_correct_rate"], 0.5)
 
 
 if __name__ == "__main__":
