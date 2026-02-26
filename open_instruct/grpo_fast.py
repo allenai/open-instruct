@@ -2434,6 +2434,7 @@ def main(
         r1_style_format_reward=streaming_config.r1_style_format_reward,
         apply_verifiable_reward=streaming_config.apply_verifiable_reward,
         verification_reward=streaming_config.verification_reward,
+        spurious_reward_mode=streaming_config.spurious_reward_mode,
         non_stop_penalty=streaming_config.non_stop_penalty,
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
         only_reward_good_outputs=tools_config.only_reward_good_outputs,

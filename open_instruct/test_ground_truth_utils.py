@@ -3,11 +3,13 @@
 Test script for verifier functionality in Python
 """
 
+import asyncio
 import unittest
 
 from parameterized import parameterized
 
-from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier
+from open_instruct.data_types import RequestInfo
+from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier, RewardConfig
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -141,6 +143,41 @@ class TestF1Verifier(unittest.TestCase):
             places=5,
             msg=f"Failed for {name}: prediction='{prediction}', labels={labels}",
         )
+
+
+class TestRewardConfig(unittest.TestCase):
+    def test_spurious_reward_mode_outputs_zero_or_verification_reward(self):
+        verification_reward = 10
+        reward_fn = RewardConfig(
+            apply_r1_style_format_reward=False,
+            apply_verifiable_reward=False,
+            non_stop_penalty=False,
+            spurious_reward_mode=True,
+            verification_reward=verification_reward,
+        ).build()
+        n = 64
+        scores, metrics = asyncio.run(
+            reward_fn(
+                responses=[[1, 2, 3] for _ in range(n)],
+                decoded_responses=["x"] * n,
+                ground_truths=["y"] * n,
+                datasets=["gsm8k"] * n,
+                finish_reasons=["stop"] * n,
+                infos=RequestInfo(
+                    num_calls=[0] * n,
+                    timeouts=[0] * n,
+                    tool_errors=[""] * n,
+                    tool_outputs=[""] * n,
+                    tool_runtimes=[0.0] * n,
+                    tool_calleds=[False] * n,
+                ),
+                queries=["q"] * n,
+            )
+        )
+        self.assertEqual(len(scores), n)
+        self.assertTrue(all(score in {0.0, float(verification_reward)} for score in scores))
+        self.assertIn("objective/spurious_reward", metrics)
+        self.assertIn("objective/spurious_correct_rate", metrics)
 
 
 if __name__ == "__main__":
