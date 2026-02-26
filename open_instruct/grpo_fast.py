@@ -329,6 +329,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
+                # Save value model dir path to load later (after value model is initialized)
+                self.value_model_checkpoint_path = None
+                if args.use_value_model and states.get("value_model_saved", False):
+                    value_model_dir = os.path.join(args.checkpoint_state_dir, "value_model")
+                    if os.path.exists(os.path.join(value_model_dir, "value_model.bin")):
+                        self.value_model_checkpoint_path = value_model_dir
+                        logger.info(f"{self.rank=}: Will load value model from {value_model_dir}")
+
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
@@ -359,6 +367,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
+
+        # Value model for PPO
+        self.value_model = None
+        if args.use_value_model:
+            self._init_value_model(args, model_config)
+
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
@@ -397,6 +411,228 @@ class PolicyTrainerRayProcess(RayProcess):
         self.dataloader = iter(self._streaming_dataloader)
 
         return optimization_steps_done
+
+    def _init_value_model(
+        self,
+        args: grpo_utils.ExperimentConfig,
+        model_config: ModelConfig,
+    ) -> None:
+        """Initialize a separate value model for PPO training.
+
+        Uses the same training DS config as the policy model (matching ppo_fast.py).
+        The LM head is replaced with a Linear(hidden_size, 1) value head.
+        """
+        logger.info(f"{self.rank=}: Initializing value model")
+
+        checkpoint_path = getattr(self, "value_model_checkpoint_path", None)
+
+        # Temporarily disable HfDeepSpeedConfig so the model loads with full weights
+        # (not ZeRO-3 sharded/meta). We need full weights to replace the LM head.
+        import transformers.integrations.deepspeed as _hf_ds_integration
+        saved_ds_config = _hf_ds_integration._hf_deepspeed_config_weak_ref
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = None
+
+        value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
+        self.value_model = AutoModelForCausalLM.from_pretrained(
+            value_model_path,
+            revision=model_config.model_revision if args.value_model_name_or_path is None else None,
+            torch_dtype=torch.bfloat16,
+            attn_implementation=model_config.attn_implementation,
+            use_cache=False,
+        )
+        disable_dropout_in_model(self.value_model)
+
+        # Replace the LM head with a newly initialized Linear(hidden_size, 1)
+        hidden_size = self.value_model.config.hidden_size
+        value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+        std = 1.0 / (hidden_size + 1) ** 0.5
+        torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
+        self.value_model.lm_head = value_head
+        logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
+
+        # Restore HfDeepSpeedConfig
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
+
+        # Load from checkpoint if available
+        if checkpoint_path is not None:
+            model_file = os.path.join(checkpoint_path, "value_model.bin")
+            state_dict = torch.load(model_file, map_location=self.device, weights_only=True)
+            self.value_model.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded value model from checkpoint {model_file}")
+
+        # Use the same training DS config as the policy (matching ppo_fast.py)
+        value_ds_config = get_train_ds_config(
+            offload=args.deepspeed_offload_param,
+            adam_offload=args.deepspeed_offload_optimizer,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            zpg=args.deepspeed_zpg,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
+        value_ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        value_ds_config["gradient_accumulation_steps"] = 1
+
+        # Create optimizer and LR scheduler for the value model
+        value_lr = args.value_learning_rate or args.learning_rate
+        if args.set_weight_decay_on_bias_and_norm:
+            value_optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
+        else:
+            value_optim_params = self.value_model.parameters()
+        self.value_optimizer = torch.optim.AdamW(value_optim_params, lr=value_lr, fused=args.fused_optimizer)
+
+        effective_value_mini_batches = args.value_num_mini_batches or args.num_mini_batches
+        num_value_scheduler_steps = args.num_training_steps * args.num_epochs * effective_value_mini_batches
+        warm_up_steps = args.warm_up_steps
+        if args.warmup_ratio > 0.0:
+            warm_up_steps = int(num_value_scheduler_steps * args.warmup_ratio)
+        value_scheduler = get_scheduler(
+            args.lr_scheduler_type,
+            optimizer=self.value_optimizer,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_value_scheduler_steps,
+        )
+
+        self.value_model, self.value_optimizer, _, self.value_scheduler = deepspeed.initialize(
+            model=self.value_model,
+            optimizer=self.value_optimizer,
+            config=value_ds_config,
+            lr_scheduler=value_scheduler,
+            dist_init_required=False,
+            mpu=self.mpu,
+        )
+
+        # Enable gradient checkpointing
+        unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+        if hasattr(unwrapped, "gradient_checkpointing_enable"):
+            unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            logger.info(f"{self.rank=}: Enabled gradient checkpointing on value model")
+
+        self.value_model.train()
+        logger.info(f"{self.rank=}: Loaded value model from {value_model_path} (lr={value_lr})")
+
+    def forward_value(
+        self,
+        query_response: torch.LongTensor,
+        attention_mask: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        response_mask: torch.BoolTensor,
+        pad_token_id: int,
+        use_grad: bool = False,
+    ) -> torch.Tensor:
+        """Compute value estimates using input-shifted convention (matching ppo_fast.py).
+
+        Feeds tokens[:, :-1] to the model, producing L-1 values that are naturally aligned
+        with logprobs (also L-1). This avoids all off-by-one alignment issues.
+
+        Returns:
+            values: Tensor of shape (batch_size, seq_len - 1) with value estimates.
+                    Masked by response_mask[:, 1:] so non-response positions are 0.
+        """
+        padding_mask = query_response != pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+
+        context_manager = torch.enable_grad() if use_grad else torch.no_grad()
+
+        with context_manager:
+            output = self.value_model(
+                input_ids=input_ids[:, :-1],
+                attention_mask=attention_mask[:, :-1].clamp(0, 1),
+                position_ids=position_ids[:, :-1],
+                return_dict=True,
+            )
+            values = output.logits.squeeze(-1)  # (batch, seq_len - 1)
+            values = values * response_mask[:, 1:].float()
+        return values
+
+    def _gather_for_gae(
+        self,
+        values: torch.Tensor,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        response_masks: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+        """Gather tensors across SP ranks to reconstruct full sequences for GAE computation.
+
+        With sequence parallelism, each rank only has a chunk of the sequence. GAE requires
+        the full sequence to compute temporal differences correctly (value[t+1] - value[t]).
+        This method gathers all chunks and concatenates them in order.
+
+        Args:
+            values: Value estimates for this rank's chunk, shape (batch, chunk_len)
+            rewards: Rewards for this rank's chunk, shape (batch, chunk_len)
+            dones: Done flags for this rank's chunk, shape (batch, chunk_len)
+            response_masks: Response masks for this rank's chunk, shape (batch, chunk_len)
+
+        Returns:
+            Tuple of (full_values, full_rewards, full_dones, full_response_masks, chunk_len)
+            where each tensor has shape (batch, full_seq_len) and chunk_len is the length
+            of each rank's chunk (for later splitting).
+        """
+        sp_group = self.splitter.sp_group
+        sp_world_size = self.splitter.sp_world_size
+        chunk_len = values.shape[-1]
+
+        # Gather from all ranks
+        def gather_and_cat(tensor: torch.Tensor) -> torch.Tensor:
+            gathered = [torch.zeros_like(tensor) for _ in range(sp_world_size)]
+            torch.distributed.all_gather(gathered, tensor.contiguous(), group=sp_group)
+            # Concatenate chunks in rank order to reconstruct full sequence
+            return torch.cat(gathered, dim=-1)
+
+        full_values = gather_and_cat(values)
+        full_rewards = gather_and_cat(rewards)
+        full_dones = gather_and_cat(dones)
+        full_response_masks = gather_and_cat(response_masks)
+
+        return full_values, full_rewards, full_dones, full_response_masks, chunk_len
+
+    def _extract_sp_chunk(self, tensor: torch.Tensor, chunk_len: int) -> torch.Tensor:
+        """Extract this rank's chunk from a full-sequence tensor after GAE computation.
+
+        Args:
+            tensor: Full sequence tensor, shape (batch, full_seq_len)
+            chunk_len: Length of each SP rank's chunk
+
+        Returns:
+            This rank's chunk, shape (batch, chunk_len)
+        """
+        sp_rank = self.splitter.sp_rank
+        start_idx = sp_rank * chunk_len
+        end_idx = (sp_rank + 1) * chunk_len
+        return tensor[:, start_idx:end_idx]
+
+    def forward(
+        self,
+        model: PreTrainedModel,
+        query_response: torch.LongTensor,
+        attention_mask: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        pad_token_id: int,
+        temperature: float,
+        return_entropy: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Replace pad tokens with 0s so that we don't run into index out of bounds errors
+        padding_mask = query_response != pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+        # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
+        output = model(
+            input_ids=input_ids[:, :-1],
+            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
+            attention_mask=attention_mask[:, :-1].clamp(0, 1),
+            position_ids=position_ids[:, :-1],
+            return_dict=True,
+        )
+        logits = output.logits
+        logits /= temperature + 1e-7
+        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
+
+        # For now, entropy is just for monitoring, and we don't pass gradients through it.
+        entropy = None
+        if return_entropy:
+            with torch.no_grad():
+                entropy = entropy_from_logits(logits)
+
+        return logprob, entropy
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -500,16 +736,53 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
         if self.args.record_entropy:
             self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+        if self.args.use_value_model and "value_loss" in loss_stats_B:
+            self.local_metrics["loss/value_avg"] = (loss_stats_B["value_loss"] * weights).sum()
+            self.local_metrics["value/clipfrac_avg"] = (loss_stats_B["vf_clipfrac"] * weights).sum()
 
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+        if self.args.use_value_model and hasattr(self, "value_scheduler"):
+            self.local_metrics["lr_value"] = self.value_scheduler.get_last_lr()[0]
         self.local_metrics["_token_count"] = total_valid_tokens
 
-    def step(self):
+    def step(self, training_step: int = 1):
         """Execute one training step: fetch data from the dataloader and train on it.
+
+        Args:
+            training_step: Current training step number. Used to determine if we're in
+                          value warmup phase (training_step <= value_warmup_steps).
+                          During warmup, only the value model is updated, policy is frozen.
 
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        # VAPO Value Warmup: During warmup steps, only train value model, freeze policy
+        # Reference: https://arxiv.org/abs/2504.05118 Section 4.1
+        is_value_warmup = (
+            self.args.use_value_model
+            and self.args.value_warmup_steps > 0
+            and training_step <= self.args.value_warmup_steps
+        )
+        if is_value_warmup and self.rank == 0:
+            logger.info(
+                f"[Value Warmup] Step {training_step}/{self.args.value_warmup_steps} - "
+                "Training value model only, policy frozen"
+            )
+
+        # Reset optimizer after value warmup ends (first step after warmup)
+        if (
+            self.args.use_value_model
+            and self.args.reset_optimizer_after_value_warmup
+            and training_step == self.args.value_warmup_steps + 1
+        ):
+            if self.rank == 0:
+                logger.info("[Value Warmup Complete] Resetting policy optimizer state")
+            # Reset optimizer state (momentum, variance estimates) by reinitializing
+            for param_group in self.model.optimizer.param_groups:
+                for p in param_group["params"]:
+                    state = self.model.optimizer.state.get(p, {})
+                    state.clear()
+
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
@@ -574,8 +847,180 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+
+        # For PPO with value model: compute value estimates and GAE advantages
+        # Supports VAPO-style decoupled GAE and length-adaptive GAE
+        # Reference: https://arxiv.org/abs/2504.05118
+        values_BT: list[torch.Tensor] = []
+        old_values_BT: list[torch.Tensor] = []
+        returns_BT: list[torch.Tensor] = []
+        gae_advantages_BT: list[torch.Tensor] = []
+        policy_lambda_used: float = self.args.gae_lambda  # For logging
+        if self.args.use_value_model:
+            from open_instruct.rl_utils import calculate_advantages_packed, calculate_advantages_packed_vapo
+            
+            use_vapo_gae = self.args.decoupled_gae or self.args.length_adaptive_gae
+            
+            with Timer("Value Model Computation", noop=self.rank != 0):
+                for i in range(num_samples):
+                    # forward_value returns L-1 values (input-shifted convention)
+                    values = self.forward_value(
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
+                        data_BT.response_masks[i],
+                        self.pad_token_id,
+                    )
+                    values_BT.append(values)
+                    old_values_BT.append(values.clone())
+
+                # Compute GAE advantages. All inputs are shifted to L-1 to match values.
+                # rewards/dones/response_masks are shifted by [:, 1:] (matching ppo_fast.py).
+                for i in range(num_samples):
+                    # Shift rewards/dones/masks to L-1 to match value model output
+                    shifted_rewards = data_BT.rewards[i][:, 1:]
+                    shifted_dones = data_BT.dones[i][:, 1:]
+                    shifted_response_masks = data_BT.response_masks[i][:, 1:].float()
+
+                    if self.splitter is not None:
+                        full_values, full_rewards, full_dones, full_response_masks, chunk_len = self._gather_for_gae(
+                            values_BT[i],
+                            shifted_rewards,
+                            shifted_dones,
+                            shifted_response_masks,
+                        )
+                        values_np = full_values.cpu().numpy()
+                        rewards_np = full_rewards.cpu().numpy()
+                        dones_np = full_dones.cpu().numpy()
+                        response_masks_np = full_response_masks.cpu().numpy()
+                    else:
+                        values_np = values_BT[i].cpu().numpy()
+                        rewards_np = shifted_rewards.cpu().numpy()
+                        dones_np = shifted_dones.cpu().numpy()
+                        response_masks_np = shifted_response_masks.cpu().numpy()
+                        chunk_len = None
+
+                    if use_vapo_gae:
+                        advantages_np, returns_np, policy_lambda_used = calculate_advantages_packed_vapo(
+                            values_np,
+                            rewards_np,
+                            self.args.gamma,
+                            dones_np,
+                            response_masks_np,
+                            lam_policy=self.args.gae_lambda,
+                            lam_critic=1.0,
+                            length_adaptive=self.args.length_adaptive_gae,
+                            length_adaptive_alpha=self.args.length_adaptive_gae_alpha,
+                        )
+                    else:
+                        advantages_np, returns_np = calculate_advantages_packed(
+                            values_np,
+                            rewards_np,
+                            self.args.gamma,
+                            self.args.gae_lambda,
+                            dones_np,
+                            response_masks_np,
+                        )
+
+                    advantages = torch.tensor(advantages_np, device=device, dtype=torch.float32)
+                    returns = torch.tensor(returns_np, device=device, dtype=torch.float32)
+
+                    if self.splitter is not None:
+                        advantages = self._extract_sp_chunk(advantages, chunk_len)
+                        returns = self._extract_sp_chunk(returns, chunk_len)
+
+                    gae_advantages_BT.append(advantages)
+                    returns_BT.append(returns)
+                
+                if use_vapo_gae:
+                    self.local_metrics["value/policy_lambda"] = policy_lambda_used
+
+        # Log value warmup status
+        if self.args.use_value_model and self.args.value_warmup_steps > 0:
+            self.local_metrics["value/warmup"] = 1.0 if is_value_warmup else 0.0
+
+        # Global advantage whitening across all workers (matching ppo_fast.py)
+        if self.args.use_value_model and self.args.whiten_advantages and len(gae_advantages_BT) > 0:
+            all_advs = torch.cat([a.flatten() for a in gae_advantages_BT])
+            all_masks = torch.cat([data_BT.response_masks[i][:, 1:].flatten().float() for i in range(num_samples)])
+            adv_sum = (all_advs * all_masks).sum()
+            adv_sq_sum = ((all_advs ** 2) * all_masks).sum()
+            mask_sum = all_masks.sum()
+            dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
+            dist.all_reduce(adv_sq_sum, op=dist.ReduceOp.SUM)
+            dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
+            adv_mean = adv_sum / mask_sum
+            adv_var = adv_sq_sum / mask_sum - adv_mean ** 2
+            adv_std = torch.clamp(adv_var, min=0).sqrt()
+            for i in range(len(gae_advantages_BT)):
+                gae_advantages_BT[i] = (gae_advantages_BT[i] - adv_mean) / (adv_std + 1e-8)
+            self.local_metrics["val/adv_mean"] = adv_mean.item()
+            self.local_metrics["val/adv_std"] = adv_std.item()
+
+        # Free memory before training loops
+        torch.cuda.empty_cache()
+
+        # ========================================================================
+        # Value training loop (separate from policy, matching ppo_fast.py)
+        # ========================================================================
+        if self.args.use_value_model:
+            effective_value_mini_batches = self.args.value_num_mini_batches or self.num_mini_batches
+            value_accumulation_steps = max(1, num_samples // effective_value_mini_batches)
+            with Timer("[Training Processes] Value loss calculation", noop=self.rank != 0):
+                value_loss_stats = torch.zeros(num_samples, device=device)
+                vf_clipfrac_stats = torch.zeros(num_samples, device=device)
+                local_value_step = 0
+                for epoch_idx in range(self.args.num_epochs):
+                    for i in range(num_samples):
+                        response_mask_BT = data_BT.response_masks[i][:, 1:]
+                        current_values = self.forward_value(
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i],
+                            data_BT.position_ids[i],
+                            data_BT.response_masks[i],
+                            self.pad_token_id,
+                            use_grad=True,
+                        )
+                        target_returns = returns_BT[i]
+                        old_values = old_values_BT[i]
+
+                        if self.args.vf_clip_range > 0:
+                            values_clipped = old_values + torch.clamp(
+                                current_values - old_values,
+                                -self.args.vf_clip_range,
+                                self.args.vf_clip_range,
+                            )
+                            vf_losses1 = (current_values - target_returns) ** 2
+                            vf_losses2 = (values_clipped - target_returns) ** 2
+                            vf_loss_BT = 0.5 * torch.max(vf_losses1, vf_losses2)
+                            vf_clipfrac_BT = (vf_losses2 > vf_losses1).float()
+                        else:
+                            vf_loss_BT = 0.5 * (current_values - target_returns) ** 2
+                            vf_clipfrac_BT = torch.zeros_like(current_values)
+
+                        value_loss = 0.5 * masked_mean(vf_loss_BT, response_mask_BT)
+                        value_loss = value_loss / value_accumulation_steps
+                        self.value_model.backward(value_loss)
+
+                        with torch.no_grad():
+                            value_loss_stats[i] = masked_mean(vf_loss_BT, response_mask_BT)
+                            vf_clipfrac_stats[i] = masked_mean(vf_clipfrac_BT, response_mask_BT)
+
+                        if (local_value_step + 1) % value_accumulation_steps == 0:
+                            self.value_model.step()
+                        if (local_value_step + 1) // value_accumulation_steps == effective_value_mini_batches:
+                            break
+                        local_value_step += 1
+
+                self.local_metrics["loss/value_avg"] = value_loss_stats.mean().item()
+                self.local_metrics["value/clipfrac_avg"] = vf_clipfrac_stats.mean().item()
+
+            torch.cuda.empty_cache()
+
+        # ========================================================================
+        # Policy training loop
+        # ========================================================================
+        with Timer("[Training Processes] Policy loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
                 "kl": torch.zeros(4, num_samples, device=device),
                 "kl_loss": torch.zeros(num_samples, device=device),
@@ -660,6 +1105,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
+
+                    # Use GAE advantages if using value model, otherwise use pre-computed group-normalized advantages
+                    if self.args.use_value_model:
+                        advantages_for_loss = gae_advantages_BT[i]
+                    else:
+                        advantages_for_loss = data_BT.advantages[i][:, 1:]
+
                     # Apply truncated importance sampling if enabled
                     tis_imp_ratio_BT = None
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
@@ -702,25 +1154,26 @@ class PolicyTrainerRayProcess(RayProcess):
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
-                        advantages=data_BT.advantages[i][:, 1:],
+                        advantages=advantages_for_loss,
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         tis_weights=tis_imp_ratio_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
-                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                    policy_loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                    policy_loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    # we already took world size into account via the tokens
-                    # but deepspeed will try to average over ranks, so multiply back
-                    # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    loss *= self.args.world_size // self.args.sequence_parallel_size
-
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
-                    self.model.backward(loss)
+
+                    if not is_value_warmup:
+                        self.model.backward(policy_loss)
+
                     if (local_step + 1) % accumulation_steps == 0:
-                        self.model.step()
+                        if not is_value_warmup:
+                            self.model.step()
+
+                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -788,6 +1241,19 @@ class PolicyTrainerRayProcess(RayProcess):
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
+
+        # Save value model/value head checkpoint if using PPO with value model
+        if self.args.use_value_model:
+            value_model_dir = os.path.join(checkpoint_state_dir, "value_model")
+            os.makedirs(value_model_dir, exist_ok=True)
+
+            if self.rank == 0 and self.value_model is not None:
+                # Save the value model (LM head is part of the model, no separate head)
+                model_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+                torch.save(model_to_save.state_dict(), os.path.join(value_model_dir, "value_model.bin"))
+                logger.info(f"Saved value model to {value_model_dir}")
+
+            client_state["value_model_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
         # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
@@ -1021,6 +1487,9 @@ def setup_runtime_variables(
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
+    # Sync use_value_model from experiment config to streaming config
+    # This ensures the data loader knows to pass raw rewards when using PPO with value model
+    streaming_config.use_value_model = args.use_value_model
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1484,7 +1953,7 @@ def one_training_step(
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
-            [policy_group.models[i].step.remote() for i in range(args.world_size)],
+            [policy_group.models[i].step.remote(training_step) for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
