@@ -445,8 +445,8 @@ class SWERLSandboxEnv(RLEnvironment):
 
         reward = self._parse_reward(result.exit_code)
 
-        stdout = result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout
-        stderr = result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr
+        stdout = _truncate_output(result.stdout) if result.stdout else ""
+        stderr = _truncate_output(result.stderr) if result.stderr else ""
 
         observation = (
             f"Test execution complete.\n"
