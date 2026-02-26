@@ -14,10 +14,10 @@ set -e
 BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 # Use v7 for models with transformers latest naming (DPO, HYBRID_INSTRUCT_SFT_8e-5, etc.)
 # BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v7"
-BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v6"
+BEAKER_IMAGE="yanhongl/oe_eval_olmo3_devel_v7"
 
 # Change this to select which path/name config to use (no commenting needed)
-MODEL_TYPE="instruct_0218"  # think | think_yarn | think_ablation | instruct | instruct_0217 | instruct_0218 | dpo
+MODEL_TYPE="dpo"  # think | think_yarn | think_ablation | instruct | instruct_0217 | instruct_0218 | dpo
 
 # PATHS
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_8e-5/step3256-hf
@@ -51,11 +51,11 @@ MODELS=(
 
     # --- 0219 DPO sweep models (SFT-2.5e-5 base, need v7 eval image) ---
     "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-1e-6"
-    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-2e-6"
-    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-8.5e-7"
-    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-7e-7"
-    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-5e-7"
-    "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-2.5e-7"
+    # "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-2e-6"
+    # "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-8.5e-7"
+    # "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-7e-7"
+    # "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-5e-7"
+    # "hybrid-7b-DPO-0219-SFT-2.5e-5-LR-2.5e-7"
 
     # --- 0217 instruct SFT models (step3256) ---
     # "HYBRID_INSTRUCT_SFT_0217_8e-5"
@@ -67,12 +67,12 @@ MODELS=(
     # "HYBRID_INSTRUCT_SFT_0217_1.5e-5"
 
     # --- 0218 instruct SFT models (step3256) ---
-    "HYBRID_INSTRUCT_SFT_0218_9e-5"
-    "HYBRID_INSTRUCT_SFT_0218_8e-5"
-    "HYBRID_INSTRUCT_SFT_0218_6e-5"
-    "HYBRID_INSTRUCT_SFT_0218_5e-5"
-    "HYBRID_INSTRUCT_SFT_0218_2.5e-5"
-    "HYBRID_INSTRUCT_SFT_0218_1e-4"
+    # "HYBRID_INSTRUCT_SFT_0218_9e-5"
+    # "HYBRID_INSTRUCT_SFT_0218_8e-5"
+    # "HYBRID_INSTRUCT_SFT_0218_6e-5"
+    # "HYBRID_INSTRUCT_SFT_0218_5e-5"
+    # "HYBRID_INSTRUCT_SFT_0218_2.5e-5"
+    # "HYBRID_INSTRUCT_SFT_0218_1e-4"
 
 )
 
