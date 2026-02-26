@@ -838,10 +838,8 @@ def accumulate_inference_batches(
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
     if all_model_steps:
         model_steps_array = np.array(all_model_steps, dtype=float)
-        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
-        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
         combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
-        combined_reward_metrics["model_step_span"] = float(model_steps_array.max() - model_steps_array.min())
+        combined_reward_metrics["model_step_values"] = model_steps_array.tolist()
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(

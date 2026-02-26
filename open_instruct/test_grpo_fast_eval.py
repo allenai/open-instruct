@@ -78,7 +78,7 @@ class TestMaybeEvaluate(unittest.TestCase):
 
         mock_accumulate.assert_called_once()
 
-    def test_records_eval_model_step_range_and_deltas(self):
+    def test_records_eval_model_step_mean(self):
         args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120)
         eval_dataset = self._build_eval_dataset(num_prompts=1)
         eval_queue = _QueueWithSize(size=1)
@@ -127,10 +127,11 @@ class TestMaybeEvaluate(unittest.TestCase):
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/model_step_diff_min"], 0.0)
-        self.assertEqual(logged["eval/model_step_diff_max"], 5.0)
-        self.assertEqual(logged["eval/model_step_diff_avg"], 3.0)
-        self.assertEqual(logged["eval/model_step_diff_span"], 5.0)
+        self.assertEqual(logged["eval/model_step_mean"], 103.0)
+        self.assertNotIn("eval/model_step_diff_min", logged)
+        self.assertNotIn("eval/model_step_diff_max", logged)
+        self.assertNotIn("eval/model_step_diff_avg", logged)
+        self.assertNotIn("eval/model_step_diff_span", logged)
 
     def test_records_eval_pass_at_powers_of_two_k(self):
         args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120)

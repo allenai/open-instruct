@@ -1673,11 +1673,17 @@ def one_training_step(
         # Handles arrays with missing values (None/NaN) by filtering to finite numeric values.
         metrics_to_log = {}
         per_index_solve_rates = metrics.pop("val/train_prompt_solve_rate_by_dataset_index", None)
+        model_step_values = metrics.pop("model_step_values", None)
         if per_index_solve_rates is not None:
             index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
             for dataset_index, solve_rate in per_index_solve_rates:
                 index_table.add_data(int(dataset_index), float(solve_rate))
             metrics_to_log["val/train_prompt_solve_rate_by_index_table"] = index_table
+        if model_step_values is not None:
+            model_step_values_table = wandb.Table(columns=["sample_idx", "model_step"])
+            for sample_idx, model_step_value in enumerate(np.asarray(model_step_values, dtype=float).tolist()):
+                model_step_values_table.add_data(int(sample_idx), float(model_step_value))
+            metrics_to_log["model_step_values_table"] = model_step_values_table
 
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
@@ -1804,10 +1810,11 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        model_step_min = eval_reward_metrics.pop("eval/model_step_min", None)
-        model_step_max = eval_reward_metrics.pop("eval/model_step_max", None)
+        eval_reward_metrics.pop("eval/model_step_min", None)
+        eval_reward_metrics.pop("eval/model_step_max", None)
         model_step_mean = eval_reward_metrics.pop("eval/model_step_mean", None)
-        model_step_span = eval_reward_metrics.pop("eval/model_step_span", None)
+        eval_reward_metrics.pop("eval/model_step_span", None)
+        model_step_values = eval_reward_metrics.pop("eval/model_step_values", None)
         eval_k = eval_generation_config.n
         scores = np.array(eval_batch.scores)
         pass_at_by_k: dict[int, float] = {}
@@ -1856,13 +1863,8 @@ def maybe_evaluate(
         for metric_name, pass_rates in dataset_pass_at_by_k.items():
             for k, pass_rate in pass_rates.items():
                 eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
-        if model_step_min is not None and model_step_max is not None and model_step_mean is not None:
-            assumed_step = float(training_step)
-            eval_metrics["eval/model_step_diff_min"] = model_step_min - assumed_step
-            eval_metrics["eval/model_step_diff_max"] = model_step_max - assumed_step
-            eval_metrics["eval/model_step_diff_avg"] = model_step_mean - assumed_step
-            if model_step_span is not None:
-                eval_metrics["eval/model_step_diff_span"] = model_step_span
+        if model_step_mean is not None:
+            eval_metrics["eval/model_step_mean"] = float(model_step_mean)
         if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
             prompt_index_to_solve_rates: dict[int, list[float]] = {}
             for prompt_index, prompt_solve_rate in zip(
@@ -1912,6 +1914,11 @@ def maybe_evaluate(
                 for dataset_index, solve_rate in per_index_solve_rates:
                     index_table.add_data(int(dataset_index), float(solve_rate))
                 eval_metrics["eval/prompt_solve_rate_by_index_table"] = index_table
+            if model_step_values is not None:
+                model_step_values_table = wandb.Table(columns=["sample_idx", "model_step"])
+                for sample_idx, model_step_value in enumerate(np.asarray(model_step_values, dtype=float).tolist()):
+                    model_step_values_table.add_data(int(sample_idx), float(model_step_value))
+                eval_metrics["eval/model_step_values_table"] = model_step_values_table
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
             wandb.log(eval_metrics, step=training_step)
         else:
