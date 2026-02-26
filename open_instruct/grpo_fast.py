@@ -718,8 +718,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                    # Tell deepspeed whether this backward is the last in the accumulation group.
+                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
-                    if (local_step + 1) % accumulation_steps == 0:
+                    if is_accumulation_boundary:
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
