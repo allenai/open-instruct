@@ -81,15 +81,19 @@ class TestWordleTextEnv(unittest.TestCase):
         self.assertIn("CRANE", r.result)
 
     def test_correct_reward_includes_turn_efficiency(self):
+        # Correct on first guess: total_turns=1, format_reward=0.2*(1/1)=0.2
+        # reward = 1.0 + 1.0/1 + 0.2 = 2.2
         env = self._make_env()
         r = asyncio.run(env.text_step("<guess>CRANE</guess>"))
-        self.assertAlmostEqual(r.reward, 1.0 + 1.0 / 2)
+        self.assertAlmostEqual(r.reward, 1.0 + 1.0 / 1 + 0.2)
 
+        # Correct on third guess: total_turns=3, format_reward=0.2*(3/3)=0.2
+        # reward = 1.0 + 1.0/3 + 0.2
         env2 = self._make_env()
         asyncio.run(env2.text_step("<guess>HOUSE</guess>"))
         asyncio.run(env2.text_step("<guess>BRAIN</guess>"))
         r2 = asyncio.run(env2.text_step("<guess>CRANE</guess>"))
-        self.assertAlmostEqual(r2.reward, 1.0 + 1.0 / 4)
+        self.assertAlmostEqual(r2.reward, 1.0 + 1.0 / 3 + 0.2)
 
     def test_scoring_all_green(self):
         env = self._make_env()
@@ -98,8 +102,9 @@ class TestWordleTextEnv(unittest.TestCase):
 
     def test_scoring_yellow_and_miss(self):
         env = self._make_env()
-        r = asyncio.run(env.text_step("<guess>NZZZZ</guess>"))
-        self.assertIn("N Z Z Z Z", r.result)
+        # Use a real English word that has a yellow and misses against CRANE
+        r = asyncio.run(env.text_step("<guess>NORTH</guess>"))
+        self.assertIn("N O R T H", r.result)
         self.assertIn("Y", r.result)
         self.assertIn("X", r.result)
 
@@ -123,7 +128,8 @@ class TestWordleTextEnv(unittest.TestCase):
         asyncio.run(env.text_step("<guess>CRANE</guess>"))
         m = env.get_metrics()
         self.assertEqual(m["guesses"], 2.0)
-        self.assertEqual(m["invalid_attempts"], 1.0)
+        # consecutive_errors resets to 0 after a valid guess
+        self.assertEqual(m["invalid_attempts"], 0.0)
         self.assertEqual(m["solved"], 1.0)
         self.assertGreater(m["total_greens"], 0)
 

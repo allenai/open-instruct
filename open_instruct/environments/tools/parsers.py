@@ -117,33 +117,26 @@ class VllmToolParser(ToolParser):
     """Wraps a vLLM tool parser to extract tool calls and format responses.
 
     Delegates tool-call extraction to vLLM's native parsers (Hermes, Llama3,
-    Qwen3, etc.) and formats outputs using a ``default_role_template`` with ``{role}``
-    and ``{output}`` placeholders.
-
-    Semantic roles (e.g. ``"tool"``) are remapped to model-specific tokens
-    via ``role_map`` (e.g. ``{"tool": "ipython"}`` for Llama 3).
-    Roles not in the map are passed through unchanged.
+    Qwen3, etc.) and formats outputs using per-role templates from
+    ``role_templates`` (each value has an ``{output}`` placeholder with the
+    role name baked in).
     """
 
     def __init__(
         self,
         tool_parser: VllmNativeToolParser,
+        role_templates: dict[str, str],
         stop_sequences: list[str] | None = None,
         tool_definitions: list[dict[str, Any]] | None = None,
         output_prefix: str = "",
         output_postfix: str = "<|im_start|>assistant\n",
-        default_role_template: str = "<|im_start|>{role}\n{output}<|im_end|>\n",
-        role_map: dict[str, str] | None = None,
-        role_templates: dict[str, str] | None = None,
     ):
         self.tool_parser = tool_parser
+        self._role_templates = role_templates
         self.stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
         self._output_prefix = output_prefix
         self._output_postfix = output_postfix
-        self._default_role_template = default_role_template
-        self._role_map = role_map or {}
-        self._role_templates = role_templates or {}
 
     def _make_request(self) -> Any:
         """Create a dummy ChatCompletionRequest for vLLM parsers.
@@ -182,9 +175,8 @@ class VllmToolParser(ToolParser):
         return tool_calls
 
     def _format_tool_output(self, tool_output: str, role: str = "tool") -> str:
-        resolved = self._role_map.get(role, role)
-        template = self._role_templates.get(role, self._default_role_template)
-        return template.format(role=resolved, output=tool_output)
+        template = self._role_templates[role]
+        return template.format(output=tool_output)
 
     def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return f"{self._output_prefix}{''.join(self._format_tool_output(output, role) for output in tool_outputs)}{self._output_postfix}"
@@ -194,29 +186,22 @@ class VllmToolParser(ToolParser):
 class VllmParserConfig:
     """Configuration for a vLLM tool parser.
 
-    Each config pairs a vLLM native parser with a ``default_role_template`` that wraps
-    individual outputs.  The template must contain ``{role}`` and ``{output}``
-    placeholders.
-
-    ``role_map`` remaps semantic role names to model-specific tokens
-    (e.g. ``{"tool": "ipython"}`` for Llama 3).  Roles not in the map
-    are passed through unchanged.
+    Each config pairs a vLLM native parser with per-role templates that wrap
+    individual outputs.  Each template value contains an ``{output}``
+    placeholder with the role name baked in.
     """
 
     import_path: str
     """Dotted import path for the vLLM native parser class
     (e.g. ``"vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser"``)."""
 
-    default_role_template: str
-    """Per-output template with ``{role}`` and ``{output}`` placeholders."""
+    role_templates: dict[str, str]
+    """Per-role templates. Keys are role names (e.g. ``"tool"``, ``"user"``),
+    values are templates with an ``{output}`` placeholder."""
 
     output_postfix: str
     """String appended after all formatted outputs (typically starts the
     assistant turn, e.g. ``"<|im_start|>assistant\\n"``)."""
-
-    role_map: dict[str, str] = field(default_factory=dict)
-    """Maps semantic roles to model-specific tokens.
-    E.g. ``{"tool": "ipython"}`` for Llama 3.  Unmapped roles pass through."""
 
     stop_sequences: list[str] = field(default_factory=list)
     """Stop sequences for this parser."""
@@ -224,34 +209,35 @@ class VllmParserConfig:
     output_prefix: str = ""
     """String prepended before all formatted outputs."""
 
-    role_templates: dict[str, str] = field(default_factory=dict)
-    """Per-role template overrides. Keys are role names (e.g. ``"user"``),
-    values are templates with ``{role}`` and ``{output}`` placeholders.
-    Falls back to ``default_role_template`` for roles not in this dict."""
-
 
 # Registry of available vLLM tool parsers
 VLLM_PARSERS: dict[str, VllmParserConfig] = {
     # Hermes-style / ChatML (also works for Qwen2.5/3)
     "vllm_hermes": VllmParserConfig(
         import_path="vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
-        default_role_template="<|im_start|>{role}\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
+        role_templates={
+            "tool": "<|im_start|>tool\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
+            "user": "<|im_start|>user\n{output}<|im_end|>\n",
+        },
         output_postfix="<|im_start|>assistant\n",
-        role_templates={"user": "<|im_start|>{role}\n{output}<|im_end|>\n"},
     ),
     # Llama 3.x JSON style
     "vllm_llama3_json": VllmParserConfig(
         import_path="vllm.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
-        default_role_template="<|start_header_id|>{role}<|end_header_id|>\n\n{output}<|eot_id|>",
+        role_templates={
+            "tool": "<|start_header_id|>ipython<|end_header_id|>\n\n{output}<|eot_id|>",
+            "user": "<|start_header_id|>user<|end_header_id|>\n\n{output}<|eot_id|>",
+        },
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
-        role_map={"tool": "ipython"},
     ),
     # Olmo 3
     "vllm_olmo3": VllmParserConfig(
         import_path="vllm.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
-        default_role_template="<|im_start|>{role}\n{output}<|im_end|>\n",
+        role_templates={
+            "tool": "<|im_start|>environment\n{output}<|im_end|>\n",
+            "user": "<|im_start|>user\n{output}<|im_end|>\n",
+        },
         output_postfix="<|im_start|>assistant\n",
-        role_map={"tool": "environment"},
     ),
 }
 
@@ -281,13 +267,11 @@ def create_vllm_parser(
 
     return VllmToolParser(
         tool_parser=native_parser,
+        role_templates=config.role_templates,
         stop_sequences=config.stop_sequences,
         tool_definitions=tool_definitions,
         output_prefix=config.output_prefix,
         output_postfix=config.output_postfix,
-        default_role_template=config.default_role_template,
-        role_map=config.role_map,
-        role_templates=config.role_templates,
     )
 
 

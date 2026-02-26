@@ -1,6 +1,5 @@
 """Example environments for testing and demonstration."""
 
-import random
 import re
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -60,8 +59,7 @@ class CounterEnv(RLEnvironment):
         self._step_count = 0
         self._done = False
 
-        if "target" in kwargs:
-            self._target = int(kwargs["target"])
+        self._target = int(kwargs["target"])
 
         return (
             StepResult(result=f"Counter is at {self._current}. Reach {self._target} to win."),
@@ -141,10 +139,7 @@ class GuessNumberEnv(RLEnvironment):
         return cls._tool_definitions
 
     async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
-        if "number" in kwargs:
-            self._secret = int(kwargs["number"])
-        else:
-            self._secret = random.randint(self._min_val, self._max_val)
+        self._secret = int(kwargs["number"])
         self._guesses = 0
         self._done = False
 
@@ -203,7 +198,7 @@ _GUESS_PATTERN = re.compile(r"<guess>\s*\[?([^<\]]+)\]?\s*</guess>", re.IGNORECA
 
 
 class WordleTextEnv(TextRLEnvironment):
-    """Wordle game as a text environment (TextArena Wordle-v0 compatible).
+    """Wordle game as a text environment (following TextArena Wordle-v0).
 
     The model outputs guesses inside ``<guess>WORD</guess>`` XML tags.
     Feedback uses spaced positional G/Y/X characters::
