@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Fixed
+- Fix ZeRO-2 discarding gradients during manual gradient accumulation by using `set_gradient_accumulation_boundary()` (https://github.com/allenai/open-instruct/pull/1498).
+
 ### Added
 - Add Docker sandbox backend and `GenericSandboxEnv` environment for code execution during RL training. `DockerBackend` with command timeout, configurable memory limits, `put_archive`/`get_archive` file I/O, and `remove=True` auto-cleanup. `GenericSandboxEnv` provides `execute_bash` (stateful bash with env/cwd persistence) and `str_replace_editor` (view/create/str_replace/insert with correct line numbering). Configurable penalty, image, and memory via `GenericSandboxEnvConfig`. Includes 1-GPU debug script (https://github.com/allenai/open-instruct/pull/1490).
 - `TextRLEnvironment` base class for text-based RL environments: model output is passed as a plain string instead of parsed tool calls, with response formatted using the parser's `role_template`. Includes `WordleTextEnv` example, role-aware `format_tool_outputs` in all parsers, shadow tool call dispatch in `process_request`, and 1-GPU debug script (https://github.com/allenai/open-instruct/pull/1489).
