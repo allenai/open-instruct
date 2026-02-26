@@ -9,11 +9,14 @@ DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mno
 LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
 
+CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
+PRIORITY="${PRIORITY:-high}"
+
 uv run mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ai2/saturn ai2/jupiter ai2/neptune \
+    --cluster ${CLUSTER} \
     --workspace ai2/oe-adapt-code \
-    --priority high \
+    --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
@@ -22,8 +25,8 @@ uv run mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
     --gpus 4 \
     --budget ai2/oe-adapt \
-    -- source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run --active open_instruct/grpo_fast.py \
+    -- \
+uv run --active open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 128 \

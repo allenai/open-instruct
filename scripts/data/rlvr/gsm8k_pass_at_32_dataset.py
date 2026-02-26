@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="mnoukhov/gsm8k-platinum-openinstruct", help="Input HF dataset")
     parser.add_argument("--split", default="test", help="Input split")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="Model used for generation")
-    parser.add_argument("--chat-template", default="qwen_instruct_gsm8k", help="Chat template name")
+    parser.add_argument("--chat-template", default="qwen_instruct_boxed_math", help="Chat template name")
     parser.add_argument("--num-samples", type=int, default=32, help="Completions per prompt")
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
     parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling")
