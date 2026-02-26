@@ -696,8 +696,8 @@ if args.run_oe_eval_experiments:
     # open_instruct GPT adjustment wasn't quite enough
     # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
     # tested reasonably extensively with 70B
-    if num_gpus > 1:
-        num_gpus *= 2
+    # if num_gpus > 1:
+    #     num_gpus *= 2
     # double GPUs for reasoning models
     if args.oe_eval_task_suite == "SAFETY_EVAL_REASONING":
         num_gpus *= 2
