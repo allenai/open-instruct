@@ -1243,11 +1243,10 @@ class DataPreparationActor:
                 for rs in result.request_info.rollout_states:
                     info = rs.get("info", {})
                     ename = info.get("env_name", "unknown")
-                    if ename not in env_metrics:
-                        env_metrics[ename] = {}
+                    env_specific_metrics = env_metrics.setdefault(ename, {})
                     for k, v in info.items():
                         if k != "env_name" and isinstance(v, (int, float)):
-                            env_metrics[ename].setdefault(k, []).append(float(v))
+                            env_specific_metrics.setdefault(k, []).append(float(v))
                 for ename, metrics in env_metrics.items():
                     for k, vals in metrics.items():
                         step_metrics[f"env/{ename}/{k}"] = np.mean(vals)
