@@ -235,14 +235,16 @@ class WordleTextEnv(TextRLEnvironment):
         self._error_allowance = error_allowance
         self._secret_word = ""
         self._guesses: list[str] = []
-        self._total_guess_attempts = 0
+        self._total_turns = 0
+        self._turns_with_tags = 0
         self._consecutive_errors = 0
         self._done = False
         self._words = self._load_valid_words()
 
     async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
-        self._total_guess_attempts = 0
+        self._total_turns = 0
+        self._turns_with_tags = 0
         self._consecutive_errors = 0
         self._done = False
 
@@ -252,19 +254,21 @@ class WordleTextEnv(TextRLEnvironment):
 
         return StepResult(result="")
 
+    def _format_reward(self) -> float:
+        """Average format compliance across all turns, weighted 0.2 (matches prime-rl)."""
+        return 0.2 * (self._turns_with_tags / self._total_turns) if self._total_turns > 0 else 0.0
+
     def _rubric_reward_on_error(self) -> float:
         """Compute reward as prime-rl's rubric would on error termination.
 
         partial_answer: 0.2*greens + 0.1*yellows from the last valid guess's scoring.
-        format_reward: 0.2 * (valid_guesses / total_messages) where total includes error turns.
+        format_reward: 0.2 * (turns_with_tags / total_turns).
         """
         partial = 0.0
         if self._guesses:
             last_scoring = self._get_scoring(self._guesses[-1], self._secret_word)
             partial = 0.2 * last_scoring.count("G") + 0.1 * last_scoring.count("Y")
-        total_messages = len(self._guesses) + self._consecutive_errors
-        fmt = 0.2 * (len(self._guesses) / total_messages) if total_messages > 0 else 0.0
-        return partial + fmt
+        return partial + self._format_reward()
 
     def _handle_invalid(self, reason: str) -> StepResult:
         """Handle an invalid move: allow one retry, then end the game (matches TextArena error_allowance=1)."""
@@ -276,12 +280,13 @@ class WordleTextEnv(TextRLEnvironment):
         return StepResult(result=f"Invalid move: {reason}", reward=self._rubric_reward_on_error(), done=True)
 
     async def text_step(self, text: str) -> StepResult:
+        self._total_turns += 1
         matches = list(_GUESS_PATTERN.finditer(text))
         match = matches[-1] if matches else None
         if not match:
             return self._handle_invalid("Please submit a 5-letter word inside <guess>...</guess> tags.")
 
-        self._total_guess_attempts += 1
+        self._turns_with_tags += 1
 
         raw_guess = match.group(1).strip()
         if not raw_guess.isalpha():
@@ -311,13 +316,13 @@ class WordleTextEnv(TextRLEnvironment):
 
         feedback = self._format_feedback(guess, scoring)
 
-        format_reward = 0.2
+        format_reward = self._format_reward()
 
         if guess == self._secret_word:
             self._done = True
             return StepResult(
                 result=f"\n{feedback}\nCongratulations! You guessed the word correctly!",
-                reward=1.0 + 1.0 / self._total_guess_attempts + format_reward,
+                reward=1.0 + 1.0 / self._total_turns + format_reward,
                 done=True,
             )
 
