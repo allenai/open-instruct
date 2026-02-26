@@ -1672,18 +1672,15 @@ def one_training_step(
         # Convert array/list metrics to wandb histograms for logging.
         # Handles arrays with missing values (None/NaN) by filtering to finite numeric values.
         metrics_to_log = {}
-        per_index_solve_rates = metrics.pop("val/train_prompt_solve_rate_by_dataset_index", None)
-        model_step_values = metrics.pop("model_step_values", None)
-        if per_index_solve_rates is not None:
-            index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
-            for dataset_index, solve_rate in per_index_solve_rates:
-                index_table.add_data(int(dataset_index), float(solve_rate))
-            metrics_to_log["val/train_prompt_solve_rate_by_index_table"] = index_table
-        if model_step_values is not None:
-            model_step_values_table = wandb.Table(columns=["sample_idx", "model_step"])
-            for sample_idx, model_step_value in enumerate(np.asarray(model_step_values, dtype=float).tolist()):
-                model_step_values_table.add_data(int(sample_idx), float(model_step_value))
-            metrics_to_log["model_step_values_table"] = model_step_values_table
+        _add_dataset_index_solve_rate_table(
+            metrics,
+            metrics_to_log,
+            source_key="val/train_prompt_solve_rate_by_dataset_index",
+            table_key="val/train_prompt_solve_rate_by_index_table",
+        )
+        _add_model_step_values_table(
+            metrics, metrics_to_log, source_key="model_step_values", table_key="model_step_values_table"
+        )
 
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
@@ -1703,6 +1700,30 @@ def one_training_step(
         wandb.log(metrics_to_log, step=training_step)
 
     return num_step_tokens
+
+
+def _add_dataset_index_solve_rate_table(
+    metrics: dict[str, Any], metrics_to_log: dict[str, Any], source_key: str, table_key: str
+) -> None:
+    per_index_solve_rates = metrics.pop(source_key, None)
+    if per_index_solve_rates is None:
+        return
+    index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
+    for dataset_index, solve_rate in per_index_solve_rates:
+        index_table.add_data(int(dataset_index), float(solve_rate))
+    metrics_to_log[table_key] = index_table
+
+
+def _add_model_step_values_table(
+    metrics: dict[str, Any], metrics_to_log: dict[str, Any], source_key: str, table_key: str
+) -> None:
+    model_step_values = metrics.pop(source_key, None)
+    if model_step_values is None:
+        return
+    model_step_values_table = wandb.Table(columns=["sample_idx", "model_step"])
+    for sample_idx, model_step_value in enumerate(np.asarray(model_step_values, dtype=float).tolist()):
+        model_step_values_table.add_data(int(sample_idx), float(model_step_value))
+    metrics_to_log[table_key] = model_step_values_table
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -1908,17 +1929,21 @@ def maybe_evaluate(
         df = pd.DataFrame(table)
 
         if args.with_tracking:
-            per_index_solve_rates = eval_metrics.pop("eval/prompt_solve_rate_by_dataset_index", None)
-            if per_index_solve_rates is not None:
-                index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
-                for dataset_index, solve_rate in per_index_solve_rates:
-                    index_table.add_data(int(dataset_index), float(solve_rate))
-                eval_metrics["eval/prompt_solve_rate_by_index_table"] = index_table
-            if model_step_values is not None:
-                model_step_values_table = wandb.Table(columns=["sample_idx", "model_step"])
-                for sample_idx, model_step_value in enumerate(np.asarray(model_step_values, dtype=float).tolist()):
-                    model_step_values_table.add_data(int(sample_idx), float(model_step_value))
-                eval_metrics["eval/model_step_values_table"] = model_step_values_table
+            table_metrics: dict[str, Any] = {}
+            _add_dataset_index_solve_rate_table(
+                eval_metrics,
+                table_metrics,
+                source_key="eval/prompt_solve_rate_by_dataset_index",
+                table_key="eval/prompt_solve_rate_by_index_table",
+            )
+            eval_metrics["eval/model_step_values"] = model_step_values
+            _add_model_step_values_table(
+                eval_metrics,
+                table_metrics,
+                source_key="eval/model_step_values",
+                table_key="eval/model_step_values_table",
+            )
+            eval_metrics.update(table_metrics)
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
             wandb.log(eval_metrics, step=training_step)
         else:
