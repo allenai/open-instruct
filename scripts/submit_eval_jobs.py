@@ -63,7 +63,7 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
     # if "codex_eval" in experiment_group:
     #     task_spec["resources"]["gpuCount"] = codex_multiplier * task_spec["resources"]["gpuCount"]
     # else:
-    #     task_spec["resources"]["gpuCount"] = default_multiplier * task_spec["resources"]["gpuCount"]
+    task_spec["resources"]["gpuCount"] = default_multiplier * task_spec["resources"]["gpuCount"]
 
     return task_spec
 

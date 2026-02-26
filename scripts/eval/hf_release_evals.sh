@@ -14,10 +14,14 @@ MODELS=(
     "hf-OLMo-3.2-Hybrid-7B-DPO|allenai/OLMo-3.2-Hybrid-7B-DPO"
 )
 
-# Eval task groups
-BATCH1_TASKS="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,omega:0-shot-chat,minerva_math::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek"
-BATCH2_TASKS="bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek"
-TRIPLE_TASKS="omega:0-shot-chat,minerva_math::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
+# Batch 1 (gpu_multiplier 1): everything except omega, bbh, mmlu, popqa, mbppplus
+BATCH1_TASKS="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,minerva_math::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,ifeval_ood::tulu-thinker-deepseek"
+
+# Batch 2 (gpu_multiplier 2): omega + the larger evals
+BATCH2_TASKS="bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,omega:0-shot-chat_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek"
+
+# 3x tasks (gpu_multiplier 2): omega, math, livecodebench get a third run
+TRIPLE_TASKS="omega:0-shot-chat_deepseek,minerva_math::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
 
 for ENTRY in "${MODELS[@]}"; do
     MODEL_NAME="${ENTRY%%|*}"
@@ -33,7 +37,7 @@ for ENTRY in "${MODELS[@]}"; do
     uv run scripts/submit_eval_jobs.py \
         --model_name "${MODEL_NAME}" \
         --location "${HF_LOCATION}" \
-        --cluster ai2/jupiter ai2/ceres \
+        --cluster ai2/jupiter \
         --is_tuned \
         --workspace ai2/olmo-instruct \
         --priority urgent \
@@ -52,7 +56,7 @@ for ENTRY in "${MODELS[@]}"; do
     uv run scripts/submit_eval_jobs.py \
         --model_name "${MODEL_NAME}" \
         --location "${HF_LOCATION}" \
-        --cluster ai2/jupiter ai2/ceres \
+        --cluster ai2/jupiter \
         --is_tuned \
         --workspace ai2/olmo-instruct \
         --priority urgent \
@@ -74,7 +78,7 @@ for ENTRY in "${MODELS[@]}"; do
     uv run scripts/submit_eval_jobs.py \
         --model_name "${MODEL_NAME}_repeat_1" \
         --location "${HF_LOCATION}" \
-        --cluster ai2/jupiter ai2/ceres \
+        --cluster ai2/jupiter \
         --is_tuned \
         --workspace ai2/olmo-instruct \
         --priority urgent \
@@ -92,7 +96,7 @@ for ENTRY in "${MODELS[@]}"; do
     uv run scripts/submit_eval_jobs.py \
         --model_name "${MODEL_NAME}_repeat_1" \
         --location "${HF_LOCATION}" \
-        --cluster ai2/jupiter ai2/ceres \
+        --cluster ai2/jupiter \
         --is_tuned \
         --workspace ai2/olmo-instruct \
         --priority urgent \
@@ -114,7 +118,8 @@ for ENTRY in "${MODELS[@]}"; do
     uv run scripts/submit_eval_jobs.py \
         --model_name "${MODEL_NAME}_repeat_2" \
         --location "${HF_LOCATION}" \
-        --cluster ai2/jupiter ai2/ceres \
+        --cluster ai2/jupiter \
+        --gpu_multiplier 2 \
         --is_tuned \
         --workspace ai2/olmo-instruct \
         --priority urgent \
