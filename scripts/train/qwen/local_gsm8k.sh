@@ -1,52 +1,26 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k"
-MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
-DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
-
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 2"
-LOCAL_EVAL_SPLITS="test"
-
-# EVALS="aime:2024::justrl,aime:2025::justrl"
-
-# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+EXP_NAME="${EXP_NAME:-qwen25_05b_it_gsm8k_quartiles}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/saturn
 
-# Check if the first argument starts with the value of $BEAKER_NAME
-# if [[ "$1" == "$BEAKER_USER"* ]]; then
-#     BEAKER_IMAGE="$1"
-#     shift
-# fi
+DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
 
-# uv run mason.py \
-#     --task_name ${EXP_NAME} \
-#     --cluster ${cluster} \
-#     --workspace ai2/oe-adapt-code \
-#     --priority high \
-#     --pure_docker_mode \
-#     --image ${BEAKER_IMAGE} \
-#     --preemptible \
-#     --num_nodes 1 \
-#     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-#     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-#     --gpus 1 \
-#     --budget ai2/oe-adapt \
-#     -- source configs/beaker_configs/ray_node_setup.sh \
-# \&\& 
-#!/bin/bash
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 export VLLM_ATTENTION_BACKEND="FLASHINFER"
+
 uv run --active open_instruct/grpo_fast.py \
     --output_dir results \
-    --run_name test \
+    --run_name ${RUN_NAME} \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 4 \
-    --active_sampling \
+    --async_steps 1 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \

@@ -427,7 +427,7 @@ class StreamingDataLoaderConfig:
             "At least one reward must be applied!"
         )
 
-        assert self.spurious_reward_mode and not self.apply_r1_style_format_reward, (
+        assert not (self.spurious_reward_mode and self.apply_r1_style_format_reward), (
             "can't do spurious reward with format reward as well"
         )
 
