@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Fixed
+- Fix ZeRO-2 discarding gradients during manual gradient accumulation by using `set_gradient_accumulation_boundary()` (https://github.com/allenai/open-instruct/pull/NEW).
+
 ### Added
 - Add Docker sandbox backend and `GenericSandboxEnv` environment for code execution during RL training. `DockerBackend` with command timeout, configurable memory limits, `put_archive`/`get_archive` file I/O, and `remove=True` auto-cleanup. `GenericSandboxEnv` provides `execute_bash` (stateful bash with env/cwd persistence) and `str_replace_editor` (view/create/str_replace/insert with correct line numbering). Configurable penalty, image, and memory via `GenericSandboxEnvConfig`. Includes 1-GPU debug script (https://github.com/allenai/open-instruct/pull/1490).
 - Wire RL environments into vLLM generation loop and preprocessing: unified tool/env system with single `TOOL_REGISTRY`, pooled actors via shared `EnvironmentPool` Ray actor (async acquire/release, auto-sized to rollout concurrency), `RolloutState` tracks all per-rollout state, `PassthroughVerifier` + `RewardAggregator` for per-turn rewards (verifier score folded into last turn before aggregation), `BaseEnvConfig` in `environments/base.py`, `--max_steps` unified, `--pool_size` configurable, auto-discovery of tools from datasets, 1-GPU debug scripts for counter/guess_number envs (https://github.com/allenai/open-instruct/pull/1479).
