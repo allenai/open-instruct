@@ -365,6 +365,9 @@ class StreamingDataLoaderConfig:
     verification_reward: float = 10.0
     remap_verifier: str | None = None
 
+    # Reward - Spurious reward
+    spurious_reward_mode: bool = False
+
     # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     llm_judge_max_tokens: int = 2048
