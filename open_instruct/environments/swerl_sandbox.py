@@ -192,7 +192,7 @@ class SWERLSandboxEnv(RLEnvironment):
             task_dir = os.path.join(self._task_data_dir, task_id)
             image_file = os.path.join(task_dir, "image.txt")
             if os.path.isfile(image_file):
-                with open(image_file) as f:
+                with open(image_file, encoding="utf-8") as f:
                     image_tag = f.read().strip()
                 if image_tag:
                     self._backend_kwargs["image"] = image_tag
@@ -236,7 +236,7 @@ class SWERLSandboxEnv(RLEnvironment):
 
         instruction_file = os.path.join(task_dir, "instruction.md")
         if os.path.isfile(instruction_file):
-            with open(instruction_file) as f:
+            with open(instruction_file, encoding="utf-8") as f:
                 self._instruction = f.read().strip()
 
         seeds_dir = os.path.join(task_dir, "environment", "seeds")
@@ -248,7 +248,7 @@ class SWERLSandboxEnv(RLEnvironment):
                     container_path = f"/workspace/{rel_path}"
                     parent = os.path.dirname(container_path)
                     self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
-                    with open(src_path) as f:
+                    with open(src_path, encoding="utf-8") as f:
                         content = f.read()
                     self._backend.write_file(container_path, content)
 
@@ -262,14 +262,14 @@ class SWERLSandboxEnv(RLEnvironment):
                     container_path = f"/tests/{rel_path}"
                     parent = os.path.dirname(container_path)
                     self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
-                    with open(src_path) as f:
+                    with open(src_path, encoding="utf-8") as f:
                         content = f.read()
                     self._backend.write_file(container_path, content)
             self._backend.run_command("chmod +x /tests/test.sh 2>/dev/null || true")
 
         setup_file = os.path.join(task_dir, "setup.sh")
         if os.path.isfile(setup_file):
-            with open(setup_file) as f:
+            with open(setup_file, encoding="utf-8") as f:
                 setup_content = f.read()
             self._backend.write_file("/tmp/setup.sh", setup_content)
             self._backend.run_command("chmod +x /tmp/setup.sh && bash /tmp/setup.sh")
