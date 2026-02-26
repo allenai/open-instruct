@@ -560,6 +560,7 @@ class LLMRayActor:
         tool_definitions: list[dict] | None = None,
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
+        per_turn_max_tokens: int | None = None,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
@@ -577,7 +578,14 @@ class LLMRayActor:
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
         self._init_config(
-            max_steps, mask_tool_use, pools, inflight_updates, reward_config, train_dataset, eval_dataset
+            max_steps,
+            per_turn_max_tokens,
+            mask_tool_use,
+            pools,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -594,6 +602,7 @@ class LLMRayActor:
     def _init_config(
         self,
         max_steps: int,
+        per_turn_max_tokens: int | None,
         mask_tool_use: bool,
         pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
@@ -602,6 +611,7 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.max_steps = max_steps
+        self.per_turn_max_tokens = per_turn_max_tokens
         self.mask_tool_use = mask_tool_use
         self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
@@ -925,7 +935,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             remaining_budget = sampling_params.max_tokens - len(response_masks)
             remaining_room = max_model_len - len(current_prompt)
-            current_max_tokens = max(1, min(remaining_budget, remaining_room))
+            per_turn_budget = actor.per_turn_max_tokens if actor.per_turn_max_tokens is not None else remaining_budget
+            current_max_tokens = max(1, min(remaining_budget, remaining_room, per_turn_budget))
             if remaining_budget <= 0 or remaining_room <= 0:
                 break
 
@@ -1108,6 +1119,7 @@ def create_vllm_engines(
     tool_definitions: list[dict] | None = None,
     tool_stop_sequences: list[str] | None = None,
     max_steps: int = 5,
+    per_turn_max_tokens: int | None = None,
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
@@ -1196,6 +1208,7 @@ def create_vllm_engines(
                 tool_definitions=tool_definitions,
                 tool_stop_sequences=tool_stop_sequences,
                 max_steps=max_steps,
+                per_turn_max_tokens=per_turn_max_tokens,
                 mask_tool_use=mask_tool_use,
                 pools=pools,
                 inflight_updates=inflight_updates,

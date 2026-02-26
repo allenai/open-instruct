@@ -52,6 +52,7 @@ uv run python mason.py \
     --push_to_hub false \
     --save_traces \
     --max_steps 20 \
+    --per_turn_max_tokens 1024 \
     --tool_parser_type vllm_hermes \
     --dataset_skip_cache \
     --reward_aggregator last \

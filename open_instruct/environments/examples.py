@@ -235,12 +235,14 @@ class WordleTextEnv(TextRLEnvironment):
         self._error_allowance = error_allowance
         self._secret_word = ""
         self._guesses: list[str] = []
+        self._total_guess_attempts = 0
         self._consecutive_errors = 0
         self._done = False
         self._words = self._load_valid_words()
 
     async def _reset(self, **kwargs: Any) -> StepResult:
         self._guesses = []
+        self._total_guess_attempts = 0
         self._consecutive_errors = 0
         self._done = False
 
@@ -279,6 +281,8 @@ class WordleTextEnv(TextRLEnvironment):
         if not match:
             return self._handle_invalid("Please submit a 5-letter word inside <guess>...</guess> tags.")
 
+        self._total_guess_attempts += 1
+
         raw_guess = match.group(1).strip()
         if not raw_guess.isalpha():
             return self._handle_invalid(
@@ -312,8 +316,8 @@ class WordleTextEnv(TextRLEnvironment):
         if guess == self._secret_word:
             self._done = True
             return StepResult(
-                result=f"\n{feedback}\n\nCongratulations! You guessed the word correctly!",
-                reward=1.0 + 1.0 / n + format_reward,
+                result=f"\n{feedback}\nCongratulations! You guessed the word correctly!",
+                reward=1.0 + 1.0 / self._total_guess_attempts + format_reward,
                 done=True,
             )
 
@@ -324,13 +328,13 @@ class WordleTextEnv(TextRLEnvironment):
         if remaining <= 0:
             self._done = True
             return StepResult(
-                result=f"\n{feedback}\n\nYou used all {self._max_guesses} guesses. The word was {self._secret_word}.",
+                result=f"\n{feedback}\nYou used all {self._max_guesses} guesses. The word was {self._secret_word}.",
                 reward=reward,
                 done=True,
             )
 
         # Intermediate guess: partial credit + format reward
-        return StepResult(result=f"\n{feedback}\n\nYou have {remaining} guesses left.", reward=reward)
+        return StepResult(result=f"\n{feedback}\nYou have {remaining} guesses left.", reward=reward)
 
     @staticmethod
     def _format_feedback(guess: str, scoring: list[str]) -> str:

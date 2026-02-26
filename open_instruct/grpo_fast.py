@@ -1321,6 +1321,7 @@ def create_model_and_optimizer(
         tool_definitions=tool_definitions,
         tool_stop_sequences=tool_stop_sequences,
         max_steps=tools_config.max_steps if tools_config else 5,
+        per_turn_max_tokens=tools_config.per_turn_max_tokens if tools_config else None,
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
