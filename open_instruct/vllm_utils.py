@@ -908,10 +908,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
             env_actor = await pool.acquire.remote()
             acquired[env_name] = (pool, env_actor)
-            env_kwargs = {k: v for k, v in env_config.items() if k not in ("env_name", "max_steps", "pool_size")}
+            env_kwargs = {k: v for k, v in env_config.items() if k not in ("env_name", "max_steps", "pool_size", "is_text_env")}
             _, env_tools = await env_actor.reset.remote(**env_kwargs)
             env_response_role = await env_actor.get_response_role.remote()
-            is_text_env = await env_actor.get_is_text_env.remote()
+            is_text_env = env_config.get("is_text_env", False)
 
             if env_tools:
                 env_tool_names = {t["function"]["name"] for t in env_tools}

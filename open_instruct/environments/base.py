@@ -53,9 +53,6 @@ class RLEnvironment(ABC):
     def get_response_role(self) -> str:
         return self.response_role
 
-    def get_is_text_env(self) -> bool:
-        return False
-
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
         return
@@ -120,9 +117,6 @@ class TextRLEnvironment(RLEnvironment):
     async def step(self, call: EnvCall) -> StepResult:
         """Extract ``args["text"]`` from the shadow EnvCall and forward to text_step."""
         return await self.text_step(call.args["text"])
-
-    def get_is_text_env(self) -> bool:
-        return True
 
 
 @dataclass
