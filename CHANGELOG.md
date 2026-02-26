@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Fixed
+- Fix ZeRO-2 discarding gradients during manual gradient accumulation by using `set_gradient_accumulation_boundary()` (https://github.com/allenai/open-instruct/pull/1498).
+
 ### Added
 - Add `SWERLSandboxEnv` for per-sample Docker tasks with submit-based evaluation. Extends `RLEnvironment` directly with `execute_bash`, `str_replace_editor`, and `submit` tools. Each task provides its own instruction, seed files, and test scripts via a task data directory. Includes 1-GPU and 8-GPU debug scripts (https://github.com/allenai/open-instruct/pull/1492).
 - Add Docker sandbox backend and `GenericSandboxEnv` environment for code execution during RL training. `DockerBackend` with command timeout, configurable memory limits, `put_archive`/`get_archive` file I/O, and `remove=True` auto-cleanup. `GenericSandboxEnv` provides `execute_bash` (stateful bash with env/cwd persistence) and `str_replace_editor` (view/create/str_replace/insert with correct line numbering). Configurable penalty, image, and memory via `GenericSandboxEnvConfig`. Includes 1-GPU debug script (https://github.com/allenai/open-instruct/pull/1490).
@@ -24,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count) (https://github.com/allenai/open-instruct/pull/1434).
 
 ### Changed
+- Bound async data preparation to stay within `async_steps` of training, preventing training data getting too far out of sync with trainer. (https://github.com/allenai/open-instruct/pull/1496).
 - Refactor Legacy and DRTulu tool parsers to use OpenAI-format `tool_definitions` instead of Ray `tool_actors`. Removes `import ray` from `parsers.py`, fixes DRTulu parser which was broken after the pool refactor, and fixes `--tool_parser_type` typo in dr_tulu debug script (https://github.com/allenai/open-instruct/pull/1491).
 - Replaces lambda collators with a "single_example_collator" (https://github.com/allenai/open-instruct/pull/1472).
 - Clarified `activation_memory_budget` guidance in DPO utils with a practical default (`0.5`) and memory/speed tradeoff notes (https://github.com/allenai/open-instruct/pull/1460).
@@ -35,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+
 - Fixed weight sync thread hang when `inflight_updates=False`: wait for all vLLM `engine.update_weight` RPCs to complete before unpausing actors, preventing `health_check_fn` from blocking indefinitely (https://github.com/allenai/open-instruct/pull/1480).
 - Fixed `nodes_needed` calculation in `grpo_fast` `kv_cache_max_concurrency` warning using `math.ceil()` instead of floor division to avoid undercounting required inference nodes (https://github.com/allenai/open-instruct/pull/1474).
 - Fixed `eval_on_step_0` never triggering in `grpo_fast` because it was gated behind the `training_step % local_eval_every == 0` modulo check; also guard `local_eval_every <= 0` to prevent accidental every-step eval or `ZeroDivisionError` (https://github.com/allenai/open-instruct/pull/1485).
