@@ -47,6 +47,7 @@ uv run python mason.py \
     --seed 42 \
     --inflight_updates True \
     --async_steps 1 \
+    --truncated_importance_sampling_ratio_cap 5.0 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub false \
