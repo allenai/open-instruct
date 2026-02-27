@@ -37,7 +37,7 @@ uv run --active open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 1 \
     --inflight_updates \
     --filter_zero_std_samples False \
     --log_train_solve_rate_metrics True \
