@@ -907,9 +907,16 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     output = None
     try:
+        unknown_targets = set(env_config_by_name) - configured_tools
+        if unknown_targets:
+            raise ValueError(
+                f"env_config references targets without pools: {sorted(unknown_targets)}. "
+                f"Available pools: {sorted(configured_tools)}"
+            )
+
         # Acquire/reset all configured pools up front so pool size directly controls
         # per-request concurrency across tools and environments.
-        for pool_name in sorted(configured_tools | set(env_config_by_name)):
+        for pool_name in sorted(configured_tools):
             pool = actor.pools.get(pool_name)
             if pool is None:
                 raise ValueError(f"No pool for target '{pool_name}'. Available: {list(actor.pools.keys())}")
