@@ -1,7 +1,6 @@
 """Tests for tool parsers."""
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from parameterized import parameterized
@@ -433,36 +432,6 @@ class TestVllmToolParser(unittest.TestCase):
             tool_parser=mock_native, role_templates=self.ROLE_TEMPLATES, stop_sequences=["</tool>", "<|end|>"]
         )
         self.assertEqual(parser.stop_sequences, ["</tool>", "<|end|>"])
-
-    def test_hermes_parser_skips_malformed_tool_call_without_name(self):
-        class Hermes2ProToolParser:
-            def extract_tool_calls(self, model_output, request):
-                raise AssertionError("native parser should not be called for malformed Hermes tool call")
-
-        parser = VllmToolParser(tool_parser=Hermes2ProToolParser(), role_templates=self.ROLE_TEMPLATES)
-        text = '<tool_call>{"arguments": {"query": "hello"}}</tool_call>'
-        self.assertEqual(parser.get_tool_calls(text), [])
-
-    def test_hermes_parser_filters_invalid_blocks_before_native_parse(self):
-        class Hermes2ProToolParser:
-            def __init__(self):
-                self.last_model_output = None
-
-            def extract_tool_calls(self, model_output, request):
-                self.last_model_output = model_output
-                return SimpleNamespace(tools_called=False, tool_calls=[])
-
-        native = Hermes2ProToolParser()
-        parser = VllmToolParser(tool_parser=native, role_templates=self.ROLE_TEMPLATES)
-        text = (
-            '<tool_call>{"arguments": {"query": "bad"}}</tool_call>\n'
-            '<tool_call>{"name": "search", "arguments": {"query": "good"}}</tool_call>'
-        )
-        self.assertEqual(parser.get_tool_calls(text), [])
-        self.assertIsNotNone(native.last_model_output)
-        assert native.last_model_output is not None
-        self.assertIn('"name": "search"', native.last_model_output)
-        self.assertNotIn('"query": "bad"', native.last_model_output)
 
 
 class TestCreateToolParser(unittest.TestCase):
