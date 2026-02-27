@@ -600,10 +600,7 @@ def _merge_env_config(
     else:
         max_steps = sample_env_config.get("max_steps", base_max_steps)
         sample_envs = _extract_env_configs(sample_env_config)
-        if sample_envs:
-            envs = _merge_sample_envs(sample_envs, base_envs_by_name)
-        else:
-            envs = base_envs
+        envs = _merge_sample_envs(sample_envs, base_envs_by_name) if sample_envs else base_envs
 
     if not envs:
         return None
