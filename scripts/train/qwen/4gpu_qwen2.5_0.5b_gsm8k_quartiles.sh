@@ -41,16 +41,16 @@ uv run --active open_instruct/grpo_fast.py \
     --log_train_solve_rate_metrics True \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
-    --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 512 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --response_length 4096 \
+    --pack_length 8192 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
@@ -61,7 +61,6 @@ uv run --active open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --save_freq 200 \
-    --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 1 \
     --vllm_num_engines 3 \
