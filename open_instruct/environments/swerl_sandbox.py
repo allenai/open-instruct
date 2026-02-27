@@ -140,6 +140,7 @@ class SWERLSandboxEnv(RLEnvironment):
         backend: str = "docker",
         image: str = "python:3.12-slim",
         task_data_dir: str = "",
+        task_data_hf_repo: str = "",
         test_timeout: int = 120,
         timeout: int = 600,
         **backend_kwargs: Any,
@@ -154,8 +155,20 @@ class SWERLSandboxEnv(RLEnvironment):
         self._step_count = 0
         self._task_id: str | None = None
         self._task_data_dir = task_data_dir
+        self._task_data_hf_repo = task_data_hf_repo
         self._test_timeout = test_timeout
         self._instruction = ""
+
+    async def setup(self) -> None:
+        """Download task data from HuggingFace if configured."""
+        if self._task_data_hf_repo and not self._task_data_dir:
+            from huggingface_hub import snapshot_download
+
+            logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
+            self._task_data_dir = snapshot_download(
+                self._task_data_hf_repo, repo_type="dataset"
+            )
+            logger.info(f"Task data cached at {self._task_data_dir}")
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
@@ -509,5 +522,6 @@ class SWERLSandboxEnvConfig(BaseEnvConfig):
     mem_limit: str = "4g"
     penalty: float = -0.05
     task_data_dir: str = ""
+    task_data_hf_repo: str = ""
     test_timeout: int = 120
     timeout: int = 600

@@ -7,7 +7,6 @@
 # Requirements:
 # - Docker running (uses python:3.12-slim image by default)
 # - 1 GPU available
-# - Test data at data/swerl_sandbox_test/
 
 set -e
 
@@ -44,7 +43,7 @@ uv run python open_instruct/grpo_fast.py \
     --push_to_hub false \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs '{"task_data_dir": "data/swerl_sandbox_test", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-data", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 4 \
     --max_steps 20 \
     --tool_parser_type vllm_hermes \
