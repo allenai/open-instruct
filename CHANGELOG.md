@@ -28,7 +28,7 @@ All notable changes to this project will be documented in this file.
 - Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count) (https://github.com/allenai/open-instruct/pull/1434).
 
 ### Changed
-- Enable multiple active environments per rollout in RL training by standardizing on canonical `env_config` payloads (`env_configs` list), activating/resetting multiple envs in the vLLM rollout loop, and reporting per-env metrics; remove support for legacy single-env `env_config` shape (https://github.com/allenai/open-instruct/pull/1500).
+- Enable multiple active targets per rollout in RL training by standardizing on canonical `env_config` payloads (`env_configs` list), unifying tool and environment dispatch in vLLM with upfront pool activation (no lazy tool acquisition), validating unknown configured targets early, and reporting per-target metrics while retaining text-environment handling (https://github.com/allenai/open-instruct/pull/1500).
 - Bound async data preparation to stay within `async_steps` of training, preventing training data getting too far out of sync with trainer. (https://github.com/allenai/open-instruct/pull/1496).
 - Refactor Legacy and DRTulu tool parsers to use OpenAI-format `tool_definitions` instead of Ray `tool_actors`. Removes `import ray` from `parsers.py`, fixes DRTulu parser which was broken after the pool refactor, and fixes `--tool_parser_type` typo in dr_tulu debug script (https://github.com/allenai/open-instruct/pull/1491).
 - Replaces lambda collators with a "single_example_collator" (https://github.com/allenai/open-instruct/pull/1472).
