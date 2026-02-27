@@ -892,23 +892,20 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     max_steps = actor.max_steps
     env_configs: list[dict[str, Any]] = []
     if env_config is not None:
-        if isinstance(env_config, list):
-            if not all(isinstance(cfg, dict) for cfg in env_config):
-                raise TypeError(f"env_config list entries must be dicts, got: {env_config!r}")
-            env_configs = [dict(cfg) for cfg in env_config]
-        elif isinstance(env_config, dict):
-            max_steps_override = env_config.get("max_steps")
-            if max_steps_override is not None:
-                max_steps = max_steps_override
-            if "env_configs" in env_config:
-                nested = env_config.get("env_configs") or []
-                if not isinstance(nested, list) or not all(isinstance(cfg, dict) for cfg in nested):
-                    raise TypeError(f"env_configs must be a list of dicts, got: {nested!r}")
-                env_configs = [dict(cfg) for cfg in nested]
-            elif env_config.get("env_name"):
-                env_configs = [dict(env_config)]
-        else:
-            raise TypeError(f"env_config must be a dict, list[dict], or None, got {type(env_config).__name__}")
+        if not isinstance(env_config, dict):
+            raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
+        if "env_name" in env_config:
+            raise ValueError(
+                "Legacy env_config {'env_name': ...} is no longer supported. "
+                "Use {'env_configs': [{'env_name': ...}, ...]}."
+            )
+        max_steps_override = env_config.get("max_steps")
+        if max_steps_override is not None:
+            max_steps = max_steps_override
+        nested = env_config.get("env_configs") or []
+        if not isinstance(nested, list) or not all(isinstance(cfg, dict) for cfg in nested):
+            raise TypeError(f"env_configs must be a list of dicts, got: {nested!r}")
+        env_configs = [dict(cfg) for cfg in nested]
 
     # Acquired actors: pool_key -> actor (released in finally block)
     acquired: dict[str, Any] = {}
