@@ -165,9 +165,7 @@ class SWERLSandboxEnv(RLEnvironment):
             from huggingface_hub import snapshot_download
 
             logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
-            self._task_data_dir = snapshot_download(
-                self._task_data_hf_repo, repo_type="dataset"
-            )
+            self._task_data_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
             logger.info(f"Task data cached at {self._task_data_dir}")
 
     @classmethod
