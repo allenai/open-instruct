@@ -563,11 +563,6 @@ def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, An
         return []
     if not isinstance(env_config, dict):
         raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
-    if "env_name" in env_config:
-        raise ValueError(
-            "Legacy env_config {'env_name': ...} is no longer supported. "
-            "Use {'env_configs': [{'env_name': ...}, ...]}."
-        )
 
     nested = env_config.get("env_configs") or []
     if not isinstance(nested, list) or not all(isinstance(cfg, dict) for cfg in nested):
