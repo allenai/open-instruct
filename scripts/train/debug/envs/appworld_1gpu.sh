@@ -2,7 +2,7 @@
 # Debug script for testing GRPO with AppWorldEnv (train + local eval)
 #
 # Requirements:
-# - `pip install appworld`
+# - `uv sync --extra appworld` (or `pip install appworld`)
 # - `appworld install`
 # - `appworld download data`
 # - Datasets created via scripts/data/create_appworld_env_datasets.py

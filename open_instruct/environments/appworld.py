@@ -40,22 +40,39 @@ _APPWORLD_EXECUTE_TOOL = {
 
 _SCORE_KEYS = ("score", "task_goal_completion", "tgc", "sgc", "success", "completed", "task_completed")
 
+_APPWORLD_MODULE: Any | None = None
+APPWORLD_AVAILABLE = False
+APPWORLD_IMPORT_ERROR: ImportError | None = None
+try:
+    _APPWORLD_MODULE = importlib.import_module("appworld")
+    APPWORLD_AVAILABLE = True
+except ImportError as e:
+    APPWORLD_IMPORT_ERROR = e
+
 
 def _load_appworld_symbols() -> tuple[type, Any]:
-    """Lazily import appworld and return key symbols."""
-    try:
-        module = importlib.import_module("appworld")
-    except ImportError as e:
-        raise ImportError(
-            "AppWorldEnv requires the `appworld` package. Install with `pip install appworld`, "
-            "then run `appworld install` and `appworld download data`."
-        ) from e
+    """Return appworld symbols if dependency is available."""
+    if not APPWORLD_AVAILABLE or _APPWORLD_MODULE is None:
+        message = (
+            "AppWorldEnv requires the optional `appworld` dependency. Install with "
+            "`pip install -e '.[appworld]'` (or `pip install appworld`), then run "
+            "`appworld install` and `appworld download data`."
+        )
+        if APPWORLD_IMPORT_ERROR is not None:
+            raise ImportError(message) from APPWORLD_IMPORT_ERROR
+        raise ImportError(message)
 
+    module = _APPWORLD_MODULE
     appworld_cls = getattr(module, "AppWorld", None)
     if appworld_cls is None:
         raise ImportError("Could not find `AppWorld` in the installed appworld package.")
     update_root = getattr(module, "update_root", None)
     return appworld_cls, update_root
+
+
+def is_appworld_available() -> bool:
+    """Return True when the optional appworld dependency is importable."""
+    return APPWORLD_AVAILABLE
 
 
 class AppWorldEnv(RLEnvironment):

@@ -5,6 +5,7 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
+import open_instruct.environments.appworld as appworld_module
 from open_instruct.environments.appworld import AppWorldEnv, AppWorldEnvConfig
 from open_instruct.environments.base import EnvCall, StepResult
 from open_instruct.environments.tools.tools import TOOL_REGISTRY
@@ -66,18 +67,26 @@ class TestAppWorldEnv(unittest.TestCase):
             AppWorld=_FakeAppWorld, update_root=update_root if update_root is not None else lambda _root: None
         )
 
+    def _patch_appworld_available(self, update_root: MagicMock | None = None):
+        return patch.multiple(
+            appworld_module,
+            APPWORLD_AVAILABLE=True,
+            _APPWORLD_MODULE=self._mock_module(update_root=update_root),
+            APPWORLD_IMPORT_ERROR=None,
+        )
+
     def test_appworld_registered(self):
         self.assertIn("appworld", TOOL_REGISTRY)
         self.assertEqual(TOOL_REGISTRY["appworld"], AppWorldEnvConfig)
 
     def test_reset_requires_task_id(self):
-        with patch("open_instruct.environments.appworld.importlib.import_module", return_value=self._mock_module()):
+        with self._patch_appworld_available():
             env = AppWorldEnv()
             with self.assertRaises(ValueError):
                 asyncio.run(env.reset())
 
     def test_reset_returns_tools_and_observation(self):
-        with patch("open_instruct.environments.appworld.importlib.import_module", return_value=self._mock_module()):
+        with self._patch_appworld_available():
             env = AppWorldEnv(experiment_name="unit-test-exp")
             result, tools = asyncio.run(env.reset(task_id="task-001"))
 
@@ -88,7 +97,7 @@ class TestAppWorldEnv(unittest.TestCase):
         self.assertEqual(_FakeAppWorld.instances[-1].experiment_name, "unit-test-exp")
 
     def test_step_and_completion_reward(self):
-        with patch("open_instruct.environments.appworld.importlib.import_module", return_value=self._mock_module()):
+        with self._patch_appworld_available():
             env = AppWorldEnv(reward_scale=1.0)
             asyncio.run(env.reset(task_id="task-002"))
 
@@ -107,7 +116,7 @@ class TestAppWorldEnv(unittest.TestCase):
         self.assertAlmostEqual(metrics["evaluation_score"], _FakeAppWorld.evaluation_score)
 
     def test_unknown_tool_returns_penalty(self):
-        with patch("open_instruct.environments.appworld.importlib.import_module", return_value=self._mock_module()):
+        with self._patch_appworld_available():
             env = AppWorldEnv(penalty=-0.2)
             asyncio.run(env.reset(task_id="task-003"))
             result = asyncio.run(env.step(EnvCall(id="1", name="not_a_tool", args={})))
@@ -118,22 +127,29 @@ class TestAppWorldEnv(unittest.TestCase):
 
     def test_appworld_root_calls_update_root(self):
         update_root = MagicMock()
-        with patch(
-            "open_instruct.environments.appworld.importlib.import_module",
-            return_value=self._mock_module(update_root=update_root),
-        ):
+        with self._patch_appworld_available(update_root=update_root):
             env = AppWorldEnv(appworld_root="/tmp/appworld")
             asyncio.run(env.reset(task_id="task-004"))
         update_root.assert_called_once_with("/tmp/appworld")
 
     def test_close_closes_world(self):
-        with patch("open_instruct.environments.appworld.importlib.import_module", return_value=self._mock_module()):
+        with self._patch_appworld_available():
             env = AppWorldEnv()
             asyncio.run(env.reset(task_id="task-005"))
             world = _FakeAppWorld.instances[-1]
             asyncio.run(env.close())
 
         self.assertTrue(world.closed)
+
+    def test_guard_raises_clean_error_when_dependency_missing(self):
+        with patch.multiple(
+            appworld_module,
+            APPWORLD_AVAILABLE=False,
+            _APPWORLD_MODULE=None,
+            APPWORLD_IMPORT_ERROR=ImportError("No module named appworld"),
+        ), self.assertRaises(ImportError) as ctx:
+            appworld_module._load_appworld_symbols()
+        self.assertIn("optional `appworld` dependency", str(ctx.exception))
 
 
 if __name__ == "__main__":

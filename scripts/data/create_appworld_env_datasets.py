@@ -16,7 +16,8 @@ def _load_appworld_symbols() -> tuple[type, Any, Any]:
         module = importlib.import_module("appworld")
     except ImportError as e:
         raise ImportError(
-            "This script requires `appworld`. Install with `pip install appworld`, "
+            "This script requires `appworld`. Install with `pip install -e '.[appworld]'` "
+            "(or `pip install appworld`), "
             "then run `appworld install` and `appworld download data`."
         ) from e
 
