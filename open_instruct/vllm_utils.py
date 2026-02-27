@@ -894,9 +894,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     if env_config is not None and not isinstance(env_config, dict):
         raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
     if isinstance(env_config, dict):
-        max_steps_override = env_config.get("max_steps")
-        if max_steps_override is not None:
-            max_steps = max_steps_override
+        max_steps = env_config.get("max_steps", max_steps)
     env_configs = _extract_env_configs(env_config)
     env_config_by_name = {cfg["env_name"]: cfg for cfg in env_configs if "env_name" in cfg}
 
