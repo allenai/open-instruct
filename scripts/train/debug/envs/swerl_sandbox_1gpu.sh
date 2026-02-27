@@ -23,12 +23,12 @@ uv run python open_instruct/grpo_fast.py \
     --response_length 4096 \
     --pack_length 8192 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 2 \
-    --num_samples_per_prompt_rollout 2 \
+    --num_unique_prompts_rollout 4 \
+    --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 1.0 \
     --learning_rate 3e-7 \
-    --total_episodes 16 \
+    --total_episodes 48 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -44,10 +44,9 @@ uv run python open_instruct/grpo_fast.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 4 \
-    --max_steps 20 \
+    --pool_size 8 \
+    --max_steps 10 \
     --tool_parser_type vllm_hermes \
-    --no_filter_zero_std_samples \
     --output_dir output/swerl_sandbox_debug
 
 echo "Training complete!"
