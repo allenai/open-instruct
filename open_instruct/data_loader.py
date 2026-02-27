@@ -576,8 +576,7 @@ def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, An
 
 
 def _merge_env_config(
-    base_env_config: dict[str, Any] | None,
-    sample_env_config: dict[str, Any] | None,
+    base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | None
 ) -> dict[str, Any] | None:
     """Merge base and sample env config into canonical payload.
 

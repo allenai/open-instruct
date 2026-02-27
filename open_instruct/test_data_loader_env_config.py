@@ -21,7 +21,10 @@ class TestEnvConfigMerging(unittest.TestCase):
     def test_merge_multi_env_base(self):
         base = {
             "max_steps": 7,
-            "env_configs": [{"env_name": "counter", "is_text_env": False}, {"env_name": "guess_number", "is_text_env": False}],
+            "env_configs": [
+                {"env_name": "counter", "is_text_env": False},
+                {"env_name": "guess_number", "is_text_env": False},
+            ],
         }
         merged = _merge_env_config(base, None)
         self.assertEqual(merged, base)
@@ -29,7 +32,10 @@ class TestEnvConfigMerging(unittest.TestCase):
     def test_sample_env_configs_merge_with_base_defaults(self):
         base = {
             "max_steps": 9,
-            "env_configs": [{"env_name": "counter", "is_text_env": False}, {"env_name": "guess_number", "is_text_env": False}],
+            "env_configs": [
+                {"env_name": "counter", "is_text_env": False},
+                {"env_name": "guess_number", "is_text_env": False},
+            ],
         }
         sample = {"env_configs": [{"env_name": "counter", "target": 11}]}
         merged = _merge_env_config(base, sample)
@@ -39,7 +45,10 @@ class TestEnvConfigMerging(unittest.TestCase):
     def test_legacy_sample_env_config_rejected(self):
         base = {
             "max_steps": 9,
-            "env_configs": [{"env_name": "counter", "is_text_env": False}, {"env_name": "guess_number", "is_text_env": False}],
+            "env_configs": [
+                {"env_name": "counter", "is_text_env": False},
+                {"env_name": "guess_number", "is_text_env": False},
+            ],
         }
         with self.assertRaises(ValueError):
             _merge_env_config(base, {"env_name": "counter", "target": 3})
@@ -53,7 +62,10 @@ class TestEnvConfigMerging(unittest.TestCase):
         queue = _QueueStub()
         base = {
             "max_steps": 4,
-            "env_configs": [{"env_name": "counter", "is_text_env": False}, {"env_name": "guess_number", "is_text_env": False}],
+            "env_configs": [
+                {"env_name": "counter", "is_text_env": False},
+                {"env_name": "guess_number", "is_text_env": False},
+            ],
         }
         example = {
             "index": 0,
@@ -73,7 +85,9 @@ class TestEnvConfigMerging(unittest.TestCase):
         self.assertEqual(len(queue.items), 1)
         request = queue.items[0]
         self.assertEqual(request.env_config["max_steps"], 4)
-        self.assertEqual(request.env_config["env_configs"], [{"env_name": "counter", "is_text_env": False, "target": 2}])
+        self.assertEqual(
+            request.env_config["env_configs"], [{"env_name": "counter", "is_text_env": False, "target": 2}]
+        )
 
 
 if __name__ == "__main__":

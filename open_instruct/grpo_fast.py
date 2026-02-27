@@ -2279,10 +2279,7 @@ def main(
             config_cls = TOOL_REGISTRY.get(parsed.name)
             if config_cls and not issubclass(config_cls.tool_class, Tool):
                 env_configs.append(
-                    {
-                        "env_name": parsed.call_name,
-                        "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment),
-                    }
+                    {"env_name": parsed.call_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
                 )
         if env_configs:
             base_env_config["env_configs"] = env_configs

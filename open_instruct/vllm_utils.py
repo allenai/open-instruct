@@ -924,7 +924,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             acquired[env_name] = (pool, env_actor)
             active_env_names.append(env_name)
             env_kwargs = {
-                k: v for k, v in env.items() if k not in ("env_name", "max_steps", "pool_size", "is_text_env", "env_configs")
+                k: v
+                for k, v in env.items()
+                if k not in ("env_name", "max_steps", "pool_size", "is_text_env", "env_configs")
             }
             _, env_tools = await env_actor.reset.remote(**env_kwargs)
             env_response_role = await env_actor.get_response_role.remote()
@@ -956,9 +958,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 tool_response_roles[env_name] = env_response_role
 
         if len(text_env_names) > 1:
-            raise ValueError(
-                f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}"
-            )
+            raise ValueError(f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}")
 
         while rollout.step_count < max_steps:
             if rollout.done:
