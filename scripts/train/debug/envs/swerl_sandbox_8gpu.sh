@@ -22,6 +22,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
+       --env REPO_PATH=/stage \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
@@ -30,7 +31,7 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/train/debug/envs/download_swerl_data.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -60,7 +61,7 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 32 \
+    --pool_size 8 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
     --active_sampling \
