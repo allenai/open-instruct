@@ -241,30 +241,11 @@ class SWERLSandboxEnv(RLEnvironment):
 
         seeds_dir = os.path.join(task_dir, "environment", "seeds")
         if os.path.isdir(seeds_dir):
-            for root, _dirs, files in os.walk(seeds_dir):
-                for fname in files:
-                    src_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(src_path, seeds_dir)
-                    container_path = f"/workspace/{rel_path}"
-                    parent = os.path.dirname(container_path)
-                    self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
-                    with open(src_path, encoding="utf-8") as f:
-                        content = f.read()
-                    self._backend.write_file(container_path, content)
+            self._upload_directory(seeds_dir, "/workspace")
 
         tests_dir = os.path.join(task_dir, "tests")
         if os.path.isdir(tests_dir):
-            self._backend.run_command("mkdir -p /tests")
-            for root, _dirs, files in os.walk(tests_dir):
-                for fname in files:
-                    src_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(src_path, tests_dir)
-                    container_path = f"/tests/{rel_path}"
-                    parent = os.path.dirname(container_path)
-                    self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
-                    with open(src_path, encoding="utf-8") as f:
-                        content = f.read()
-                    self._backend.write_file(container_path, content)
+            self._upload_directory(tests_dir, "/tests")
             self._backend.run_command("chmod +x /tests/test.sh 2>/dev/null || true")
 
         setup_file = os.path.join(task_dir, "setup.sh")
@@ -273,6 +254,34 @@ class SWERLSandboxEnv(RLEnvironment):
                 setup_content = f.read()
             self._backend.write_file("/tmp/setup.sh", setup_content)
             self._backend.run_command("chmod +x /tmp/setup.sh && bash /tmp/setup.sh")
+
+    def _upload_directory(self, host_dir: str, container_dir: str) -> None:
+        """Upload a local directory tree into the container, batching mkdir calls."""
+        assert self._backend is not None
+
+        file_pairs: list[tuple[str, str]] = []
+        dirs_to_create: set[str] = set()
+
+        for root, _dirs, files in os.walk(host_dir):
+            for fname in files:
+                src_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(src_path, host_dir)
+                container_path = f"{container_dir}/{rel_path}"
+                parent = os.path.dirname(container_path)
+                if parent != container_dir:
+                    dirs_to_create.add(parent)
+                file_pairs.append((src_path, container_path))
+
+        if dirs_to_create:
+            quoted = " ".join(shlex.quote(d) for d in sorted(dirs_to_create))
+            self._backend.run_command(f"mkdir -p {quoted}")
+        else:
+            self._backend.run_command(f"mkdir -p {shlex.quote(container_dir)}")
+
+        for src_path, container_path in file_pairs:
+            with open(src_path, encoding="utf-8") as f:
+                content = f.read()
+            self._backend.write_file(container_path, content)
 
     # ------------------------------------------------------------------
     # Step
