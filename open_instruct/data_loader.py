@@ -529,7 +529,10 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
+            wait_start_time = time.perf_counter()
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
+            trainer_idle_wait_time = time.perf_counter() - wait_start_time
+            batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
             yield batch_data
 
