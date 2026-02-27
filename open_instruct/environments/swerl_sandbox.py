@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from huggingface_hub import snapshot_download
+
 from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
@@ -293,7 +294,7 @@ class SWERLSandboxEnv(RLEnvironment):
             self._backend.run_command(f"mkdir -p {shlex.quote(container_dir)}")
 
         for src_path, container_path in file_pairs:
-            with open(src_path, encoding="utf-8") as f:
+            with open(src_path, "rb") as f:
                 content = f.read()
             self._backend.write_file(container_path, content)
 
