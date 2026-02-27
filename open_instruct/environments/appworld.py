@@ -128,8 +128,7 @@ class AppWorldEnv(RLEnvironment):
             )
         if not os.environ.get("APPWORLD_ROOT"):
             raise ValueError(
-                "`APPWORLD_ROOT` is required for AppWorldEnv and must be set by the caller "
-                "before creating rollouts."
+                "`APPWORLD_ROOT` is required for AppWorldEnv and must be set by the caller before creating rollouts."
             )
 
         experiment_name = str(kwargs.get("experiment_name", self._default_experiment_name))
