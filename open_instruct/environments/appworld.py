@@ -50,7 +50,7 @@ except ImportError as e:
     APPWORLD_IMPORT_ERROR = e
 
 
-def _load_appworld_symbols() -> tuple[type, Any]:
+def _load_appworld_symbols() -> type:
     """Return appworld symbols if dependency is available."""
     if not APPWORLD_AVAILABLE or _APPWORLD_MODULE is None:
         message = (
@@ -66,8 +66,7 @@ def _load_appworld_symbols() -> tuple[type, Any]:
     appworld_cls = getattr(module, "AppWorld", None)
     if appworld_cls is None:
         raise ImportError("Could not find `AppWorld` in the installed appworld package.")
-    update_root = getattr(module, "update_root", None)
-    return appworld_cls, update_root
+    return appworld_cls
 
 
 def is_appworld_available() -> bool:
@@ -84,7 +83,6 @@ class AppWorldEnv(RLEnvironment):
     def __init__(
         self,
         experiment_name: str = "open_instruct_appworld",
-        appworld_root: str | None = None,
         raise_on_failure: bool = True,
         evaluate_on_done: bool = True,
         reward_scale: float = 1.0,
@@ -97,10 +95,9 @@ class AppWorldEnv(RLEnvironment):
         if kwargs:
             logger.warning(f"Ignoring unexpected AppWorldEnv kwargs: {sorted(kwargs.keys())}")
 
-        self._appworld_cls, self._update_root = _load_appworld_symbols()
+        self._appworld_cls = _load_appworld_symbols()
 
         self._default_experiment_name = experiment_name
-        self._default_appworld_root = appworld_root
         self._default_raise_on_failure = raise_on_failure
         self._evaluate_on_done = evaluate_on_done
         self._reward_scale = reward_scale
@@ -124,12 +121,16 @@ class AppWorldEnv(RLEnvironment):
 
         await self.close()
 
-        appworld_root = kwargs.get("appworld_root", self._default_appworld_root)
-        if appworld_root:
-            if self._update_root is not None:
-                self._update_root(appworld_root)
-            else:
-                os.environ["APPWORLD_ROOT"] = str(appworld_root)
+        if kwargs.get("appworld_root") is not None:
+            raise ValueError(
+                "`appworld_root` in env_config is not supported. Set `APPWORLD_ROOT` "
+                "before launching training/evaluation."
+            )
+        if not os.environ.get("APPWORLD_ROOT"):
+            raise ValueError(
+                "`APPWORLD_ROOT` is required for AppWorldEnv and must be set by the caller "
+                "before creating rollouts."
+            )
 
         experiment_name = str(kwargs.get("experiment_name", self._default_experiment_name))
         raise_on_failure = bool(kwargs.get("raise_on_failure", self._default_raise_on_failure))
@@ -307,7 +308,6 @@ class AppWorldEnvConfig(BaseEnvConfig):
 
     tool_class: ClassVar[type[RLEnvironment]] = AppWorldEnv
     experiment_name: str = "open_instruct_appworld"
-    appworld_root: str | None = None
     raise_on_failure: bool = True
     evaluate_on_done: bool = True
     reward_scale: float = 1.0

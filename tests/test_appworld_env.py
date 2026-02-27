@@ -1,9 +1,10 @@
 """Unit tests for AppWorld environment integration."""
 
 import asyncio
+import os
 import types
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import open_instruct.environments.appworld as appworld_module
 from open_instruct.environments.appworld import AppWorldEnv, AppWorldEnvConfig
@@ -62,31 +63,32 @@ class TestAppWorldEnv(unittest.TestCase):
         _FakeAppWorld.instances = []
         _FakeAppWorld.evaluation_score = 0.75
 
-    def _mock_module(self, update_root: MagicMock | None = None):
-        return types.SimpleNamespace(
-            AppWorld=_FakeAppWorld, update_root=update_root if update_root is not None else lambda _root: None
-        )
+    def _mock_module(self):
+        return types.SimpleNamespace(AppWorld=_FakeAppWorld)
 
-    def _patch_appworld_available(self, update_root: MagicMock | None = None):
+    def _patch_appworld_available(self):
         return patch.multiple(
             appworld_module,
             APPWORLD_AVAILABLE=True,
-            _APPWORLD_MODULE=self._mock_module(update_root=update_root),
+            _APPWORLD_MODULE=self._mock_module(),
             APPWORLD_IMPORT_ERROR=None,
         )
+
+    def _patch_appworld_root(self):
+        return patch.dict(os.environ, {"APPWORLD_ROOT": "/tmp/appworld"}, clear=False)
 
     def test_appworld_registered(self):
         self.assertIn("appworld", TOOL_REGISTRY)
         self.assertEqual(TOOL_REGISTRY["appworld"], AppWorldEnvConfig)
 
     def test_reset_requires_task_id(self):
-        with self._patch_appworld_available():
+        with self._patch_appworld_available(), self._patch_appworld_root():
             env = AppWorldEnv()
             with self.assertRaises(ValueError):
                 asyncio.run(env.reset())
 
     def test_reset_returns_tools_and_observation(self):
-        with self._patch_appworld_available():
+        with self._patch_appworld_available(), self._patch_appworld_root():
             env = AppWorldEnv(experiment_name="unit-test-exp")
             result, tools = asyncio.run(env.reset(task_id="task-001"))
 
@@ -97,7 +99,7 @@ class TestAppWorldEnv(unittest.TestCase):
         self.assertEqual(_FakeAppWorld.instances[-1].experiment_name, "unit-test-exp")
 
     def test_step_and_completion_reward(self):
-        with self._patch_appworld_available():
+        with self._patch_appworld_available(), self._patch_appworld_root():
             env = AppWorldEnv(reward_scale=1.0)
             asyncio.run(env.reset(task_id="task-002"))
 
@@ -116,7 +118,7 @@ class TestAppWorldEnv(unittest.TestCase):
         self.assertAlmostEqual(metrics["evaluation_score"], _FakeAppWorld.evaluation_score)
 
     def test_unknown_tool_returns_penalty(self):
-        with self._patch_appworld_available():
+        with self._patch_appworld_available(), self._patch_appworld_root():
             env = AppWorldEnv(penalty=-0.2)
             asyncio.run(env.reset(task_id="task-003"))
             result = asyncio.run(env.step(EnvCall(id="1", name="not_a_tool", args={})))
@@ -125,15 +127,22 @@ class TestAppWorldEnv(unittest.TestCase):
         self.assertEqual(result.reward, -0.2)
         self.assertIn("Unknown tool", result.result)
 
-    def test_appworld_root_calls_update_root(self):
-        update_root = MagicMock()
-        with self._patch_appworld_available(update_root=update_root):
-            env = AppWorldEnv(appworld_root="/tmp/appworld")
-            asyncio.run(env.reset(task_id="task-004"))
-        update_root.assert_called_once_with("/tmp/appworld")
+    def test_requires_appworld_root_env_var(self):
+        with self._patch_appworld_available(), patch.dict(os.environ, {}, clear=True):
+            env = AppWorldEnv()
+            with self.assertRaises(ValueError) as ctx:
+                asyncio.run(env.reset(task_id="task-004"))
+        self.assertIn("APPWORLD_ROOT", str(ctx.exception))
+
+    def test_rejects_appworld_root_override_in_env_config(self):
+        with self._patch_appworld_available(), self._patch_appworld_root():
+            env = AppWorldEnv()
+            with self.assertRaises(ValueError) as ctx:
+                asyncio.run(env.reset(task_id="task-004b", appworld_root="/tmp/other-root"))
+        self.assertIn("appworld_root", str(ctx.exception))
 
     def test_close_closes_world(self):
-        with self._patch_appworld_available():
+        with self._patch_appworld_available(), self._patch_appworld_root():
             env = AppWorldEnv()
             asyncio.run(env.reset(task_id="task-005"))
             world = _FakeAppWorld.instances[-1]
