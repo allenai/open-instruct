@@ -365,7 +365,7 @@ class SWERLSandboxEnv(RLEnvironment):
                 output = self._editor_insert(path, args.get("insert_line"), args.get("new_str"))
             else:
                 return self._editor_error(f"Unknown command '{command}'. Use view/create/str_replace/insert.")
-        except (_EditorError, FileNotFoundError) as exc:
+        except (_EditorError, FileNotFoundError, IsADirectoryError) as exc:
             return self._editor_error(str(exc))
 
         return StepResult(result=f"Execution output of [str_replace_editor]:\n{output}")
