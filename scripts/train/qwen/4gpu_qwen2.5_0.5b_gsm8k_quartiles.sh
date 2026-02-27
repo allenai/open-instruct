@@ -1,13 +1,15 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen25_05b_it_gsm8k_quartiles}"
+EXP_NAME="${EXP_NAME:-qwen25_05b_it_gsm8k_buckets}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
-LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
+DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets}"
+DATASET_SPLITS="${DATASET_SPLITS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets}"
+
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
 PRIORITY="${PRIORITY:-high}"
@@ -47,7 +49,7 @@ uv run --active open_instruct/grpo_fast.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits train \
+    --dataset_mixer_list_splits $DATASET_SPLITS \
     --max_prompt_token_length 512 \
     --response_length 4096 \
     --pack_length 8192 \
