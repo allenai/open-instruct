@@ -2,7 +2,7 @@
 # Training script for GRPO with SWERL Sandbox environment (8 GPUs on Beaker)
 #
 # SWERL Sandbox: Per-sample Docker tasks with submit-based evaluation.
-# Extends GenericSandboxEnv with per-task instruction, seeds, and test scripts.
+# Provides execute_bash, str_replace_editor, and submit tools.
 #
 # Requirements:
 # - 8 GPUs (launched on Beaker)
@@ -30,9 +30,7 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& \
-          source scripts/train/debug/envs/download_swerl_data.sh \&\& \
-          python open_instruct/grpo_fast.py \
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -61,12 +59,11 @@ uv run python mason.py \
     --with_tracking \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs "{\"task_data_dir\": \"$TASK_DATA_DIR\", \"test_timeout\": 120, \"image\": \"python:3.12-slim\"}" \
+    --tool_configs '{"task_data_dir": "data/swerl_sandbox_test", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 8 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
     --active_sampling \
-    --dataset_skip_cache \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name swerl_sandbox_qwen3_4b_grpo \
