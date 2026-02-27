@@ -51,6 +51,9 @@ class EnvsConfig:
     max_steps: int = 5
     """Maximum number of tool calls or environment steps per generation."""
 
+    per_turn_max_tokens: int | None = None
+    """Maximum tokens per generation turn. If None, uses the overall response_length budget for each turn."""
+
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
@@ -398,7 +401,7 @@ class Tool(RLEnvironment):
 
     # -- RLEnvironment defaults for stateless tools --
 
-    async def reset(self, task_id: str | None = None, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs) -> tuple[StepResult, list[dict]]:
         return StepResult(result=""), [get_openai_tool_definitions(self)]
 
     def state(self) -> State:

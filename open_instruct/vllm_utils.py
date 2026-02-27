@@ -141,6 +141,7 @@ def process_tool_tokens(
     max_model_len: int,
     max_tokens: int,
     mask_tool_use: bool,
+    role: str = "tool",
 ) -> tuple[list[int], list[float], list[int], int]:
     """Format, tokenize, and truncate tool outputs.
 
@@ -153,11 +154,12 @@ def process_tool_tokens(
         max_model_len: Maximum model sequence length.
         max_tokens: Maximum response tokens.
         mask_tool_use: Whether to mask tool tokens in loss computation.
+        role: Chat role for formatting (e.g. "tool", "user" for text envs).
 
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
-    formatted_output = tool_parser.format_tool_outputs(tool_outputs)
+    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
     tokens, excess = truncate_tool_output_tokens(
@@ -558,6 +560,7 @@ class LLMRayActor:
         tool_definitions: list[dict] | None = None,
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
+        per_turn_max_tokens: int | None = None,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
@@ -575,7 +578,14 @@ class LLMRayActor:
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
         self._init_config(
-            max_steps, mask_tool_use, pools, inflight_updates, reward_config, train_dataset, eval_dataset
+            max_steps,
+            per_turn_max_tokens,
+            mask_tool_use,
+            pools,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -592,6 +602,7 @@ class LLMRayActor:
     def _init_config(
         self,
         max_steps: int,
+        per_turn_max_tokens: int | None,
         mask_tool_use: bool,
         pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
@@ -600,6 +611,7 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.max_steps = max_steps
+        self.per_turn_max_tokens = per_turn_max_tokens
         self.mask_tool_use = mask_tool_use
         self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
@@ -883,6 +895,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     acquired: dict[str, Any] = {}
     actor_map: dict[str, Any] = {}
 
+    is_text_env = False
+    env_response_role = "tool"
+
     output = None
     try:
         # If env_config is present, acquire from the env's pool and call reset
@@ -893,8 +908,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
             env_actor = await pool.acquire.remote()
             acquired[env_name] = (pool, env_actor)
-            task_id = env_config.get("task_id")
-            _, env_tools = await env_actor.reset.remote(task_id=task_id)
+            env_kwargs = {
+                k: v for k, v in env_config.items() if k not in ("env_name", "max_steps", "pool_size", "is_text_env")
+            }
+            _, env_tools = await env_actor.reset.remote(**env_kwargs)
+            env_response_role = await env_actor.get_response_role.remote()
+            is_text_env = env_config.get("is_text_env", False)
+
             if env_tools:
                 env_tool_names = {t["function"]["name"] for t in env_tools}
                 clashes = env_tool_names & set(actor.pools.keys())
@@ -907,13 +927,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     actor_map[name] = env_actor
                     allowed_tools.add(name)
 
+            if is_text_env:
+                actor_map[env_name] = env_actor
+                allowed_tools.add(env_name)
+
         while rollout.step_count < max_steps:
             if rollout.done:
                 break
 
             remaining_budget = sampling_params.max_tokens - len(response_masks)
             remaining_room = max_model_len - len(current_prompt)
-            current_max_tokens = max(1, min(remaining_budget, remaining_room))
+            per_turn_budget = actor.per_turn_max_tokens if actor.per_turn_max_tokens is not None else remaining_budget
+            current_max_tokens = max(1, min(remaining_budget, remaining_room, per_turn_budget))
             if remaining_budget <= 0 or remaining_room <= 0:
                 break
 
@@ -942,6 +967,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             response_masks.extend([1] * len(model_tokens))
 
             tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
+
+            # Text envs: inject a shadow tool call so dispatch handles it uniformly
+            if is_text_env:
+                tool_calls.append(EnvCall(id="", name=env_name, args={"text": output.text}))
+
             if not tool_calls:
                 break
 
@@ -1006,6 +1036,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     max_model_len,
                     sampling_params.max_tokens,
                     actor.mask_tool_use,
+                    role=env_response_role,
                 )
                 response_tokens.extend(tokens)
                 response_logprobs.extend(logprobs)
@@ -1014,8 +1045,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 if excess > 0:
                     break
     finally:
-        # TODO: In future, health-check actors and gracefully degrade (skip dead actors)
-        # instead of crashing. For now, let RayActorError propagate if an actor died.
+        if env_config is not None and env_name in acquired:
+            _, env_act = acquired[env_name]
+            rollout.info["env_name"] = env_name
+            rollout.info.update(await env_act.get_metrics.remote())
         for pool, acq_actor in acquired.values():
             pool.release.remote(acq_actor)
 
@@ -1088,6 +1121,7 @@ def create_vllm_engines(
     tool_definitions: list[dict] | None = None,
     tool_stop_sequences: list[str] | None = None,
     max_steps: int = 5,
+    per_turn_max_tokens: int | None = None,
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
@@ -1176,6 +1210,7 @@ def create_vllm_engines(
                 tool_definitions=tool_definitions,
                 tool_stop_sequences=tool_stop_sequences,
                 max_steps=max_steps,
+                per_turn_max_tokens=per_turn_max_tokens,
                 mask_tool_use=mask_tool_use,
                 pools=pools,
                 inflight_updates=inflight_updates,

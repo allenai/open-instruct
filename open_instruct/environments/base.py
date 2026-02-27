@@ -48,6 +48,10 @@ class RLEnvironment(ABC):
     """
 
     config_name: str = ""
+    response_role: str = "tool"
+
+    def get_response_role(self) -> str:
+        return self.response_role
 
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
@@ -63,7 +67,7 @@ class RLEnvironment(ABC):
         return []
 
     @abstractmethod
-    async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         """Initialize episode. Returns (initial observation, tool definitions)."""
         pass
 
@@ -76,6 +80,43 @@ class RLEnvironment(ABC):
     def state(self) -> State:
         """Return current episode state."""
         pass
+
+
+class TextRLEnvironment(RLEnvironment):
+    """Base class for text-based RL environments.
+
+    Unlike tool-based environments where parsed tool calls are dispatched,
+    text environments receive the model's entire generation as a plain string.
+    The environment's response is injected back into the conversation with
+    the role specified by ``response_role`` (default ``"user"``).
+
+    Subclasses implement ``text_step`` instead of ``step``.
+
+    The dispatch pipeline injects a shadow ``EnvCall`` with the model's full
+    output stored under ``args["text"]``. The ``step`` method extracts this
+    and forwards it to ``text_step``.
+    """
+
+    response_role: str = "user"
+
+    @abstractmethod
+    async def text_step(self, text: str) -> StepResult:
+        """Process the model's full output text and return an observation."""
+        pass
+
+    @abstractmethod
+    async def _reset(self, **kwargs: Any) -> StepResult:
+        """Subclass hook: initialize episode and return the initial observation."""
+        pass
+
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+        """Initialize episode. Always returns empty tool list for text envs."""
+        result = await self._reset(**kwargs)
+        return result, []
+
+    async def step(self, call: EnvCall) -> StepResult:
+        """Extract ``args["text"]`` from the shadow EnvCall and forward to text_step."""
+        return await self.text_step(call.args["text"])
 
 
 @dataclass

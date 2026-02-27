@@ -27,7 +27,7 @@ def create_counter_samples(num_samples: int = 100, nothink: bool = False) -> lis
             ],
             "ground_truth": str(target),
             "dataset": "passthrough",
-            "env_config": {"task_id": str(target), "env_name": "counter"},
+            "env_config": {"target": str(target), "env_name": "counter"},
         })
     return samples
 
@@ -50,7 +50,7 @@ def create_guess_number_samples(num_samples: int = 100, nothink: bool = False) -
             ],
             "ground_truth": str(secret),
             "dataset": "passthrough",
-            "env_config": {"task_id": str(secret), "env_name": "guess_number"},
+            "env_config": {"number": str(secret), "env_name": "guess_number"},
         })
     return samples
 

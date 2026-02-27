@@ -90,7 +90,7 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
-from open_instruct.environments.base import BaseEnvConfig
+from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
@@ -1324,6 +1324,7 @@ def create_model_and_optimizer(
         tool_definitions=tool_definitions,
         tool_stop_sequences=tool_stop_sequences,
         max_steps=tools_config.max_steps if tools_config else 5,
+        per_turn_max_tokens=tools_config.per_turn_max_tokens if tools_config else None,
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
@@ -2275,6 +2276,7 @@ def main(
             config_cls = TOOL_REGISTRY.get(parsed.name)
             if config_cls and not issubclass(config_cls.tool_class, Tool):
                 base_env_config["env_name"] = parsed.call_name
+                base_env_config["is_text_env"] = issubclass(config_cls.tool_class, TextRLEnvironment)
                 break
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
