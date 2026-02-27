@@ -68,14 +68,15 @@ _STR_REPLACE_EDITOR_TOOL = {
             "Custom editing tool for viewing, creating, and editing files.\n"
             "* State is persistent across command calls and discussions.\n"
             "* `view` for reading files/directories, `create` for new files,\n"
-            "  `str_replace` for editing, `insert` for adding lines."
+            "  `str_replace` for editing, `insert` for adding lines,\n"
+            "  `undo_edit` to revert the last edit to a file."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "enum": ["view", "create", "str_replace", "insert"],
+                    "enum": ["view", "create", "str_replace", "insert", "undo_edit"],
                     "description": "The editor command to run.",
                 },
                 "path": {"type": "string", "description": "Absolute path to file or directory."},
@@ -87,7 +88,10 @@ _STR_REPLACE_EDITOR_TOOL = {
                     "type": "string",
                     "description": "Required for `str_replace`. The exact string to replace (must appear exactly once).",
                 },
-                "new_str": {"type": "string", "description": "Required for `str_replace`/`insert`. The new string."},
+                "new_str": {
+                    "type": "string",
+                    "description": "Optional for `str_replace` (omit to delete old_str), required for `insert`.",
+                },
                 "insert_line": {
                     "type": "integer",
                     "description": "Required for `insert`. Line number after which to insert `new_str`.",
@@ -302,7 +306,7 @@ class SWERLSandboxEnv(RLEnvironment):
 
         self._step_count += 1
 
-        if call.name == "execute_bash":
+        if call.name in ("execute_bash", "bash"):
             args = coerce_args(_EXECUTE_BASH_TOOL["function"]["parameters"], call.args)
             return self._execute_bash(args)
         elif call.name == "str_replace_editor":
@@ -312,7 +316,7 @@ class SWERLSandboxEnv(RLEnvironment):
             return self._run_tests()
         else:
             return StepResult(
-                result=f"Error: Unknown tool '{call.name}'. Available: execute_bash, str_replace_editor, submit",
+                result=f"Error: Unknown tool '{call.name}'. Available: execute_bash, bash, str_replace_editor, submit",
                 reward=self._penalty,
             )
 
@@ -362,8 +366,12 @@ class SWERLSandboxEnv(RLEnvironment):
                 output = self._editor_str_replace(path, args.get("old_str"), args.get("new_str"))
             elif command == "insert":
                 output = self._editor_insert(path, args.get("insert_line"), args.get("new_str"))
+            elif command == "undo_edit":
+                output = self._editor_undo(path)
             else:
-                return self._editor_error(f"Unknown command '{command}'. Use view/create/str_replace/insert.")
+                return self._editor_error(
+                    f"Unknown command '{command}'. Use view/create/str_replace/insert/undo_edit."
+                )
         except (_EditorError, FileNotFoundError, IsADirectoryError) as exc:
             return self._editor_error(str(exc))
 
@@ -417,7 +425,7 @@ class SWERLSandboxEnv(RLEnvironment):
         if old_str is None:
             raise _EditorError("'old_str' parameter is required for str_replace.")
         if new_str is None:
-            raise _EditorError("'new_str' parameter is required for str_replace.")
+            new_str = ""
 
         content = self._backend.read_file(path)
         if isinstance(content, bytes):
@@ -429,6 +437,7 @@ class SWERLSandboxEnv(RLEnvironment):
         if count > 1:
             raise _EditorError(f"old_str found {count} times in {path}. It must appear exactly once.")
 
+        self._backend.run_command(f"cp {shlex.quote(path)} {shlex.quote(path + '.bak')}")
         new_content = content.replace(old_str, new_str, 1)
         self._backend.write_file(path, new_content)
         return f"The file {path} has been edited. Review the changes with `view`."
@@ -449,8 +458,19 @@ class SWERLSandboxEnv(RLEnvironment):
         insert_text = new_str if new_str.endswith("\n") else new_str + "\n"
         insert_lines = insert_text.splitlines(keepends=True)
         new_lines = lines[:idx] + insert_lines + lines[idx:]
+        self._backend.run_command(f"cp {shlex.quote(path)} {shlex.quote(path + '.bak')}")
         self._backend.write_file(path, "".join(new_lines))
         return f"The file {path} has been edited. Review the changes with `view`."
+
+    def _editor_undo(self, path: str) -> str:
+        """Revert the last edit to a file by restoring from .bak."""
+        assert self._backend is not None
+        bak_path = path + ".bak"
+        check = self._backend.run_command(f"test -f {shlex.quote(bak_path)} && echo EXISTS")
+        if check.stdout.strip() != "EXISTS":
+            raise _EditorError(f"No undo history for {path}.")
+        self._backend.run_command(f"mv {shlex.quote(bak_path)} {shlex.quote(path)}")
+        return f"Last edit to {path} has been undone."
 
     def _editor_error(self, message: str) -> StepResult:
         return StepResult(result=f"Execution output of [str_replace_editor]:\nERROR: {message}", reward=self._penalty)
