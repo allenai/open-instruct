@@ -59,6 +59,7 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
+from open_instruct.data_loader import _extract_env_configs
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
@@ -890,22 +891,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
     max_steps = actor.max_steps
-    env_configs: list[dict[str, Any]] = []
-    if env_config is not None:
-        if not isinstance(env_config, dict):
-            raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
-        if "env_name" in env_config:
-            raise ValueError(
-                "Legacy env_config {'env_name': ...} is no longer supported. "
-                "Use {'env_configs': [{'env_name': ...}, ...]}."
-            )
+    if env_config is not None and not isinstance(env_config, dict):
+        raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
+    if isinstance(env_config, dict):
         max_steps_override = env_config.get("max_steps")
         if max_steps_override is not None:
             max_steps = max_steps_override
-        nested = env_config.get("env_configs") or []
-        if not isinstance(nested, list) or not all(isinstance(cfg, dict) for cfg in nested):
-            raise TypeError(f"env_configs must be a list of dicts, got: {nested!r}")
-        env_configs = [dict(cfg) for cfg in nested]
+    env_configs = _extract_env_configs(env_config)
 
     # Acquired actors: pool_key -> actor (released in finally block)
     acquired: dict[str, Any] = {}
