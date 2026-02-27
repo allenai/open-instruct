@@ -94,7 +94,7 @@ from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig, Tool
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -2277,7 +2277,7 @@ def main(
         env_configs: list[dict[str, Any]] = []
         for parsed in tools_config._parsed_tools:
             config_cls = TOOL_REGISTRY.get(parsed.name)
-            if config_cls and not issubclass(config_cls.tool_class, Tool):
+            if config_cls:
                 env_configs.append(
                     {"env_name": parsed.call_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
                 )
