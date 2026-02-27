@@ -54,7 +54,7 @@ class TestEnvConfigMerging(unittest.TestCase):
 
     def test_sample_env_without_name_raises(self):
         base = {"max_steps": 9, "env_configs": [{"env_name": "counter", "is_text_env": False}]}
-        with self.assertRaises(ValueError):
+        with self.assertRaises(KeyError):
             _merge_env_config(base, {"env_configs": [{"target": 3}]})
 
     def test_add_prompt_to_generator_emits_normalized_env_payload(self):

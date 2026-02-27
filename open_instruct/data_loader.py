@@ -561,26 +561,12 @@ def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, An
     """Return env configs from canonical payload format."""
     if env_config is None:
         return []
-    if not isinstance(env_config, dict):
-        raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
-
-    nested = env_config.get("env_configs") or []
-    if not isinstance(nested, list) or not all(isinstance(cfg, dict) for cfg in nested):
-        raise TypeError(f"env_configs must be a list of dicts, got: {nested!r}")
-    return [dict(cfg) for cfg in nested]
+    return [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
 
 
-def _index_env_configs(envs: list[dict[str, Any]], source: str) -> dict[str, dict[str, Any]]:
-    """Validate env entries and return env_name -> config mapping."""
-    indexed: dict[str, dict[str, Any]] = {}
-    for cfg in envs:
-        env_name = cfg.get("env_name")
-        if env_name is None:
-            raise ValueError(f"Each env_config must include 'env_name', got: {cfg!r}")
-        if env_name in indexed:
-            raise ValueError(f"Duplicate env '{env_name}' in {source} env_configs: {envs!r}")
-        indexed[env_name] = cfg
-    return indexed
+def _index_env_configs(envs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return env_name -> config mapping for quick lookup."""
+    return {cfg["env_name"]: cfg for cfg in envs}
 
 
 def _merge_sample_envs(
@@ -605,28 +591,22 @@ def _merge_env_config(
       {"max_steps": int | None, "env_configs": [<env dict>, ...]}
     """
     base_envs = _extract_env_configs(base_env_config)
-    base_envs_by_name = _index_env_configs(base_envs, source="base")
-    base_max_steps = base_env_config.get("max_steps") if isinstance(base_env_config, dict) else None
+    base_envs_by_name = _index_env_configs(base_envs)
+    base_max_steps = base_env_config.get("max_steps") if base_env_config is not None else None
 
     if sample_env_config is None:
         envs = base_envs
         max_steps = base_max_steps
     else:
-        if not isinstance(sample_env_config, dict):
-            raise TypeError(f"Sample env_config must be a dict or None, got {type(sample_env_config).__name__}")
-
         max_steps = sample_env_config.get("max_steps", base_max_steps)
         sample_envs = _extract_env_configs(sample_env_config)
         if sample_envs:
-            _index_env_configs(sample_envs, source="sample")
             envs = _merge_sample_envs(sample_envs, base_envs_by_name)
         else:
             envs = base_envs
 
     if not envs:
         return None
-
-    _index_env_configs(envs, source="merged")
 
     payload: dict[str, Any] = {"env_configs": envs}
     if max_steps is not None:
