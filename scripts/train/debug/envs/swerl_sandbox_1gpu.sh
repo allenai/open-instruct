@@ -45,7 +45,7 @@ uv run python open_instruct/grpo_fast.py \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 4 \
-    --max_steps 20 \
+    --max_steps 10 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --output_dir output/swerl_sandbox_debug
