@@ -405,8 +405,14 @@ class SWERLSandboxEnv(RLEnvironment):
             raise _EditorError(f"File '{path}' already exists. Use str_replace to edit.")
 
         parent = "/".join(path.rsplit("/", 1)[:-1]) or "/"
-        self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
-        self._backend.write_file(path, file_text)
+        mkdir_result = self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
+        if mkdir_result.exit_code != 0:
+            raise _EditorError(f"Failed to create directory '{parent}': {mkdir_result.stderr or mkdir_result.stdout}")
+
+        try:
+            self._backend.write_file(path, file_text)
+        except Exception as e:
+            raise _EditorError(f"Failed to write file '{path}': {e}") from e
         return f"File created successfully at: {path}"
 
     def _editor_str_replace(self, path: str, old_str: str | None, new_str: str | None) -> str:
