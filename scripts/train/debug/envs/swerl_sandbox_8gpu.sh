@@ -30,7 +30,7 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/train/debug/envs/download_swerl_data.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
