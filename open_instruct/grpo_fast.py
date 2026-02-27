@@ -2056,8 +2056,20 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
         if ENV_CONFIG_KEY in ds.column_names:
             for row in ds:
                 env_cfg = row.get(ENV_CONFIG_KEY)
-                if env_cfg and env_cfg.get("env_name"):
-                    tool_names.add(env_cfg["env_name"])
+                if not env_cfg:
+                    continue
+                if isinstance(env_cfg, dict):
+                    if env_cfg.get("env_name"):
+                        tool_names.add(env_cfg["env_name"])
+                    env_cfgs = env_cfg.get("env_configs")
+                    if isinstance(env_cfgs, list):
+                        for cfg in env_cfgs:
+                            if isinstance(cfg, dict) and cfg.get("env_name"):
+                                tool_names.add(cfg["env_name"])
+                elif isinstance(env_cfg, list):
+                    for cfg in env_cfg:
+                        if isinstance(cfg, dict) and cfg.get("env_name"):
+                            tool_names.add(cfg["env_name"])
 
     return tool_names
 
@@ -2269,15 +2281,18 @@ def main(
     base_env_config = None
     if tools_config.enabled:
         base_env_config = {"max_steps": tools_config.max_steps}
-        # TODO: Support multiple concurrent envs per rollout. Currently only one
-        # stateful environment is supported; the rollout loop acquires/resets a
-        # single env and maps its inner tool names to that actor.
+        env_configs: list[dict[str, Any]] = []
         for parsed in tools_config._parsed_tools:
             config_cls = TOOL_REGISTRY.get(parsed.name)
             if config_cls and not issubclass(config_cls.tool_class, Tool):
-                base_env_config["env_name"] = parsed.call_name
-                base_env_config["is_text_env"] = issubclass(config_cls.tool_class, TextRLEnvironment)
-                break
+                env_configs.append(
+                    {
+                        "env_name": parsed.call_name,
+                        "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment),
+                    }
+                )
+        if env_configs:
+            base_env_config["env_configs"] = env_configs
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,

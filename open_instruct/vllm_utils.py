@@ -889,31 +889,57 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     configured_tools = set(actor.pools.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
-    max_steps = env_config.get("max_steps", actor.max_steps) if env_config else actor.max_steps
+    max_steps = actor.max_steps
+    env_configs: list[dict[str, Any]] = []
+    if env_config is not None:
+        if isinstance(env_config, list):
+            if not all(isinstance(cfg, dict) for cfg in env_config):
+                raise TypeError(f"env_config list entries must be dicts, got: {env_config!r}")
+            env_configs = [dict(cfg) for cfg in env_config]
+        elif isinstance(env_config, dict):
+            max_steps_override = env_config.get("max_steps")
+            if max_steps_override is not None:
+                max_steps = max_steps_override
+            if "env_configs" in env_config:
+                nested = env_config.get("env_configs") or []
+                if not isinstance(nested, list) or not all(isinstance(cfg, dict) for cfg in nested):
+                    raise TypeError(f"env_configs must be a list of dicts, got: {nested!r}")
+                env_configs = [dict(cfg) for cfg in nested]
+            elif env_config.get("env_name"):
+                env_configs = [dict(env_config)]
+        else:
+            raise TypeError(f"env_config must be a dict, list[dict], or None, got {type(env_config).__name__}")
 
     # Acquired actors: pool_key -> actor (released in finally block)
     acquired: dict[str, Any] = {}
     actor_map: dict[str, Any] = {}
-
-    is_text_env = False
-    env_response_role = "tool"
+    tool_response_roles: dict[str, str] = {}
+    active_env_names: list[str] = []
+    text_env_names: list[str] = []
 
     output = None
     try:
-        # If env_config is present, acquire from the env's pool and call reset
-        if env_config is not None:
-            env_name = env_config["env_name"]
+        # If env_config is present, acquire/reset each configured env.
+        for env in env_configs:
+            if "env_name" not in env:
+                raise ValueError(f"Each env_config must include 'env_name', got: {env!r}")
+
+            env_name = env["env_name"]
+            if env_name in active_env_names:
+                raise ValueError(f"Duplicate env '{env_name}' in env_configs: {env_configs!r}")
+
             pool = actor.pools.get(env_name)
             if pool is None:
                 raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
             env_actor = await pool.acquire.remote()
             acquired[env_name] = (pool, env_actor)
+            active_env_names.append(env_name)
             env_kwargs = {
-                k: v for k, v in env_config.items() if k not in ("env_name", "max_steps", "pool_size", "is_text_env")
+                k: v for k, v in env.items() if k not in ("env_name", "max_steps", "pool_size", "is_text_env", "env_configs")
             }
             _, env_tools = await env_actor.reset.remote(**env_kwargs)
             env_response_role = await env_actor.get_response_role.remote()
-            is_text_env = env_config.get("is_text_env", False)
+            is_text_env = env.get("is_text_env", False)
 
             if env_tools:
                 env_tool_names = {t["function"]["name"] for t in env_tools}
@@ -923,13 +949,27 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         f"Env '{env_name}' tool names clash with tool pool names: {sorted(clashes)}. "
                         f"Rename one side to avoid ambiguous dispatch."
                     )
+                existing = env_tool_names & set(actor_map.keys())
+                if existing:
+                    raise ValueError(
+                        f"Env '{env_name}' tool names clash with already-active env tool names: {sorted(existing)}. "
+                        "Rename one side to avoid ambiguous dispatch."
+                    )
                 for name in env_tool_names:
                     actor_map[name] = env_actor
                     allowed_tools.add(name)
+                    tool_response_roles[name] = env_response_role
 
             if is_text_env:
+                text_env_names.append(env_name)
                 actor_map[env_name] = env_actor
                 allowed_tools.add(env_name)
+                tool_response_roles[env_name] = env_response_role
+
+        if len(text_env_names) > 1:
+            raise ValueError(
+                f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}"
+            )
 
         while rollout.step_count < max_steps:
             if rollout.done:
@@ -969,13 +1009,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
 
             # Text envs: inject a shadow tool call so dispatch handles it uniformly
-            if is_text_env:
-                tool_calls.append(EnvCall(id="", name=env_name, args={"text": output.text}))
+            for text_env_name in text_env_names:
+                tool_calls.append(EnvCall(id="", name=text_env_name, args={"text": output.text}))
 
             if not tool_calls:
                 break
 
-            observations: list[str] = []
+            observations: list[tuple[str, str]] = []
             for tc in tool_calls:
                 if rollout.step_count >= max_steps:
                     break
@@ -991,6 +1031,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     acq = await pool.acquire.remote()
                     acquired[tc.name] = (pool, acq)
                     actor_map[tc.name] = acq
+                    tool_response_roles.setdefault(tc.name, "tool")
                 target = actor_map[tc.name]
 
                 rollout.step_count += 1
@@ -999,7 +1040,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     step_result: StepResult = await target.step.remote(
                         EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
                     )
-                    observations.append(step_result.result)
+                    observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
                     rollout.tool_output += step_result.result
                     rollout.rewards.append(step_result.reward)
                     if step_result.done:
@@ -1018,7 +1059,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 except Exception as e:
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
-                    observations.append(error_msg)
+                    observations.append((error_msg, "tool"))
                     rollout.tool_error += error_msg
                     rollout.rewards.append(0.0)
                     rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
@@ -1027,28 +1068,40 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     break
 
             if observations:
-                tokens, logprobs, masks, excess = process_tool_tokens(
-                    observations,
-                    actor.tool_parser,
-                    actor.llm_engine.tokenizer,
-                    len(current_prompt),
-                    len(response_masks),
-                    max_model_len,
-                    sampling_params.max_tokens,
-                    actor.mask_tool_use,
-                    role=env_response_role,
-                )
-                response_tokens.extend(tokens)
-                response_logprobs.extend(logprobs)
-                response_masks.extend(masks)
-                current_prompt.extend(tokens)
-                if excess > 0:
+                exceeded_context_budget = False
+                for observation, response_role in observations:
+                    tokens, logprobs, masks, excess = process_tool_tokens(
+                        [observation],
+                        actor.tool_parser,
+                        actor.llm_engine.tokenizer,
+                        len(current_prompt),
+                        len(response_masks),
+                        max_model_len,
+                        sampling_params.max_tokens,
+                        actor.mask_tool_use,
+                        role=response_role,
+                    )
+                    response_tokens.extend(tokens)
+                    response_logprobs.extend(logprobs)
+                    response_masks.extend(masks)
+                    current_prompt.extend(tokens)
+                    if excess > 0:
+                        exceeded_context_budget = True
+                        break
+                if exceeded_context_budget:
                     break
     finally:
-        if env_config is not None and env_name in acquired:
-            _, env_act = acquired[env_name]
+        env_metrics: dict[str, dict[str, float]] = {}
+        for env_name in active_env_names:
+            if env_name in acquired:
+                _, env_act = acquired[env_name]
+                env_metrics[env_name] = await env_act.get_metrics.remote()
+        if len(env_metrics) == 1:
+            env_name, metrics = next(iter(env_metrics.items()))
             rollout.info["env_name"] = env_name
-            rollout.info.update(await env_act.get_metrics.remote())
+            rollout.info.update(metrics)
+        elif env_metrics:
+            rollout.info["env_metrics"] = env_metrics
         for pool, acq_actor in acquired.values():
             pool.release.remote(acq_actor)
 
