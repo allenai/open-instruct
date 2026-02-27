@@ -16,6 +16,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from huggingface_hub import snapshot_download
 from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
@@ -162,8 +163,6 @@ class SWERLSandboxEnv(RLEnvironment):
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
         if self._task_data_hf_repo and not self._task_data_dir:
-            from huggingface_hub import snapshot_download
-
             logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
             self._task_data_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
             logger.info(f"Task data cached at {self._task_data_dir}")
