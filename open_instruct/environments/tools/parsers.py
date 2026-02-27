@@ -18,7 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import ray
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
@@ -55,35 +54,33 @@ class OpenInstructLegacyToolParser(ToolParser):
     Tools are invoked via <tool_name>content</tool_name> tags.
     The content between tags is passed to the tool's first required parameter.
     Only works for tools that take a single string parameter.
+
+    Tool names and parameter names are derived from OpenAI-format tool definitions.
     """
 
-    def __init__(self, tool_actors: list[ray.actor.ActorHandle], output_wrap_name: str = "output"):
-        """Initialize the parser.
-
-        Args:
-            tool_actors: List of Ray actor handles for Tools.
-            output_wrap_name: Name to wrap tool outputs with.
-        """
-        # Fetch metadata from actors
-        self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
+    def __init__(self, tool_definitions: list[dict[str, Any]] | None = None, output_wrap_name: str = "output"):
         self.output_wrap_name = output_wrap_name
+
+        if tool_definitions:
+            self.tool_names = [td["function"]["name"] for td in tool_definitions]
+            self.tool_param_names: dict[str, str] = {}
+            for td in tool_definitions:
+                func = td["function"]
+                name = func["name"]
+                params = func.get("parameters", {})
+                required = params.get("required", [])
+                if required:
+                    self.tool_param_names[name] = required[0]
+                else:
+                    properties = params.get("properties", {})
+                    self.tool_param_names[name] = next(iter(properties)) if properties else "text"
+        else:
+            self.tool_names = []
+            self.tool_param_names = {}
+
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
         self.stop_sequences = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
-
-        self.tool_param_names: dict[str, str] = {}
-        for actor, tool_name in zip(tool_actors, self.tool_names):
-            params = ray.get(actor.get_parameters.remote())
-            required = params.get("required", [])
-            if required:
-                self.tool_param_names[tool_name] = required[0]
-            else:
-                properties = params.get("properties", {})
-                if properties:
-                    self.tool_param_names[tool_name] = next(iter(properties))
-                else:
-                    self.tool_param_names[tool_name] = "text"
-
         self.tool_regexes = {
             tool_name: re.compile(re.escape(f"<{tool_name}>") + r"(.*?)" + re.escape(f"</{tool_name}>"), re.DOTALL)
             for tool_name in self.tool_names
@@ -276,21 +273,23 @@ class DRTuluToolParser(ToolParser):
     """
     Parser for DR Tulu style tool calls. Delegates actual parsing to the tool itself.
     Only detects that a tool call occurred (via stop strings) and passes text to the tool.
+
+    Requires exactly one tool (dr_agent_mcp) in tool_definitions.
     """
 
-    def __init__(self, tool_actors: list[ray.actor.ActorHandle]):
-        if len(tool_actors) != 1:
-            raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_actors)}")
+    def __init__(self, tool_definitions: list[dict[str, Any]], stop_sequences: list[str]):
+        if len(tool_definitions) != 1:
+            raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_definitions)}")
 
-        actor = tool_actors[0]
-        self.tool_call_name = ray.get(actor.get_call_name.remote())
+        self.tool_call_name = tool_definitions[0]["function"]["name"]
 
         if self.tool_call_name != "dr_agent_mcp":
             raise ValueError(f"DRTuluToolParser requires dr_agent_mcp tool, got {self.tool_call_name}")
 
-        stop_strings = ray.get(actor.get_stop_strings.remote())
-        # Use dict.fromkeys to deduplicate while preserving order
-        self.stop_sequences = list(dict.fromkeys(stop_strings)) if stop_strings else []
+        self.stop_sequences = list(dict.fromkeys(stop_sequences)) if stop_sequences else []
+
+        if not self.stop_sequences:
+            logger.warning("DRTuluToolParser initialized with no stop sequences — tool calls will never be detected")
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         for stop in self.stop_sequences:
@@ -310,8 +309,8 @@ def get_available_parsers() -> list[str]:
 def create_tool_parser(
     parser_type: str,
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
-    tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
+    stop_sequences: list[str] | None = None,
 ) -> ToolParser:
     """Create a tool parser instance by type.
 
@@ -321,8 +320,8 @@ def create_tool_parser(
             - "dr_tulu": DRTuluToolParser for <call_tool name="...">content</call_tool> format
             - "vllm_*": VllmToolParser variants (vllm_hermes, vllm_llama3_json, vllm_olmo3)
         tokenizer: Tokenizer for the model (required for all parser types).
-        tool_actors: List of Ray actor handles for the tools.
-        tool_definitions: OpenAI-format tool definitions (required for vllm_* parsers).
+        tool_definitions: OpenAI-format tool definitions.
+        stop_sequences: a list of stop sequences to use for stopping generations.
 
     Returns:
         A ToolParser instance configured for the specified type.
@@ -331,10 +330,12 @@ def create_tool_parser(
         ValueError: If parser_type is unknown.
     """
     if parser_type == "legacy":
-        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
+        return OpenInstructLegacyToolParser(tool_definitions=tool_definitions, output_wrap_name="output")
 
     if parser_type == "dr_tulu":
-        return DRTuluToolParser(tool_actors)
+        if tool_definitions is None or stop_sequences is None:
+            raise ValueError("dr_tulu parser requires both tool_definitions and stop_sequences")
+        return DRTuluToolParser(tool_definitions=tool_definitions, stop_sequences=stop_sequences)
 
     if parser_type in VLLM_PARSERS:
         return create_vllm_parser(parser_type, tokenizer, tool_definitions=tool_definitions)

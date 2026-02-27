@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any
 
 import aiohttp
 import backoff
@@ -48,8 +48,8 @@ class EnvsConfig:
     tool_parser_type: str = "legacy"
     """Type of tool parser to use. See parsers.get_available_parsers() for valid options."""
 
-    max_tool_calls: int = 5
-    """Maximum number of tool calls allowed per generation."""
+    max_steps: int = 5
+    """Maximum number of tool calls or environment steps per generation."""
 
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
@@ -57,11 +57,15 @@ class EnvsConfig:
     pass_tools_to_chat_template: bool = True
     """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
 
+    pool_size: int | None = None
+    """Number of actors per tool pool. Defaults to num_unique_prompts_rollout * num_samples_per_prompt_rollout."""
+
     _parsed_tools: list[ParsedEnvConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
-        self.max_tool_calls = int(self.max_tool_calls)
+        if self.max_steps < 1:
+            raise ValueError(f"max_steps must be >= 1, got {self.max_steps}")
 
         if not self.tools:
             return
@@ -135,28 +139,15 @@ class EnvStatistics:
         self._counts: defaultdict[str, int] = defaultdict(int)
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
-        self._excess_calls: defaultdict[str, int] = defaultdict(int)
 
-    def add_rollout(
-        self, tool_call_stats: list[ToolCallStats], excess_tool_calls: dict[str, int] | None = None
-    ) -> None:
-        """Add statistics from a single rollout.
-
-        Args:
-            tool_call_stats: List of ToolCallStats from a single rollout.
-            excess_tool_calls: Dict mapping tool name to count of calls that exceeded the limit.
-        """
+    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
+        """Add statistics from a single rollout."""
         self.num_rollouts += 1
         for s in tool_call_stats:
             self.tool_names.add(s.tool_name)
             self._counts[s.tool_name] += 1
             self._failures[s.tool_name] += not s.success
             self._runtimes[s.tool_name] += s.runtime
-
-        if excess_tool_calls:
-            for tool_name, count in excess_tool_calls.items():
-                self.tool_names.add(tool_name)
-                self._excess_calls[tool_name] += count
 
     def compute_metrics(self) -> dict[str, float]:
         """Compute per-tool and aggregate metrics.
@@ -166,11 +157,9 @@ class EnvStatistics:
             - tools/{name}/avg_calls_per_rollout
             - tools/{name}/failure_rate
             - tools/{name}/avg_runtime
-            - tools/{name}/avg_excess_calls_per_rollout
             - tools/aggregate/avg_calls_per_rollout
             - tools/aggregate/failure_rate
             - tools/aggregate/avg_runtime
-            - tools/aggregate/avg_excess_calls_per_rollout
         """
         if not self.num_rollouts or not self.tool_names:
             return {}
@@ -179,24 +168,19 @@ class EnvStatistics:
         total_calls = 0
         total_failures = 0
         total_runtime = 0.0
-        total_excess = 0
 
         for name in self.tool_names:
             calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
-            excess = self._excess_calls[name]
             metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
             metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
             metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
-            metrics[f"tools/{name}/avg_excess_calls_per_rollout"] = excess / self.num_rollouts
             total_calls += calls
             total_failures += failures
             total_runtime += runtime
-            total_excess += excess
 
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
         metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
         metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
-        metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
 
         return metrics
 
@@ -438,17 +422,9 @@ class Tool(RLEnvironment):
         """Get the tool's parameter schema."""
         return self.parameters
 
-    def get_openai_tool_definitions(self) -> dict[str, Any]:
-        """Get tool definition in OpenAI format."""
-        return get_openai_tool_definitions(self)
+    def get_stop_strings(self) -> list[str]:
+        """Get stop strings for this tool. Override in subclasses that define custom stop sequences."""
+        return []
 
-
-@dataclass
-class BaseEnvConfig:
-    """Base configuration class for individual tools.
-
-    Subclasses must also define a config, which is used also used to instantiate the tool itself.
-    """
-
-    tool_class: ClassVar[type[Tool]]
-    """Related tool class for this config."""
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
+        return [get_openai_tool_definitions(self)]

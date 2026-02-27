@@ -1,13 +1,31 @@
 #!/bin/bash
-# Local debug script for testing GRPO with tool use
-# Uses hamishivi/tulu_3_rewritten_tools_test which has a 'tools' column
-# for per-sample active tool configuration (search, code, browse)
+# Beaker experiment for tool use regression test (python+search+browse) on 1 GPU.
+# Usage: bash scripts/train/build_image_and_launch.sh scripts/train/debug/tools/tool_regression_beaker.sh
 
-# Load API keys from beaker secrets
-export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)
-export JINA_API_KEY=$(beaker secret read hamishivi_JINA_API_KEY --workspace ai2/dr-tulu-ablations)
+BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
-VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
+uv run python mason.py \
+       --cluster ai2/jupiter \
+       --cluster ai2/saturn \
+       --cluster ai2/ceres \
+       --image "$BEAKER_IMAGE" \
+       --description "Tool use regression test (python+search+browse) 1GPU" \
+       --pure_docker_mode \
+       --no-host-networking \
+       --workspace ai2/open-instruct-dev \
+       --priority urgent \
+       --num_nodes 1 \
+       --max_retries 0 \
+       --timeout 30m \
+       --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
+       --env VLLM_DISABLE_COMPILE_CACHE=1 \
+       --env VLLM_USE_V1=1 \
+       --env 'SERPER_API_KEY=secret:hamishivi_SERPER_API_KEY' \
+       --env 'JINA_API_KEY=secret:hamishivi_JINA_API_KEY' \
+       --budget ai2/oe-adapt \
+       --gpus 1 \
+       --no_auto_dataset_cache \
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_tools_test 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_tools_test 4 \
@@ -38,9 +56,9 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --tools python serper_search jina_browse \
-    --verbose true \
     --tool_call_names code search browse \
     --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' '{}' \
     --tool_parser_type vllm_hermes \
     --max_steps 5 \
+    --with_tracking \
     --push_to_hub false
