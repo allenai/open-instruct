@@ -145,6 +145,32 @@ class VllmToolParser(ToolParser):
         """
         return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore[arg-type]
 
+    @staticmethod
+    def _sanitize_hermes_tool_calls(text: str) -> str | None:
+        """Drop malformed Hermes <tool_call> blocks before native parsing.
+
+        Hermes parser logs noisy errors when a <tool_call> JSON object is missing
+        the required "name" field. We keep valid blocks and silently skip invalid
+        ones to avoid parser-side traceback noise in actor logs.
+        """
+        tool_call_matches = list(re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, re.DOTALL))
+        if not tool_call_matches:
+            return text
+
+        valid_blocks: list[str] = []
+        for match in tool_call_matches:
+            raw_payload = match.group(1)
+            try:
+                parsed_payload = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed_payload, dict) and isinstance(parsed_payload.get("name"), str):
+                valid_blocks.append(match.group(0))
+
+        if not valid_blocks:
+            return None
+        return "\n".join(valid_blocks)
+
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.
 
@@ -154,8 +180,14 @@ class VllmToolParser(ToolParser):
         Returns:
             List of EnvCall objects extracted from the text.
         """
+        model_output = text
+        if self.tool_parser.__class__.__name__ == "Hermes2ProToolParser":
+            model_output = self._sanitize_hermes_tool_calls(text)
+            if model_output is None:
+                return []
+
         request = self._make_request()
-        result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
+        result = self.tool_parser.extract_tool_calls(model_output=model_output, request=request)
 
         if not result.tools_called:
             return []
