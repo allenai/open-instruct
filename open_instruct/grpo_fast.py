@@ -1404,6 +1404,7 @@ def weight_sync_thread(
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
+    inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
@@ -1437,13 +1438,16 @@ def weight_sync_thread(
                 enable=args.verbose,
             )
 
-            # Ensure all vLLM engine update RPCs have completed before unpausing actors.
-            # Without waiting here, should_stop may flip to False while updates are still queued.
-            engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-            if engine_update_refs:
-                ray_get_with_progress(
-                    engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
-                )
+            if not inflight_updates:
+                # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+                # Without waiting here, should_stop may flip to False while updates are still queued.
+                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+                if engine_update_refs:
+                    ray_get_with_progress(
+                        engine_update_refs,
+                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
+                        enable=False,
+                    )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1860,6 +1864,7 @@ def run_training(
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
+        streaming_config.inflight_updates,
     )
 
     """Run the main training loop with worker threads."""
