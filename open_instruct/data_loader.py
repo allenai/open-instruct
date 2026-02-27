@@ -570,6 +570,32 @@ def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, An
     return [dict(cfg) for cfg in nested]
 
 
+def _index_env_configs(envs: list[dict[str, Any]], source: str) -> dict[str, dict[str, Any]]:
+    """Validate env entries and return env_name -> config mapping."""
+    indexed: dict[str, dict[str, Any]] = {}
+    for cfg in envs:
+        env_name = cfg.get("env_name")
+        if env_name is None:
+            raise ValueError(f"Each env_config must include 'env_name', got: {cfg!r}")
+        if env_name in indexed:
+            raise ValueError(f"Duplicate env '{env_name}' in {source} env_configs: {envs!r}")
+        indexed[env_name] = cfg
+    return indexed
+
+
+def _merge_sample_envs(
+    sample_envs: list[dict[str, Any]], base_envs_by_name: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Merge sample-provided env configs with same-name defaults from base config."""
+    merged_envs: list[dict[str, Any]] = []
+    for sample_env in sample_envs:
+        env_name = sample_env["env_name"]
+        merged = dict(base_envs_by_name.get(env_name, {}))
+        merged.update(sample_env)
+        merged_envs.append(merged)
+    return merged_envs
+
+
 def _merge_env_config(
     base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | None
 ) -> dict[str, Any] | None:
@@ -579,15 +605,7 @@ def _merge_env_config(
       {"max_steps": int | None, "env_configs": [<env dict>, ...]}
     """
     base_envs = _extract_env_configs(base_env_config)
-    seen_base_envs: set[str] = set()
-    for cfg in base_envs:
-        env_name = cfg.get("env_name")
-        if env_name is None:
-            raise ValueError(f"Each env_config must include 'env_name', got: {cfg!r}")
-        if env_name in seen_base_envs:
-            raise ValueError(f"Duplicate env '{env_name}' in base env_configs: {base_envs!r}")
-        seen_base_envs.add(env_name)
-    base_envs_by_name = {cfg["env_name"]: cfg for cfg in base_envs if "env_name" in cfg}
+    base_envs_by_name = _index_env_configs(base_envs, source="base")
     base_max_steps = base_env_config.get("max_steps") if isinstance(base_env_config, dict) else None
 
     if sample_env_config is None:
@@ -600,28 +618,15 @@ def _merge_env_config(
         max_steps = sample_env_config.get("max_steps", base_max_steps)
         sample_envs = _extract_env_configs(sample_env_config)
         if sample_envs:
-            envs = []
-            for sample_env in sample_envs:
-                env_name = sample_env.get("env_name")
-                if env_name is None:
-                    raise ValueError(f"Each env_config must include 'env_name', got: {sample_env!r}")
-                merged = dict(base_envs_by_name.get(env_name, {}))
-                merged.update(sample_env)
-                envs.append(merged)
+            _index_env_configs(sample_envs, source="sample")
+            envs = _merge_sample_envs(sample_envs, base_envs_by_name)
         else:
             envs = base_envs
 
     if not envs:
         return None
 
-    seen_envs: set[str] = set()
-    for cfg in envs:
-        env_name = cfg.get("env_name")
-        if env_name is None:
-            raise ValueError(f"Each env_config must include 'env_name', got: {cfg!r}")
-        if env_name in seen_envs:
-            raise ValueError(f"Duplicate env '{env_name}' in merged env_configs: {envs!r}")
-        seen_envs.add(env_name)
+    _index_env_configs(envs, source="merged")
 
     payload: dict[str, Any] = {"env_configs": envs}
     if max_steps is not None:
