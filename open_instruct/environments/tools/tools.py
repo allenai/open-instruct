@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 
 from open_instruct import logger_utils
 from open_instruct.environments.base import BaseEnvConfig, EnvCall, StepResult
-from open_instruct.environments.examples import CounterEnvConfig, GuessNumberEnvConfig
+from open_instruct.environments.examples import CounterEnvConfig, GuessNumberEnvConfig, WordleTextEnvConfig
 from open_instruct.environments.generic_sandbox import GenericSandboxEnvConfig
 from open_instruct.environments.swerl_sandbox import SWERLSandboxEnvConfig
 from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
@@ -660,4 +660,5 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     GuessNumberEnvConfig.tool_class.config_name: GuessNumberEnvConfig,
     GenericSandboxEnvConfig.tool_class.config_name: GenericSandboxEnvConfig,
     SWERLSandboxEnvConfig.tool_class.config_name: SWERLSandboxEnvConfig,
+    WordleTextEnvConfig.tool_class.config_name: WordleTextEnvConfig,
 }

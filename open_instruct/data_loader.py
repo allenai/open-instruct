@@ -770,6 +770,7 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
     combined_tool_call_stats = []
+    combined_rollout_states = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -791,6 +792,7 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
         combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_rollout_states.extend(result.request_info.rollout_states)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -820,6 +822,7 @@ def accumulate_inference_batches(
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
         tool_call_stats=combined_tool_call_stats,
+        rollout_states=combined_rollout_states,
     )
 
     combined_result = data_types.GenerationResult(
@@ -1235,6 +1238,18 @@ class DataPreparationActor:
                 for rollout_stats in result.request_info.tool_call_stats:
                     tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
+
+                env_metrics: dict[str, dict[str, list[float]]] = {}
+                for rs in result.request_info.rollout_states:
+                    info = rs.get("info", {})
+                    ename = info.get("env_name", "unknown")
+                    env_specific_metrics = env_metrics.setdefault(ename, {})
+                    for k, v in info.items():
+                        if k != "env_name" and isinstance(v, (int, float)):
+                            env_specific_metrics.setdefault(k, []).append(float(v))
+                for ename, metrics in env_metrics.items():
+                    for k, vals in metrics.items():
+                        step_metrics[f"env/{ename}/{k}"] = np.mean(vals)
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
