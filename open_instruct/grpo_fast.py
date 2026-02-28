@@ -2056,9 +2056,13 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
         if ENV_CONFIG_KEY in ds.column_names:
             for row in ds:
                 env_cfg = row.get(ENV_CONFIG_KEY)
-                if not isinstance(env_cfg, dict):
-                    continue
-                env_cfgs = env_cfg.get("env_configs")
+                env_cfgs = None
+                if isinstance(env_cfg, dict):
+                    if env_cfg.get("env_name"):
+                        tool_names.add(env_cfg["env_name"])
+                    env_cfgs = env_cfg.get("env_configs")
+                elif isinstance(env_cfg, list):
+                    env_cfgs = env_cfg
                 if isinstance(env_cfgs, list):
                     for cfg in env_cfgs:
                         if isinstance(cfg, dict) and cfg.get("env_name"):

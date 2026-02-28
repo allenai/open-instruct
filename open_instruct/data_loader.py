@@ -557,10 +557,14 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
-def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Return env configs from canonical payload format."""
+def _extract_env_configs(env_config: dict[str, Any] | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return env configs from canonical or row-level payload formats."""
     if env_config is None:
         return []
+    if isinstance(env_config, list):
+        return [dict(cfg) for cfg in env_config]
+    if env_config.get("env_name"):
+        return [dict(env_config)]
     return [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
 
 
@@ -583,7 +587,7 @@ def _merge_sample_envs(
 
 
 def _merge_env_config(
-    base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | None
+    base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | list[dict[str, Any]] | None
 ) -> dict[str, Any] | None:
     """Merge base and sample env config into canonical payload.
 
@@ -598,7 +602,7 @@ def _merge_env_config(
         envs = base_envs
         max_steps = base_max_steps
     else:
-        max_steps = sample_env_config.get("max_steps", base_max_steps)
+        max_steps = sample_env_config.get("max_steps", base_max_steps) if isinstance(sample_env_config, dict) else base_max_steps
         sample_envs = _extract_env_configs(sample_env_config)
         envs = _merge_sample_envs(sample_envs, base_envs_by_name) if sample_envs else base_envs
 
