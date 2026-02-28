@@ -557,6 +557,66 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
+def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return env configs from canonical payload format."""
+    if env_config is None:
+        return []
+    if not isinstance(env_config, dict):
+        raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
+    if "env_name" in env_config:
+        raise ValueError("env_config must use canonical form {'env_configs': [...]} at this stage.")
+    return [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
+
+
+def _index_env_configs(envs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return env_name -> config mapping for quick lookup."""
+    return {cfg["env_name"]: cfg for cfg in envs}
+
+
+def _merge_sample_envs(
+    sample_envs: list[dict[str, Any]], base_envs_by_name: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Merge sample-provided env configs with same-name defaults from base config."""
+    merged_envs: list[dict[str, Any]] = []
+    for sample_env in sample_envs:
+        env_name = sample_env["env_name"]
+        merged = dict(base_envs_by_name.get(env_name, {}))
+        merged.update(sample_env)
+        merged_envs.append(merged)
+    return merged_envs
+
+
+def _merge_env_config(
+    base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Merge base and sample env config into canonical payload.
+
+    Canonical form:
+      {"max_steps": int | None, "env_configs": [<env dict>, ...]}
+    """
+    base_envs = _extract_env_configs(base_env_config)
+    base_envs_by_name = _index_env_configs(base_envs)
+    base_max_steps = base_env_config.get("max_steps") if base_env_config is not None else None
+
+    if sample_env_config is None:
+        envs = base_envs
+        max_steps = base_max_steps
+    else:
+        if not isinstance(sample_env_config, dict):
+            raise TypeError(f"sample_env_config must be a dict or None, got {type(sample_env_config).__name__}")
+        max_steps = sample_env_config.get("max_steps", base_max_steps)
+        sample_envs = _extract_env_configs(sample_env_config)
+        envs = _merge_sample_envs(sample_envs, base_envs_by_name) if sample_envs else base_envs
+
+    if not envs:
+        return None
+
+    payload: dict[str, Any] = {"env_configs": envs}
+    if max_steps is not None:
+        payload["max_steps"] = max_steps
+    return payload
+
+
 def add_prompt_to_generator(
     example: dict[str, Any],
     epoch_number: int,
@@ -567,17 +627,10 @@ def add_prompt_to_generator(
 ) -> None:
     index = int(example["index"])
 
-    # Merge base env_config with per-sample env_config.
-    # 1. Sample has env_config -> merge with base (sample overrides base)
-    # 2. Sample has no env_config but base has env_name -> use base as-is
-    # 3. Neither -> None (non-env sample)
-    env_config = None
+    # Merge base env_config with per-sample env_config in canonical form:
+    # {"env_configs": [{"env_name": "..."}, ...], "max_steps": ...}
     sample_env_config = example.get(ENV_CONFIG_KEY)
-    if sample_env_config is not None:
-        env_config = dict(base_env_config) if base_env_config else {}
-        env_config.update(sample_env_config)
-    elif base_env_config and base_env_config.get("env_name"):
-        env_config = dict(base_env_config)
+    env_config = _merge_env_config(base_env_config, sample_env_config)
 
     param_prompt_Q.put(
         data_types.PromptRequest(
@@ -1242,6 +1295,17 @@ class DataPreparationActor:
                 env_metrics: dict[str, dict[str, list[float]]] = {}
                 for rs in result.request_info.rollout_states:
                     info = rs.get("info", {})
+                    multi_env_metrics = info.get("env_metrics")
+                    if isinstance(multi_env_metrics, dict):
+                        for ename, per_env in multi_env_metrics.items():
+                            if not isinstance(per_env, dict):
+                                continue
+                            env_specific_metrics = env_metrics.setdefault(ename, {})
+                            for k, v in per_env.items():
+                                if isinstance(v, (int, float)):
+                                    env_specific_metrics.setdefault(k, []).append(float(v))
+                        continue
+
                     ename = info.get("env_name", "unknown")
                     env_specific_metrics = env_metrics.setdefault(ename, {})
                     for k, v in info.items():

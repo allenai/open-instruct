@@ -936,8 +936,48 @@ TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v3: Added per-sample env tool injection in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v3"
+# to invalidate old caches. v4: Normalized env_config into canonical payloads in preprocessing.
+DATASET_CACHE_VERSION = "v4"
+
+
+def _normalize_env_config_column(row: dict[str, Any]) -> None:
+    """Normalize row-level env_config to canonical dict form.
+
+    We turn dict-only or list-only configs into the same form.
+    """
+    env_config = row.get(ENV_CONFIG_KEY)
+    if env_config is None:
+        return
+
+    if isinstance(env_config, list):
+        row[ENV_CONFIG_KEY] = {"env_configs": [dict(cfg) for cfg in env_config]}
+        return
+
+    if not isinstance(env_config, dict):
+        raise TypeError(f"{ENV_CONFIG_KEY} must be a dict, list, or None, got {type(env_config).__name__}")
+
+    if "env_configs" in env_config:
+        normalized = dict(env_config)
+        normalized["env_configs"] = [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    if "env_name" in env_config:
+        single_env = dict(env_config)
+        max_steps = single_env.pop("max_steps", None)
+        normalized: dict[str, Any] = {"env_configs": [single_env]}
+        if max_steps is not None:
+            normalized["max_steps"] = max_steps
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    row[ENV_CONFIG_KEY] = {"env_configs": []}
+
+
+def _normalize_env_config_row(row: dict[str, Any]) -> dict[str, Any]:
+    """HF map wrapper for env_config normalization."""
+    _normalize_env_config_column(row)
+    return row
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1662,6 +1702,19 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         num_proc=num_proc,
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
+
+    # Normalize env_config before tokenization so downstream always sees canonical payloads.
+    if ENV_CONFIG_KEY in dataset.column_names:
+        env_config_fingerprint = hashlib.sha256(
+            f"{DATASET_CACHE_VERSION}:normalize_env_config:{dataset._fingerprint}".encode()
+        ).hexdigest()[:16]
+        dataset = dataset.map(
+            _normalize_env_config_row,
+            num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+            new_fingerprint=env_config_fingerprint,
+            desc=f"Normalizing {ENV_CONFIG_KEY} for {dc.dataset_name}",
+        )
+
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed

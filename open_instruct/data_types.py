@@ -76,8 +76,10 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
-    env_config: dict | None = None
-    """Environment config dict (env_name, max_steps, plus env-specific kwargs). If set, uses environment."""
+    env_config: dict[str, Any] | None = None
+    """Environment config in canonical form:
+    {"max_steps": ..., "env_configs": [{"env_name": "...", ...}, ...]}.
+    """
 
 
 @dataclass

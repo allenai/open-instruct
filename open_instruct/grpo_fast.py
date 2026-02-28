@@ -94,7 +94,7 @@ from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig, Tool
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -1219,6 +1219,33 @@ def create_tool_pools(
     return pools, tool_call_names
 
 
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> dict[str, Any] | None:
+    """Build canonical base env config from active pools.
+
+    Includes auto-discovered dataset targets so text env routing metadata
+    (e.g., is_text_env) is available even when --tools is empty.
+    """
+    if not pools:
+        return None
+
+    base_env_config: dict[str, Any] = {"max_steps": tools_config.max_steps}
+    env_configs: list[dict[str, Any]] = []
+    registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
+
+    for pool_name in sorted(pools):
+        registry_name = registry_name_by_call_name.get(pool_name, pool_name)
+        config_cls = TOOL_REGISTRY.get(registry_name)
+        if config_cls is None:
+            continue
+        env_configs.append(
+            {"env_name": pool_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
+        )
+
+    if env_configs:
+        base_env_config["env_configs"] = env_configs
+    return base_env_config
+
+
 def create_model_and_optimizer(
     args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
@@ -2056,8 +2083,17 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
         if ENV_CONFIG_KEY in ds.column_names:
             for row in ds:
                 env_cfg = row.get(ENV_CONFIG_KEY)
-                if env_cfg and env_cfg.get("env_name"):
-                    tool_names.add(env_cfg["env_name"])
+                env_cfgs = None
+                if isinstance(env_cfg, dict):
+                    if env_cfg.get("env_name"):
+                        tool_names.add(env_cfg["env_name"])
+                    env_cfgs = env_cfg.get("env_configs")
+                elif isinstance(env_cfg, list):
+                    env_cfgs = env_cfg
+                if isinstance(env_cfgs, list):
+                    for cfg in env_cfgs:
+                        if isinstance(cfg, dict) and cfg.get("env_name"):
+                            tool_names.add(cfg["env_name"])
 
     return tool_names
 
@@ -2266,18 +2302,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = None
-    if tools_config.enabled:
-        base_env_config = {"max_steps": tools_config.max_steps}
-        # TODO: Support multiple concurrent envs per rollout. Currently only one
-        # stateful environment is supported; the rollout loop acquires/resets a
-        # single env and maps its inner tool names to that actor.
-        for parsed in tools_config._parsed_tools:
-            config_cls = TOOL_REGISTRY.get(parsed.name)
-            if config_cls and not issubclass(config_cls.tool_class, Tool):
-                base_env_config["env_name"] = parsed.call_name
-                base_env_config["is_text_env"] = issubclass(config_cls.tool_class, TextRLEnvironment)
-                break
+    base_env_config = build_base_env_config(tools_config, pools)
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
