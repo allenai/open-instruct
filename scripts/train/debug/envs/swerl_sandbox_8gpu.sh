@@ -27,6 +27,7 @@ uv run python mason.py \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+       --env DOCKERHUB_USERNAME=hamishivi \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --budget ai2/oe-adapt \
        --mount_docker_socket \
@@ -62,7 +63,7 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 128 \
+    --pool_size 8 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
     --active_sampling \

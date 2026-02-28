@@ -7,7 +7,8 @@
 if [ -n "$DOCKER_PAT" ]; then
     python -c "
 import base64, json, os
-auth = base64.b64encode(b'hamishivi:' + os.environ['DOCKER_PAT'].encode()).decode()
+username = os.environ.get('DOCKERHUB_USERNAME', 'hamishivi')
+auth = base64.b64encode(f'{username}:'.encode() + os.environ['DOCKER_PAT'].encode()).decode()
 config_dir = os.path.expanduser('~/.docker')
 os.makedirs(config_dir, exist_ok=True)
 config_path = os.path.join(config_dir, 'config.json')
