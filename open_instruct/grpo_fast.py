@@ -132,7 +132,7 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-WEIGHT_SYNC_TIMEOUT_S = 120.0
+WEIGHT_SYNC_TIMEOUT_S = 180.0
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):

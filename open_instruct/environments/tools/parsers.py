@@ -163,11 +163,11 @@ class VllmToolParser(ToolParser):
         tool_calls = []
         for call in result.tool_calls:
             try:
-                tool_calls.append(
-                    EnvCall(id=call.id or "", name=call.function.name, args=json.loads(call.function.arguments))
-                )
-            except json.JSONDecodeError as e:
-                # the model may have mungled the tool call somehow, catch the error here.
+                args = json.loads(call.function.arguments)
+                if not isinstance(args, dict):
+                    raise ValueError(f"Expected dict, got {type(args).__name__}: {args!r}")
+                tool_calls.append(EnvCall(id=call.id or "", name=call.function.name, args=args))
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(
                     f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
                 )
