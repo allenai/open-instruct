@@ -1219,6 +1219,33 @@ def create_tool_pools(
     return pools, tool_call_names
 
 
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> dict[str, Any] | None:
+    """Build canonical base env config from active pools.
+
+    Includes auto-discovered dataset targets so text env routing metadata
+    (e.g., is_text_env) is available even when --tools is empty.
+    """
+    if not pools:
+        return None
+
+    base_env_config: dict[str, Any] = {"max_steps": tools_config.max_steps}
+    env_configs: list[dict[str, Any]] = []
+    registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
+
+    for pool_name in sorted(pools):
+        registry_name = registry_name_by_call_name.get(pool_name, pool_name)
+        config_cls = TOOL_REGISTRY.get(registry_name)
+        if config_cls is None:
+            continue
+        env_configs.append(
+            {"env_name": pool_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
+        )
+
+    if env_configs:
+        base_env_config["env_configs"] = env_configs
+    return base_env_config
+
+
 def create_model_and_optimizer(
     args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
@@ -2275,18 +2302,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = None
-    if tools_config.enabled:
-        base_env_config = {"max_steps": tools_config.max_steps}
-        env_configs: list[dict[str, Any]] = []
-        for parsed in tools_config._parsed_tools:
-            config_cls = TOOL_REGISTRY.get(parsed.name)
-            if config_cls:
-                env_configs.append(
-                    {"env_name": parsed.call_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
-                )
-        if env_configs:
-            base_env_config["env_configs"] = env_configs
+    base_env_config = build_base_env_config(tools_config, pools)
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
