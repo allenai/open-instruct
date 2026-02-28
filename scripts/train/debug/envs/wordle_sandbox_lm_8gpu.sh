@@ -3,6 +3,7 @@
 #
 # Wordle text environment with sandbox tools available every rollout.
 # Uses Wordle dataset and a combined Wordle + SandboxLM system prompt.
+# Tuned for stability to avoid filter collapse / actor pressure in debug runs.
 #
 # Usage: bash scripts/train/build_image_and_launch.sh scripts/train/debug/envs/wordle_sandbox_lm_8gpu.sh
 
@@ -11,7 +12,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "WordleTextEnv + SandboxLM 8-GPU (4L/4E)" \
+       --description "WordleTextEnv + SandboxLM 8-GPU debug (4L/4E)" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --preemptible \
@@ -29,11 +30,11 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 8192 \
+    --response_length 4096 \
     --pack_length 16384 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 64 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 16 \
+    --num_samples_per_prompt_rollout 4 \
     --model_name_or_path PrimeIntellect/Qwen3-1.7B-Wordle-SFT \
     --temperature 1.0 \
     --learning_rate 1e-6 \
@@ -54,11 +55,12 @@ uv run python mason.py \
     --push_to_hub false \
     --save_traces \
     --tools wordle generic_sandbox \
-    --pool_size 64 \
+    --pool_size 16 \
     --max_steps 20 \
-    --per_turn_max_tokens 1024 \
-    --tool_parser_type vllm_hermes \
+    --per_turn_max_tokens 512 \
+    --tool_parser_type vllm_qwen3xml \
     --dataset_skip_cache \
+    --no_filter_zero_std_samples \
     --reward_aggregator last \
     --advantage_normalization_type centered \
     --system_prompt_override_file scripts/train/debug/envs/wordle_sandbox_lm_system_prompt.txt \
