@@ -936,8 +936,42 @@ TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v3: Added per-sample env tool injection in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v3"
+# to invalidate old caches. v4: Normalized env_config into canonical payloads in preprocessing.
+DATASET_CACHE_VERSION = "v4"
+
+
+def _normalize_env_config_column(row: dict[str, Any]) -> None:
+    """Normalize row-level env_config to canonical dict form.
+
+    We turn dict-only or list-only configs into the same form.
+    """
+    env_config = row.get(ENV_CONFIG_KEY)
+    if env_config is None:
+        return
+
+    if isinstance(env_config, list):
+        row[ENV_CONFIG_KEY] = {"env_configs": [dict(cfg) for cfg in env_config]}
+        return
+
+    if not isinstance(env_config, dict):
+        raise TypeError(f"{ENV_CONFIG_KEY} must be a dict, list, or None, got {type(env_config).__name__}")
+
+    if "env_configs" in env_config:
+        normalized = dict(env_config)
+        normalized["env_configs"] = [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    if "env_name" in env_config:
+        single_env = dict(env_config)
+        max_steps = single_env.pop("max_steps", None)
+        normalized: dict[str, Any] = {"env_configs": [single_env]}
+        if max_steps is not None:
+            normalized["max_steps"] = max_steps
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    row[ENV_CONFIG_KEY] = {"env_configs": []}
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1435,6 +1469,7 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
+    _normalize_env_config_column(row)
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.

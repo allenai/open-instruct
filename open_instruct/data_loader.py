@@ -557,14 +557,14 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
-def _extract_env_configs(env_config: dict[str, Any] | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """Return env configs from canonical or row-level payload formats."""
+def _extract_env_configs(env_config: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return env configs from canonical payload format."""
     if env_config is None:
         return []
-    if isinstance(env_config, list):
-        return [dict(cfg) for cfg in env_config]
-    if env_config.get("env_name"):
-        return [dict(env_config)]
+    if not isinstance(env_config, dict):
+        raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
+    if "env_name" in env_config:
+        raise ValueError("env_config must use canonical form {'env_configs': [...]} at this stage.")
     return [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
 
 
@@ -587,7 +587,7 @@ def _merge_sample_envs(
 
 
 def _merge_env_config(
-    base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | list[dict[str, Any]] | None
+    base_env_config: dict[str, Any] | None, sample_env_config: dict[str, Any] | None
 ) -> dict[str, Any] | None:
     """Merge base and sample env config into canonical payload.
 
@@ -602,7 +602,9 @@ def _merge_env_config(
         envs = base_envs
         max_steps = base_max_steps
     else:
-        max_steps = sample_env_config.get("max_steps", base_max_steps) if isinstance(sample_env_config, dict) else base_max_steps
+        if not isinstance(sample_env_config, dict):
+            raise TypeError(f"sample_env_config must be a dict or None, got {type(sample_env_config).__name__}")
+        max_steps = sample_env_config.get("max_steps", base_max_steps)
         sample_envs = _extract_env_configs(sample_env_config)
         envs = _merge_sample_envs(sample_envs, base_envs_by_name) if sample_envs else base_envs
 
