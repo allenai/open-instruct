@@ -11,8 +11,10 @@ Each task has its own files on disk at ``{task_data_dir}/{task_id}/``:
 """
 
 import contextlib
+import io
 import os
 import shlex
+import tarfile
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -270,31 +272,38 @@ class SWERLSandboxEnv(RLEnvironment):
             self._backend.run_command("chmod +x /tmp/setup.sh && bash /tmp/setup.sh")
 
     def _upload_directory(self, host_dir: str, container_dir: str) -> None:
-        """Upload a local directory tree into the container, batching mkdir calls."""
+        """Upload a local directory tree into the container as a single tar archive.
+
+        Builds an in-memory tar with full container paths (e.g. /tests/test.sh)
+        and extracts at / so no pre-existing directories are required.
+        """
         assert self._backend is not None
+        # Strip leading slash for tar entry names (put_archive at "/" adds it back)
+        prefix = container_dir.lstrip("/")
 
-        file_pairs: list[tuple[str, str]] = []
-        dirs_to_create: set[str] = set()
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+            # Add the root directory entry
+            dir_info = tarfile.TarInfo(name=prefix)
+            dir_info.type = tarfile.DIRTYPE
+            dir_info.mode = 0o755
+            tar.addfile(dir_info)
 
-        for root, _dirs, files in os.walk(host_dir):
-            for fname in files:
-                src_path = os.path.join(root, fname)
-                rel_path = os.path.relpath(src_path, host_dir)
-                container_path = f"{container_dir}/{rel_path}"
-                parent = os.path.dirname(container_path)
-                if parent != container_dir:
-                    dirs_to_create.add(parent)
-                file_pairs.append((src_path, container_path))
+            for root, dirs, files in os.walk(host_dir):
+                rel_root = os.path.relpath(root, host_dir)
+                for d in dirs:
+                    rel_dir = os.path.join(rel_root, d) if rel_root != "." else d
+                    info = tarfile.TarInfo(name=f"{prefix}/{rel_dir}")
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o755
+                    tar.addfile(info)
+                for fname in files:
+                    src_path = os.path.join(root, fname)
+                    rel_file = os.path.join(rel_root, fname) if rel_root != "." else fname
+                    tar.add(src_path, arcname=f"{prefix}/{rel_file}")
 
-        self._backend.run_command(f"mkdir -p {shlex.quote(container_dir)}")
-        if dirs_to_create:
-            quoted = " ".join(shlex.quote(d) for d in sorted(dirs_to_create))
-            self._backend.run_command(f"mkdir -p {quoted}")
-
-        for src_path, container_path in file_pairs:
-            with open(src_path, "rb") as f:
-                content = f.read()
-            self._backend.write_file(container_path, content)
+        tar_stream.seek(0)
+        self._backend._container.put_archive("/", tar_stream)
 
     # ------------------------------------------------------------------
     # Step
