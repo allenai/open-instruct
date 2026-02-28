@@ -20,6 +20,25 @@ GOLD_PREFERENCE = {"count": 2678, "hash": "14eec936b320768c0985866fd9d8033d0d960
 GOLD_RLVR = {"count": 298, "hash": "2999bbb6d7b3f54d6fbffbeeb8bfa31c0efe2b1685def883e6e52914db9f1496"}
 
 
+class TestEnvConfigNormalization(unittest.TestCase):
+    def test_normalize_single_dict_env_config(self):
+        row = {"env_config": {"env_name": "guess_number", "number": "7"}}
+        open_instruct.dataset_transformation._normalize_env_config_column(row)
+        self.assertEqual(row["env_config"], {"env_configs": [{"env_name": "guess_number", "number": "7"}]})
+
+    def test_normalize_list_env_config(self):
+        row = {"env_config": [{"env_name": "counter", "target": "3"}]}
+        open_instruct.dataset_transformation._normalize_env_config_column(row)
+        self.assertEqual(row["env_config"], {"env_configs": [{"env_name": "counter", "target": "3"}]})
+
+    def test_normalize_canonical_env_config(self):
+        row = {"env_config": {"max_steps": 10, "env_configs": [{"env_name": "guess_number", "number": "5"}]}}
+        open_instruct.dataset_transformation._normalize_env_config_column(row)
+        self.assertEqual(
+            row["env_config"], {"max_steps": 10, "env_configs": [{"env_name": "guess_number", "number": "5"}]}
+        )
+
+
 class TestTokenizerEquality(unittest.TestCase):
     @parameterized.expand(
         [("olmo", "allenai/OLMo-2-1124-7B", "allenai/OLMo-2-1124-7B-SFT", "allenai/OLMo-2-1124-7B-DPO", True)]

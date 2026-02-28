@@ -974,6 +974,12 @@ def _normalize_env_config_column(row: dict[str, Any]) -> None:
     row[ENV_CONFIG_KEY] = {"env_configs": []}
 
 
+def _normalize_env_config_row(row: dict[str, Any]) -> dict[str, Any]:
+    """HF map wrapper for env_config normalization."""
+    _normalize_env_config_column(row)
+    return row
+
+
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
     """Validate that configured tools match tools in dataset's 'tools' column.
 
@@ -1469,7 +1475,6 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    _normalize_env_config_column(row)
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
@@ -1697,6 +1702,19 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         num_proc=num_proc,
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
+
+    # Normalize env_config before tokenization so downstream always sees canonical payloads.
+    if ENV_CONFIG_KEY in dataset.column_names:
+        env_config_fingerprint = hashlib.sha256(
+            f"{DATASET_CACHE_VERSION}:normalize_env_config:{dataset._fingerprint}".encode()
+        ).hexdigest()[:16]
+        dataset = dataset.map(
+            _normalize_env_config_row,
+            num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+            new_fingerprint=env_config_fingerprint,
+            desc=f"Normalizing {ENV_CONFIG_KEY} for {dc.dataset_name}",
+        )
+
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
