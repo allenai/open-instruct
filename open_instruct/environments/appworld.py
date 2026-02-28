@@ -22,6 +22,8 @@ _APPWORLD_EXECUTE_TOOL = {
         "name": "appworld_execute",
         "description": (
             "Execute Python code in an AppWorld task shell. The shell is stateful across calls. "
+            "Task context should come from the dataset prompt because env reset observations "
+            "are not injected back into the model conversation. "
             "Use the injected `apis` object for app API calls and call "
             "`apis.supervisor.complete_task()` when finished."
         ),
@@ -75,7 +77,12 @@ def is_appworld_available() -> bool:
 
 
 class AppWorldEnv(RLEnvironment):
-    """Stateful AppWorld environment exposed as a single code-exec tool."""
+    """Stateful AppWorld environment exposed as a single code-exec tool.
+
+    Note: the rollout pipeline does not inject reset() observations into the
+    model conversation, so task instructions/context must be present in the
+    dataset prompt.
+    """
 
     config_name = "appworld"
     _tool_definitions = (_APPWORLD_EXECUTE_TOOL,)
@@ -146,24 +153,7 @@ class AppWorldEnv(RLEnvironment):
         self._step_count = 0
         self._completed = False
         self._last_eval_score = None
-
-        task = getattr(self._world, "task", None)
-        instruction = str(getattr(task, "instruction", "")).strip()
-        supervisor = getattr(task, "supervisor", {})
-        supervisor_name = ""
-        if isinstance(supervisor, dict):
-            first_name = str(supervisor.get("first_name", "")).strip()
-            last_name = str(supervisor.get("last_name", "")).strip()
-            supervisor_name = " ".join(part for part in (first_name, last_name) if part)
-
-        lines = [f"AppWorld task loaded: {task_id}"]
-        if instruction:
-            lines.append(f"Instruction: {instruction}")
-        if supervisor_name:
-            lines.append(f"Supervisor: {supervisor_name}")
-        lines.append("Use `appworld_execute` to run Python code. Call `apis.supervisor.complete_task()` when done.")
-
-        return StepResult(result="\n".join(lines)), list(self._tool_definitions)
+        return StepResult(result="", metadata={"task_id": task_id}), list(self._tool_definitions)
 
     async def step(self, call: EnvCall) -> StepResult:
         if self._world is None:

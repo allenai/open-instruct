@@ -49,6 +49,8 @@ def _build_user_prompt(
         f"Supervisor: {_format_supervisor(supervisor)}",
         f"Instruction: {instruction}",
         "",
+        "Important: this prompt must include all task context; env reset output is not injected.",
+        "",
         "Use the `appworld_execute` tool to run Python code in the AppWorld shell.",
         "The shell is stateful across calls.",
         "Use `apis.<app>.<api>(...)` for API calls and call `apis.supervisor.complete_task()` when done.",
