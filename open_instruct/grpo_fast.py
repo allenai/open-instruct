@@ -1886,6 +1886,9 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
+        if args.eval_only:
+            eval_metrics["episode"] = 0
+            eval_metrics["global_step"] = 0
         for k, pass_rate in pass_at_by_k.items():
             eval_metrics[f"eval/pass_at_{k}"] = pass_rate
         for metric_name, pass_rates in dataset_pass_at_by_k.items():
