@@ -7,9 +7,11 @@ MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 BEAKER_IMAGE="michaeln/open_instruct"
 
 # Training data is unused in eval-only mode but still required by config parsing.
-DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8}"
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
-LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
+DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets 1.0}"
+DATASET_SPLITS="${DATASET_SPLITS:-test}"
+
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets 1.0}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -41,7 +43,7 @@ uv run --active open_instruct/grpo_fast.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list ${DATASETS} \
-    --dataset_mixer_list_splits train \
+    --dataset_mixer_list_splits ${DATASET_SPLITS} \
     --dataset_mixer_eval_list ${LOCAL_EVALS} \
     --dataset_mixer_eval_list_splits "${LOCAL_EVAL_SPLITS}" \
     --max_prompt_token_length 512 \
@@ -74,7 +76,7 @@ uv run --active open_instruct/grpo_fast.py \
     --eval_on_step_0 \
     --eval_only \
     --eval_temperature 1.0 \
-    --eval_top_p 0.95 \
+    --eval_top_p 1.0 \
     --eval_pass_at_k 128 \
     --with_tracking \
     --push_to_hub False "$@"

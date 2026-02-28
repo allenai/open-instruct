@@ -64,8 +64,8 @@ uv run --active open_instruct/grpo_fast.py \
     --seed 1 \
     --save_freq 200 \
     --vllm_enable_prefix_caching \
-    --num_learners_per_node 1 \
-    --vllm_num_engines 3 \
+    --num_learners_per_node 2 \
+    --vllm_num_engines 2 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
