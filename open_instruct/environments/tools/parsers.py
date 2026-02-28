@@ -11,7 +11,6 @@ For vLLM parsers, add to VLLM_PARSERS!
 See: https://docs.vllm.ai/en/latest/features/tool_calling/
 """
 
-import ast
 import json
 import re
 from abc import ABC, abstractmethod
@@ -165,12 +164,10 @@ class VllmToolParser(ToolParser):
         for call in result.tool_calls:
             try:
                 args = json.loads(call.function.arguments)
-                if isinstance(args, str):
-                    args = ast.literal_eval(args)
                 if not isinstance(args, dict):
-                    raise ValueError(f"Expected dict, got {type(args).__name__}")
+                    raise ValueError(f"Expected dict, got {type(args).__name__}: {args!r}")
                 tool_calls.append(EnvCall(id=call.id or "", name=call.function.name, args=args))
-            except (json.JSONDecodeError, ValueError, SyntaxError) as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(
                     f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
                 )
