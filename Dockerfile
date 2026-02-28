@@ -70,7 +70,7 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+    uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab'); nltk.download('words')"
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
