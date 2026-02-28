@@ -27,11 +27,12 @@ uv run python mason.py \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+       --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --budget ai2/oe-adapt \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/train/debug/envs/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -61,7 +62,7 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 256 \
+    --pool_size 8 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
     --active_sampling \
