@@ -62,7 +62,7 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 8 \
+    --pool_size 128 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
     --active_sampling \
