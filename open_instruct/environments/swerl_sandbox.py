@@ -286,11 +286,10 @@ class SWERLSandboxEnv(RLEnvironment):
                     dirs_to_create.add(parent)
                 file_pairs.append((src_path, container_path))
 
+        self._backend.run_command(f"mkdir -p {shlex.quote(container_dir)}")
         if dirs_to_create:
             quoted = " ".join(shlex.quote(d) for d in sorted(dirs_to_create))
             self._backend.run_command(f"mkdir -p {quoted}")
-        else:
-            self._backend.run_command(f"mkdir -p {shlex.quote(container_dir)}")
 
         for src_path, container_path in file_pairs:
             with open(src_path, "rb") as f:
