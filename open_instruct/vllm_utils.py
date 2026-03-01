@@ -61,7 +61,7 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
-from open_instruct.environments.base import StepResult
+from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
@@ -120,15 +120,8 @@ class CompletionOutput:
     finish_reason: str
     cumulative_logprob: float = 0.0
     mask: list[int] | None = None
-    num_calls: int = 0
-    timeout: bool = False
-    tool_error: str = ""
-    tool_output: str = ""
-    tool_runtime: float = 0.0
-    tool_called: bool = False
-    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
-    excess_tool_calls: dict[str, int] = dataclasses.field(default_factory=dict)
-    """Dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
+    rollout_state: dict = dataclasses.field(default_factory=dict)
+    """Rollout state dict — rewards, step_count, done, tool_output, tool_error, etc."""
 
 
 @dataclasses.dataclass
@@ -148,6 +141,7 @@ def process_tool_tokens(
     max_model_len: int,
     max_tokens: int,
     mask_tool_use: bool,
+    role: str = "tool",
 ) -> tuple[list[int], list[float], list[int], int]:
     """Format, tokenize, and truncate tool outputs.
 
@@ -160,11 +154,12 @@ def process_tool_tokens(
         max_model_len: Maximum model sequence length.
         max_tokens: Maximum response tokens.
         mask_tool_use: Whether to mask tool tokens in loss computation.
+        role: Chat role for formatting (e.g. "tool", "user" for text envs).
 
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
-    formatted_output = tool_parser.format_tool_outputs(tool_outputs)
+    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
     tokens, excess = truncate_tool_output_tokens(
@@ -303,20 +298,18 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         )
         logprobs.append(out.logprobs)
 
-    # Extract attributes based on whether tools are used
     if use_tools:
-        # Extract tool-specific attributes from outputs
+        rollout_states = [out.rollout_state for out in final_output.outputs]
         masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in final_output.outputs]
-        num_calls = [getattr(out, "num_calls", 0) for out in final_output.outputs]
-        timeouts = [getattr(out, "timeout", False) for out in final_output.outputs]
-        tool_errors = [getattr(out, "tool_error", "") for out in final_output.outputs]
-        tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
-        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
-        tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
-        tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
-        excess_tool_calls = [getattr(out, "excess_tool_calls", {}) for out in final_output.outputs]
+        num_calls = [rs.get("step_count", 0) for rs in rollout_states]
+        timeouts = [rs.get("timeout", False) for rs in rollout_states]
+        tool_errors = [rs.get("tool_error", "") for rs in rollout_states]
+        tool_outputs = [rs.get("tool_output", "") for rs in rollout_states]
+        tool_runtimes = [rs.get("tool_runtime", 0.0) for rs in rollout_states]
+        tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
+        tool_call_stats = [[ToolCallStats(**s) for s in rs.get("tool_call_stats", [])] for rs in rollout_states]
     else:
-        # Use default values when tools are not used
+        rollout_states = [{} for _ in response_ids]
         masks = [[1] * len(resp) for resp in response_ids]
         num_calls = [0] * len(response_ids)
         timeouts = [False] * len(response_ids)
@@ -325,7 +318,6 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
         tool_call_stats = [[] for _ in response_ids]
-        excess_tool_calls = [{} for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -339,7 +331,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
             tool_call_stats=tool_call_stats,
-            excess_tool_calls=excess_tool_calls,
+            rollout_states=rollout_states,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
@@ -467,6 +459,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
+        "env_config": request.env_config,
     }
 
     for j in range(request.generation_config.n):
@@ -563,10 +556,13 @@ class LLMRayActor:
     def __init__(
         self,
         *args,
-        tool_actors: list[ray.actor.ActorHandle] | None = None,
         tool_parser_type: str = "legacy",
-        max_tool_calls: int = 5,
+        tool_definitions: list[dict] | None = None,
+        tool_stop_sequences: list[str] | None = None,
+        max_steps: int = 5,
+        per_turn_max_tokens: int | None = None,
         mask_tool_use: bool = True,
+        pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -579,8 +575,17 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
+        self._tool_definitions = tool_definitions
+        self._tool_stop_sequences = tool_stop_sequences
         self._init_config(
-            tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+            max_steps,
+            per_turn_max_tokens,
+            mask_tool_use,
+            pools,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -596,17 +601,19 @@ class LLMRayActor:
 
     def _init_config(
         self,
-        tool_actors: list[ray.actor.ActorHandle] | None,
-        max_tool_calls: int,
+        max_steps: int,
+        per_turn_max_tokens: int | None,
         mask_tool_use: bool,
+        pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
         eval_dataset,
     ) -> None:
-        self.tool_actors = tool_actors or []
-        self.max_tool_calls = max_tool_calls
+        self.max_steps = max_steps
+        self.per_turn_max_tokens = per_turn_max_tokens
         self.mask_tool_use = mask_tool_use
+        self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -621,12 +628,7 @@ class LLMRayActor:
             {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
         )
         self.reward_fn = reward_config.build() if reward_config else None
-
-        # Build mapping from tool names to actors for fast lookup
-        self.tool_actor_map = {}
-        if self.tool_actors:
-            call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
-            self.tool_actor_map = dict(zip(call_names, self.tool_actors))
+        self.tool_parser: ToolParser  # Set in _init_tool_parser
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -646,14 +648,11 @@ class LLMRayActor:
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _init_tool_parser(self, tool_parser_type: str) -> None:
-        if not self.tool_actors:
-            return
-        _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
         self.tool_parser = create_tool_parser(
             parser_type=tool_parser_type,
-            tool_actors=self.tool_actors,
             tokenizer=self.llm_engine.tokenizer,
-            tool_definitions=_tool_definitions,
+            tool_definitions=self._tool_definitions,
+            stop_sequences=self._tool_stop_sequences,
         )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
@@ -870,164 +869,218 @@ class LLMRayActor:
 
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
-    """Process a single async request with tool support, awaiting tools inline."""
+    """Process a single async request with tool/environment support."""
     await _check_health(actor.server_port)
-    response_tokens = []
-    response_logprobs = []
-    response_masks = []
+
+    response_tokens: list[int] = []
+    response_logprobs: list[float] = []
+    response_masks: list[int] = []
     cumulative_logprob = 0.0
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
-    tool_call_stats: list[ToolCallStats] = []
-    excess_tool_calls: dict[str, int] = {}
+    rollout = RolloutState()
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
     active_tools = request_metadata["active_tools"]
+    env_config = request_metadata.get("env_config")
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
-    current_max_tokens = sampling_params.max_tokens
 
-    configured_tools = set(actor.tool_actor_map.keys())
+    configured_tools = set(actor.pools.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
-    while True:
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        api_response = await actor.client.completions.create(
-            model=actor.model_name,
-            prompt=current_prompt,
-            extra_body={
-                "return_token_ids": True,
-                "cache_salt": base_request_id,
-                "include_stop_str_in_output": True,
-                "skip_special_tokens": False,
-            },
-            **dataclasses.asdict(current_sampling_params),
-        )
+    max_steps = env_config.get("max_steps", actor.max_steps) if env_config else actor.max_steps
 
-        output = api_response.choices[0]
-        model_tokens = list(output.token_ids)
+    # Acquired actors: pool_key -> actor (released in finally block)
+    acquired: dict[str, Any] = {}
+    actor_map: dict[str, Any] = {}
 
-        response_tokens.extend(model_tokens)
-        current_prompt.extend(model_tokens)
+    is_text_env = False
+    env_response_role = "tool"
 
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for logprob in output.logprobs.token_logprobs:
-            response_logprobs.append(logprob)
-            cumulative_logprob += logprob
+    output = None
+    try:
+        # If env_config is present, acquire from the env's pool and call reset
+        if env_config is not None:
+            env_name = env_config["env_name"]
+            pool = actor.pools.get(env_name)
+            if pool is None:
+                raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
+            env_actor = await pool.acquire.remote()
+            acquired[env_name] = (pool, env_actor)
+            env_kwargs = {
+                k: v for k, v in env_config.items() if k not in ("env_name", "max_steps", "pool_size", "is_text_env")
+            }
+            _, env_tools = await env_actor.reset.remote(**env_kwargs)
+            env_response_role = await env_actor.get_response_role.remote()
+            is_text_env = env_config.get("is_text_env", False)
 
-        response_masks.extend([1] * len(model_tokens))
+            if env_tools:
+                env_tool_names = {t["function"]["name"] for t in env_tools}
+                clashes = env_tool_names & set(actor.pools.keys())
+                if clashes:
+                    raise ValueError(
+                        f"Env '{env_name}' tool names clash with tool pool names: {sorted(clashes)}. "
+                        f"Rename one side to avoid ambiguous dispatch."
+                    )
+                for name in env_tool_names:
+                    actor_map[name] = env_actor
+                    allowed_tools.add(name)
 
-        # check if we have tools to check for
-        # allowed_tools is empty if active_tools=[] for this sample (no tools active)
-        if not actor.tool_actors or actor.tool_parser is None or not allowed_tools:
-            break
+            if is_text_env:
+                actor_map[env_name] = env_actor
+                allowed_tools.add(env_name)
 
-        tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # Sometimes the model will make a tool call that *looks* valid,
-        # but actually that tool doesn't exist for it! So we filter these out.
-        # In future, we could instead add an error message to the model output to indicate that the tool call is invalid.
-        tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
-        if not tool_calls:
-            break
+        while rollout.step_count < max_steps:
+            if rollout.done:
+                break
 
-        # Execute tool calls
-        outputs: list[str] = []
-        for tool_call in tool_calls:
-            tool_called = True
-            num_calls += 1
+            remaining_budget = sampling_params.max_tokens - len(response_masks)
+            remaining_room = max_model_len - len(current_prompt)
+            per_turn_budget = actor.per_turn_max_tokens if actor.per_turn_max_tokens is not None else remaining_budget
+            current_max_tokens = max(1, min(remaining_budget, remaining_room, per_turn_budget))
+            if remaining_budget <= 0 or remaining_room <= 0:
+                break
 
-            # Check if we've exceeded max tool calls
-            if num_calls > actor.max_tool_calls:
-                exceeded_message = "Max tool calls exceeded"
-                tool_error += exceeded_message
-                outputs.append(exceeded_message)
-                excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
-                continue
-
-            try:
-                tool_result: StepResult = await actor.tool_actor_map[tool_call.name].step.remote(tool_call)
-            except (TypeError, ValueError) as e:
-                error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
-                logger.warning(error_msg)
-                tool_result = StepResult(result="", metadata={"error": error_msg})
-
-            meta = tool_result.metadata
-            timeout = timeout or meta.get("timeout", False)
-            tool_error += meta.get("error", "")
-            tool_output += tool_result.result
-            tool_runtime += meta.get("runtime", 0.0)
-            outputs.append(tool_result.result)
-
-            tool_call_stats.append(
-                ToolCallStats(
-                    tool_name=tool_call.name,
-                    success=not meta.get("error") and not meta.get("timeout", False),
-                    runtime=meta.get("runtime", 0.0),
-                )
+            current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            api_response = await actor.client.completions.create(
+                model=actor.model_name,
+                prompt=current_prompt,
+                extra_body={
+                    "return_token_ids": True,
+                    "cache_salt": base_request_id,
+                    "include_stop_str_in_output": True,
+                    "skip_special_tokens": False,
+                },
+                **dataclasses.asdict(current_sampling_params),
             )
 
-        tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
-            tool_outputs=outputs,
-            tool_parser=actor.tool_parser,
-            tokenizer=actor.llm_engine.tokenizer,
-            current_prompt_len=len(current_prompt),
-            current_response_len=len(response_masks),
-            max_model_len=max_model_len,
-            max_tokens=sampling_params.max_tokens,
-            mask_tool_use=actor.mask_tool_use,
-        )
+            output = api_response.choices[0]
+            model_tokens = list(output.token_ids)
+            response_tokens.extend(model_tokens)
+            current_prompt.extend(model_tokens)
 
-        response_tokens.extend(tool_tokens)
-        response_logprobs.extend(tool_logprobs)
-        response_masks.extend(tool_masks)
-        current_prompt.extend(tool_tokens)
+            assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+            for logprob in output.logprobs.token_logprobs:
+                response_logprobs.append(logprob)
+                cumulative_logprob += logprob
+            response_masks.extend([1] * len(model_tokens))
 
-        current_max_tokens = sampling_params.max_tokens - len(response_masks)
-        if excess > 0 or current_max_tokens <= 0:
-            break
+            tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
 
-    if output.finish_reason == "stop" and len(response_tokens) == 0:
+            # Text envs: inject a shadow tool call so dispatch handles it uniformly
+            if is_text_env:
+                tool_calls.append(EnvCall(id="", name=env_name, args={"text": output.text}))
+
+            if not tool_calls:
+                break
+
+            observations: list[str] = []
+            for tc in tool_calls:
+                if rollout.step_count >= max_steps:
+                    break
+
+                # Lazily acquire from pool on first use of this tool name
+                if tc.name not in actor_map:
+                    pool = actor.pools.get(tc.name)
+                    if pool is None:
+                        raise ValueError(
+                            f"Model called tool '{tc.name}' but no pool exists for it. "
+                            f"Available pools: {list(actor.pools.keys())}"
+                        )
+                    acq = await pool.acquire.remote()
+                    acquired[tc.name] = (pool, acq)
+                    actor_map[tc.name] = acq
+                target = actor_map[tc.name]
+
+                rollout.step_count += 1
+
+                try:
+                    step_result: StepResult = await target.step.remote(
+                        EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
+                    )
+                    observations.append(step_result.result)
+                    rollout.tool_output += step_result.result
+                    rollout.rewards.append(step_result.reward)
+                    if step_result.done:
+                        rollout.done = True
+                    meta = step_result.metadata or {}
+                    rollout.timeout = rollout.timeout or meta.get("timeout", False)
+                    rollout.tool_error += meta.get("error", "")
+                    rollout.tool_runtime += meta.get("runtime", 0.0)
+                    rollout.tool_call_stats.append(
+                        ToolCallStats(
+                            tool_name=tc.name,
+                            success=not meta.get("error") and not meta.get("timeout", False),
+                            runtime=meta.get("runtime", 0.0),
+                        )
+                    )
+                except Exception as e:
+                    error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
+                    logger.warning(error_msg)
+                    observations.append(error_msg)
+                    rollout.tool_error += error_msg
+                    rollout.rewards.append(0.0)
+                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
+
+                if rollout.done:
+                    break
+
+            if observations:
+                tokens, logprobs, masks, excess = process_tool_tokens(
+                    observations,
+                    actor.tool_parser,
+                    actor.llm_engine.tokenizer,
+                    len(current_prompt),
+                    len(response_masks),
+                    max_model_len,
+                    sampling_params.max_tokens,
+                    actor.mask_tool_use,
+                    role=env_response_role,
+                )
+                response_tokens.extend(tokens)
+                response_logprobs.extend(logprobs)
+                response_masks.extend(masks)
+                current_prompt.extend(tokens)
+                if excess > 0:
+                    break
+    finally:
+        if env_config is not None and env_name in acquired:
+            _, env_act = acquired[env_name]
+            rollout.info["env_name"] = env_name
+            rollout.info.update(await env_act.get_metrics.remote())
+        for pool, acq_actor in acquired.values():
+            pool.release.remote(acq_actor)
+
+    if len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
         response_tokens.append(eos_token_id)
         response_masks.append(1)
         response_logprobs.append(float("nan"))
+
+    finish_reason = output.finish_reason if output else "stop"
 
     complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         token_ids=response_tokens,
         cumulative_logprob=cumulative_logprob,
         logprobs=response_logprobs,
-        finish_reason=output.finish_reason,
+        finish_reason=finish_reason,
+        mask=response_masks,
+        rollout_state=dataclasses.asdict(rollout),
     )
-    if actor.tool_actors:
-        complete_output.mask = response_masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
-        complete_output.tool_call_stats = tool_call_stats
-        complete_output.excess_tool_calls = excess_tool_calls
 
     actor.active_tasks.pop(sub_request_id, None)
-
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "expected_n": request_metadata["original_sampling_params"].n,
             "request_output": RequestOutput(
                 request_id=sub_request_id,
-                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
+                prompt_token_ids=request_metadata["prompt_token_ids"],
                 outputs=[complete_output],
             ),
-            "use_tools": bool(actor.tool_actors),
+            "use_tools": bool(actor.pools),
         }
     )
 
@@ -1064,10 +1117,13 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
-    tool_actors: list[ray.actor.ActorHandle] | None = None,
     tool_parser_type: str = "legacy",
-    max_tool_calls: int = 5,
+    tool_definitions: list[dict] | None = None,
+    tool_stop_sequences: list[str] | None = None,
+    max_steps: int = 5,
+    per_turn_max_tokens: int | None = None,
     mask_tool_use: bool = True,
+    pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -1078,7 +1134,6 @@ def create_vllm_engines(
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
 ) -> list[ray.actor.ActorHandle]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
     # Using "ray" executor causes placement group context loss in vLLM v1's
@@ -1151,10 +1206,13 @@ def create_vllm_engines(
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
-                tool_actors=tool_actors,
                 tool_parser_type=tool_parser_type,
-                max_tool_calls=max_tool_calls,
+                tool_definitions=tool_definitions,
+                tool_stop_sequences=tool_stop_sequences,
+                max_steps=max_steps,
+                per_turn_max_tokens=per_turn_max_tokens,
                 mask_tool_use=mask_tool_use,
+                pools=pools,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
