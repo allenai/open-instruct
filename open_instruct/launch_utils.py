@@ -3,7 +3,19 @@ import subprocess
 
 from transformers.utils import hub as transformers_hub
 
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
+WEKA_CLUSTERS = [
+    "ai2/jupiter",
+    "ai2/jupiter-cirrascale-2",
+    "ai2/saturn",
+    "ai2/saturn-cirrascale",
+    "ai2/titan",
+    "ai2/neptune",
+    "ai2/neptune-cirrascale",
+    "ai2/ceres",
+    "ai2/ceres-cirrascale",
+    "ai2/triton",
+    "ai2/rhea",
+]
 
 
 def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
