@@ -46,7 +46,8 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
         --process_output r1_style \
         --skip_oi_evals \
         --beaker_image jacobm/oe-eval-flex-olmo-9-29-5 \
-        --s3_output_dir s3://ai2-sewonm/sanjaya/post_training_eval_results/${MODEL_NAME}/
+        --s3_output_dir s3://ai2-sewonm/sanjaya/post_training_eval_results/${MODEL_NAME}/ \
+        2>&1
 
     if [ $? -eq 0 ]; then
         echo "Successfully submitted evaluation for $MODEL_NAME"
