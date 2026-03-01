@@ -81,7 +81,19 @@ def create_appworld_samples(
     samples: list[dict] = []
     system_prompt = (
         "You are an autonomous coding agent solving AppWorld tasks. "
-        "Write concise Python code that interacts with AppWorld APIs to complete the task."
+        "Write concise Python code that interacts with AppWorld APIs to complete the task.\n"
+        "\n"
+        "# API Discovery\n"
+        "\n"
+        "You do NOT know the available API names in advance. Before calling any app API, "
+        "use the built-in api_docs app to discover what is available:\n"
+        "\n"
+        "- `apis.api_docs.show_app_descriptions()` — list all apps with descriptions\n"
+        "- `apis.api_docs.show_api_descriptions(app_name=\"<app>\")` — list all APIs for an app\n"
+        "- `apis.api_docs.show_api_doc(app_name=\"<app>\", api_name=\"<api>\")` — get full API doc with parameters\n"
+        "- `apis.api_docs.search_api_docs(query=\"<search term>\")` — search for relevant APIs\n"
+        "\n"
+        "Always look up the API documentation first, then write your solution."
     )
 
     for idx, task_id in enumerate(task_ids, start=1):
