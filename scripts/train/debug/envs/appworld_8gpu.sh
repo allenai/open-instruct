@@ -69,6 +69,7 @@ uv run python mason.py \
     --per_turn_max_tokens 1024 \
     --tool_parser_type vllm_hermes \
     --reward_aggregator last \
+    --no_filter_zero_std_samples \
     --local_eval_every 10 \
     --eval_on_step_0 true \
     --dataset_skip_cache \
