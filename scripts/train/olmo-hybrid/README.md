@@ -1,6 +1,6 @@
 # Overview
 
-OLMo 3.2 Hybrid is an experimental hybrid model built on top of the OLMo 3 recipe with a hybrid, gated delta net (GDN) architecture. We used the following scripts to train our models.
+Olmo 3.2 Hybrid is an experimental hybrid model built on top of the Olmo 3 recipe with a hybrid, gated delta net (GDN) architecture. We used the following scripts to train our models.
 
 > **Note**: SFT runs (Think SFT and Instruct SFT) use the [OLMo-core](https://github.com/allenai/OLMo-core) SFT implementation and are not run from this repository. DPO is run with DeepSpeed via open-instruct's standalone DPO trainer, not the in-process OLMo-Core primitives version.
 
