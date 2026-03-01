@@ -966,16 +966,33 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 cumulative_logprob += logprob
             response_masks.extend([1] * len(model_tokens))
 
-            tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
+            parse_error_observation = ""
+            try:
+                parsed_tool_calls = actor.tool_parser.get_tool_calls(output.text)
+            except Exception as e:
+                parse_error_observation = (
+                    "Tool call parsing failed. Return tool arguments as a JSON object, "
+                    f"not raw text. Parser error: {e}"
+                )
+                logger.warning(f"[Tool Parser] {parse_error_observation}\nModel output: {output.text!r}")
+                parsed_tool_calls = []
+
+            tool_calls = [tc for tc in parsed_tool_calls if tc.name in allowed_tools]
 
             # Text envs: inject a shadow tool call so dispatch handles it uniformly
             if is_text_env:
                 tool_calls.append(EnvCall(id="", name=env_name, args={"text": output.text}))
 
-            if not tool_calls:
+            if not tool_calls and not parse_error_observation:
                 break
 
             observations: list[str] = []
+            if parse_error_observation:
+                observations.append(parse_error_observation)
+                rollout.tool_error += parse_error_observation
+                rollout.rewards.append(0.0)
+                rollout.tool_call_stats.append(ToolCallStats(tool_name="tool_parser", success=False, runtime=0.0))
+
             for tc in tool_calls:
                 if rollout.step_count >= max_steps:
                     break
