@@ -17,8 +17,7 @@ import math
 import numpy as np
 from datasets import Dataset, concatenate_datasets, load_dataset
 
-from open_instruct import grpo_utils
-from open_instruct import logger_utils
+from open_instruct import grpo_utils, logger_utils
 from open_instruct.utils import max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -54,7 +53,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--private", action="store_true")
-    parser.add_argument("--push", action="store_true", help="Push to hub (default False)")
     return parser.parse_args()
 
 
@@ -159,15 +157,14 @@ def main() -> None:
             bucket * 100.0,
         )
 
-    if args.push:
-        if args.push_layout in {"all", "bucket_splits"}:
-            for split_name, bucket_ds in bucket_outputs:
-                logger.info("Pushing split %s to %s", split_name, args.output_dataset)
-                bucket_ds.push_to_hub(args.output_dataset, split=split_name, private=args.private)
-        if args.push_layout in {"all", "test_concat"}:
-            concatenated = concatenate_datasets([bucket_ds for _, bucket_ds in bucket_outputs])
-            logger.info("Pushing concatenated split test (%d rows) to %s", len(concatenated), args.output_dataset)
-            concatenated.push_to_hub(args.output_dataset, split="test", private=args.private)
+    if args.push_layout in {"all", "bucket_splits"}:
+        for split_name, bucket_ds in bucket_outputs:
+            logger.info("Pushing split %s to %s", split_name, args.output_dataset)
+            bucket_ds.push_to_hub(args.output_dataset, split=split_name, private=args.private)
+    if args.push_layout in {"all", "test_concat"}:
+        concatenated = concatenate_datasets([bucket_ds for _, bucket_ds in bucket_outputs])
+        logger.info("Pushing concatenated split test (%d rows) to %s", len(concatenated), args.output_dataset)
+        concatenated.push_to_hub(args.output_dataset, split="test", private=args.private)
 
     logger.info("Done")
 
