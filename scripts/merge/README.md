@@ -8,7 +8,6 @@ Merge HuggingFace models on Beaker using either [mergekit](https://github.com/ar
 |------|-------------|
 | `mergekit_merge.sh` | Beaker launcher using mergekit (for supported architectures) |
 | `direct_merge.sh` | Beaker launcher using direct safetensors averaging (for all architectures) |
-| `launch_merges.sh` | Example batch script that launches multiple merge jobs |
 
 ## Why Two Approaches?
 
@@ -107,6 +106,29 @@ For models that require a custom transformers build (e.g., new OLMo architecture
     /weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR2.5e-5/step46412-hf \
     /weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42/step46412-hf \
     /weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR1e-5/step46412-hf
+```
+
+### Batch launching multiple merges
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+
+MODEL_1="/weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR2.5e-5/step46412-hf"
+MODEL_2="/weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42/step46412-hf"
+MODEL_3="/weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR1e-5/step46412-hf"
+
+# 2-model merge
+./scripts/merge/direct_merge.sh \
+    "/weka/oe-adapt-default/${BEAKER_USER}/merged/sft-2model-linear" \
+    "$MODEL_1" "$MODEL_2"
+
+# 3-model merge
+./scripts/merge/direct_merge.sh \
+    "/weka/oe-adapt-default/${BEAKER_USER}/merged/sft-3model-linear" \
+    "$MODEL_1" "$MODEL_2" "$MODEL_3"
 ```
 
 ## Notes
