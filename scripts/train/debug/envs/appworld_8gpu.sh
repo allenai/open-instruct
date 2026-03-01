@@ -35,7 +35,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/appworld_setup.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- bash configs/beaker_configs/appworld_setup.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list "${APPWORLD_TRAIN_DATASET}" 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list "${APPWORLD_EVAL_DATASET}" 1.0 \
