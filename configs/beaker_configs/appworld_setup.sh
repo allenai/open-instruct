@@ -34,6 +34,12 @@ APPWORLD_PACKAGE_REF="${APPWORLD_PACKAGE_REF:-git+https://github.com/stonybrookn
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python)}"
 if [[ "${APPWORLD_PACKAGE_REF}" == git+* ]]; then
     export UV_GIT_LFS="${UV_GIT_LFS:-1}"
+    if ! git lfs version >/dev/null 2>&1; then
+        echo "[appworld_setup] Error: git-lfs is required for git-based AppWorld installs."
+        echo "[appworld_setup] Rebuild the Beaker image from a commit that installs git-lfs in the Dockerfile."
+        exit 1
+    fi
+    git lfs install --skip-repo >/dev/null
 fi
 
 echo "[appworld_setup] APPWORLD_ROOT=${APPWORLD_ROOT}"
