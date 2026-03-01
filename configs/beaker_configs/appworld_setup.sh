@@ -3,7 +3,7 @@
 set -euo pipefail
 
 _appworld_cli() {
-    uv run --python "${PYTHON_BIN}" python -m appworld.cli --root "${APPWORLD_ROOT}" "$@"
+    uv run --python "${PYTHON_BIN}" python -m appworld.cli "$@"
 }
 
 _appworld_has_private_apps() {
@@ -74,7 +74,7 @@ fi
 echo "[appworld_setup] Running \`appworld install\` via uv run..."
 _appworld_cli install
 echo "[appworld_setup] Running \`appworld download data\` via uv run..."
-_appworld_cli download data
+_appworld_cli download data --root "${APPWORLD_ROOT}"
 
 if ! _appworld_has_private_apps; then
     echo "[appworld_setup] Error: app modules are still missing after install."
