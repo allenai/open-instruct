@@ -4,6 +4,7 @@ import contextlib
 import importlib
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -90,6 +91,7 @@ class AppWorldEnv(RLEnvironment):
     def __init__(
         self,
         experiment_name: str = "open_instruct_appworld",
+        isolate_experiment_name: bool = True,
         raise_on_failure: bool = True,
         evaluate_on_done: bool = True,
         reward_scale: float = 1.0,
@@ -105,11 +107,13 @@ class AppWorldEnv(RLEnvironment):
         self._appworld_cls = _load_appworld_symbols()
 
         self._default_experiment_name = experiment_name
+        self._default_isolate_experiment_name = isolate_experiment_name
         self._default_raise_on_failure = raise_on_failure
         self._evaluate_on_done = evaluate_on_done
         self._reward_scale = reward_scale
         self._penalty = penalty
         self._default_init_kwargs = dict(init_kwargs or {})
+        self._actor_experiment_suffix = uuid.uuid4().hex
 
         self._world: Any | None = None
         self._task_id: str | None = None
@@ -139,6 +143,9 @@ class AppWorldEnv(RLEnvironment):
             )
 
         experiment_name = str(kwargs.get("experiment_name", self._default_experiment_name))
+        isolate_experiment_name = bool(kwargs.get("isolate_experiment_name", self._default_isolate_experiment_name))
+        if isolate_experiment_name:
+            experiment_name = f"{experiment_name}_{self._actor_experiment_suffix}"
         raise_on_failure = bool(kwargs.get("raise_on_failure", self._default_raise_on_failure))
 
         init_kwargs = dict(self._default_init_kwargs)
@@ -146,9 +153,16 @@ class AppWorldEnv(RLEnvironment):
         if isinstance(override_init_kwargs, dict):
             init_kwargs.update(override_init_kwargs)
 
-        self._world = self._appworld_cls(
-            task_id=task_id, experiment_name=experiment_name, raise_on_failure=raise_on_failure, **init_kwargs
-        )
+        try:
+            self._world = self._appworld_cls(
+                task_id=task_id, experiment_name=experiment_name, raise_on_failure=raise_on_failure, **init_kwargs
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                "AppWorldEnv failed to initialize its output directory. This is often caused by multiple "
+                "actors sharing the same `experiment_name` and task ID. Use unique experiment names or keep "
+                "`isolate_experiment_name=true`."
+            ) from e
         self._task_id = task_id
         self._step_count = 0
         self._completed = False
@@ -297,6 +311,7 @@ class AppWorldEnvConfig(BaseEnvConfig):
 
     tool_class: ClassVar[type[RLEnvironment]] = AppWorldEnv
     experiment_name: str = "open_instruct_appworld"
+    isolate_experiment_name: bool = True
     raise_on_failure: bool = True
     evaluate_on_done: bool = True
     reward_scale: float = 1.0
