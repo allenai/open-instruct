@@ -7,7 +7,7 @@ from datetime import date
 
 import yaml
 
-from open_instruct import launch_utils, utils
+from open_instruct import launch_utils
 
 ########################################
 
