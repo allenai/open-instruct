@@ -1,5 +1,5 @@
 #!/bin/bash
-# Think SFT for OLMo 3.2 Hybrid 7B (LR 2.5e-5).
+# Think SFT for Olmo Hybrid 7B (LR 2.5e-5).
 # This runs in OLMo-core, not open-instruct.
 # See: https://github.com/allenai/OLMo-core
 

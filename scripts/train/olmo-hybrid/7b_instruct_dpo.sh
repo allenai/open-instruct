@@ -1,5 +1,5 @@
 #!/bin/bash
-# Final DPO run for OLMo 3.2 Hybrid 7B Instruct.
+# Final DPO run for Olmo Hybrid 7B Instruct.
 #
 # Usage (with pre-built image, no Docker build needed):
 #   bash scripts/train/olmo-hybrid/7b_instruct_dpo.sh

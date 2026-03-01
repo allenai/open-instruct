@@ -1,5 +1,5 @@
 #!/bin/bash
-# Instruct SFT for OLMo 3.2 Hybrid 7B (LR 2.5e-5).
+# Instruct SFT for Olmo Hybrid 7B (LR 2.5e-5).
 # Trains on top of the Think SFT checkpoint.
 # This runs in OLMo-core, not open-instruct.
 # See: https://github.com/allenai/OLMo-core
