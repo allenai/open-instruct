@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     git \
+    git-lfs \
     make \
     sudo \
     nginx \
@@ -64,7 +65,8 @@ WORKDIR /stage/
 
 ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
-    UV_COMPILE_BYTECODE=0
+    UV_COMPILE_BYTECODE=0 \
+    UV_GIT_LFS=1
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \

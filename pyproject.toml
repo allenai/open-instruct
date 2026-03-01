@@ -80,6 +80,10 @@ code = [
     "pydantic>=2.0.0",
     "requests>=2.28.0",
 ]
+appworld = [
+    # AppWorld is currently consumed from source for compatibility with our dependency set.
+    "appworld @ git+https://github.com/stonybrooknlp/appworld.git@main",
+]
 dr-tulu = [
     "dr_agent",
     "authlib",
