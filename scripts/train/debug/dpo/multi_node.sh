@@ -2,12 +2,12 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-tp2-${LR}-$(date +%s)
+EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs32-tp2-${LR}-$(date +%s)
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO run with OLMo2-7B, 16k seq len, bs=16 (packing, TP=2, compile)." \
+    --description "2 node DPO run with OLMo2-7B, 16k seq len, bs=32 (packing, TP=2, compile)." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -29,7 +29,7 @@ uv run python mason.py \
     --model_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
     --max_seq_length 16384 \
-    --per_device_train_batch_size 16 \
+    --per_device_train_batch_size 32 \
     --packing \
     --gradient_accumulation_steps 1 \
     --learning_rate "$LR" \
