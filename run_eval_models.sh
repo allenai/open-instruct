@@ -2,10 +2,6 @@
 
 MODEL_PATHS=(
     "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_5e-5/step1534-hf"
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_8e-5/step1534-hf"
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_1e-4/step1534-hf"
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_2e-4/step1534-hf"
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_5e-4/step1534-hf"
 )
 
 for MODEL_PATH in "${MODEL_PATHS[@]}"; do
