@@ -90,9 +90,13 @@ class AppWorldEnv(RLEnvironment):
 
     def __init__(
         self,
-        experiment_name: str = "open_instruct_appworld",
-        isolate_experiment_name: bool = True,
-        raise_on_failure: bool = True,
+        experiment_name: str = "rl_training",
+        max_interactions: int = 100,
+        max_api_calls_per_interaction: int = 500,
+        raise_on_failure: bool = False,
+        random_seed: int = 42,
+        ground_truth_mode: str = "minimal",
+        timeout: float | None = None,
         evaluate_on_done: bool = True,
         reward_scale: float = 1.0,
         penalty: float = -0.05,
@@ -101,14 +105,21 @@ class AppWorldEnv(RLEnvironment):
     ):
         # EnvironmentPool always passes call_name; stateful envs do not use it.
         kwargs.pop("call_name", None)
+        # Accept and ignore legacy/unsupported keys for compatibility.
+        kwargs.pop("timeout", None)
+        kwargs.pop("base_url", None)
         if kwargs:
             logger.warning(f"Ignoring unexpected AppWorldEnv kwargs: {sorted(kwargs.keys())}")
 
         self._appworld_cls = _load_appworld_symbols()
 
         self._default_experiment_name = experiment_name
-        self._default_isolate_experiment_name = isolate_experiment_name
+        self._default_max_interactions = max_interactions
+        self._default_max_api_calls_per_interaction = max_api_calls_per_interaction
         self._default_raise_on_failure = raise_on_failure
+        self._default_random_seed = random_seed
+        self._default_ground_truth_mode = ground_truth_mode
+        self._default_timeout = timeout
         self._evaluate_on_done = evaluate_on_done
         self._reward_scale = reward_scale
         self._penalty = penalty
@@ -143,12 +154,18 @@ class AppWorldEnv(RLEnvironment):
             )
 
         experiment_name = str(kwargs.get("experiment_name", self._default_experiment_name))
-        isolate_experiment_name = bool(kwargs.get("isolate_experiment_name", self._default_isolate_experiment_name))
-        if isolate_experiment_name:
-            experiment_name = f"{experiment_name}_{self._actor_experiment_suffix}"
+        # Always isolate output directories per actor/instance to avoid collisions
+        # when multiple rollouts for the same task_id run concurrently.
+        experiment_name = f"{experiment_name}_{self._actor_experiment_suffix}"
         raise_on_failure = bool(kwargs.get("raise_on_failure", self._default_raise_on_failure))
 
         init_kwargs = dict(self._default_init_kwargs)
+        init_kwargs.setdefault("max_interactions", self._default_max_interactions)
+        init_kwargs.setdefault("max_api_calls_per_interaction", self._default_max_api_calls_per_interaction)
+        init_kwargs.setdefault("random_seed", self._default_random_seed)
+        init_kwargs.setdefault("ground_truth_mode", self._default_ground_truth_mode)
+        # Disable signal-based timeout handling for ray actor compatibility.
+        init_kwargs.setdefault("timeout_seconds", None if self._default_timeout is None else self._default_timeout)
         override_init_kwargs = kwargs.get("appworld_init_kwargs")
         if isinstance(override_init_kwargs, dict):
             init_kwargs.update(override_init_kwargs)
@@ -160,8 +177,7 @@ class AppWorldEnv(RLEnvironment):
         except FileNotFoundError as e:
             raise FileNotFoundError(
                 "AppWorldEnv failed to initialize its output directory. This is often caused by multiple "
-                "actors sharing the same `experiment_name` and task ID. Use unique experiment names or keep "
-                "`isolate_experiment_name=true`."
+                "actors sharing the same `experiment_name` and task ID. Use unique experiment names."
             ) from e
         self._task_id = task_id
         self._step_count = 0
@@ -310,9 +326,13 @@ class AppWorldEnvConfig(BaseEnvConfig):
     """Configuration for AppWorldEnv."""
 
     tool_class: ClassVar[type[RLEnvironment]] = AppWorldEnv
-    experiment_name: str = "open_instruct_appworld"
-    isolate_experiment_name: bool = True
-    raise_on_failure: bool = True
+    experiment_name: str = "rl_training"
+    max_interactions: int = 100
+    max_api_calls_per_interaction: int = 500
+    raise_on_failure: bool = False
+    random_seed: int = 42
+    ground_truth_mode: str = "minimal"
+    timeout: float | None = None
     evaluate_on_done: bool = True
     reward_scale: float = 1.0
     penalty: float = -0.05
