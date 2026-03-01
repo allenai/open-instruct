@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
+from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.utils import get_rank
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
@@ -140,8 +141,11 @@ class PerfCallback(Callback):
     _interval_num_sequences: int = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
+    _tp_degree: int = field(default=1, repr=False)
 
     def pre_train(self) -> None:
+        total_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
+        self._tp_degree = max(1, total_world_size // self.num_training_gpus)
         self._start_time = time.perf_counter()
         self._interval_start_time = self._start_time
         self._total_tokens_processed = 0
@@ -192,7 +196,7 @@ class PerfCallback(Callback):
             total_tokens=total_tokens_step,
             avg_sequence_length=avg_sequence_length,
             training_time=training_time,
-            num_training_gpus=self.num_training_gpus,
+            num_training_gpus=self.num_training_gpus * self._tp_degree,
         )
 
         self._mfu_sum += mfu_result["mfu"]
@@ -206,7 +210,9 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
         self.trainer.record_metric(
-            "perf/tokens_per_second_per_gpu", tokens_per_second / self.num_training_gpus, reduce_type=None
+            "perf/tokens_per_second_per_gpu",
+            tokens_per_second / (self.num_training_gpus * self._tp_degree),
+            reduce_type=None,
         )
         self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)
         self.trainer.record_metric("perf/data_loading_seconds", self._batch_load_time, reduce_type=None)

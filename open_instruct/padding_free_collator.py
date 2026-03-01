@@ -7,6 +7,15 @@ from transformers import DefaultDataCollator
 from open_instruct import tensor_utils
 
 
+def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    shifted_labels = torch.full_like(labels, -100)
+    shifted_labels[:, :-1] = labels[:, 1:]
+
+    logits = logits.to(torch.float32)
+    safe = shifted_labels.clamp(min=0)
+    return torch.gather(logits.log_softmax(-1), 2, safe.unsqueeze(2)).squeeze(2)
+
+
 def _collect_flattened_features(
     features: list[dict[str, Any]], separator_id: int
 ) -> tuple[dict[str, Any], list[torch.Tensor], list[torch.Tensor], list[int], int]:
@@ -191,26 +200,15 @@ def concatenated_inputs(
 
 
 def get_batch_logps(
-    logits: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
+    per_token_logps: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
 ) -> torch.Tensor:
-    assert logits.shape[:-1] == labels.shape
-
-    # - we are going to get crossings at labels / logits
-    #   cont batch boundaries, but we assume that the
-    #   loss mask == True at those places
-    labels = labels[:, 1:].clone()
-    logits = logits[:, :-1, :]
-    loss_mask = labels != -100
-
-    # dummy token; we'll ignore the losses on these tokens later
-    labels = labels.masked_fill(~loss_mask, 0)
+    per_token_logps = per_token_logps[:, :-1]
+    loss_mask = labels[:, 1:] != -100
 
     # Compensate for the next-token shift above: each boundary moved left by 1,
     # but the leading 0 must stay at 0.
     cu_seq_lens = cu_seq_lens.clone() - 1
     cu_seq_lens[0] = 0
-
-    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
 
     num_seqs = cu_seq_lens.shape[0] - 1
     seq_len = per_token_logps.shape[1]

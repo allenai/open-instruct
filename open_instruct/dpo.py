@@ -213,11 +213,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_lora:
         raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
 
-    if args.tensor_parallel_degree > 1:
-        raise NotImplementedError(
-            "Tensor parallelism is not supported with DPO (DTensor view ops are incompatible with torch.compile)."
-        )
-
     if args.context_parallel_degree > 1:
         raise NotImplementedError(
             "Context parallelism is not supported with DPO (requires batch_shard_by_document integration)."
@@ -262,8 +257,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     train.prepare_training_environment(seed=args.seed)
 
-    dp_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
-    is_main_process = dp_rank == 0
+    tp_degree = args.tensor_parallel_degree
+    global_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
+    dp_rank = global_rank // tp_degree
+    is_main_process = global_rank == 0
 
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
@@ -272,7 +269,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     dp_world_size = world_size // args.tensor_parallel_degree
 
-    logger_utils.setup_logger(rank=dp_rank)
+    logger_utils.setup_logger(rank=global_rank)
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
 
@@ -305,6 +302,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
         drop_last=True,
+        fs_local_rank=global_rank,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size
@@ -323,6 +321,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
         drop_last=True,
+        fs_local_rank=global_rank,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
@@ -367,6 +366,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         if args.activation_memory_budget < 1.0 and args.compile_model
         else None
     )
+    tp_config = (
+        transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+        if args.tensor_parallel_degree > 1
+        else None
+    )
 
     train_module = DPOTrainModule(
         model=model,
@@ -375,6 +379,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
+        tp_config=tp_config,
         ac_config=ac_config,
         compile_model=args.compile_model,
         max_grad_norm=max_grad_norm,
