@@ -27,7 +27,7 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
     uv run python scripts/submit_eval_jobs.py \
         --model_name "${MODEL_NAME}-updated-evals" \
         --location "$MODEL_PATH" \
-        --cluster ai2/saturn \
+        --cluster ai2/saturn-cirrascale \
         --is_tuned \
         --workspace ai2/flex2 \
         --priority urgent \
