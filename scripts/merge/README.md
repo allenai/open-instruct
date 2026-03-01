@@ -8,13 +8,16 @@ Merge HuggingFace models on Beaker using either [mergekit](https://github.com/ar
 |------|-------------|
 | `mergekit_merge.sh` | Beaker launcher using mergekit (for supported architectures) |
 | `direct_merge.sh` | Beaker launcher using direct safetensors averaging (for all architectures) |
-| `direct_merge.py` | Python script for direct safetensors averaging (used by `direct_merge.sh`) |
 | `launch_merges.sh` | Example batch script that launches multiple merge jobs |
 
-## Which Script to Use
+## Why Two Approaches?
 
-- **`mergekit_merge.sh`**: Works with standard HuggingFace architectures (e.g., Llama, OLMo3). Supports multiple merge methods (`linear`, `slerp`, `ties`, `dare_ties`).
-- **`direct_merge.sh`**: Works with any architecture, including hybrid models (e.g., `Olmo3_5HybridForCausalLM`) that mergekit doesn't support. Only does linear (weighted average) merging.
+We maintain both scripts because they serve complementary roles:
+
+- **`mergekit_merge.sh`** wraps [mergekit](https://github.com/arcee-ai/mergekit), which supports advanced merge methods (`linear`, `slerp`, `ties`, `dare_ties`). However, mergekit relies on architecture-specific layer detection, so it only works with architectures it already knows about (e.g., Llama, OLMo3).
+- **`direct_merge.sh`** uses `open_instruct/merge_models.py` to do architecture-agnostic weighted averaging of safetensors files. It works with *any* architecture — including hybrid models like `Olmo3_5HybridForCausalLM` — but only supports linear (weighted average) merging.
+
+In short: use **mergekit** when you need a complex merge method on a supported architecture, and **direct merge** when you need to merge models whose architecture mergekit doesn't support yet.
 
 ## Usage
 
@@ -49,7 +52,7 @@ Models can be local paths or HuggingFace model IDs (mergekit only).
 Both scripts use base64-encoding to safely pass configs/scripts through the shell layers (bash -> mason.py -> Beaker), avoiding YAML escaping issues. On Beaker, the encoded string is decoded and executed.
 
 - `mergekit_merge.sh`: Base64-encodes a YAML config, installs mergekit on Beaker, and runs `mergekit-yaml`
-- `direct_merge.sh`: Base64-encodes `direct_merge.py`, sends it to Beaker, and runs it directly
+- `direct_merge.sh`: Base64-encodes `open_instruct/merge_models.py`, sends it to Beaker, and runs it directly
 
 Both scripts copy tokenizer files and `chat_template.jinja` from the first model.
 

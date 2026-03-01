@@ -43,8 +43,8 @@ for model in "${MODELS[@]}"; do
 done
 echo "=============================================="
 
-# Base64 encode the Python script to avoid escaping issues
-SCRIPT_B64=$(base64 < scripts/merge/direct_merge.py | tr -d '\n')
+# Base64 encode the Python module to avoid escaping issues
+SCRIPT_B64=$(base64 < open_instruct/merge_models.py | tr -d '\n')
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -56,4 +56,4 @@ uv run python mason.py \
     --gpus 0 \
     --priority normal \
     --description "Linear merge: ${NUM_MODELS}-model" \
-    -- bash -c \"cd /stage \&\& echo $SCRIPT_B64 \| base64 -d \> /tmp/direct_merge.py \&\& uv run python /tmp/direct_merge.py --models $MODELS_ARG --output_dir $OUTPUT_DIR --dtype bfloat16\"
+    -- bash -c \"cd /stage \&\& echo $SCRIPT_B64 \| base64 -d \> /tmp/merge_models.py \&\& uv run python /tmp/merge_models.py --models $MODELS_ARG --output_dir $OUTPUT_DIR --dtype bfloat16\"

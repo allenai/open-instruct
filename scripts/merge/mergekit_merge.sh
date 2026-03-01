@@ -52,7 +52,7 @@ for model in "${MODELS[@]}"; do
 done
 echo "=============================================="
 
-# NOTE: MergeKit doesn't support hybrid models yet. Use linear_merge.sh for those.
+# NOTE: MergeKit doesn't support hybrid models yet. Use direct_merge.sh for those.
 #
 # Custom installs needed for new architectures (uncomment and set PR number as needed)
 # CUSTOM_INSTALL="uv pip install git+https://github.com/huggingface/transformers.git@refs/pull/XXXXX/head"
