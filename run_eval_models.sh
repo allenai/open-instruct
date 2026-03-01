@@ -1,7 +1,11 @@
 #!/bin/bash
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex2-7B-sft/flexolmo-4x7b-math_rl-olmo3_code-tool-unf-rt-4-domain/step1128-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_5e-5/step1534-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_8e-5/step1534-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_1e-4/step1534-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_2e-4/step1534-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/flexolmo-4x7b-tool_use-router_sft-lr_5e-4/step1534-hf"
 )
 
 for MODEL_PATH in "${MODEL_PATHS[@]}"; do
@@ -34,7 +38,6 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
         --is_tuned \
         --workspace ai2/flex2 \
         --priority urgent \
-        --preemptible \
         --use_hf_tokenizer_template \
         --run_oe_eval_experiments \
         --evaluate_on_weka \
