@@ -25,7 +25,7 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
 
     echo "Submitting eval for: $MODEL_NAME"
     uv run python scripts/submit_eval_jobs.py \
-        --model_name "${MODEL_NAME}-updated-evals" \
+        --model_name "${MODEL_NAME}-evals" \
         --location "$MODEL_PATH" \
         --cluster ai2/saturn-cirrascale \
         --is_tuned \
