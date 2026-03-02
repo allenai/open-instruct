@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest, ChatCompletionToolsParam
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.environments.base import EnvCall
@@ -62,9 +62,7 @@ class OpenInstructLegacyToolParser(ToolParser):
     Tool names and parameter names are derived from OpenAI-format tool definitions.
     """
 
-    def __init__(
-        self, tool_definitions: list[ChatCompletionToolsParam] | None = None, output_wrap_name: str = "output"
-    ):
+    def __init__(self, tool_definitions: list[dict[str, Any]] | None = None, output_wrap_name: str = "output"):
         self.output_wrap_name = output_wrap_name
 
         if tool_definitions:
@@ -129,7 +127,7 @@ class VllmToolParser(ToolParser):
         tool_parser: VllmNativeToolParser,
         role_templates: dict[str, str],
         stop_sequences: list[str] | None = None,
-        tool_definitions: list[ChatCompletionToolsParam] | None = None,
+        tool_definitions: list[dict[str, Any]] | None = None,
         output_prefix: str = "",
         output_postfix: str = "<|im_start|>assistant\n",
     ):
@@ -247,7 +245,7 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
 def create_vllm_parser(
     parser_name: str,
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
-    tool_definitions: list[ChatCompletionToolsParam] | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
 ) -> VllmToolParser:
     """Create a VllmToolParser by name.
 
@@ -285,7 +283,7 @@ class DRTuluToolParser(ToolParser):
     Requires exactly one tool (dr_agent_mcp) in tool_definitions.
     """
 
-    def __init__(self, tool_definitions: list[ChatCompletionToolsParam], stop_sequences: list[str]):
+    def __init__(self, tool_definitions: list[dict[str, Any]], stop_sequences: list[str]):
         if len(tool_definitions) != 1:
             raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_definitions)}")
 
@@ -320,7 +318,7 @@ def get_available_parsers() -> list[str]:
 def create_tool_parser(
     parser_type: str,
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
-    tool_definitions: list[ChatCompletionToolsParam] | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
     stop_sequences: list[str] | None = None,
 ) -> ToolParser:
     """Create a tool parser instance by type.
