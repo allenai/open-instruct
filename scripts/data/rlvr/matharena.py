@@ -20,6 +20,7 @@ SOURCE_DATASETS = (
     ("MathArena/hmmt_feb_2025", "math_hmmt_feb_2025"),
     ("MathArena/hmmt_nov_2025", "math_hmmt_nov_2025"),
     ("MathArena/brumo_2025", "math_brumo_2025"),
+    ("MathArena/aime_2025", "math_aime_2025"),
 )
 SOURCE_DATASET_MAP = {name: label for name, label in SOURCE_DATASETS}
 
