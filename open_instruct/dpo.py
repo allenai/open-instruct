@@ -366,6 +366,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         if args.activation_memory_budget < 1.0 and args.compile_model
         else None
     )
+
     train_module = DPOTrainModule(
         model=model,
         optim=optim_config,
