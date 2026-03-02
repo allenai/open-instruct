@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from olmo_core.distributed import utils as distributed_utils
-from olmo_core.distributed.utils import get_rank
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
@@ -51,7 +50,7 @@ class BeakerCallbackV2(Callback):
             self.enabled = True
 
     def pre_train(self) -> None:
-        if self.enabled and get_rank() == 0:
+        if self.enabled and distributed_utils.get_rank() == 0:
             workload_id = os.environ.get(BEAKER_WORKLOAD_ID_ENV_VAR)
             if workload_id is None:
                 logger.warning(f"BeakerCallbackV2: {BEAKER_WORKLOAD_ID_ENV_VAR} not set, disabling")
@@ -81,7 +80,7 @@ class BeakerCallbackV2(Callback):
     def post_step(self) -> None:
         should_update = (
             self.enabled
-            and get_rank() == 0
+            and distributed_utils.get_rank() == 0
             and self.step % self.trainer.metrics_collect_interval == 0
             and (self._last_update is None or (time.perf_counter() - self._last_update) > 10)
         )
@@ -89,7 +88,7 @@ class BeakerCallbackV2(Callback):
             self._update()
 
     def post_train(self) -> None:
-        if self.enabled and get_rank() == 0:
+        if self.enabled and distributed_utils.get_rank() == 0:
             self._update()
 
     def _get_tracking_url(self) -> str | None:
