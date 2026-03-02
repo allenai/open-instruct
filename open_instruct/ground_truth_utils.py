@@ -1003,6 +1003,8 @@ async def apply_verifiable_reward(
             return reward_func
         if dataset_key.startswith("gsm8k"):
             return reward_fn_mapping.get("gsm8k")
+        if dataset_key.startswith("math"):
+            return reward_fn_mapping.get("math")
         return None
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(

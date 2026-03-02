@@ -5,13 +5,14 @@ Test script for verifier functionality in Python
 
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
 from parameterized import parameterized
 
 from open_instruct.data_types import RequestInfo
-from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier, RewardConfig
+from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier, RewardConfig, apply_verifiable_reward
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -224,6 +225,33 @@ class TestRewardConfig(unittest.TestCase):
         self.assertNotIn("objective/true_objective_correct_rate", metrics)
         self.assertEqual(metrics["objective/spurious_reward"], 5.0)
         self.assertEqual(metrics["objective/spurious_correct_rate"], 0.5)
+
+
+class TestApplyVerifiableRewardDatasetAliases(unittest.TestCase):
+    class _DummyVerifier:
+        def __init__(self, name: str, score: float = 1.0):
+            self.name = name
+            self.weight = 1.0
+            self._score = score
+
+        async def async_call(self, **kwargs):
+            return SimpleNamespace(score=self._score)
+
+    def test_math_prefixed_dataset_uses_math_verifier(self):
+        verifier = self._DummyVerifier(name="math", score=1.0)
+        scores, per_func_scores = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"math": verifier},
+                responses=[[1, 2, 3]],
+                decoded_responses=["dummy"],
+                ground_truths=["42"],
+                datasets=["math_hmmt_feb_2025"],
+                reward_mult=10,
+                queries=["q"],
+            )
+        )
+        self.assertEqual(scores, [10.0])
+        self.assertEqual(per_func_scores, [{"math": 10.0}])
 
 
 if __name__ == "__main__":
