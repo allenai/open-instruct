@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count) (https://github.com/allenai/open-instruct/pull/1434).
 
 ### Changed
+- Updated vLLM weight update RPCs to prefer vLLM v1 `AsyncMPClient.collective_rpc_async` (with compatibility fallbacks), aligning Open Instruct’s `inflight_updates` update flow with PipelineRL’s v1 pattern (https://github.com/allenai/open-instruct/pull/1506).
 - Bound async data preparation to stay within `async_steps` of training, preventing training data getting too far out of sync with trainer. (https://github.com/allenai/open-instruct/pull/1496).
 - Refactor Legacy and DRTulu tool parsers to use OpenAI-format `tool_definitions` instead of Ray `tool_actors`. Removes `import ray` from `parsers.py`, fixes DRTulu parser which was broken after the pool refactor, and fixes `--tool_parser_type` typo in dr_tulu debug script (https://github.com/allenai/open-instruct/pull/1491).
 - Replaces lambda collators with a "single_example_collator" (https://github.com/allenai/open-instruct/pull/1472).
