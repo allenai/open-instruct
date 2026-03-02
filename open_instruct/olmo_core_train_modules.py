@@ -121,6 +121,7 @@ class DPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
+        # TODO(finbarrtimbers): Remove this hack once Transformer supports configuring the LM head.
         model.lm_head.__class__ = DPOLMHead
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
         super().__init__(

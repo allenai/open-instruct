@@ -374,6 +374,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
+        # Passing degree=1 is functionally correct but adds DTensor overhead with no benefit,
+        # as apply_tp would wrap all layers unnecessarily. Pass None to skip TP entirely.
         tp_config=(
             transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
             if args.tensor_parallel_degree > 1
