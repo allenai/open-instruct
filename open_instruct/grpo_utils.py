@@ -76,13 +76,13 @@ class ExperimentConfig:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_high: float = 2.0
+    truncated_importance_sampling_ratio_cap: float = 2.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
-    truncated_importance_sampling_ratio_low: float = 0.0
+    truncated_importance_sampling_ratio_cap_low: float = 0.0
     """The minimum floor for truncated importance sampling ratio (0 means disabled)"""
     truncated_importance_sampling_hard_filter: bool = False
-    """If True, zero out tokens where the mismatch ratio is outside [low, high] (GLM-5 pop operator).
-    If False, clamp the ratio to [low, high] (soft bounding)."""
+    """If True, zero out tokens where the mismatch ratio is outside [cap_low, cap] (GLM-5 pop operator).
+    If False, clamp the ratio to [cap_low, cap] (soft bounding)."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -193,9 +193,9 @@ class ExperimentConfig:
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
     def __post_init__(self):
-        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_high > 0:
+        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0:
             raise ValueError(
-                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_high`. "
+                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
