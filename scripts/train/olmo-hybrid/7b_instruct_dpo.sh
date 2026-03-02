@@ -10,7 +10,7 @@
 # Nominal performance: ~10s/step, ~6hrs total (2031 steps).
 # Monitor via wandb perf/seconds_per_step. Expect MFU ~3%.
 
-BEAKER_IMAGE="${1:-finbarrt/hyrid-dpo-stable}"
+BEAKER_IMAGE="${1:-finbarrt/hybrid-dpo-stable}"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
