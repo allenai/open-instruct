@@ -662,7 +662,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     ratio_BT = torch.exp(logprobs_diff_BT)
                     # Apply truncated importance sampling if enabled
                     tis_imp_ratio_BT = None
-                    if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
+                    if self.args.truncated_importance_sampling_ratio_high > 0 and vllm_logprobs_BT is not None:
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
 
@@ -678,26 +678,26 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
 
                         valid_mask_BT = response_mask_BT
-                        # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
 
                         if valid_mask_BT.any():
-                            # Calculate logprob difference only for valid positions
                             logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
-                            # Clamp to prevent numerical overflow in exp
-                            logprob_diff_is_BT = torch.where(
-                                valid_mask_BT,
-                                logprob_diff_is_BT.clamp(-10.0, 10.0),
-                                torch.zeros_like(logprob_diff_is_BT),
-                            )
-                            # Compute importance ratio only for valid positions
                             tis_imp_ratio_BT = torch.where(
                                 valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
                             )
-                            # Apply cap
-                            tis_imp_ratio_BT = torch.clamp(
-                                tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
-                            )
+                            if self.args.truncated_importance_sampling_hard_filter:
+                                in_range = (tis_imp_ratio_BT >= self.args.truncated_importance_sampling_ratio_low) & (
+                                    tis_imp_ratio_BT <= self.args.truncated_importance_sampling_ratio_high
+                                )
+                                tis_imp_ratio_BT = torch.where(
+                                    valid_mask_BT & in_range, tis_imp_ratio_BT, torch.zeros_like(tis_imp_ratio_BT)
+                                )
+                            else:
+                                tis_imp_ratio_BT = torch.clamp(
+                                    tis_imp_ratio_BT,
+                                    min=self.args.truncated_importance_sampling_ratio_low or None,
+                                    max=self.args.truncated_importance_sampling_ratio_high,
+                                )
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -1020,7 +1020,7 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.ExperimentConfig:
     """Set up runtime variables for the experiment."""
-    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_high > 0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )

@@ -143,7 +143,7 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore[arg-type]
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.

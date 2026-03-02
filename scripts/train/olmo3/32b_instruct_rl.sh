@@ -78,7 +78,6 @@ uv run python mason.py \
         --async_steps 8 \
         --active_sampling \
         --advantage_normalization_type centered \
-        --truncated_importance_sampling_ratio_cap 2.0 \
         --oe_eval_tasks "${OE_EVAL_TASKS}" \
         --oe_eval_gpu_multiplier 2 \
         --vllm_enforce_eager \

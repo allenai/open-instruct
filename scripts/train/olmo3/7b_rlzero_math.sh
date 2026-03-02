@@ -39,7 +39,6 @@ uv run mason.py \
     --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
-    --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
@@ -80,4 +79,4 @@ uv run mason.py \
     --eval_priority high \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4 $@
+    --oe_eval_gpu_multiplier 4 "$@"
