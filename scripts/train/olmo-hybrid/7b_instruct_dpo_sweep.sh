@@ -11,7 +11,7 @@
 # Monitor via wandb perf/seconds_per_step. Expect MFU ~3%.
 # Reference: commit 787cdb78 achieved ~7s/step.
 
-BEAKER_IMAGE="${1:-finbarrt/hyrid-dpo-stable}"
+BEAKER_IMAGE="${1:-finbarrt/hybrid-dpo-stable}"
 
 BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 
