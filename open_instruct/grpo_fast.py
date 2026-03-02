@@ -689,13 +689,11 @@ class PolicyTrainerRayProcess(RayProcess):
                                 in_range = (
                                     tis_imp_ratio_BT >= self.args.truncated_importance_sampling_ratio_cap_low
                                 ) & (tis_imp_ratio_BT <= self.args.truncated_importance_sampling_ratio_cap)
-                                tis_imp_ratio_BT = torch.where(
-                                    valid_mask_BT & in_range, tis_imp_ratio_BT, torch.zeros_like(tis_imp_ratio_BT)
-                                )
+                                tis_imp_ratio_BT = tis_imp_ratio_BT * (valid_mask_BT & in_range)
                             else:
                                 tis_imp_ratio_BT = torch.clamp(
                                     tis_imp_ratio_BT,
-                                    min=self.args.truncated_importance_sampling_ratio_cap_low or None,
+                                    min=self.args.truncated_importance_sampling_ratio_cap_low,
                                     max=self.args.truncated_importance_sampling_ratio_cap,
                                 )
 
