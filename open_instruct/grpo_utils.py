@@ -204,6 +204,11 @@ class ExperimentConfig:
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
+        if self.eval_on_step_0 and self.local_eval_every <= 0:
+            raise ValueError(
+                "`eval_on_step_0` requires `local_eval_every` > 0. "
+                "Set `local_eval_every` to a positive value or disable `eval_on_step_0`."
+            )
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:

@@ -37,6 +37,7 @@ dependencies = [
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
+    "docker>=7.0.0",
 ]
 
 [build-system]
@@ -81,6 +82,8 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+    "authlib",
+    "scipy",
 ]
 
 [tool.uv]

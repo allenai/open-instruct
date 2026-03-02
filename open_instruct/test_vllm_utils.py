@@ -62,28 +62,34 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output1.token_ids = [1, 2, 3]
         mock_output1.logprobs = create_mock_logprobs([1, 2, 3])
         mock_output1.mask = [1, 1, 1]
-        mock_output1.num_calls = 1
-        mock_output1.timeout = False
-        mock_output1.tool_error = ""
-        mock_output1.tool_output = "result1"
-        mock_output1.tool_runtime = 0.5
-        mock_output1.tool_called = True
-        mock_output1.tool_call_stats = []
-        mock_output1.excess_tool_calls = {"python": 1}
+        mock_output1.rollout_state = {
+            "step_count": 1,
+            "timeout": False,
+            "tool_error": "",
+            "tool_output": "result1",
+            "tool_runtime": 0.5,
+            "tool_call_stats": [],
+            "rewards": [],
+            "done": False,
+            "info": {},
+        }
         mock_output1.finish_reason = "stop"
 
         mock_output2 = MagicMock(spec=vllm.CompletionOutput)
         mock_output2.token_ids = [4, 5, 6]
         mock_output2.logprobs = create_mock_logprobs([4, 5, 6])
         mock_output2.mask = [1, 1, 1]
-        mock_output2.num_calls = 2
-        mock_output2.timeout = False
-        mock_output2.tool_error = ""
-        mock_output2.tool_output = "result2"
-        mock_output2.tool_runtime = 0.3
-        mock_output2.tool_called = True
-        mock_output2.tool_call_stats = []
-        mock_output2.excess_tool_calls = {"python": 2, "search": 1}
+        mock_output2.rollout_state = {
+            "step_count": 2,
+            "timeout": False,
+            "tool_error": "",
+            "tool_output": "result2",
+            "tool_runtime": 0.3,
+            "tool_call_stats": [],
+            "rewards": [],
+            "done": False,
+            "info": {},
+        }
         mock_output2.finish_reason = "stop"
 
         mock_request_output = MagicMock(spec=vllm.RequestOutput)
@@ -126,12 +132,11 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.masks[0], [1, 1, 1])
         self.assertEqual(result.masks[1], [1, 1, 1])
 
-        # Verify request_info has correct tool attributes
+        # Verify request_info has correct tool attributes (read from rollout_state dicts)
         self.assertEqual(result.request_info.num_calls, [1, 2])
         self.assertEqual(result.request_info.tool_outputs, ["result1", "result2"])
         self.assertEqual(result.request_info.tool_runtimes, [0.5, 0.3])
         self.assertEqual(result.request_info.tool_calleds, [True, True])
-        self.assertEqual(result.request_info.excess_tool_calls, [{"python": 1}, {"python": 2, "search": 1}])
 
     def test_process_outputs_without_tools(self):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
@@ -208,7 +213,7 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["", ""])
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
-        self.assertEqual(result.request_info.excess_tool_calls, [{}, {}])
+        self.assertEqual(result.request_info.rollout_states, [{}, {}])
 
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):

@@ -921,20 +921,14 @@ def pack_padded_sequences(
         - max_doc_len: Maximum document length in the batch.
     """
     batch_size = input_ids.shape[0]
-    seq_lengths = attention_mask.sum(dim=1)
+    seq_lengths = attention_mask.sum(dim=1, dtype=torch.int32)
     max_doc_len = int(seq_lengths.max().item())
     cu_doc_lens = torch.zeros(batch_size + 1, dtype=torch.int32, device=input_ids.device)
     cu_doc_lens[1:] = seq_lengths.cumsum(dim=0)
 
-    packed_input_ids_list = []
-    packed_labels_list = []
-    for i in range(batch_size):
-        length = seq_lengths[i].item()
-        packed_input_ids_list.append(input_ids[i, :length])
-        packed_labels_list.append(labels[i, :length])
-
-    packed_input_ids = torch.cat(packed_input_ids_list, dim=0).unsqueeze(0)
-    packed_labels = torch.cat(packed_labels_list, dim=0).unsqueeze(0)
+    mask = attention_mask.bool()
+    packed_input_ids = input_ids[mask].unsqueeze(0)
+    packed_labels = labels[mask].unsqueeze(0)
 
     return packed_input_ids, packed_labels, cu_doc_lens, max_doc_len
 

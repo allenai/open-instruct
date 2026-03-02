@@ -149,6 +149,9 @@ def get_args():
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
+    parser.add_argument(
+        "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
+    )
     parser.add_argument("--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing")
     parser.add_argument("--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing")
     parser.add_argument("--non_resumable", action="store_true", help="If given, disable resumable mode")
@@ -395,7 +398,7 @@ def get_env_vars(
     return env_vars
 
 
-def get_datasets(beaker_datasets, cluster: list[str]):
+def get_datasets(beaker_datasets, cluster: list[str], mount_docker_socket: bool = False):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
@@ -414,6 +417,12 @@ def get_datasets(beaker_datasets, cluster: list[str]):
                 source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
             )
         ]
+    if mount_docker_socket:
+        res.append(
+            beaker.BeakerDataMount(
+                source=beaker.BeakerDataSource(host_path="/var/run/docker.sock"), mount_path="/var/run/docker.sock"
+            )
+        )
     for beaker_dataset in beaker_datasets:
         to_append = beaker.BeakerDataMount(
             source=beaker.BeakerDataSource(beaker=beaker_dataset["beaker"]), mount_path=beaker_dataset["mount_path"]
@@ -768,7 +777,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         command=["/bin/bash", "-c"],
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.cluster),
+        datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
         ),
