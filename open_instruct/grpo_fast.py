@@ -1448,6 +1448,9 @@ def create_generation_configs(
         n=args.eval_pass_at_k,
         temperature=args.eval_temperature if args.eval_temperature is not None else generation_config.temperature,
         top_p=args.eval_top_p if args.eval_top_p is not None else generation_config.top_p,
+        max_tokens=args.eval_response_length
+        if args.eval_response_length is not None
+        else generation_config.max_tokens,
     )
     return {"train": generation_config, "eval": eval_generation_config}
 
