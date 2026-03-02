@@ -25,9 +25,9 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.9.0,<2.10",
-    "transformers>=4.57.0",
-    "vllm==0.14.1; platform_system != 'Darwin'",
+    "torch==2.10.0",
+    "transformers>=5.2.0",
+    "vllm @ file:///weka/oe-adapt-default/michaeln/vllm/dist/vllm-0.13.0rc2.dev2265+gd35c05dbf.cu128-cp312-cp312-linux_x86_64.whl ; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -52,13 +52,6 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
-
-# pytorch related setups
-[tool.uv.sources]
-torch = [
-  { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
-]
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
@@ -95,6 +88,10 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'darwin'",
 ]
+
+[tool.uv.pip]
+torch-backend = "auto"
+find-links = ["/weka/oe-adapt-default/michaeln/vllm/dist"]
 
 [dependency-groups]
 dev = [
