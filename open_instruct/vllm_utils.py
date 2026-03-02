@@ -25,7 +25,6 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
@@ -772,26 +771,48 @@ class LLMRayActor:
         use_ray: bool = False,
         timeout_minutes: int = 120,
     ) -> None:
-        future = asyncio.run_coroutine_threadsafe(
-            self.llm_engine.collective_rpc(
-                "init_process_group",
-                args=(
-                    master_address,
-                    master_port,
-                    rank_offset,
-                    world_size,
-                    group_name,
-                    backend,
-                    use_ray,
-                    timeout_minutes,
-                ),
-            ),
-            self.loop,
+        return self._collective_rpc(
+            "init_process_group",
+            timeout=timeout_minutes * 60,
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray, timeout_minutes),
         )
-        return future.result(timeout=timeout_minutes * 60)
 
-    def _run_async(self, coro: Awaitable[Any]) -> Any:
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+    def _collective_rpc(
+        self,
+        method: str,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> list[Any]:
+        """Dispatch worker RPCs through the vLLM v1 AsyncMPClient path when available."""
+        engine_core = getattr(self.llm_engine, "engine_core", None)
+        if engine_core is not None and hasattr(engine_core, "collective_rpc_async"):
+            future = asyncio.run_coroutine_threadsafe(
+                engine_core.collective_rpc_async(method, timeout=timeout, args=args, kwargs=kwargs), self.loop
+            )
+            return future.result(timeout=timeout)
+
+        # Fallback for engine cores that only expose sync collective RPC.
+        if engine_core is not None and hasattr(engine_core, "collective_rpc"):
+            return engine_core.collective_rpc(method, timeout=timeout, args=args, kwargs=kwargs)
+
+        # Backward-compatible fallback for engines exposing only async collective RPC.
+        future = asyncio.run_coroutine_threadsafe(
+            self.llm_engine.collective_rpc(method, timeout=timeout, args=args, kwargs=kwargs), self.loop
+        )
+        return future.result(timeout=timeout)
+
+    def _reset_prefix_cache(self) -> bool:
+        """Reset prefix cache through AsyncMPClient when available."""
+        engine_core = getattr(self.llm_engine, "engine_core", None)
+        if engine_core is not None and hasattr(engine_core, "reset_prefix_cache_async"):
+            future = asyncio.run_coroutine_threadsafe(engine_core.reset_prefix_cache_async(), self.loop)
+            return future.result()
+
+        if engine_core is not None and hasattr(engine_core, "reset_prefix_cache"):
+            return engine_core.reset_prefix_cache()
+
+        future = asyncio.run_coroutine_threadsafe(self.llm_engine.reset_prefix_cache(), self.loop)
         return future.result()
 
     def _prepare_weight_update(self, name: str, dtype: str) -> None:
@@ -805,20 +826,16 @@ class LLMRayActor:
 
     def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+        return self._collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
     ) -> None:
         self._prepare_weight_update(name, dtype)
-        return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
-        )
+        return self._collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
     def reset_prefix_cache(self) -> None:
-        return self._run_async(self.llm_engine.reset_prefix_cache())
+        return self._reset_prefix_cache()
 
     def ready(self) -> bool:
         return True
@@ -838,7 +855,7 @@ class LLMRayActor:
 
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
+        kv_cache_specs = self._collective_rpc("get_kv_cache_spec")
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
