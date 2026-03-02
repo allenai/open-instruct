@@ -62,7 +62,9 @@ class OpenInstructLegacyToolParser(ToolParser):
     Tool names and parameter names are derived from OpenAI-format tool definitions.
     """
 
-    def __init__(self, tool_definitions: list[dict[str, Any]] | None = None, output_wrap_name: str = "output"):
+    def __init__(
+        self, tool_definitions: list[ChatCompletionToolsParam] | None = None, output_wrap_name: str = "output"
+    ):
         self.output_wrap_name = output_wrap_name
 
         if tool_definitions:
@@ -283,7 +285,7 @@ class DRTuluToolParser(ToolParser):
     Requires exactly one tool (dr_agent_mcp) in tool_definitions.
     """
 
-    def __init__(self, tool_definitions: list[dict[str, Any]], stop_sequences: list[str]):
+    def __init__(self, tool_definitions: list[ChatCompletionToolsParam], stop_sequences: list[str]):
         if len(tool_definitions) != 1:
             raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_definitions)}")
 
