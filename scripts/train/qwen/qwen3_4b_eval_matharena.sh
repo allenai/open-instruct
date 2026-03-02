@@ -8,8 +8,8 @@ BEAKER_IMAGE="michaeln/open_instruct"
 DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
 DATASET_SPLITS="${DATASET_SPLITS:-test}"
 
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
-LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/brumo_2025_openinstruct 1.0 mnoukhov/hmmt_feb_2025_openinstruct 1.0 mnoukhov/hmmt_nov_2025_openinstruct 1.0 mnoukhov/aime_2025_openinstruct 1.0}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
 
 CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
 PRIORITY="${PRIORITY:-high}"
@@ -31,19 +31,28 @@ uv run mason.py \
 uv run --active open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
-    --eval_pass_at_k 128 \
+    --eval_on_step_0 \
+    --eval_only \
+    --eval_pass_at_k 16 \
+    --eval_temperature 1.0 \
+    --eval_top_p 0.95 \
+    --eval_response_length 65536 \
     --vllm_top_p 1.0 \
+    --vllm_gpu_memory_utilization 0.7 \
+    --colocate_train_inference_mode \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
+    --vllm_enforce_eager \
+    --vllm_sync_backend gloo \
     --local_eval_every 100 \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --beta 0.0 \
     --async_steps 1 \
-    --inflight_updates \
     --filter_zero_std_samples False \
-    --log_train_solve_rate_metrics True \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
-    --num_samples_per_prompt_rollout 16 \
+    --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
@@ -64,13 +73,11 @@ uv run --active open_instruct/grpo_fast.py \
     --seed 1 \
     --save_freq 200 \
     --vllm_enable_prefix_caching \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 2 \
-    --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
-    --load_ref_policy True \
+    --load_ref_policy False \
     --with_tracking \
+    --total_episodes 128 \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \
