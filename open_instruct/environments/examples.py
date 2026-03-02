@@ -8,7 +8,7 @@ import nltk
 from nltk.corpus import words as nltk_words
 from openenv.core.env_server.types import State
 
-from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult, TextRLEnvironment
+from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult, TextRLEnvironment, ToolDefinition
 
 
 class CounterEnv(RLEnvironment):
@@ -17,7 +17,7 @@ class CounterEnv(RLEnvironment):
     config_name = "counter"
     max_steps = 20
 
-    _tool_definitions = [
+    _tool_definitions: ClassVar[list[ToolDefinition]] = [
         {
             "type": "function",
             "function": {
@@ -51,10 +51,10 @@ class CounterEnv(RLEnvironment):
         self._done = False
 
     @classmethod
-    def get_tool_definitions(cls) -> list[dict]:
+    def get_tool_definitions(cls) -> list[ToolDefinition]:
         return cls._tool_definitions
 
-    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[ToolDefinition]]:
         self._current = 0
         self._step_count = 0
         self._done = False
@@ -112,7 +112,7 @@ class GuessNumberEnv(RLEnvironment):
     config_name = "guess_number"
     max_steps = 10
 
-    _tool_definitions = [
+    _tool_definitions: ClassVar[list[ToolDefinition]] = [
         {
             "type": "function",
             "function": {
@@ -135,10 +135,10 @@ class GuessNumberEnv(RLEnvironment):
         self._done = False
 
     @classmethod
-    def get_tool_definitions(cls) -> list[dict]:
+    def get_tool_definitions(cls) -> list[ToolDefinition]:
         return cls._tool_definitions
 
-    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[ToolDefinition]]:
         self._secret = int(kwargs["number"])
         self._guesses = 0
         self._done = False
