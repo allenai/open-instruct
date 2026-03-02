@@ -352,8 +352,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     dp_config = transformer_config.TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
-        num_replicas=args.num_replicas,
-        shard_degree=args.shard_degree,
+        num_replicas=args.fsdp_num_replicas,
+        shard_degree=args.fsdp_shard_degree,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,

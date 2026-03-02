@@ -164,9 +164,9 @@ class TrainingConfig:
     """Exit after building the reference logprobs cache (for benchmarking)."""
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
-    shard_degree: int | None = None
+    fsdp_shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
-    num_replicas: int | None = None
+    fsdp_num_replicas: int | None = None
     """Number of FSDP replicas. None means auto-detect."""
 
 
