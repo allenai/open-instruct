@@ -41,7 +41,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
-- Fixed `VllmToolParser._make_request` typing by using `ChatCompletionToolsParam` for tool definitions and removing unnecessary casts/ignores (https://github.com/allenai/open-instruct/pull/1481).
+- Fixed `VllmToolParser._make_request` typing by using `ChatCompletionToolsParam` for tool definitions and removing unnecessary casts/ignores (https://github.com/allenai/open-instruct/pull/1504).
 
 - Updated previous fix of weight sync thread to only be active when `inflight_updates=False`, removing an issue with weight sync updates stalling (https://github.com/allenai/open-instruct/pull/1499).
 - Fixed weight sync thread hang when `inflight_updates=False`: wait for all vLLM `engine.update_weight` RPCs to complete before unpausing actors, preventing `health_check_fn` from blocking indefinitely (https://github.com/allenai/open-instruct/pull/1480).
