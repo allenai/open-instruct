@@ -186,7 +186,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
-        pools, _ = create_tool_pools(
+        pools, _, _ = create_tool_pools(
             [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
             pool_size=4,
         )
