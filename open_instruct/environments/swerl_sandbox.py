@@ -496,7 +496,7 @@ class SWERLSandboxEnv(RLEnvironment):
 
         result = self._backend.run_command(f"timeout {self._test_timeout} bash /tests/test.sh")
 
-        reward = self._parse_reward(result.exit_code)
+        reward = self._parse_reward()
 
         stdout = _truncate_output(result.stdout) if result.stdout else ""
         stderr = _truncate_output(result.stderr) if result.stderr else ""
@@ -511,14 +511,8 @@ class SWERLSandboxEnv(RLEnvironment):
 
         return StepResult(result=observation, reward=reward, done=True)
 
-    def _parse_reward(self, exit_code: int) -> float:
-        """Parse reward from /logs/verifier/reward.txt, falling back to exit code.
-
-        Reward scheme:
-        - 1.0 if tests pass (verifier says so, or exit code 0)
-        - 0.2 if submit ran without test errors but tests didn't pass
-        - 0.0 if tests fail
-        """
+    def _parse_reward(self) -> float:
+        """Parse reward from /logs/verifier/reward.txt. Returns 0.0 if not found."""
         assert self._backend is not None
 
         try:
@@ -529,8 +523,6 @@ class SWERLSandboxEnv(RLEnvironment):
         except (ValueError, TypeError):
             pass
 
-        if exit_code == 0:
-            return 1.0
         return 0.0
 
     # ------------------------------------------------------------------
