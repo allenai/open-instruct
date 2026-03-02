@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.environments.base import EnvCall
@@ -143,7 +143,7 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.
