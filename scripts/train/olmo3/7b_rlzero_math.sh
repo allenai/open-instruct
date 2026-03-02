@@ -80,4 +80,4 @@ uv run mason.py \
     --eval_priority high \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4 $@
+    --oe_eval_gpu_multiplier 4 "$@"

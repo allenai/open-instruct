@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Rename `truncated_importance_sampling_ratio_cap` to `truncated_importance_sampling_ratio_high`, add `truncated_importance_sampling_ratio_low` and `truncated_importance_sampling_hard_filter` to support GLM-5-style hard filtering of the training-inference mismatch ratio (https://github.com/allenai/open-instruct/pull/PLACEHOLDER).
+
 ### Fixed
 - Fix ZeRO-2 discarding gradients during manual gradient accumulation by using `set_gradient_accumulation_boundary()` (https://github.com/allenai/open-instruct/pull/1498).
 
