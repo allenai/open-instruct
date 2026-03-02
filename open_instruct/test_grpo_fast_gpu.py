@@ -178,7 +178,7 @@ class TestGeneration(TestGrpoFastBase):
         pools = None
         tool_definitions = None
         if use_tools:
-            pools, _, _ = create_tool_pools(
+            pools, _ = create_tool_pools(
                 [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
                 pool_size=4,
             )

@@ -1168,7 +1168,7 @@ def setup_datasets(
 
 def create_tool_pools(
     parsed_tools: list[ParsedEnvConfig], pool_size: int
-) -> tuple[dict[str, ray.actor.ActorHandle], list[str], dict[str, bool]]:
+) -> tuple[dict[str, ray.actor.ActorHandle], list[str]]:
     """Create an EnvironmentPool for each tool/env in the registry.
 
     Args:
@@ -1176,14 +1176,12 @@ def create_tool_pools(
         pool_size: Number of actors per pool.
 
     Returns:
-        A tuple of (pools, tool_call_names, pool_is_text_env) where:
+        A tuple of (pools, tool_call_names) where:
         - pools: Dict mapping call_name -> EnvironmentPool Ray actor handle.
         - tool_call_names: List of call names (may differ from input for MCP tools).
-        - pool_is_text_env: Dict mapping pool call_name -> whether target is TextRLEnvironment.
     """
     pools: dict[str, ray.actor.ActorHandle] = {}
     tool_call_names: list[str] = []
-    pool_is_text_env: dict[str, bool] = {}
 
     for parsed_tool in parsed_tools:
         if parsed_tool.name not in TOOL_REGISTRY:
@@ -1213,42 +1211,38 @@ def create_tool_pools(
             kwargs = asdict(cfg) | {"call_name": call_name}
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
-            is_text_env = issubclass(tool_class, TextRLEnvironment)
-            existing = pool_is_text_env.get(call_name)
-            if existing is not None and existing != is_text_env:
-                raise ValueError(f"Pool '{call_name}' has conflicting text-env metadata: {existing} vs {is_text_env}")
-            pool_is_text_env[call_name] = is_text_env
 
     # Wait for all pools to initialize
     if pools:
         ray.get([pool.size.remote() for pool in pools.values()])
 
-    return pools, tool_call_names, pool_is_text_env
+    return pools, tool_call_names
 
 
-def build_base_env_config(
-    tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle], pool_is_text_env: dict[str, bool]
-) -> dict[str, Any] | None:
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> dict[str, Any] | None:
     """Build canonical base env config from active pools.
 
-    Requires explicit per-pool text-env metadata from pool initialization.
+    Includes auto-discovered dataset targets so text env routing metadata
+    (e.g., is_text_env) is available even when --tools is empty.
     """
     if not pools:
         return None
 
-    pool_names = set(pools)
-    metadata_names = set(pool_is_text_env)
-    missing = sorted(pool_names - metadata_names)
-    extra = sorted(metadata_names - pool_names)
-    if missing or extra:
-        raise ValueError(
-            f"Pool text-env metadata mismatch. Missing: {missing}, extra: {extra}. Pools: {sorted(pool_names)}"
+    base_env_config: dict[str, Any] = {"max_steps": tools_config.max_steps}
+    env_configs: list[dict[str, Any]] = []
+    registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
+
+    for pool_name in sorted(pools):
+        registry_name = registry_name_by_call_name.get(pool_name, pool_name)
+        config_cls = TOOL_REGISTRY.get(registry_name)
+        if config_cls is None:
+            continue
+        env_configs.append(
+            {"env_name": pool_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
         )
 
-    base_env_config: dict[str, Any] = {"max_steps": tools_config.max_steps}
-    base_env_config["env_configs"] = [
-        {"env_name": pool_name, "is_text_env": pool_is_text_env[pool_name]} for pool_name in sorted(pools)
-    ]
+    if env_configs:
+        base_env_config["env_configs"] = env_configs
     return base_env_config
 
 
@@ -2110,7 +2104,7 @@ def initialize_tools_and_envs(
     pool_size: int,
     dataset_mixer_list: list[str] | None = None,
     dataset_mixer_list_splits: list[str] | None = None,
-) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str], dict[str, bool]]:
+) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str]]:
     """Initialize all tool/env pools and collect tool definitions.
 
     Creates an EnvironmentPool for each tool specified via --tools CLI.
@@ -2118,9 +2112,9 @@ def initialize_tools_and_envs(
     that exist in TOOL_REGISTRY but weren't in --tools.
 
     Returns:
-        Tuple of (pools, tool_definitions, stop_sequences, pool_is_text_env).
+        Tuple of (pools, tool_definitions, stop_sequences).
     """
-    pools, tool_call_names, pool_is_text_env = create_tool_pools(tools_config._parsed_tools, pool_size)
+    pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
 
     # Collect tool definitions from CLI-specified pools so we know inner tool names
     # (e.g., GenericSandboxEnv exposes "execute_bash" and "str_replace_editor").
@@ -2148,11 +2142,6 @@ def initialize_tools_and_envs(
             kwargs = asdict(config) | {"call_name": call_name}
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
             tool_call_names.append(call_name)
-            is_text_env = issubclass(tool_cls, TextRLEnvironment)
-            existing = pool_is_text_env.get(call_name)
-            if existing is not None and existing != is_text_env:
-                raise ValueError(f"Pool '{call_name}' has conflicting text-env metadata: {existing} vs {is_text_env}")
-            pool_is_text_env[call_name] = is_text_env
             # Collect tool definitions from newly created pool
             new_actor = ray.get(pools[call_name].acquire.remote())
             new_defs = ray.get(new_actor.get_tool_definitions.remote())
@@ -2210,14 +2199,7 @@ def initialize_tools_and_envs(
         f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
     )
 
-    missing_pool_metadata = sorted(set(pools) - set(pool_is_text_env))
-    if missing_pool_metadata:
-        raise ValueError(
-            f"Missing text-env metadata for pools: {missing_pool_metadata}. "
-            f"Known metadata keys: {sorted(pool_is_text_env)}"
-        )
-
-    return pools, tool_definitions, stop_sequences, pool_is_text_env
+    return pools, tool_definitions, stop_sequences
 
 
 def main(
@@ -2247,7 +2229,7 @@ def main(
         pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     logger.info(f"Pool size per tool: {pool_size}")
 
-    pools, tool_definitions, tool_stop_sequences, pool_is_text_env = initialize_tools_and_envs(
+    pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
         tools_config,
         tokenizer,
         pool_size=pool_size,
@@ -2320,7 +2302,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = build_base_env_config(tools_config, pools, pool_is_text_env)
+    base_env_config = build_base_env_config(tools_config, pools)
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
