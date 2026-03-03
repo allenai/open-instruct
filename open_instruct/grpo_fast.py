@@ -799,11 +799,17 @@ class PolicyTrainerRayProcess(RayProcess):
             # For reference policy, we save just the model weights
             # We can't use save_checkpoint because it would try to save DummyOptim
             # which doesn't have state_dict
+            # Use GatheredParameters to assemble the full ZeRO-3 sharded weights on rank 0
+            # before saving; without this, rank 0's state_dict() only has its local shard.
+            ref_state_dict = {}
+            for k, v in self.ref_policy.module.named_parameters():
+                params_to_fetch = _z3_params_to_fetch([v])
+                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                    vv = v.data.cpu()
+                    if self.rank == 0:
+                        ref_state_dict[k] = vv
             if self.rank == 0:
-                # Only rank 0 saves the model state
-                model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
-                # Save the state dict
-                torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                torch.save(ref_state_dict, os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
