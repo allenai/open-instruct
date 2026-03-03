@@ -125,7 +125,8 @@ class PerfCallback(Callback):
     model_dims: utils.ModelDims
     per_device_train_batch_size: int
     gradient_accumulation_steps: int
-    num_training_gpus: int
+    dp_world_size: int
+    tensor_parallel_degree: int = 1
 
     _start_time: float = field(default=0.0, repr=False)
     _interval_start_time: float = field(default=0.0, repr=False)
@@ -140,11 +141,8 @@ class PerfCallback(Callback):
     _interval_num_sequences: int = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
-    _tp_degree: int = field(default=1, repr=False)
 
     def pre_train(self) -> None:
-        total_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-        self._tp_degree = max(1, total_world_size // self.num_training_gpus)
         self._start_time = time.perf_counter()
         self._interval_start_time = self._start_time
         self._total_tokens_processed = 0
@@ -165,7 +163,7 @@ class PerfCallback(Callback):
         num_seqs = padding_free_collator.get_num_sequences(batch)
         if num_seqs is None:
             num_seqs = self.per_device_train_batch_size * 2
-        self._interval_num_sequences += num_seqs * self.num_training_gpus
+        self._interval_num_sequences += num_seqs * self.dp_world_size
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -195,7 +193,7 @@ class PerfCallback(Callback):
             total_tokens=total_tokens_step,
             avg_sequence_length=avg_sequence_length,
             training_time=training_time,
-            num_training_gpus=self.num_training_gpus * self._tp_degree,
+            num_training_gpus=self.dp_world_size * self.tensor_parallel_degree,
         )
 
         self._mfu_sum += mfu_result["mfu"]
@@ -210,7 +208,7 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
         self.trainer.record_metric(
             "perf/tokens_per_second_per_gpu",
-            tokens_per_second / (self.num_training_gpus * self._tp_degree),
+            tokens_per_second / (self.dp_world_size * self.tensor_parallel_degree),
             reduce_type=None,
         )
         self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)

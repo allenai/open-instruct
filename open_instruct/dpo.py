@@ -142,7 +142,8 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
         model_dims=model_dims,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_training_gpus=dp_world_size,
+        dp_world_size=dp_world_size,
+        tensor_parallel_degree=args.tensor_parallel_degree,
     )
     if args.profiling:
         trainer_callbacks["profiler"] = ProfilerCallback(
