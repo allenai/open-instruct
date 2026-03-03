@@ -1850,24 +1850,47 @@ class ModelDims:
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-        hidden_size = config.hidden_size
-        intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
-        sliding_window = getattr(config, "sliding_window", None)
+
+        nested_config = getattr(config, "text_config", None)
+
+        def get_config_attr(*names: str, default=None):
+            for container in (config, nested_config):
+                if container is None:
+                    continue
+                for name in names:
+                    value = getattr(container, name, None)
+                    if value is not None:
+                        return value
+            return default
+
+        hidden_size = get_config_attr("hidden_size", "d_model", "dim", "n_embd")
+        if hidden_size is None:
+            raise AttributeError(f"Could not infer hidden size from config type {type(config).__name__}")
+
+        num_layers = get_config_attr("num_hidden_layers", "num_layers", "n_layer")
+        num_attention_heads = get_config_attr("num_attention_heads", "num_heads", "n_head")
+        if num_layers is None or num_attention_heads is None:
+            raise AttributeError(
+                f"Could not infer num_layers/num_attention_heads from config type {type(config).__name__}"
+            )
+
+        intermediate_size = get_config_attr("intermediate_size", default=4 * hidden_size)
+        sliding_window = get_config_attr("sliding_window")
         num_sliding_window_layers = 0
         if sliding_window is not None:
-            layer_types = getattr(config, "layer_types", None)
+            layer_types = get_config_attr("layer_types")
             if layer_types is not None:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
-                num_sliding_window_layers = config.num_hidden_layers
-        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+                num_sliding_window_layers = num_layers
+        head_dim = get_config_attr("head_dim", default=hidden_size // num_attention_heads)
         return cls(
-            num_layers=config.num_hidden_layers,
+            num_layers=num_layers,
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
-            vocab_size=config.vocab_size,
-            num_attn_heads=config.num_attention_heads,
-            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+            vocab_size=get_config_attr("vocab_size"),
+            num_attn_heads=num_attention_heads,
+            num_kv_heads=get_config_attr("num_key_value_heads", "num_kv_heads", default=num_attention_heads),
             head_dim=head_dim,
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,

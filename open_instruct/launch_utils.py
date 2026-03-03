@@ -14,12 +14,10 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
         else:
             return None
     else:
+        # maintain compatability with old transformers 4.x.x env variable
+        cache_dir = os.environ.get("TRANSFORMERS_CACHE")
         resolved_file = transformers_hub.try_to_load_from_cache(
-            model_name_or_path,
-            filename,
-            cache_dir=transformers_hub.TRANSFORMERS_CACHE,
-            revision=revision,
-            repo_type=repo_type,
+            model_name_or_path, filename, revision=revision, repo_type=repo_type, cache_dir=cache_dir
         )
         if not isinstance(resolved_file, str):
             return None

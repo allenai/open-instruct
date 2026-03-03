@@ -254,7 +254,6 @@ def load_ref_policy(
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
         attn_implementation=model_config.attn_implementation,
-        use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
