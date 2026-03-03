@@ -1430,6 +1430,71 @@ def create_model_and_optimizer(
     return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
 
+def create_eval_only_runtime(
+    args: grpo_utils.ExperimentConfig,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    tokenizer: PreTrainedTokenizer,
+    inference_results_Q: ray_queue.Queue,
+    prompt_Q: ray_queue.Queue,
+    eval_prompt_Q: ray_queue.Queue,
+    evaluation_inference_results_Q: ray_queue.Queue,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+    train_dataset: Dataset,
+    eval_dataset,
+    reward_config: RewardConfig,
+    tool_actors: list[ray.actor.ActorHandle] | None = None,
+    tools_config: ToolsConfig | None = None,
+) -> tuple[list[vllm_utils.LLMRayActor], ray.actor.ActorHandle, utils.ModelDims]:
+    """Create inference-only runtime resources for eval-only mode."""
+    queues_to_monitor = {
+        "Inference Results Queue": inference_results_Q,
+        "Prompt Queue": prompt_Q,
+        "Eval Prompt Queue": eval_prompt_Q,
+        "Evaluation Queue": evaluation_inference_results_Q,
+    }
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
+    model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
+
+    vllm_engines = vllm_utils.create_vllm_engines(
+        vllm_config.vllm_num_engines,
+        vllm_config.vllm_tensor_parallel_size,
+        vllm_config.vllm_enforce_eager,
+        tc.tokenizer_name_or_path,
+        model_config.model_name_or_path,
+        model_config.model_revision,
+        args.seed,
+        vllm_config.vllm_enable_prefix_caching,
+        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
+        vllm_config.vllm_gpu_memory_utilization,
+        single_gpu_mode=False,
+        pg=None,
+        tool_actors=tool_actors,
+        tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
+        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
+        mask_tool_use=streaming_config.mask_tool_use,
+        prompt_queue=prompt_Q,
+        eval_prompt_queue=eval_prompt_Q,
+        results_queue=inference_results_Q,
+        eval_results_queue=evaluation_inference_results_Q,
+        actor_manager=actor_manager,
+        inflight_updates=streaming_config.inflight_updates,
+        reward_config=reward_config,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+    )
+    logger.info("======== ✅ eval-only vLLM engines and actor_manager initialized =========")
+
+    if vllm_engines:
+        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+    else:
+        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+
+    return vllm_engines, actor_manager, model_dims
+
+
 def create_generation_configs(
     args: grpo_utils.ExperimentConfig, streaming_config: data_loader_lib.StreamingDataLoaderConfig
 ):
@@ -2230,23 +2295,6 @@ def run_training(
     )
     pending_local_eval_rounds = 0
     local_eval_start_time = None
-    if args.eval_only:
-        return run_eval_only_round(
-            args,
-            resume_training_step,
-            episode,
-            eval_dataset,
-            eval_prompt_Q,
-            evaluation_inference_results_Q,
-            generation_configs,
-            tokenizer,
-            model_dims,
-            streaming_config.max_possible_score,
-            training_start_time,
-            wandb_url,
-            actor_manager,
-            health_check_fn,
-        )
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -2504,13 +2552,11 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
-        create_model_and_optimizer(
+    if args.eval_only:
+        vllm_engines, actor_manager, model_dims = create_eval_only_runtime(
             args,
             tc,
             model_config,
-            beaker_config,
-            wandb_url,
             tokenizer,
             inference_results_Q,
             prompt_Q,
@@ -2521,62 +2567,138 @@ def main(
             train_dataset,
             eval_dataset,
             reward_config,
-            generation_configs["train"],
-            data_prep_actor_state,
             tool_actors,
             tools_config,
         )
-    )
+        resume_training_step = (
+            int(checkpoint_state["training_step"]) + 1
+            if checkpoint_state and "training_step" in checkpoint_state
+            else 1
+        )
+        episode = (
+            int(checkpoint_state["episode"])
+            if checkpoint_state and "episode" in checkpoint_state
+            else (resume_training_step - 1)
+            * streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
+        )
+        stop_event = threading.Event()
+        executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
+        try:
+            ray_get_with_progress(
+                [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+            )
 
-    if checkpoint_state:
-        episode = checkpoint_state["episode"]
-        logger.info(f"Restored episode count: {episode}")
+            def eval_health_check_fn():
+                ray_get_with_progress(
+                    [engine.check_background_threads.remote() for engine in vllm_engines],
+                    desc="Checking vLLM engine health",
+                    enable=False,
+                )
 
-    # Create additional queues (main queues already created above)
-    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
-
-    stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
-
-    try:
-        episode = run_training(
-            args,
-            streaming_config,
-            tokenizer,
-            train_dataset,
-            eval_dataset,
-            policy_group,
-            vllm_engines,
-            generation_configs,
-            resume_training_step,
-            episode,
-            wandb_url,
-            tc,
-            stop_event,
-            executor,
-            inference_results_Q,
-            prompt_Q,
-            eval_prompt_Q,
-            evaluation_inference_results_Q,
-            weight_sync_metrics_Q,
-            actor_manager,
-            model_dims,
-            checkpoint_state,
+            start_time = time.perf_counter()
+            run_eval_only_round(
+                args,
+                resume_training_step,
+                episode,
+                eval_dataset,
+                eval_prompt_Q,
+                evaluation_inference_results_Q,
+                generation_configs,
+                tokenizer,
+                model_dims,
+                streaming_config.max_possible_score,
+                start_time,
+                wandb_url,
+                actor_manager,
+                eval_health_check_fn,
+            )
+            if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+                push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        except Exception as e:
+            if args.send_slack_alerts:
+                utils.send_slack_message(f"<!here> An eval job has died. Error message: {e}.")
+            raise
+        finally:
+            cleanup_training_resources(
+                stop_event,
+                executor,
+                [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
+                actor_manager,
+            )
+    else:
+        (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
+            create_model_and_optimizer(
+                args,
+                tc,
+                model_config,
+                beaker_config,
+                wandb_url,
+                tokenizer,
+                inference_results_Q,
+                prompt_Q,
+                eval_prompt_Q,
+                evaluation_inference_results_Q,
+                streaming_config,
+                vllm_config,
+                train_dataset,
+                eval_dataset,
+                reward_config,
+                generation_configs["train"],
+                data_prep_actor_state,
+                tool_actors,
+                tools_config,
+            )
         )
 
-        if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
-            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
-    except Exception as e:
-        if args.send_slack_alerts:
-            utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
-        raise
-    finally:
-        cleanup_training_resources(
-            stop_event,
-            executor,
-            [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
-            actor_manager,
-        )
+        if checkpoint_state:
+            episode = checkpoint_state["episode"]
+            logger.info(f"Restored episode count: {episode}")
+
+        # Create additional queues (main queues already created above)
+        weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
+        stop_event = threading.Event()
+        executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
+
+        try:
+            episode = run_training(
+                args,
+                streaming_config,
+                tokenizer,
+                train_dataset,
+                eval_dataset,
+                policy_group,
+                vllm_engines,
+                generation_configs,
+                resume_training_step,
+                episode,
+                wandb_url,
+                tc,
+                stop_event,
+                executor,
+                inference_results_Q,
+                prompt_Q,
+                eval_prompt_Q,
+                evaluation_inference_results_Q,
+                weight_sync_metrics_Q,
+                actor_manager,
+                model_dims,
+                checkpoint_state,
+            )
+
+            if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+                push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        except Exception as e:
+            if args.send_slack_alerts:
+                utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
+            raise
+        finally:
+            cleanup_training_resources(
+                stop_event,
+                executor,
+                [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
+                actor_manager,
+            )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
