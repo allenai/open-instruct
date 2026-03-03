@@ -82,6 +82,7 @@ nav:
     - algorithms/finetune.md
     - algorithms/dpo.md
     - algorithms/grpo.md
+    - algorithms/tool_training.md
     - algorithms/ppo.md
     - algorithms/reward_modeling.md
   - Not Maintained:
