@@ -5,8 +5,8 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B-Thinking-2507}"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
-DATASET_SPLITS="${DATASET_SPLITS:-test}"
+DATASETS="${DATASETS:-mnoukhov/brumo_2025_openinstruct 1.0}"
+DATASET_SPLITS="${DATASET_SPLITS:-train}"
 
 LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/brumo_2025_openinstruct 1.0 mnoukhov/hmmt_feb_2025_openinstruct 1.0 mnoukhov/hmmt_nov_2025_openinstruct 1.0 mnoukhov/aime_2025_openinstruct 1.0}"
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
@@ -59,9 +59,9 @@ uv run --active open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits $DATASET_SPLITS \
-    --max_prompt_token_length 512 \
-    --response_length 4096 \
-    --pack_length 32768 \
+    --max_prompt_token_length 2048 \
+    --response_length 65536 \
+    --pack_length 70000 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
