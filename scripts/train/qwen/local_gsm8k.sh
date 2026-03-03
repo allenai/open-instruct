@@ -2,12 +2,14 @@
 
 EXP_NAME="${EXP_NAME:-qwen25_05b_it_gsm8k_quartiles}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
-MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3.5-0.8B}"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-0 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8}"
-LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
+DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
+DATASET_SPLITS="${DATASET_SPLITS:-test}"
+
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
@@ -30,12 +32,12 @@ uv run --active open_instruct/grpo_fast.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits train \
+    --dataset_mixer_list_splits $DATASET_SPLITS \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 512 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --response_length 4096 \
+    --pack_length 8192 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \

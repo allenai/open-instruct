@@ -15,7 +15,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 4 \
+    --gpus 2 \
     --budget ai2/oe-adapt \
     -- \
 uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
@@ -25,7 +25,7 @@ uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
   --chat-template qwen_instruct_boxed_math \
   --num-samples 1024 \
   --max-tokens 4096 \
-  --tensor-parallel-size 4 \
+  --tensor-parallel-size 2 \
   --push-to-hub mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples \
   --save-local-dir /weka/oe-adapt-default/allennlp/deletable_rollouts/michaeln/ \
 \&\& uv run scripts/data/rlvr/create_gsm8k_pass_rate_buckets.py \

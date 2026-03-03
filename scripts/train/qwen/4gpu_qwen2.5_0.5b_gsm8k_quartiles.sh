@@ -5,10 +5,10 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets 1.0}"
+DATASETS="${DATASETS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
 DATASET_SPLITS="${DATASET_SPLITS:-test}"
 
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets 1.0}"
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
