@@ -1000,13 +1000,16 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         value_loss = 0.5 * masked_mean(vf_loss_BT, response_mask_BT)
                         value_loss = value_loss / value_accumulation_steps
+
+                        is_value_accum_boundary = (local_value_step + 1) % value_accumulation_steps == 0
+                        self.value_model.set_gradient_accumulation_boundary(is_value_accum_boundary)
                         self.value_model.backward(value_loss)
 
                         with torch.no_grad():
                             value_loss_stats[i] = masked_mean(vf_loss_BT, response_mask_BT)
                             vf_clipfrac_stats[i] = masked_mean(vf_clipfrac_BT, response_mask_BT)
 
-                        if (local_value_step + 1) % value_accumulation_steps == 0:
+                        if is_value_accum_boundary:
                             self.value_model.step()
                         if (local_value_step + 1) // value_accumulation_steps == effective_value_mini_batches:
                             break
