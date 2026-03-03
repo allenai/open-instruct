@@ -1,0 +1,38 @@
+python mason.py \
+    --cluster ai2/augusta \
+    --workspace ai2/olmo-instruct \
+    --image hamishivi/open_instruct_fun_naming3 \
+    --pure_docker_mode \
+    --priority urgent \
+    --gs_model_name olmo3_dpo_rl_final_mix_jupiter_10108_6245__1__1759426652_checkpoints_step_1400 \
+    --preemptible \
+    --num_nodes 2 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/finetune.py \
+    --exp_name olmo3_dpo_2710_rlname_f1_sft_nothink_${RANDOM} \
+    --learning_rate 1e-5 \
+    --chat_template_name olmo_thinker \
+    --gradient_accumulation_steps 4 \
+    --per_device_train_batch_size 1 \
+    --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
+    --model_name_or_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/olmo3_dpo_rl_final_mix_jupiter_10108_6245__1__1759426652_checkpoints/step_1400 \
+    --use_flash_attn \
+    --use_slow_tokenizer False \
+    --dataset_mixer_list allenai/hardcoded-olmo 10.0 \
+    --dataset_mixer_list_splits train \
+    --max_seq_length 32768 \
+    --preprocessing_num_workers 128 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.03 \
+    --weight_decay 0.0 \
+    --num_train_epochs 10 \
+    --output_dir /output/ \
+    --with_tracking \
+    --report_to wandb \
+    --logging_steps 1

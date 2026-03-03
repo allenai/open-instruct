@@ -14,13 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from olmo_core.distributed.utils import get_rank
+from olmo_core.distributed import utils as distributed_utils
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, padding_free_collator, utils
 from open_instruct.utils import maybe_update_beaker_description
 
 logger = logger_utils.setup_logger(__name__)
@@ -50,7 +50,7 @@ class BeakerCallbackV2(Callback):
             self.enabled = True
 
     def pre_train(self) -> None:
-        if self.enabled and get_rank() == 0:
+        if self.enabled and distributed_utils.get_rank() == 0:
             workload_id = os.environ.get(BEAKER_WORKLOAD_ID_ENV_VAR)
             if workload_id is None:
                 logger.warning(f"BeakerCallbackV2: {BEAKER_WORKLOAD_ID_ENV_VAR} not set, disabling")
@@ -80,7 +80,7 @@ class BeakerCallbackV2(Callback):
     def post_step(self) -> None:
         should_update = (
             self.enabled
-            and get_rank() == 0
+            and distributed_utils.get_rank() == 0
             and self.step % self.trainer.metrics_collect_interval == 0
             and (self._last_update is None or (time.perf_counter() - self._last_update) > 10)
         )
@@ -88,7 +88,7 @@ class BeakerCallbackV2(Callback):
             self._update()
 
     def post_train(self) -> None:
-        if self.enabled and get_rank() == 0:
+        if self.enabled and distributed_utils.get_rank() == 0:
             self._update()
 
     def _get_tracking_url(self) -> str | None:
@@ -125,7 +125,8 @@ class PerfCallback(Callback):
     model_dims: utils.ModelDims
     per_device_train_batch_size: int
     gradient_accumulation_steps: int
-    num_training_gpus: int
+    dp_world_size: int
+    tensor_parallel_degree: int = 1
 
     _start_time: float = field(default=0.0, repr=False)
     _interval_start_time: float = field(default=0.0, repr=False)
@@ -133,6 +134,13 @@ class PerfCallback(Callback):
     _total_tokens_processed: int = field(default=0, repr=False)
     _mfu_sum: float = field(default=0.0, repr=False)
     _last_step: int = field(default=0, repr=False)
+    _batch_load_start: float = field(default=0.0, repr=False)
+    _batch_load_time: float = field(default=0.0, repr=False)
+    _wall_clock_step_start: float = field(default=0.0, repr=False)
+    _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
+    _interval_num_sequences: int = field(default=0, repr=False)
+    _pre_step_time: float = field(default=0.0, repr=False)
+    _prev_pre_step_time: float = field(default=0.0, repr=False)
 
     def pre_train(self) -> None:
         self._start_time = time.perf_counter()
@@ -140,10 +148,22 @@ class PerfCallback(Callback):
         self._total_tokens_processed = 0
         self._mfu_sum = 0.0
         self._last_step = 0
+        self._interval_num_sequences = 0
+
+    def pre_load_batch(self) -> None:
+        self._batch_load_start = time.perf_counter()
+        self._prev_wall_clock_step_start = self._wall_clock_step_start
+        self._wall_clock_step_start = self._batch_load_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
-        del batch
-        self._step_start_time = time.perf_counter()
+        self._batch_load_time = time.perf_counter() - self._batch_load_start
+        self._prev_pre_step_time = self._pre_step_time
+        self._pre_step_time = time.perf_counter()
+        self._step_start_time = self._pre_step_time
+        num_seqs = padding_free_collator.get_num_sequences(batch)
+        if num_seqs is None:
+            num_seqs = self.per_device_train_batch_size * 2
+        self._interval_num_sequences += num_seqs * self.dp_world_size
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -165,20 +185,15 @@ class PerfCallback(Callback):
         tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
-        num_sequences = (
-            self.per_device_train_batch_size
-            * self.num_training_gpus
-            * self.gradient_accumulation_steps
-            * logging_steps
-            * 2  # * 2 for chosen + rejected
+        avg_sequence_length = (
+            total_tokens_step / self._interval_num_sequences if self._interval_num_sequences > 0 else 0
         )
-        avg_sequence_length = total_tokens_step / num_sequences if num_sequences > 0 else 0
 
         mfu_result = self.model_dims.approximate_learner_utilization(
             total_tokens=total_tokens_step,
             avg_sequence_length=avg_sequence_length,
             training_time=training_time,
-            num_training_gpus=self.num_training_gpus,
+            num_training_gpus=self.dp_world_size * self.tensor_parallel_degree,
         )
 
         self._mfu_sum += mfu_result["mfu"]
@@ -191,6 +206,33 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
+        self.trainer.record_metric(
+            "perf/tokens_per_second_per_gpu",
+            tokens_per_second / (self.dp_world_size * self.tensor_parallel_degree),
+            reduce_type=None,
+        )
+        self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)
+        self.trainer.record_metric("perf/data_loading_seconds", self._batch_load_time, reduce_type=None)
+
+        if self._prev_wall_clock_step_start > 0:
+            wall_clock_per_step = self._wall_clock_step_start - self._prev_wall_clock_step_start
+            self.trainer.record_metric("perf/wall_clock_per_step", wall_clock_per_step, reduce_type=None)
+            if wall_clock_per_step > 0:
+                data_loading_pct = 100 * self._batch_load_time / wall_clock_per_step
+                self.trainer.record_metric("perf/data_loading_pct", data_loading_pct, reduce_type=None)
+                step_overhead_pct = 100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step
+                self.trainer.record_metric("perf/step_overhead_pct", step_overhead_pct, reduce_type=None)
+
+        step_time_ms = (interval_end - self._pre_step_time) * 1000
+        self.trainer.record_metric("perf/step_time_ms", step_time_ms, reduce_type=None)
+        if self._prev_pre_step_time > 0:
+            cycle_time_ms = (self._pre_step_time - self._prev_pre_step_time) * 1000
+            overhead_ms = cycle_time_ms - step_time_ms
+            step_pct = step_time_ms / cycle_time_ms * 100 if cycle_time_ms > 0 else 0
+            self.trainer.record_metric("perf/cycle_time_ms", cycle_time_ms, reduce_type=None)
+            self.trainer.record_metric("perf/overhead_ms", overhead_ms, reduce_type=None)
+            self.trainer.record_metric("perf/step_pct", step_pct, reduce_type=None)
 
         self._interval_start_time = interval_end
+        self._interval_num_sequences = 0
         self._last_step = self.step

@@ -298,8 +298,6 @@ class FlatArguments:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
 
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
@@ -390,10 +388,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Set up runtime variables
 
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)

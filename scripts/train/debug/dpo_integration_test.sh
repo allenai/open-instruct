@@ -34,4 +34,6 @@ uv run python mason.py \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --add_bos \
     --chat_template_name olmo \
-    --seed 123
+    --seed 123 \
+    --checkpointing_steps 5 \
+    --keep_last_n_checkpoints 2

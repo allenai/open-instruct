@@ -1,0 +1,78 @@
+version: v2
+description: 'Beaker-Mason job. git_commit: f2475238 git_branch: add-sequence-parallel https://wandb.ai/ai2-llm/open_instruct_internal/runs/85ty3hyg [63.5% complete (step 1270/2001), eta 9d 16h 30m] git_commit: f2475238 git_branch: add-sequence-parallel https://wandb.ai/ai2-llm/open_instruct_internal/runs/85ty3hyg [71.0% complete (step 1420/2001), eta 1d 22h 7m] git_commit: f2475238 git_branch: add-sequence-parallel https://wandb.ai/ai2-llm/open_instruct_internal/runs/85ty3hyg git_commit: f2475238 git_branch: add-sequence-parallel https://wandb.ai/ai2-llm/open_instruct_internal/runs/85ty3hyg [76.0% complete (step 1520/2001), eta 15h 34m]'
+tasks:
+  - name: beaker_mason__0
+    replicas: 4
+    leaderSelection: true
+    image:
+      beaker: hamishivi/open_instruct_seq_para8
+    command: [/bin/bash, -c]
+    arguments: ['source configs/beaker_configs/ray_node_setup.sh && source configs/beaker_configs/code_api_setup.sh && python open_instruct/grpo_fast.py --exp_name olmo3_1912_7b_rlzero_math_65k_length --beta 0.0 --async_steps 8 --inflight_updates --no_resampling_pass_rate 0.875 --truncated_importance_sampling_ratio_cap 2.0 --advantage_normalization_type centered --active_sampling --num_samples_per_prompt_rollout 8 --num_unique_prompts_rollout 32 --num_mini_batches 1 --learning_rate 1e-6 --per_device_train_batch_size 1 --kl_estimator 2 --dataset_mixer_list allenai/Dolci-RLZero-Math-7B 1.0 --dataset_mixer_list_splits train --dataset_mixer_eval_list allenai/Dolci-RLZero-Math-7B 16 --dataset_mixer_eval_list_splits train train --max_prompt_token_length 2048 --response_length 63488 --pack_length 65536 --model_name_or_path allenai/Olmo-3-1025-7B --chat_template_name olmo_thinker_rlzero --non_stop_penalty False --temperature 1.0 --total_episodes 512256 --deepspeed_stage 3 --num_learners_per_node 8 8 --sequence_parallel_size 4 --vllm_num_engines 16 --vllm_tensor_parallel_size 1 --lr_scheduler_type constant --apply_verifiable_reward true --seed 1 --local_eval_every 25 --save_freq 100 --checkpoint_state_freq 100 --gradient_checkpointing --with_tracking --vllm_enable_prefix_caching --clip_higher 0.272 --oe_eval_max_length 65536 --try_launch_beaker_eval_jobs_on_weka True --eval_priority normal --allow_world_padding True --eval_on_step_0 True --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero --oe_eval_gpu_multiplier 4 --hf_entity allenai --wandb_entity ai2-llm --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/hamishivi/1766115534_482123 --checkpoint_state_freq 100 --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/']
+    envVars:
+      - name: RAY_CGRAPH_get_timeout
+        value: "300"
+      - name: VLLM_DISABLE_COMPILE_CACHE
+        value: "1"
+      - name: NCCL_DEBUG
+        value: ERROR
+      - name: VLLM_LOGGING_LEVEL
+        value: WARNING
+      - name: VLLM_USE_V1
+        value: "1"
+      - name: VLLM_ALLOW_INSECURE_SERIALIZATION
+        value: "1"
+      - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+        value: "1"
+      - name: PYTORCH_CUDA_ALLOC_CONF
+        value: expandable_segments:True
+      - name: LD_LIBRARY_PATH
+        value: /var/lib/tcpxo/lib64
+      - name: NCCL_LIB_DIR
+        value: /var/lib/tcpxo/lib64
+      - name: HOSTED_VLLM_API_BASE
+        value: http://ceres-cs-aus-447.reviz.ai2.in:8001/v1
+      - name: HF_TOKEN
+        secret: hamishivi_HF_TOKEN
+      - name: WANDB_API_KEY
+        secret: hamishivi_WANDB_API_KEY
+      - name: BEAKER_TOKEN
+        secret: hamishivi_BEAKER_TOKEN
+      - name: OPENAI_API_KEY
+        secret: hamishivi_OPENAI_API_KEY
+      - name: HF_HOME
+        value: /weka/oe-adapt-default/allennlp/.cache/huggingface
+      - name: HF_DATASETS_CACHE
+        value: /weka/oe-adapt-default/allennlp/.cache/huggingface
+      - name: HF_HUB_CACHE
+        value: /weka/oe-adapt-default/allennlp/.cache/hub
+      - name: CHECKPOINT_OUTPUT_DIR
+        value: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/85ty3hyg
+      - name: NCCL_SOCKET_IFNAME
+        value: ib
+      - name: NCCL_IB_HCA
+        value: ^=mlx5_bond_0
+      - name: WANDB_RUN_ID
+        value: 85ty3hyg
+      - name: WANDB_RESUME
+        value: allow
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+      - mountPath: /weka/oe-training-default
+        source:
+          weka: oe-training-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 8
+      sharedMemory: 10240 MB
+    context:
+      priority: high
+      preemptible: true
+    constraints:
+      cluster:
+        - ai2/jupiter
+    hostNetworking: true
+    propagateFailure: true
+    propagatePreemption: true

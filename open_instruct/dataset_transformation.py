@@ -933,10 +933,11 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 
 TOOLS_COLUMN_KEY = "tools"
+ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v2"
+# to invalidate old caches. v3: Added per-sample env tool injection in rlvr_tokenize_v3.
+DATASET_CACHE_VERSION = "v3"
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1403,6 +1404,27 @@ def rlvr_tokenize_v2(
     return row
 
 
+def _resolve_tools_for_sample(
+    row: dict[str, Any], tool_definitions: list[dict[str, Any]] | None, pass_tools: bool
+) -> list[dict[str, Any]] | None:
+    """Resolve which tool definitions to inject into this sample's prompt.
+
+    Filters global tool_definitions by per-sample active_tools column.
+    """
+    if not pass_tools or not tool_definitions:
+        return None
+
+    sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+    if sample_active_tools is not None:
+        known_names = {t.get("function", {}).get("name") for t in tool_definitions}
+        unknown = set(sample_active_tools) - known_names
+        if unknown:
+            logger.warning(f"Sample references unknown tools: {sorted(unknown)}. Known: {sorted(known_names)}")
+        filtered = [t for t in tool_definitions if t.get("function", {}).get("name") in sample_active_tools]
+        return filtered or None
+    return tool_definitions
+
+
 def rlvr_tokenize_v3(
     row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1424,16 +1446,7 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    tools_for_template: list[dict[str, Any]] | None = None
-    if pass_tools_to_chat_template and tool_definitions:
-        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        if sample_active_tools is not None:
-            active_tool_names = set(sample_active_tools)
-            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            if filtered_tools:
-                tools_for_template = filtered_tools
-        else:
-            tools_for_template = tool_definitions
+    tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
@@ -1666,6 +1679,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
         target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(
