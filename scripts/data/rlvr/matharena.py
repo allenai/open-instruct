@@ -40,8 +40,10 @@ def _convert_dataset(source_dataset_name: str, dataset_label: str, dataset_field
     )
 
     def process(example):
+        answer_str = str(example["answer"])
         example["messages"] = [{"role": "user", "content": example["problem"]}]
-        example["ground_truth"] = example["answer"]
+        example["ground_truth"] = answer_str
+        example["answer"] = answer_str
         example["dataset"] = "math" if dataset_field_mode == "math" else dataset_label
         example["source_dataset"] = source_dataset_name
         return example
