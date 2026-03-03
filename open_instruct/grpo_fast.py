@@ -1414,12 +1414,12 @@ class WeightSyncTrigger:
     def wait(self, timeout: float | None = None) -> bool:
         return self._event.wait(timeout=timeout)
 
-    def clear(self) -> None:
-        self._event.clear()
-
-    def get_step(self) -> int | None:
+    def get_step_and_clear(self) -> int | None:
+        """Atomically gets the step and clears the event."""
         with self._lock:
-            return self._step
+            step = self._step
+            self._event.clear()
+            return step
 
 
 def weight_sync_thread(
@@ -1444,8 +1444,7 @@ def weight_sync_thread(
             continue
 
         # Clear the event for next iteration
-        weight_sync_trigger.clear()
-        target_model_step = weight_sync_trigger.get_step()
+        target_model_step = weight_sync_trigger.get_step_and_clear()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
