@@ -95,6 +95,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     estimate_kl,
     freeze_parameters_by_pattern,
+    freeze_router_expert_rows,
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
@@ -333,6 +334,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 logger.warning(f"  - {name}: {numel:,} params")
             if len(trainable_params) > 20:
                 logger.warning(f"  ... and {len(trainable_params) - 20} more")
+
+        # Freeze expert 0's row of router gate weights via gradient hooks
+        if args.freeze_router_expert_0:
+            hook_count = freeze_router_expert_rows(self.policy, expert_indices=[0])
+            if self.rank == 0:
+                logger.warning(f"[freeze_router_expert_0] Registered gradient hooks on {hook_count} router gates")
 
         # Note: When freezing parameters, keep embed_tokens trainable so gradient checkpointing
         # sees inputs with requires_grad=True. Otherwise use_reentrant=False would be needed,

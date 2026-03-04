@@ -202,6 +202,9 @@ class ExperimentConfig:
     )
     """List of patterns (fnmatch-style) to match parameter names for freezing.
     Example: ['model.layers.*.mlp.*', 'model.embed_tokens.*']"""
+    freeze_router_expert_0: bool = False
+    """Freeze expert 0's row of the router gate weights via gradient hooks.
+    Use with freeze_parameters to also freeze expert 0's MLP weights."""
     swap_router_preference: bool = False
     """Swap MoE router weights to prefer expert 1 instead of expert 0.
     This is useful when freezing expert 0 - by swapping router preference,

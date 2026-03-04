@@ -218,6 +218,56 @@ def freeze_parameters_by_pattern(model: torch.nn.Module, patterns: list[str]) ->
     return frozen_count, trainable_count, frozen_tensors, trainable_tensors
 
 
+def freeze_router_expert_rows(model: torch.nn.Module, expert_indices: list[int] | None = None) -> int:
+    """Freeze specific expert rows of MoE router/gate weights via gradient hooks.
+
+    Since the router is a single parameter tensor (e.g., [num_experts, d_model]), we cannot
+    use requires_grad to freeze individual rows. Instead, we register backward hooks that
+    zero out gradients for the specified expert indices.
+
+    Args:
+        model: The model containing MoE layers with router gates.
+        expert_indices: Which expert rows to freeze. Defaults to [0].
+
+    Returns:
+        Number of router gate parameters that had hooks registered.
+    """
+    if expert_indices is None:
+        expert_indices = [0]
+
+    hook_count = 0
+    for name, module in model.named_modules():
+        if "mlp.gate" in name and hasattr(module, "weight"):
+            w = module.weight
+            if w.shape[0] == 2:  # [num_experts, d_model] - zero out rows
+
+                def _make_row_hook(indices: list[int]):
+                    def hook(grad: torch.Tensor) -> torch.Tensor:
+                        grad[indices, :] = 0
+                        return grad
+
+                    return hook
+
+                w.register_hook(_make_row_hook(expert_indices))
+                hook_count += 1
+                logger.info(f"Registered gradient hook to freeze expert {expert_indices} rows for {name}.weight")
+            elif w.shape[1] == 2:  # [d_model, num_experts] - zero out columns
+
+                def _make_col_hook(indices: list[int]):
+                    def hook(grad: torch.Tensor) -> torch.Tensor:
+                        grad[:, indices] = 0
+                        return grad
+
+                    return hook
+
+                w.register_hook(_make_col_hook(expert_indices))
+                hook_count += 1
+                logger.info(f"Registered gradient hook to freeze expert {expert_indices} cols for {name}.weight")
+            else:
+                logger.warning(f"Router {name} has unexpected shape {w.shape}, expected 2 experts. Skipping hook.")
+    return hook_count
+
+
 def maybe_load_checkpoint(
     model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
 ) -> None:
