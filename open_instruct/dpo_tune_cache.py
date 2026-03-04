@@ -48,7 +48,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers import initialization as transformers_init
-from transformers.models.olmo3_2_hybrid import modeling_olmo3_2_hybrid
+from transformers.models.olmo_hybrid import modeling_olmo_hybrid
 from transformers.utils.import_utils import is_flash_linear_attention_available
 
 from open_instruct import dpo_utils, logger_utils, model_utils, utils
@@ -294,12 +294,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
-    # Workaround: olmo3_2_hybrid's _init_weights accesses Embedding weights by
+    # Workaround: olmo_hybrid's _init_weights accesses Embedding weights by
     # padding_idx, which crashes under ZeRO-3 where weights are partitioned (size 0
     # on non-owning ranks). Monkey-patch until fixed upstream:
     # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
-    if config.model_type == "olmo3_2_hybrid":
-        _original_init_weights = modeling_olmo3_2_hybrid.Olmo3_2HybridPreTrainedModel._init_weights
+    if config.model_type in ("olmo3_2_hybrid", "olmo_hybrid"):
+        _original_init_weights = modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights
 
         def _init_weights_zero3_safe(self, module):
             if (
@@ -311,7 +311,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 return
             _original_init_weights(self, module)
 
-        modeling_olmo3_2_hybrid.Olmo3_2HybridPreTrainedModel._init_weights = _init_weights_zero3_safe
+        modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights = _init_weights_zero3_safe
 
     def load_model():
         if args.model_name_or_path:
@@ -372,7 +372,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
 
-    if model.config.model_type == "olmo3_2_hybrid" and not is_flash_linear_attention_available():
+    if model.config.model_type in ("olmo3_2_hybrid", "olmo_hybrid") and not is_flash_linear_attention_available():
         raise ImportError(
             "flash-linear-attention (fla) is required for hybrid models but is not installed. "
             "Without it, linear attention layers fall back to a slow PyTorch implementation. "
