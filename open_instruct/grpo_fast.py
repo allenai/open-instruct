@@ -78,12 +78,7 @@ from rich.pretty import pprint
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers import initialization as transformers_init
 from transformers.integrations import HfDeepSpeedConfig
-from transformers.models.auto import configuration_auto as auto_config
 from transformers.models.olmo_hybrid import modeling_olmo_hybrid
-from transformers.models.olmo_hybrid.configuration_olmo_hybrid import OlmoHybridConfig
-
-if "olmo3_2_hybrid" not in auto_config.CONFIG_MAPPING_NAMES:
-    AutoConfig.register("olmo3_2_hybrid", OlmoHybridConfig)
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -258,7 +253,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # on non-owning ranks). Monkey-patch until fixed upstream:
         # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
         _model_config = AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
-        if _model_config.model_type in ("olmo3_2_hybrid", "olmo_hybrid"):
+        if _model_config.model_type == "olmo_hybrid":
             _original_init_weights = modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights
 
             def _init_weights_zero3_safe(self, module):
