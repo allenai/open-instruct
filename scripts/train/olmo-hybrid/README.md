@@ -10,6 +10,20 @@ Olmo Hybrid is an experimental hybrid model built on top of the Olmo 3 recipe wi
 | 7B Instruct SFT | (OLMo-core) | [link](https://beaker.org/orgs/ai2/workspaces/olmo-instruct/work/01KHS8BD4N6B6AWYSYHGY8DQWB) | [link](https://wandb.ai/ai2-llm/nathanl-Hybrid-7B-sft/runs/gdm1bg5b) | TODO |
 | 7B Instruct DPO | [`7b_instruct_dpo.sh`](7b_instruct_dpo.sh) | [link](https://beaker.org/orgs/ai2/workspaces/olmo-instruct/work/01KHWBB0GAQ0V9YS2B3VMH8MNN) | [link](https://wandb.ai/ai2-llm/open_instruct_internal/runs/xoqrwhvw) | TODO |
 
+## Hyperparameters
+
+Total tokens includes masked tokens (e.g. prompts). Think SFT total tokens is computed from the Olmo 3 baseline (45.4B) plus the 3x tool-use upscale: 45.4B × (1 + 2 × 2.47%) = 47.6B.
+
+| | 7B Think SFT | 7B Instruct SFT | 7B Instruct DPO |
+|---|---|---|---|
+| Instances | 2,932,239 | 2,153,716 | 259,922 |
+| Total Tokens | 47.6B | 3.4B | — |
+| Learning Rate | 2.5×10⁻⁵ | 2.5×10⁻⁵ | 1×10⁻⁶ |
+| Num. GPUs | 64 | 64 | 32 |
+| Max Sequence Length | 32K | 32K | 16K |
+| Epochs | 2 | 2 | 1 |
+| Loss | — | — | DPO Norm (β=5) |
+
 To reproduce DPO, if you are internal to Ai2, you can run [`./scripts/train/build_image_and_launch.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/build_image_and_launch.sh)
 
 ```
