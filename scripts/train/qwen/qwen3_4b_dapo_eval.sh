@@ -6,9 +6,9 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="mnoukhov/dapo_math_17k_qwen3_1.7b 1.0"
+DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
 
-LOCAL_EVALS="mnoukhov/dapo_math_17k_qwen3_1.7b 32"
+LOCAL_EVALS="mnoukhov/dapo_math_14k_en_openinstruct 50"
 LOCAL_EVAL_SPLITS="train"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -28,7 +28,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 4 \
+    --gpus 2 \
     --budget ai2/oe-adapt \
     -- \
 uv run open_instruct/grpo_fast.py \
@@ -62,7 +62,7 @@ uv run open_instruct/grpo_fast.py \
     --total_episodes 512000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --vllm_num_engines 2 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \

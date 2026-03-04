@@ -6,10 +6,11 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="mnoukhov/dapo_math_17k_qwen3_1.7b 1.0"
+DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
+DATASET_SPLITS="train"
 
-LOCAL_EVALS="mnoukhov/aime2024-25-mathprompt-openinstruct 1.0"
-LOCAL_EVAL_SPLITS="test_2025"
+LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0"
+LOCAL_EVAL_SPLITS="train"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
@@ -34,9 +35,10 @@ uv run mason.py \
 uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
-    --eval_pass_at_k 64 \
+    --eval_pass_at_k 32 \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
+    --eval_response_length 65536 \
     --beta 0.0 \
     --async_steps 2 \
     --active_sampling \
@@ -49,12 +51,12 @@ uv run open_instruct/grpo_fast.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits train \
+    --dataset_mixer_list_splits $DATASET_SPLITS \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
-    --pack_length 32000 \
+    --pack_length 36864 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
@@ -74,6 +76,7 @@ uv run open_instruct/grpo_fast.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
+    --chat_template qwen_instruct_boxed_math \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
