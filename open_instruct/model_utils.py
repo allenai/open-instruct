@@ -239,7 +239,7 @@ def freeze_router_expert_rows(model: torch.nn.Module, expert_indices: list[int] 
     for name, module in model.named_modules():
         if "mlp.gate" in name and hasattr(module, "weight"):
             w = module.weight
-            if w.shape[0] == 2:  # [num_experts, d_model] - zero out rows
+            if w.ndim == 2 and w.shape[0] == 2:  # [num_experts, d_model] - zero out rows
 
                 def _make_row_hook(indices: list[int]):
                     def hook(grad: torch.Tensor) -> torch.Tensor:
@@ -251,7 +251,7 @@ def freeze_router_expert_rows(model: torch.nn.Module, expert_indices: list[int] 
                 w.register_hook(_make_row_hook(expert_indices))
                 hook_count += 1
                 logger.info(f"Registered gradient hook to freeze expert {expert_indices} rows for {name}.weight")
-            elif w.shape[1] == 2:  # [d_model, num_experts] - zero out columns
+            elif w.ndim == 2 and w.shape[1] == 2:  # [d_model, num_experts] - zero out columns
 
                 def _make_col_hook(indices: list[int]):
                     def hook(grad: torch.Tensor) -> torch.Tensor:
@@ -263,6 +263,18 @@ def freeze_router_expert_rows(model: torch.nn.Module, expert_indices: list[int] 
                 w.register_hook(_make_col_hook(expert_indices))
                 hook_count += 1
                 logger.info(f"Registered gradient hook to freeze expert {expert_indices} cols for {name}.weight")
+            elif w.ndim == 1:  # [num_experts] - zero out specific indices
+
+                def _make_1d_hook(indices: list[int]):
+                    def hook(grad: torch.Tensor) -> torch.Tensor:
+                        grad[indices] = 0
+                        return grad
+
+                    return hook
+
+                w.register_hook(_make_1d_hook(expert_indices))
+                hook_count += 1
+                logger.info(f"Registered gradient hook to freeze expert {expert_indices} entries for {name}.weight")
             else:
                 logger.warning(f"Router {name} has unexpected shape {w.shape}, expected 2 experts. Skipping hook.")
     return hook_count
