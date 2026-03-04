@@ -1,6 +1,6 @@
 #!/bin/bash
-# OPSD (On-Policy Self-Distillation) + VAPO test script
-# Matches rlzero_seqlen.sh configuration but with VAPO value model
+# OPSD (On-Policy Self-Distillation) test script — no value model
+# Uses OPSD teacher (GT-conditioned policy) as KL reference
 # Uses 4 nodes (2 learner nodes + 2 vLLM nodes), 16k seqlen, no sequence parallelism
 # Reference: https://arxiv.org/abs/2504.05118
 
@@ -24,7 +24,7 @@ uv run python mason.py \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
-    --beta 0.0 \
+    --beta 1.0 \
     --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
@@ -70,20 +70,8 @@ uv run python mason.py \
     --eval_on_step_0 True \
     --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero \
     --oe_eval_gpu_multiplier 4 \
-    --use_value_model \
-    --value_model_ground_truth_conditioning \
     --reference_distribution opsd_teacher \
     --load_ref_policy false \
-    --value_loss_coef 0.5 \
-    --value_learning_rate 2e-6 \
-    --vf_clip_range 0.2 \
-    --gamma 1.0 \
-    --gae_lambda 0.95 \
-    --value_warmup_steps 100 \
-    --reset_optimizer_after_value_warmup \
-    --decoupled_gae \
-    --length_adaptive_gae \
-    --length_adaptive_gae_alpha 0.05 \
     --loss_fn dapo \
     --clip_higher 0.28 \
     --push_to_hub False
