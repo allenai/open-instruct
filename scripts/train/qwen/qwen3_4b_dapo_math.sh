@@ -38,7 +38,7 @@ uv run open_instruct/grpo_fast.py \
     --eval_pass_at_k 32 \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
-    --eval_response_length 65536 \
+    --eval_response_length 32768 \
     --beta 0.0 \
     --async_steps 2 \
     --active_sampling \
