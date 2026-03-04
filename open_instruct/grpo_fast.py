@@ -518,11 +518,17 @@ class PolicyTrainerRayProcess(RayProcess):
         response_mask: torch.BoolTensor,
         pad_token_id: int,
         use_grad: bool = False,
+        ground_truths: list[list[str]] | None = None,
     ) -> torch.Tensor:
         """Compute value estimates using input-shifted convention (matching ppo_fast.py).
 
         Feeds tokens[:, :-1] to the model, producing L-1 values that are naturally aligned
-        with logprobs (also L-1). This avoids all off-by-one alignment issues.
+        with logprobs (also L-1).
+
+        When ground_truths is provided and value_model_ground_truth_conditioning is enabled,
+        prepends 'Answer: {gt}\n' at the start of each sub-sequence within the packed batch,
+        runs the forward pass on the expanded sequence, then extracts values at the original
+        positions (stripping prefix positions).
 
         Returns:
             values: Tensor of shape (batch_size, seq_len - 1) with value estimates.
@@ -531,17 +537,146 @@ class PolicyTrainerRayProcess(RayProcess):
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
 
+        # Apply input shift
+        shifted_ids = input_ids[:, :-1]
+        shifted_attn = attention_mask[:, :-1].clamp(0, 1)
+        shifted_pos = position_ids[:, :-1]
+        shifted_resp_mask = response_mask[:, 1:].float()
+
         context_manager = torch.enable_grad() if use_grad else torch.no_grad()
 
         with context_manager:
-            output = self.value_model(
-                input_ids=input_ids[:, :-1],
-                attention_mask=attention_mask[:, :-1].clamp(0, 1),
-                position_ids=position_ids[:, :-1],
-                return_dict=True,
-            )
-            values = output.logits.squeeze(-1)  # (batch, seq_len - 1)
-            values = values * response_mask[:, 1:].float()
+            if (
+                self.args.value_model_ground_truth_conditioning
+                and ground_truths is not None
+                and len(ground_truths) > 0
+            ):
+                values = self._forward_value_with_gt(
+                    shifted_ids, shifted_attn, shifted_pos, shifted_resp_mask, ground_truths
+                )
+            else:
+                output = self.value_model(
+                    input_ids=shifted_ids,
+                    attention_mask=shifted_attn,
+                    position_ids=shifted_pos,
+                    return_dict=True,
+                )
+                values = output.logits.squeeze(-1)
+
+            values = values * shifted_resp_mask
+        return values
+
+    def _forward_value_with_gt(
+        self,
+        shifted_ids: torch.Tensor,
+        shifted_attn: torch.Tensor,
+        shifted_pos: torch.Tensor,
+        shifted_resp_mask: torch.Tensor,
+        ground_truths: list[list[str]],
+    ) -> torch.Tensor:
+        """Forward pass with ground truth prefixes inserted at sub-sequence boundaries.
+
+        For each batch element (packed sequence), inserts tokenized 'Answer: {gt}\n'
+        at the start of each sub-sequence. Runs the value model on the expanded sequence,
+        then extracts values at the original (non-prefix) positions.
+        """
+        batch_size, orig_len = shifted_ids.shape
+        device = shifted_ids.device
+
+        expanded_ids_list = []
+        expanded_attn_list = []
+        expanded_pos_list = []
+        orig_position_masks = []
+
+        for b in range(batch_size):
+            gt_list = ground_truths[b] if b < len(ground_truths) else []
+            seq_ids = shifted_ids[b]
+            seq_attn = shifted_attn[b]
+            seq_pos = shifted_pos[b]
+
+            # Find sub-sequence boundaries: where position_ids resets to 0
+            boundary_indices = [0]
+            for t in range(1, orig_len):
+                if seq_pos[t] == 0 and seq_attn[t] > 0:
+                    boundary_indices.append(t)
+
+            new_ids_parts = []
+            new_attn_parts = []
+            new_pos_parts = []
+            is_orig = []
+            gt_idx = 0
+
+            for seg_i, start in enumerate(boundary_indices):
+                end = boundary_indices[seg_i + 1] if seg_i + 1 < len(boundary_indices) else orig_len
+
+                # Insert ground truth prefix before this sub-sequence
+                if gt_idx < len(gt_list):
+                    gt_text = gt_list[gt_idx]
+                    gt_idx += 1
+                else:
+                    gt_text = ""
+
+                if gt_text:
+                    prefix_text = f"Answer: {gt_text}" + chr(10)
+                    prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
+                    prefix_len = len(prefix_tokens)
+                    prefix_ids = torch.tensor(prefix_tokens, device=device, dtype=seq_ids.dtype)
+                    prefix_attn = torch.ones(prefix_len, device=device, dtype=seq_attn.dtype)
+                    # Position IDs for prefix: start from 0 (will be part of the sub-sequence context)
+                    seg_pos = seq_pos[start:end]
+                    max_prefix_pos = prefix_len
+                    prefix_pos = torch.arange(prefix_len, device=device, dtype=seq_pos.dtype)
+                    # Shift the original segment's position IDs up by prefix_len
+                    adjusted_seg_pos = seg_pos + prefix_len
+
+                    new_ids_parts.append(prefix_ids)
+                    new_attn_parts.append(prefix_attn)
+                    new_pos_parts.append(prefix_pos)
+                    is_orig.extend([False] * prefix_len)
+
+                    new_ids_parts.append(seq_ids[start:end])
+                    new_attn_parts.append(seq_attn[start:end])
+                    new_pos_parts.append(adjusted_seg_pos)
+                    is_orig.extend([True] * (end - start))
+                else:
+                    new_ids_parts.append(seq_ids[start:end])
+                    new_attn_parts.append(seq_attn[start:end])
+                    new_pos_parts.append(seq_pos[start:end])
+                    is_orig.extend([True] * (end - start))
+
+            expanded_ids_list.append(torch.cat(new_ids_parts))
+            expanded_attn_list.append(torch.cat(new_attn_parts))
+            expanded_pos_list.append(torch.cat(new_pos_parts))
+            orig_position_masks.append(is_orig)
+
+        # Pad to same length
+        max_len = max(t.shape[0] for t in expanded_ids_list)
+        padded_ids = torch.zeros(batch_size, max_len, device=device, dtype=shifted_ids.dtype)
+        padded_attn = torch.zeros(batch_size, max_len, device=device, dtype=shifted_attn.dtype)
+        padded_pos = torch.zeros(batch_size, max_len, device=device, dtype=shifted_pos.dtype)
+
+        for b in range(batch_size):
+            L = expanded_ids_list[b].shape[0]
+            padded_ids[b, :L] = expanded_ids_list[b]
+            padded_attn[b, :L] = expanded_attn_list[b]
+            padded_pos[b, :L] = expanded_pos_list[b]
+
+        output = self.value_model(
+            input_ids=padded_ids,
+            attention_mask=padded_attn,
+            position_ids=padded_pos,
+            return_dict=True,
+        )
+        all_values = output.logits.squeeze(-1)  # (batch, max_len)
+
+        # Extract values at original (non-prefix) positions
+        values = torch.zeros(batch_size, orig_len, device=device, dtype=all_values.dtype)
+        for b in range(batch_size):
+            orig_indices = [j for j, is_o in enumerate(orig_position_masks[b]) if is_o]
+            for out_idx, expanded_idx in enumerate(orig_indices):
+                if out_idx < orig_len:
+                    values[b, out_idx] = all_values[b, expanded_idx]
+
         return values
 
     def _gather_for_gae(
@@ -864,12 +999,14 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Value Model Computation", noop=self.rank != 0):
                 for i in range(num_samples):
                     # forward_value returns L-1 values (input-shifted convention)
+                    gt_for_value = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
                     values = self.forward_value(
                         data_BT.query_responses[i],
                         data_BT.attention_masks[i],
                         data_BT.position_ids[i],
                         data_BT.response_masks[i],
                         self.pad_token_id,
+                        ground_truths=gt_for_value,
                     )
                     values_BT.append(values)
                     old_values_BT.append(values.clone())
@@ -973,6 +1110,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 for epoch_idx in range(self.args.num_epochs):
                     for i in range(num_samples):
                         response_mask_BT = data_BT.response_masks[i][:, 1:]
+                        gt_for_value = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
                         current_values = self.forward_value(
                             data_BT.query_responses[i],
                             data_BT.attention_masks[i],
@@ -980,6 +1118,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             data_BT.response_masks[i],
                             self.pad_token_id,
                             use_grad=True,
+                            ground_truths=gt_for_value,
                         )
                         target_returns = returns_BT[i]
                         old_values = old_values_BT[i]

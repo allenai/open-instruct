@@ -210,6 +210,8 @@ class PackedSequences(Generic[T]):
     """
     rewards: list[torch.Tensor] | None = None
     """packed rewards (batch_size, pack_length)"""
+    ground_truths: list[list[str]] | None = None
+    """per-pack ground truths, one list of strings per packed sequence"""
 
 
 def reset_position_ids(attention_mask):

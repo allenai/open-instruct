@@ -921,14 +921,17 @@ def prepare_collated_data_for_workers(
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
 
-        # For PPO with value model: also slice rewards and dones
+        # For PPO with value model: also slice rewards, dones, and ground truths
         per_device_packed_rewards = None
         per_device_packed_dones = None
+        per_device_packed_ground_truths = None
         if include_rewards:
             assert packed_sequences.rewards is not None, "rewards must be set when include_rewards=True"
             assert packed_sequences.dones is not None, "dones must be set when include_rewards=True"
             per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)]
             per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)]
+            if packed_sequences.ground_truths is not None:
+                per_device_packed_ground_truths = packed_sequences.ground_truths[B * i : B * (i + 1)]
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -940,6 +943,7 @@ def prepare_collated_data_for_workers(
         collated_vllm_logprobs = []
         collated_rewards = [] if include_rewards else None
         collated_dones = [] if include_rewards else None
+        collated_ground_truths = [] if include_rewards else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -967,6 +971,10 @@ def prepare_collated_data_for_workers(
                 collated_dones.append(
                     collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory)
                 )
+                if per_device_packed_ground_truths is not None:
+                    collated_ground_truths.append(
+                        [per_device_packed_ground_truths[idx] for idx in micro_range]
+                    )
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -977,6 +985,7 @@ def prepare_collated_data_for_workers(
                 vllm_logprobs=collated_vllm_logprobs,
                 rewards=collated_rewards,
                 dones=collated_dones,
+                ground_truths=collated_ground_truths if collated_ground_truths else None,
             )
         )
     return collated_data
@@ -1134,6 +1143,7 @@ class DataPreparationActor:
                         vllm_logprobs=[],
                         rewards=[] if self.config.use_value_model else None,
                         dones=[] if self.config.use_value_model else None,
+                        ground_truths=[] if self.config.use_value_model else None,
                     )
                     for _ in range(self.dp_world_size)
                 ]
@@ -1231,6 +1241,16 @@ class DataPreparationActor:
                                 reward_tensor[pos_idx] = float(lookup_rewards[seq_idx])
                     packed_rewards.append(reward_tensor)
                 packed_sequences.rewards = packed_rewards
+
+                # Map packed sequences to their ground truths using dones (sub-sequence indices)
+                lookup_ground_truths = [""] + list(batch.ground_truths)  # 1-indexed like lookup_rewards
+                packed_ground_truths = []
+                for dones in packed_sequences.dones:
+                    # Get unique non-zero sub-sequence indices in this pack
+                    unique_indices = sorted(set(int(d) for d in dones.tolist() if d > 0))
+                    gt_list = [lookup_ground_truths[idx] if idx < len(lookup_ground_truths) else "" for idx in unique_indices]
+                    packed_ground_truths.append(gt_list)
+                packed_sequences.ground_truths = packed_ground_truths
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences,

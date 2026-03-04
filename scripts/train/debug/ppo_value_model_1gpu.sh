@@ -44,6 +44,7 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --single_gpu_mode \
     --use_value_model \
+    --value_model_ground_truth_conditioning \
     --value_loss_coef 0.5 \
     --value_learning_rate 2e-6 \
     --vf_clip_range 0.2 \
