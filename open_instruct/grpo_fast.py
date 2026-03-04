@@ -1080,7 +1080,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
         for f in dataclasses.fields(data_BT):
-            to_device_inplace(getattr(data_BT, f.name), self.device)
+            val = getattr(data_BT, f.name)
+            if val is not None and isinstance(val, list) and len(val) > 0 and isinstance(val[0], torch.Tensor):
+                to_device_inplace(val, self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
