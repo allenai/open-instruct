@@ -32,7 +32,7 @@ The OLMo-core SFT config for Olmo Hybrid differs from the Olmo 3 config in the f
 | | Olmo 3 | Olmo Hybrid |
 |---|---|---|
 | Data Parallel | HSDP (shard within node) | FSDP (full sharding) |
-| Context Parallel | Conditional (llama3/zig_zag) | Ulysses, degree=2 (hardcoded) |
+| Context Parallel | Ring (degree=8) | Ulysses (degree=2) |
 | Activation Checkpointing | Selected modules (`feed_forward`) | Budget-based (0.1) |
 
 To reproduce DPO, if you are internal to Ai2, you can run [`./scripts/train/build_image_and_launch.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/build_image_and_launch.sh)
