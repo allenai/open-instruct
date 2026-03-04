@@ -25,6 +25,16 @@ Total tokens includes masked tokens (e.g. prompts). Think SFT total tokens is co
 | Epochs | 2 | 2 | 1 |
 | Loss | — | — | DPO Norm (β=5) |
 
+### Differences from Olmo 3 SFT training
+
+The OLMo-core SFT config for Olmo Hybrid differs from the Olmo 3 config in the following ways (beyond the model architecture itself):
+
+| | Olmo 3 | Olmo Hybrid |
+|---|---|---|
+| Data Parallel | HSDP (shard within node) | FSDP (full sharding) |
+| Context Parallel | Conditional (llama3/zig_zag) | Ulysses, degree=2 (hardcoded) |
+| Activation Checkpointing | Selected modules (`feed_forward`) | Budget-based (0.1) |
+
 To reproduce DPO, if you are internal to Ai2, you can run [`./scripts/train/build_image_and_launch.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/build_image_and_launch.sh)
 
 ```
