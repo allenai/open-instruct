@@ -1,11 +1,11 @@
 #!/bin/bash
-# VAPO (Value-model-based Augmented PPO) test script
+# OPSD (On-Policy Self-Distillation) + VAPO test script
 # Matches rlzero_seqlen.sh configuration but with VAPO value model
 # Uses 4 nodes (2 learner nodes + 2 vLLM nodes), 16k seqlen, no sequence parallelism
 # Reference: https://arxiv.org/abs/2504.05118
 
 DDMM=$(date +"%d%m")
-exp_name=vapo_${DDMM}_7b_rlzero_math_16k
+exp_name=opsd_${DDMM}_7b_rlzero_math_16k
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -72,6 +72,8 @@ uv run python mason.py \
     --oe_eval_gpu_multiplier 4 \
     --use_value_model \
     --value_model_ground_truth_conditioning \
+    --reference_distribution opsd_teacher \
+    --load_ref_policy false \
     --value_loss_coef 0.5 \
     --value_learning_rate 2e-6 \
     --vf_clip_range 0.2 \
