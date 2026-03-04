@@ -679,6 +679,156 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return values
 
+    def _compute_opsd_teacher_logprobs(
+        self,
+        query_response: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        ground_truths: list[list[str]] | None,
+    ) -> torch.Tensor:
+        """Compute OPSD teacher logprobs: policy model conditioned on ground truth.
+
+        For each sub-sequence in the packed batch, inserts an OPSD teacher prompt
+        containing the ground truth answer. Runs the policy model on the expanded
+        sequence, then extracts logprobs at the original response token positions.
+
+        Returns logprobs of shape (B, L-1), aligned with standard logprobs.
+        """
+        if ground_truths is None or len(ground_truths) == 0:
+            return grpo_utils.forward_for_logprobs(
+                self.model, query_response, attention_mask, position_ids,
+                self.pad_token_id, self.streaming_config.temperature,
+            )[0]
+
+        batch_size, orig_len = query_response.shape
+        device = query_response.device
+        padding_mask = query_response != self.pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+
+        OPSD_TEMPLATE = "Here is a reference answer: {answer}\nAfter understanding the reference solution, please try to solve this problem using your own approach below.\n"
+
+        expanded_ids_list = []
+        expanded_attn_list = []
+        expanded_pos_list = []
+        orig_position_masks = []
+
+        for b in range(batch_size):
+            gt_list = ground_truths[b] if b < len(ground_truths) else []
+            seq_ids = input_ids[b]
+            seq_attn = attention_mask[b].clamp(0, 1)
+            seq_pos = position_ids[b]
+
+            boundary_indices = [0]
+            for t in range(1, orig_len):
+                if seq_pos[t] == 0 and seq_attn[t] > 0:
+                    boundary_indices.append(t)
+
+            new_ids_parts = []
+            new_attn_parts = []
+            new_pos_parts = []
+            is_orig = []
+            gt_idx = 0
+
+            for seg_i, start in enumerate(boundary_indices):
+                end_pos = boundary_indices[seg_i + 1] if seg_i + 1 < len(boundary_indices) else orig_len
+                gt_text = gt_list[gt_idx] if gt_idx < len(gt_list) else ""
+                gt_idx += 1
+
+                # Find where the response starts in this segment (first response_mask > 0)
+                seg_resp_mask = response_mask[b, start:end_pos]
+                resp_start_in_seg = None
+                for t in range(len(seg_resp_mask)):
+                    if seg_resp_mask[t] > 0:
+                        resp_start_in_seg = t
+                        break
+
+                if gt_text and resp_start_in_seg is not None:
+                    prefix_text = OPSD_TEMPLATE.format(answer=gt_text)
+                    prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
+                    prefix_len = len(prefix_tokens)
+                    prefix_ids = torch.tensor(prefix_tokens, device=device, dtype=seq_ids.dtype)
+                    prefix_attn = torch.ones(prefix_len, device=device, dtype=seq_attn.dtype)
+
+                    # Query part (before response)
+                    query_end = start + resp_start_in_seg
+                    query_ids = seq_ids[start:query_end]
+                    query_attn = seq_attn[start:query_end]
+                    query_pos = seq_pos[start:query_end]
+
+                    # Response part
+                    resp_ids = seq_ids[query_end:end_pos]
+                    resp_attn = seq_attn[query_end:end_pos]
+
+                    # Position IDs: query positions, then prefix positions, then response positions
+                    query_max_pos = query_pos[-1].item() + 1 if len(query_pos) > 0 else 0
+                    prefix_pos = torch.arange(query_max_pos, query_max_pos + prefix_len, device=device, dtype=seq_pos.dtype)
+                    resp_pos = torch.arange(query_max_pos + prefix_len, query_max_pos + prefix_len + len(resp_ids), device=device, dtype=seq_pos.dtype)
+
+                    new_ids_parts.extend([query_ids, prefix_ids, resp_ids])
+                    new_attn_parts.extend([query_attn, prefix_attn, resp_attn])
+                    new_pos_parts.extend([query_pos, prefix_pos, resp_pos])
+                    is_orig.extend([True] * len(query_ids))
+                    is_orig.extend([False] * prefix_len)
+                    is_orig.extend([True] * len(resp_ids))
+                else:
+                    new_ids_parts.append(seq_ids[start:end_pos])
+                    new_attn_parts.append(seq_attn[start:end_pos])
+                    new_pos_parts.append(seq_pos[start:end_pos])
+                    is_orig.extend([True] * (end_pos - start))
+
+            expanded_ids_list.append(torch.cat(new_ids_parts))
+            expanded_attn_list.append(torch.cat(new_attn_parts))
+            expanded_pos_list.append(torch.cat(new_pos_parts))
+            orig_position_masks.append(is_orig)
+
+        # Pad to same length
+        max_len = max(t.shape[0] for t in expanded_ids_list)
+        padded_ids = torch.full((batch_size, max_len), self.pad_token_id, device=device, dtype=input_ids.dtype)
+        padded_attn = torch.zeros(batch_size, max_len, device=device, dtype=attention_mask.dtype)
+        padded_pos = torch.zeros(batch_size, max_len, device=device, dtype=position_ids.dtype)
+
+        for b in range(batch_size):
+            L = expanded_ids_list[b].shape[0]
+            padded_ids[b, :L] = expanded_ids_list[b]
+            padded_attn[b, :L] = expanded_attn_list[b]
+            padded_pos[b, :L] = expanded_pos_list[b]
+
+        # Forward pass through policy model
+        with torch.no_grad():
+            output = self.model(
+                input_ids=padded_ids,
+                attention_mask=padded_attn.clamp(0, 1),
+                position_ids=padded_pos,
+                return_dict=True,
+            )
+            logits = getattr(output, "logits", output)
+            logits = logits / (self.streaming_config.temperature + 1e-7)
+
+        # Extract logprobs at original positions (shifted by 1 for next-token prediction)
+        # We need logprobs of shape (B, orig_len - 1) aligned with standard logprobs
+        result_logprobs = torch.zeros(batch_size, orig_len - 1, device=device, dtype=torch.float32)
+        labels = query_response[:, 1:].clone()
+        labels[labels == self.pad_token_id] = 0
+
+        for b in range(batch_size):
+            orig_indices = [j for j, is_o in enumerate(orig_position_masks[b]) if is_o]
+            # orig_indices maps original positions to expanded positions
+            # For logprobs: logit at expanded position j predicts token at expanded position j+1
+            # We need logprobs for original tokens 1..L-1 (the shifted labels)
+            for orig_idx in range(orig_len - 1):
+                # The logit that predicts original token orig_idx+1 is at expanded position
+                # corresponding to original position orig_idx
+                if orig_idx < len(orig_indices):
+                    expanded_idx = orig_indices[orig_idx]
+                    if expanded_idx < max_len:
+                        token_id = labels[b, orig_idx].item()
+                        log_probs = torch.nn.functional.log_softmax(logits[b, expanded_idx], dim=-1)
+                        result_logprobs[b, orig_idx] = log_probs[int(token_id)]
+
+        return result_logprobs
+
+
     def _gather_for_gae(
         self,
         values: torch.Tensor,
@@ -859,7 +1009,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Zero weights when no tokens - all weighted sums become 0
         weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
-        if self.args.load_ref_policy:
+        if self.args.load_ref_policy or self.args.reference_distribution == "opsd_teacher":
             for j in range(4):
                 self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
             self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
@@ -942,7 +1092,23 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
         ref_logprobs_BT: list[torch.Tensor] = []
-        if self.args.load_ref_policy:
+        if self.args.reference_distribution == "opsd_teacher":
+            with Timer("OPSD Teacher Logprob Calculation", noop=self.rank != 0):
+                with torch.no_grad():
+                    for i in range(num_samples):
+                        gt_for_teacher = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
+                        teacher_logprobs = self._compute_opsd_teacher_logprobs(
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i],
+                            data_BT.position_ids[i],
+                            data_BT.response_masks[i],
+                            gt_for_teacher,
+                        )
+                        response_mask_shifted = data_BT.response_masks[i][:, 1:]
+                        teacher_logprobs = torch.masked_fill(teacher_logprobs, ~response_mask_shifted.bool(), INVALID_LOGPROB)
+                        ref_logprobs_BT.append(teacher_logprobs)
+                        torch.cuda.empty_cache()
+        elif self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
@@ -1297,7 +1463,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=advantages_for_loss,
-                        ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                        ref_logprobs=ref_logprobs_BT[i] if (self.args.load_ref_policy or self.args.reference_distribution == "opsd_teacher") else None,
                         config=self.args,
                         tis_weights=tis_imp_ratio_BT,
                     )

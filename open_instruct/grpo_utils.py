@@ -94,6 +94,11 @@ class ExperimentConfig:
     """How many training steps to take before updating the reference policy."""
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
+    reference_distribution: str = "init"
+    """Source of reference logprobs for KL penalty. 'init' uses a frozen initial policy (standard PPO/GRPO).
+    'opsd_teacher' uses the current policy conditioned on ground truth answers (On-Policy Self-Distillation).
+    When 'opsd_teacher', no separate ref model is loaded — the KL penalty pushes the student toward
+    the ground-truth-conditioned teacher distribution of the same model."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
     """Whether to use DAPO or CISPO loss function."""
     record_entropy: bool = False
@@ -273,7 +278,7 @@ class ExperimentConfig:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if not self.load_ref_policy and self.beta != 0.0:
+        if not self.load_ref_policy and self.beta != 0.0 and self.reference_distribution == "init":
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."

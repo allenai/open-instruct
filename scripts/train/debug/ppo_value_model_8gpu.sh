@@ -72,6 +72,8 @@ uv run python mason.py \
     --oe_eval_gpu_multiplier 4 \
     --use_value_model \
     --value_model_ground_truth_conditioning \
+    --reference_distribution opsd_teacher \
+    --load_ref_policy false \
     --value_loss_coef 0.5 \
     --value_learning_rate 2e-6 \
     --vf_clip_range 0.2 \
