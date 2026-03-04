@@ -17,7 +17,8 @@ Total tokens includes masked tokens (e.g. prompts). Think SFT total tokens is co
 | | 7B Think SFT | 7B Instruct SFT | 7B Instruct DPO |
 |---|---|---|---|
 | Instances | 2,932,239 | 2,153,716 | 259,922 |
-| Total Tokens | 47.6B | 3.4B | — |
+| Total Tokens | 47.6B | 3.4B | N/A |
+| Batch Size | 1M tokens | 1M tokens | N/A |
 | Learning Rate | 2.5×10⁻⁵ | 2.5×10⁻⁵ | 1×10⁻⁶ |
 | Num. GPUs | 64 | 64 | 32 |
 | Max Sequence Length | 32K | 32K | 16K |
