@@ -68,6 +68,14 @@ fi
 echo "Installing dependencies with uv..."
 uv sync
 
+# Ensure pip-bundled NVIDIA libs are found before system CUDA libs
+VENV_NVIDIA_DIR=".venv/lib/python3.12/site-packages/nvidia"
+if [ -d "$VENV_NVIDIA_DIR" ]; then
+    for lib_dir in "$VENV_NVIDIA_DIR"/*/lib; do
+        [ -d "$lib_dir" ] && export LD_LIBRARY_PATH="${lib_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    done
+fi
+
 # Run the provided script with the image name and all remaining arguments
 script="$1"
 shift
