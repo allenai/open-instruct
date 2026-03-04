@@ -113,6 +113,39 @@ def build_deepspeed_config(
     return config
 
 
+def swap_moe_router_expert_preference(model: torch.nn.Module) -> int:
+    """Swap MoE router weights so expert 1 is preferred instead of expert 0.
+
+    This is useful when freezing expert 0 in a 2-expert MoE. By swapping the
+    router weights, expert 1 (trainable) will now be selected by the router,
+    ensuring gradient flow during training.
+
+    Args:
+        model: The model containing MoE layers with router gates.
+
+    Returns:
+        Number of router gates that were swapped.
+    """
+    swapped_count = 0
+    for name, module in model.named_modules():
+        # Look for router/gate modules in MoE layers
+        if "mlp.gate" in name and hasattr(module, "weight"):
+            with torch.no_grad():
+                w = module.weight.data
+                # Router weight shape is typically [num_experts, d_model] or [d_model, num_experts]
+                if w.shape[0] == 2:  # [2, d_model] - swap rows
+                    module.weight.data = w[[1, 0], :]
+                    swapped_count += 1
+                    logger.info(f"Swapped router weights (rows) for {name}, shape {w.shape}")
+                elif w.shape[1] == 2:  # [d_model, 2] - swap columns
+                    module.weight.data = w[:, [1, 0]]
+                    swapped_count += 1
+                    logger.info(f"Swapped router weights (columns) for {name}, shape {w.shape}")
+                else:
+                    logger.warning(f"Skipping {name}: unexpected shape {w.shape} (expected 2 experts)")
+    return swapped_count
+
+
 def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -378,6 +411,49 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
+    # Swap MoE router preference if configured (must happen before freezing)
+    if args.swap_router_preference:
+        swapped = swap_moe_router_expert_preference(model)
+        logger.warning(f"[swap_router_preference] Swapped {swapped} router gates to prefer expert 1")
+
+    # Freeze parameters if configured (e.g., for FlexOlmo partial training)
+    if args.freeze_parameters:
+        param_names = [name for name, _ in model.named_parameters()]
+        logger.warning(
+            f"[freeze_parameters] Model has {len(param_names)} parameters. First 10 names: {param_names[:10]}"
+        )
+        logger.warning(f"[freeze_parameters] Freeze patterns: {args.freeze_patterns}")
+
+        frozen, trainable, frozen_tensors, trainable_tensors = model_utils.freeze_parameters_by_pattern(
+            model, args.freeze_patterns
+        )
+        total = frozen + trainable
+        total_tensors = frozen_tensors + trainable_tensors
+        if total > 0:
+            pct_trainable = 100 * trainable / total
+            logger.warning(
+                f"[freeze_parameters] {frozen:,} params frozen, {trainable:,} params trainable "
+                f"({pct_trainable:.1f}% trainable) | {frozen_tensors} tensors frozen, {trainable_tensors} tensors trainable"
+            )
+        elif total_tensors > 0:
+            # DeepSpeed ZeRO-3: param counts are 0 due to sharding, but tensor counts work
+            pct_trainable_tensors = 100 * trainable_tensors / total_tensors
+            logger.warning(
+                f"[freeze_parameters] DeepSpeed ZeRO-3 detected (param counts are 0 due to sharding). "
+                f"{frozen_tensors} tensors frozen, {trainable_tensors} tensors trainable "
+                f"({pct_trainable_tensors:.1f}% trainable)"
+            )
+        else:
+            logger.warning("[freeze_parameters] No parameters found in model - freeze_parameters has no effect")
+
+        # List trainable parameters before optimizer creation
+        trainable_params = [(n, p.numel()) for n, p in model.named_parameters() if p.requires_grad]
+        logger.warning(f"[freeze_parameters] Trainable params BEFORE optimizer ({len(trainable_params)} total):")
+        for name, numel in trainable_params[:20]:
+            logger.warning(f"  - {name}: {numel:,} params")
+        if len(trainable_params) > 20:
+            logger.warning(f"  ... and {len(trainable_params) - 20} more")
+
     model_dims = ModelDims(
         num_layers=config.num_hidden_layers,
         hidden_size=config.hidden_size,
@@ -417,10 +493,17 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "params": [
+                p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad
+            ],
             "weight_decay": args.weight_decay,
         },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
+        {
+            "params": [
+                p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad
+            ],
+            "weight_decay": 0.0,
+        },
     ]
     if args.use_qlora or args.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW  # noqa: PLC0415

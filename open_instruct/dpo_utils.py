@@ -421,6 +421,26 @@ class ExperimentConfig(
     eval_priority: str | None = "high"
     """The priority of auto-launched evaluation jobs"""
 
+    # Parameter freezing for FlexOlmo
+    freeze_parameters: bool = False
+    """Whether to freeze parameters matching the freeze_patterns."""
+    freeze_patterns: list[str] | None = field(
+        default_factory=lambda: [
+            # "model.embed_tokens.*", # this breaks it sometimes?
+            "model.layers.*.self_attn.*",
+            "model.layers.*.post_attention_layernorm.*",
+            "model.layers.*.post_feedforward_layernorm.*",
+            "model.layers.*.mlp.experts.0.*",  # Freeze expert 0 only (expert 1 + router remain trainable)
+            "lm_head.*",
+        ]
+    )
+    """List of patterns (fnmatch-style) to match parameter names for freezing.
+    Example: ['model.layers.*.mlp.*', 'model.embed_tokens.*']"""
+    swap_router_preference: bool = False
+    """Swap MoE router weights to prefer expert 1 instead of expert 0.
+    This is useful when freezing expert 0 - by swapping router preference,
+    expert 1 (trainable) participates in forward pass and receives gradients."""
+
     @property
     def forward_fn(self) -> Callable:
         fn = concatenated_forward if self.concatenated_forward else separate_forward
@@ -457,6 +477,8 @@ class ExperimentConfig(
                 raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
             if self.offload_param and self.zero_stage != 3:
                 raise ValueError("offload_param can only be used with zero_stage 3")
+        if self.freeze_parameters and not self.freeze_patterns:
+            raise ValueError("`freeze_patterns` must be provided when `freeze_parameters=True`")
 
 
 FlatArguments = ExperimentConfig
