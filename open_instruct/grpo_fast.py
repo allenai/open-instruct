@@ -78,7 +78,12 @@ from rich.pretty import pprint
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers import initialization as transformers_init
 from transformers.integrations import HfDeepSpeedConfig
+from transformers.models.auto import configuration_auto as auto_config
 from transformers.models.olmo_hybrid import modeling_olmo_hybrid
+from transformers.models.olmo_hybrid.configuration_olmo_hybrid import OlmoHybridConfig
+
+if "olmo3_2_hybrid" not in auto_config.CONFIG_MAPPING_NAMES:
+    AutoConfig.register("olmo3_2_hybrid", OlmoHybridConfig)
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager

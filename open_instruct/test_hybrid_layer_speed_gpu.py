@@ -106,9 +106,9 @@ class TestHybridLayerSpeed(unittest.TestCase):
         full_attn_layer_idx = config.layer_types.index("full_attention")
         linear_attn_layer_idx = config.layer_types.index("linear_attention")
 
-        full_attn_block = modeling_olmo_hybrid.OlmoHybridAttentionDecoderLayer(config, layer_idx=full_attn_layer_idx).to(
-            device=device, dtype=torch.bfloat16
-        )
+        full_attn_block = modeling_olmo_hybrid.OlmoHybridAttentionDecoderLayer(
+            config, layer_idx=full_attn_layer_idx
+        ).to(device=device, dtype=torch.bfloat16)
 
         linear_attn_block = modeling_olmo_hybrid.OlmoHybridLinearAttentionDecoderLayer(
             config, layer_idx=linear_attn_layer_idx
