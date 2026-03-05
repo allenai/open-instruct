@@ -2597,8 +2597,14 @@ def main(
         resume_training_step = (
             int(checkpoint_state["training_step"]) + 1
             if checkpoint_state and "training_step" in checkpoint_state
-            else 1
+            else (args.eval_only_set_checkpoint if args.eval_only_set_checkpoint is not None else 1)
         )
+        if args.eval_only_set_checkpoint is not None and (
+            not checkpoint_state or "training_step" not in checkpoint_state
+        ):
+            logger.info(
+                f"Eval-only mode using explicit checkpoint step {args.eval_only_set_checkpoint} for eval logging."
+            )
         episode = (
             int(checkpoint_state["episode"])
             if checkpoint_state and "episode" in checkpoint_state

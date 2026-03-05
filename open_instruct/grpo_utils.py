@@ -190,6 +190,8 @@ class ExperimentConfig:
     """Number of completions per eval prompt for pass@k metrics."""
     eval_only: bool = False
     """Whether to run one local evaluation round and exit without training."""
+    eval_only_set_checkpoint: int | None = None
+    """Optional checkpoint step to use as eval-only logging step."""
     eval_temperature: float | None = None
     """Optional eval-only temperature override. If None, uses training temperature."""
     eval_top_p: float | None = None
@@ -255,6 +257,10 @@ class ExperimentConfig:
             raise ValueError(f"`eval_pass_at_k` must be >= 1, got {self.eval_pass_at_k}")
         if self.eval_pass_at_k & (self.eval_pass_at_k - 1) != 0:
             raise ValueError(f"`eval_pass_at_k` must be a power of 2, got {self.eval_pass_at_k}")
+        if self.eval_only_set_checkpoint is not None and self.eval_only_set_checkpoint < 1:
+            raise ValueError(
+                f"`eval_only_set_checkpoint` must be >= 1 when provided, got {self.eval_only_set_checkpoint}"
+            )
 
 
 def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
