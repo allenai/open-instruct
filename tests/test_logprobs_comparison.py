@@ -17,7 +17,8 @@ MAX_TOKENS = 20
 SEED = 42
 PACK_LENGTH = 64
 DTYPE = "bfloat16"
-MODEL_NAME = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
+HYBRID_MODEL = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
+TRANSFORMER_MODEL = "allenai/Olmo-3-1025-7B"
 
 
 class TestLogprobsComparison(unittest.TestCase):
@@ -25,9 +26,12 @@ class TestLogprobsComparison(unittest.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
-        ("capital", MODEL_NAME, "The capital of France is"),
-        ("weather", MODEL_NAME, "The weather today is"),
-        ("ml", MODEL_NAME, "Machine learning is"),
+        ("hybrid_capital", HYBRID_MODEL, "The capital of France is"),
+        ("hybrid_weather", HYBRID_MODEL, "The weather today is"),
+        ("hybrid_ml", HYBRID_MODEL, "Machine learning is"),
+        ("transformer_capital", TRANSFORMER_MODEL, "The capital of France is"),
+        ("transformer_weather", TRANSFORMER_MODEL, "The weather today is"),
+        ("transformer_ml", TRANSFORMER_MODEL, "Machine learning is"),
     ])
     def test_vllm_hf_logprobs_match_large(self, _name, model_name, prompt):
         """Test that vLLM and HuggingFace produce matching logprobs for large models (GPU only)."""

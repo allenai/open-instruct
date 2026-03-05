@@ -10,7 +10,7 @@ uv run python mason.py \
        --cluster ai2/saturn \
        --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
-       --description "Logprobs comparison test (hybrid model)" \
+       --description "Logprobs comparison test (hybrid + transformer)" \
        --pure_docker_mode \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
