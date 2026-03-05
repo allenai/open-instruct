@@ -21,4 +21,4 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \
-       -- uv run pytest scripts/test_logprobs_comparison.py -v -x
+       -- uv run pytest scripts/test_logprobs_comparison.py -v
