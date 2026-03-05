@@ -10,7 +10,7 @@ from typing import Dict, List, Union
 from transformers import PreTrainedModel
 
 from open_instruct import model_utils
-from open_instruct import rl_utils2
+from open_instruct import rl_utils
 
 
 MAX_TOKENS = 20
@@ -40,12 +40,13 @@ class TestLogprobsComparison(unittest.TestCase):
         vllm_output = _get_vllm_logprobs(model_name, query)
         gc.collect()
         torch.cuda.empty_cache()
-        packed_sequences = rl_utils2.pack_sequences(
+        packed_sequences = rl_utils.pack_sequences(
             queries=[query],
             responses=[vllm_output["response"]],
             masks=[[1] * len(vllm_output["response"])],
             pack_length=PACK_LENGTH,
             pad_token_id=tokenizer.pad_token_id,
+            vllm_logprobs=[vllm_output["logprobs"]],
         )
 
         hf_logprobs = _get_hf_logprobs(
