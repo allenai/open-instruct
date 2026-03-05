@@ -925,13 +925,13 @@ def prepare_collated_data_for_workers(
         per_device_packed_rewards = None
         per_device_packed_dones = None
         per_device_packed_ground_truths = None
+        if packed_sequences.ground_truths is not None:
+            per_device_packed_ground_truths = packed_sequences.ground_truths[B * i : B * (i + 1)]
         if include_rewards:
             assert packed_sequences.rewards is not None, "rewards must be set when include_rewards=True"
             assert packed_sequences.dones is not None, "dones must be set when include_rewards=True"
             per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)]
             per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)]
-            if packed_sequences.ground_truths is not None:
-                per_device_packed_ground_truths = packed_sequences.ground_truths[B * i : B * (i + 1)]
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -943,7 +943,7 @@ def prepare_collated_data_for_workers(
         collated_vllm_logprobs = []
         collated_rewards = [] if include_rewards else None
         collated_dones = [] if include_rewards else None
-        collated_ground_truths = [] if include_rewards else None
+        collated_ground_truths = [] if per_device_packed_ground_truths is not None else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -971,10 +971,10 @@ def prepare_collated_data_for_workers(
                 collated_dones.append(
                     collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory)
                 )
-                if per_device_packed_ground_truths is not None:
-                    collated_ground_truths.append(
-                        [per_device_packed_ground_truths[idx] for idx in micro_range]
-                    )
+            if per_device_packed_ground_truths is not None:
+                collated_ground_truths.append(
+                    [per_device_packed_ground_truths[idx] for idx in micro_range]
+                )
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1242,11 +1242,11 @@ class DataPreparationActor:
                     packed_rewards.append(reward_tensor)
                 packed_sequences.rewards = packed_rewards
 
-                # Map packed sequences to their ground truths using dones (sub-sequence indices)
-                lookup_ground_truths = [""] + list(batch.ground_truths)  # 1-indexed like lookup_rewards
+            # Always map ground truths for value model GT conditioning or OPSD
+            if batch.ground_truths is not None and packed_sequences.dones is not None:
+                lookup_ground_truths = [""] + list(batch.ground_truths)
                 packed_ground_truths = []
                 for dones in packed_sequences.dones:
-                    # Get unique non-zero sub-sequence indices in this pack
                     unique_indices = sorted(set(int(d) for d in dones.tolist() if d > 0))
                     gt_list = [lookup_ground_truths[idx] if idx < len(lookup_ground_truths) else "" for idx in unique_indices]
                     packed_ground_truths.append(gt_list)
