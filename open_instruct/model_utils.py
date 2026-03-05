@@ -218,66 +218,56 @@ def freeze_parameters_by_pattern(model: torch.nn.Module, patterns: list[str]) ->
     return frozen_count, trainable_count, frozen_tensors, trainable_tensors
 
 
-def freeze_router_expert_rows(model: torch.nn.Module, expert_indices: list[int] | None = None) -> int:
-    """Freeze specific expert rows of MoE router/gate weights via gradient hooks.
+class RouterExpertFreezer:
+    """Saves original router expert rows and restores them after each optimizer step.
 
-    Since the router is a single parameter tensor (e.g., [num_experts, d_model]), we cannot
-    use requires_grad to freeze individual rows. Instead, we register backward hooks that
-    zero out gradients for the specified expert indices.
+    ZeRO-3 compatible: uses GatheredParameters to access the full parameter for restoration.
+    This approach is safer than gradient hooks, which operate on partitioned (1D) shards
+    under ZeRO-3 and cannot correctly target specific rows.
 
-    Args:
-        model: The model containing MoE layers with router gates.
-        expert_indices: Which expert rows to freeze. Defaults to [0].
-
-    Returns:
-        Number of router gate parameters that had hooks registered.
+    Usage:
+        freezer = RouterExpertFreezer(model, expert_index=0)  # before DeepSpeed wrapping
+        ...
+        model.step()
+        freezer.restore(model)  # after each optimizer step
     """
-    if expert_indices is None:
-        expert_indices = [0]
 
-    hook_count = 0
-    for name, module in model.named_modules():
-        if "mlp.gate" in name and hasattr(module, "weight"):
-            w = module.weight
-            if w.ndim == 2 and w.shape[0] == 2:  # [num_experts, d_model] - zero out rows
+    def __init__(self, model: torch.nn.Module, expert_index: int = 0):
+        self.expert_index = expert_index
+        self.saved_rows: dict[str, torch.Tensor] = {}  # name -> saved row tensor
+        self.param_names: dict[str, str] = {}  # name -> full param name for named_parameters lookup
 
-                def _make_row_hook(indices: list[int]):
-                    def hook(grad: torch.Tensor) -> torch.Tensor:
-                        grad[indices, :] = 0
-                        return grad
+        for name, module in model.named_modules():
+            if "mlp.gate" in name and hasattr(module, "weight"):
+                w = module.weight
+                if w.ndim == 2 and w.shape[0] >= expert_index + 1:
+                    self.saved_rows[name] = w.data[expert_index].clone().cpu()
+                    self.param_names[name] = f"{name}.weight"
+                    logger.info(
+                        f"Saved router expert {expert_index} row for {name}.weight "
+                        f"(shape {w.shape}, row norm={self.saved_rows[name].norm():.4f})"
+                    )
 
-                    return hook
+    def restore(self, deepspeed_model: torch.nn.Module) -> None:
+        """Restore frozen expert rows after an optimizer step.
 
-                w.register_hook(_make_row_hook(expert_indices))
-                hook_count += 1
-                logger.info(f"Registered gradient hook to freeze expert {expert_indices} rows for {name}.weight")
-            elif w.ndim == 2 and w.shape[1] == 2:  # [d_model, num_experts] - zero out columns
+        Args:
+            deepspeed_model: The DeepSpeed engine (model wrapper).
+        """
+        unwrapped = deepspeed_model.module if hasattr(deepspeed_model, "module") else deepspeed_model
+        params_dict = dict(unwrapped.named_parameters())
 
-                def _make_col_hook(indices: list[int]):
-                    def hook(grad: torch.Tensor) -> torch.Tensor:
-                        grad[:, indices] = 0
-                        return grad
+        for name, saved_row in self.saved_rows.items():
+            param_name = self.param_names[name]
+            if param_name not in params_dict:
+                continue
+            param = params_dict[param_name]
+            with deepspeed.zero.GatheredParameters([param], modifier_rank=0):
+                if deepspeed.comm.get_rank() == 0:
+                    param.data[self.expert_index] = saved_row.to(param.data.device, dtype=param.data.dtype)
 
-                    return hook
-
-                w.register_hook(_make_col_hook(expert_indices))
-                hook_count += 1
-                logger.info(f"Registered gradient hook to freeze expert {expert_indices} cols for {name}.weight")
-            elif w.ndim == 1:  # [num_experts] - zero out specific indices
-
-                def _make_1d_hook(indices: list[int]):
-                    def hook(grad: torch.Tensor) -> torch.Tensor:
-                        grad[indices] = 0
-                        return grad
-
-                    return hook
-
-                w.register_hook(_make_1d_hook(expert_indices))
-                hook_count += 1
-                logger.info(f"Registered gradient hook to freeze expert {expert_indices} entries for {name}.weight")
-            else:
-                logger.warning(f"Router {name} has unexpected shape {w.shape}, expected 2 experts. Skipping hook.")
-    return hook_count
+    def __len__(self) -> int:
+        return len(self.saved_rows)
 
 
 def maybe_load_checkpoint(

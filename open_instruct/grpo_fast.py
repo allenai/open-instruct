@@ -92,10 +92,10 @@ from open_instruct.dataset_transformation import (
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
+    RouterExpertFreezer,
     disable_dropout_in_model,
     estimate_kl,
     freeze_parameters_by_pattern,
-    freeze_router_expert_rows,
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
@@ -335,11 +335,14 @@ class PolicyTrainerRayProcess(RayProcess):
             if len(trainable_params) > 20:
                 logger.warning(f"  ... and {len(trainable_params) - 20} more")
 
-        # Freeze expert 0's row of router gate weights via gradient hooks
+        # Save expert 0's router rows for restoration after each optimizer step (ZeRO-3 safe)
+        self._router_freezer = None
         if args.freeze_router_expert_0:
-            hook_count = freeze_router_expert_rows(self.policy, expert_indices=[0])
+            self._router_freezer = RouterExpertFreezer(self.policy, expert_index=0)
             if self.rank == 0:
-                logger.warning(f"[freeze_router_expert_0] Registered gradient hooks on {hook_count} router gates")
+                logger.warning(
+                    f"[freeze_router_expert_0] Saved {len(self._router_freezer)} router gate rows for restoration"
+                )
 
         # Note: When freezing parameters, keep embed_tokens trainable so gradient checkpointing
         # sees inputs with requires_grad=True. Otherwise use_reentrant=False would be needed,
@@ -924,6 +927,10 @@ class PolicyTrainerRayProcess(RayProcess):
                                 pass
 
                         self.model.step()
+
+                        # Restore frozen router expert rows after optimizer step
+                        if self._router_freezer is not None:
+                            self._router_freezer.restore(self.model)
 
                         if debug_params:
                             for label, info in debug_params.items():
