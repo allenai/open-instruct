@@ -579,6 +579,27 @@ def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, A
     return EnvConfig(max_steps=max_steps, env_configs=merged)
 
 
+def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
+    env_metrics: dict[str, dict[str, list[float]]] = {}
+    for rs in rollout_states:
+        info = rs.get("info", {})
+        multi_env_metrics = info.get("env_metrics")
+        if multi_env_metrics is not None:
+            for ename, per_env in multi_env_metrics.items():
+                bucket = env_metrics.setdefault(ename, {})
+                for k, v in per_env.items():
+                    bucket.setdefault(k, []).append(float(v))
+            continue
+
+        ename = info.get("env_name", "unknown")
+        bucket = env_metrics.setdefault(ename, {})
+        for k, v in info.items():
+            if k != "env_name" and isinstance(v, (int, float)):
+                bucket.setdefault(k, []).append(float(v))
+
+    return {f"env/{ename}/{k}": np.mean(vals) for ename, metrics in env_metrics.items() for k, vals in metrics.items()}
+
+
 def add_prompt_to_generator(
     example: dict[str, Any],
     epoch_number: int,
@@ -1252,28 +1273,7 @@ class DataPreparationActor:
                     tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
 
-                env_metrics: dict[str, dict[str, list[float]]] = {}
-                for rs in result.request_info.rollout_states:
-                    info = rs.get("info", {})
-                    multi_env_metrics = info.get("env_metrics")
-                    if isinstance(multi_env_metrics, dict):
-                        for ename, per_env in multi_env_metrics.items():
-                            if not isinstance(per_env, dict):
-                                continue
-                            env_specific_metrics = env_metrics.setdefault(ename, {})
-                            for k, v in per_env.items():
-                                if isinstance(v, (int, float)):
-                                    env_specific_metrics.setdefault(k, []).append(float(v))
-                        continue
-
-                    ename = info.get("env_name", "unknown")
-                    env_specific_metrics = env_metrics.setdefault(ename, {})
-                    for k, v in info.items():
-                        if k != "env_name" and isinstance(v, (int, float)):
-                            env_specific_metrics.setdefault(k, []).append(float(v))
-                for ename, metrics in env_metrics.items():
-                    for k, vals in metrics.items():
-                        step_metrics[f"env/{ename}/{k}"] = np.mean(vals)
+                step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
