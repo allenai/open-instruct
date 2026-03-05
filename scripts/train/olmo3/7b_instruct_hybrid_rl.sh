@@ -17,7 +17,7 @@ chat_template=olmo123 #olmo
 
 NUM_GPUS=${NUM_GPUS:-8}
 hosted_vllm=""
-exp_name="grpo_hybrid_p64_4_8k_2node"
+exp_name="grpo_hybrid_p64_4_8k_2node_v2"
 
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
