@@ -2161,8 +2161,17 @@ def run_eval_only_round(
 
     health_check_fn()
     eval_step = max(resume_training_step, 1)
+    # Use a single training step in eval-only mode so status/progress waits for eval completion.
+    args.num_training_steps = eval_step
     local_eval_start_time = time.perf_counter()
     logger.info("Eval-only mode enabled: scheduling one local evaluation round and exiting.")
+
+    maybe_update_beaker_description(
+        current_step=eval_step,
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
 
     for idx in range(len(eval_dataset)):
         eval_example = eval_dataset[idx]
@@ -2170,7 +2179,7 @@ def run_eval_only_round(
 
     eval_collected = maybe_evaluate(
         args,
-        max(eval_step, args.num_training_steps),
+        eval_step,
         evaluation_inference_results_Q,
         tokenizer,
         episode,
@@ -2185,7 +2194,7 @@ def run_eval_only_round(
         raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
 
     maybe_update_beaker_description(
-        current_step=max(eval_step, args.num_training_steps),
+        current_step=eval_step,
         total_steps=args.num_training_steps,
         start_time=training_start_time,
         wandb_url=wandb_url,
