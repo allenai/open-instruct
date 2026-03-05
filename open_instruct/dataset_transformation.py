@@ -296,13 +296,17 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "qwen_base_boxed_math2": (
+    "qwen_instruct_boxed_math2": (
         "{% for message in messages %}"
         "{% if message['role'] == 'user' %}"
-        "{{ message['content'] + '\n' }}"
-        "{% endfor %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and put your final answer within \\\\boxed{}<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
         "{% endif %}"
-        "{{ 'Let’s think step by step and output the final answer within \\\\boxed{}.\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
     ),
     "tulu_thinker": (
         "{% for message in messages %}"
