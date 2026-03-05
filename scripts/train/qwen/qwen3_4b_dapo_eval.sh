@@ -38,7 +38,7 @@ uv run open_instruct/grpo_fast.py \
     --eval_pass_at_k 32 \
     --eval_top_p 1.0 \
     --eval_temperature 1.0 \
-    --eval_response_length 32768 \
+    --eval_response_length 16384 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
@@ -60,5 +60,6 @@ uv run open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --mask_truncated_completions False \
+    --beta 0.0 \
     --load_ref_policy False \
     --push_to_hub False $@

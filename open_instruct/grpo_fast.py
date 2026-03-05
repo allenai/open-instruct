@@ -2001,12 +2001,21 @@ def maybe_evaluate(
 
         print_rich_single_line_metrics(eval_metrics)
 
+        def _ground_truth_for_table(value: Any) -> str:
+            while isinstance(value, list) and len(value) > 0:
+                value = value[0]
+            if value is None:
+                return ""
+            return str(value)
+
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_batch.decoded_responses
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
-        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        table["ground_truth"] = (
+            [_ground_truth_for_table(ground_truth) for ground_truth in eval_batch.ground_truths] if eval_batch else []
+        )
         if eval_batch.active_tools is not None:
             table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
