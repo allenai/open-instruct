@@ -59,8 +59,15 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.data_loader import _extract_env_configs
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
+from open_instruct.data_types import (
+    EnvConfig,
+    EnvConfigEntry,
+    GenerationResult,
+    PromptRequest,
+    RequestInfo,
+    TokenStatistics,
+    ToolCallStats,
+)
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
@@ -883,20 +890,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
     active_tools = request_metadata["active_tools"]
-    env_config = request_metadata.get("env_config")
+    env_config: EnvConfig = request_metadata.get("env_config", EnvConfig())
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
 
     configured_tools = set(actor.pools.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else set(configured_tools)
 
-    max_steps = actor.max_steps
-    if env_config is not None and not isinstance(env_config, dict):
-        raise TypeError(f"env_config must be a dict or None, got {type(env_config).__name__}")
-    if isinstance(env_config, dict):
-        max_steps = env_config.get("max_steps", max_steps)
-    env_configs = _extract_env_configs(env_config)
-    env_config_by_name = {cfg["env_name"]: cfg for cfg in env_configs if "env_name" in cfg}
+    max_steps = env_config.max_steps
 
     # Acquired actors: pool_key -> actor (released in finally block)
     acquired: dict[str, Any] = {}
@@ -907,7 +908,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     output = None
     try:
-        unknown_targets = set(env_config_by_name) - configured_tools
+        unknown_targets = set(env_config.env_configs) - configured_tools
         if unknown_targets:
             raise ValueError(
                 f"env_config references targets without pools: {sorted(unknown_targets)}. "
@@ -926,15 +927,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             actor_map[pool_name] = target_actor
             active_env_names.append(pool_name)
 
-            target_cfg = env_config_by_name.get(pool_name, {"env_name": pool_name})
-            target_kwargs = {
-                k: v
-                for k, v in target_cfg.items()
-                if k not in ("env_name", "max_steps", "pool_size", "is_text_env", "env_configs")
-            }
-            _, target_tools = await target_actor.reset.remote(**target_kwargs)
+            entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
+            _, target_tools = await target_actor.reset.remote(**entry.kwargs)
             target_response_role = await target_actor.get_response_role.remote()
-            is_text_env = target_cfg.get("is_text_env", False)
+            is_text_env = entry.is_text_env
             tool_response_roles[pool_name] = target_response_role
 
             if target_tools:

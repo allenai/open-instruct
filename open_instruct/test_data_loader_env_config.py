@@ -1,6 +1,7 @@
 import unittest
 
 from open_instruct.data_loader import _merge_env_config, add_prompt_to_generator
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import INPUT_IDS_PROMPT_KEY
 
 
@@ -12,72 +13,64 @@ class _QueueStub:
         self.items.append(item)
 
 
-class TestEnvConfigMerging(unittest.TestCase):
-    def test_legacy_single_env_base_raises(self):
-        base = {"max_steps": 5, "env_name": "counter", "is_text_env": False}
-        with self.assertRaises(ValueError):
-            _merge_env_config(base, None)
+def _make_env_configs(*entries: EnvConfigEntry) -> dict[str, EnvConfigEntry]:
+    return {e.env_name: e for e in entries}
 
+
+class TestEnvConfigMerging(unittest.TestCase):
     def test_merge_multi_env_base(self):
-        base = {
-            "max_steps": 7,
-            "env_configs": [
-                {"env_name": "counter", "is_text_env": False},
-                {"env_name": "guess_number", "is_text_env": False},
-            ],
-        }
+        base = EnvConfig(
+            max_steps=7,
+            env_configs=_make_env_configs(
+                EnvConfigEntry(env_name="counter", is_text_env=False),
+                EnvConfigEntry(env_name="guess_number", is_text_env=False),
+            ),
+        )
         merged = _merge_env_config(base, None)
-        self.assertEqual(merged, base)
+        self.assertIs(merged, base)
 
     def test_sample_env_configs_merge_with_base_defaults(self):
-        base = {
-            "max_steps": 9,
-            "env_configs": [
-                {"env_name": "counter", "is_text_env": False},
-                {"env_name": "guess_number", "is_text_env": False},
-            ],
-        }
+        base = EnvConfig(
+            max_steps=9,
+            env_configs=_make_env_configs(
+                EnvConfigEntry(env_name="counter", is_text_env=False),
+                EnvConfigEntry(env_name="guess_number", is_text_env=False),
+            ),
+        )
         sample = {"env_configs": [{"env_name": "counter", "target": 11}]}
         merged = _merge_env_config(base, sample)
-        self.assertEqual(merged["max_steps"], 9)
-        self.assertEqual(merged["env_configs"], [{"env_name": "counter", "is_text_env": False, "target": 11}])
-
-    def test_legacy_sample_env_config_raises(self):
-        base = {
-            "max_steps": 9,
-            "env_configs": [
-                {"env_name": "counter", "is_text_env": False},
-                {"env_name": "guess_number", "is_text_env": False},
-            ],
-        }
-        with self.assertRaises(ValueError):
-            _merge_env_config(base, {"env_name": "counter", "target": 3})
+        self.assertEqual(merged.max_steps, 9)
+        entry = merged.env_configs["counter"]
+        self.assertFalse(entry.is_text_env)
+        self.assertEqual(entry.kwargs, {"target": 11})
 
     def test_list_sample_env_config_raises(self):
-        base = {
-            "max_steps": 9,
-            "env_configs": [
-                {"env_name": "counter", "is_text_env": False},
-                {"env_name": "guess_number", "is_text_env": False},
-            ],
-        }
+        base = EnvConfig(
+            max_steps=9,
+            env_configs=_make_env_configs(
+                EnvConfigEntry(env_name="counter", is_text_env=False),
+                EnvConfigEntry(env_name="guess_number", is_text_env=False),
+            ),
+        )
         with self.assertRaises(TypeError):
             _merge_env_config(base, [{"env_name": "guess_number", "number": "7"}])  # type: ignore[arg-type]
 
     def test_sample_env_without_name_raises(self):
-        base = {"max_steps": 9, "env_configs": [{"env_name": "counter", "is_text_env": False}]}
+        base = EnvConfig(
+            max_steps=9, env_configs=_make_env_configs(EnvConfigEntry(env_name="counter", is_text_env=False))
+        )
         with self.assertRaises(KeyError):
             _merge_env_config(base, {"env_configs": [{"target": 3}]})
 
     def test_add_prompt_to_generator_emits_normalized_env_payload(self):
         queue = _QueueStub()
-        base = {
-            "max_steps": 4,
-            "env_configs": [
-                {"env_name": "counter", "is_text_env": False},
-                {"env_name": "guess_number", "is_text_env": False},
-            ],
-        }
+        base = EnvConfig(
+            max_steps=4,
+            env_configs=_make_env_configs(
+                EnvConfigEntry(env_name="counter", is_text_env=False),
+                EnvConfigEntry(env_name="guess_number", is_text_env=False),
+            ),
+        )
         example = {
             "index": 0,
             INPUT_IDS_PROMPT_KEY: [1, 2, 3],
@@ -95,10 +88,31 @@ class TestEnvConfigMerging(unittest.TestCase):
 
         self.assertEqual(len(queue.items), 1)
         request = queue.items[0]
-        self.assertEqual(request.env_config["max_steps"], 4)
-        self.assertEqual(
-            request.env_config["env_configs"], [{"env_name": "counter", "is_text_env": False, "target": 2}]
+        self.assertEqual(request.env_config.max_steps, 4)
+        entry = request.env_config.env_configs["counter"]
+        self.assertFalse(entry.is_text_env)
+        self.assertEqual(entry.kwargs, {"target": 2})
+
+    def test_sample_overrides_max_steps(self):
+        base = EnvConfig(
+            max_steps=10, env_configs=_make_env_configs(EnvConfigEntry(env_name="counter", is_text_env=False))
         )
+        sample = {"max_steps": 3}
+        merged = _merge_env_config(base, sample)
+        self.assertEqual(merged.max_steps, 3)
+        self.assertIn("counter", merged.env_configs)
+
+    def test_sample_kwargs_merge_with_base_kwargs(self):
+        base = EnvConfig(
+            max_steps=5,
+            env_configs=_make_env_configs(
+                EnvConfigEntry(env_name="counter", is_text_env=False, kwargs={"difficulty": "hard"})
+            ),
+        )
+        sample = {"env_configs": [{"env_name": "counter", "target": 7}]}
+        merged = _merge_env_config(base, sample)
+        entry = merged.env_configs["counter"]
+        self.assertEqual(entry.kwargs, {"difficulty": "hard", "target": 7})
 
 
 if __name__ == "__main__":

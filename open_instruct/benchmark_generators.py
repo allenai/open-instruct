@@ -29,7 +29,7 @@ from ray.util import queue as ray_queue
 
 from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_types import PromptRequest
+from open_instruct.data_types import EnvConfig, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 
 logger = logger_utils.setup_logger(__name__)
@@ -341,6 +341,7 @@ def submission_thread(
                     index=start_idx + i,
                     prompt_id=f"batch_{batch_idx}_prompt_{i}",
                     generation_config=generation_config,
+                    env_config=EnvConfig(),
                 )
             )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
@@ -395,6 +396,7 @@ def run_benchmark(
                 index=warmup_start_idx + i,
                 prompt_id=f"warmup_prompt_{i}",
                 generation_config=generation_config,
+                env_config=EnvConfig(),
             )
         )
 

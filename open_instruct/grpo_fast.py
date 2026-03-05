@@ -43,6 +43,7 @@ with contextlib.suppress(Exception):
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
 import asyncio
@@ -1219,17 +1220,13 @@ def create_tool_pools(
     return pools, tool_call_names
 
 
-def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> dict[str, Any] | None:
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> EnvConfig:
     """Build canonical base env config from active pools.
 
     Includes auto-discovered dataset targets so text env routing metadata
     (e.g., is_text_env) is available even when --tools is empty.
     """
-    if not pools:
-        return None
-
-    base_env_config: dict[str, Any] = {"max_steps": tools_config.max_steps}
-    env_configs: list[dict[str, Any]] = []
+    entries: dict[str, EnvConfigEntry] = {}
     registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
 
     for pool_name in sorted(pools):
@@ -1237,13 +1234,10 @@ def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.A
         config_cls = TOOL_REGISTRY.get(registry_name)
         if config_cls is None:
             continue
-        env_configs.append(
-            {"env_name": pool_name, "is_text_env": issubclass(config_cls.tool_class, TextRLEnvironment)}
+        entries[pool_name] = EnvConfigEntry(
+            env_name=pool_name, is_text_env=issubclass(config_cls.tool_class, TextRLEnvironment)
         )
-
-    if env_configs:
-        base_env_config["env_configs"] = env_configs
-    return base_env_config
+    return EnvConfig(max_steps=tools_config.max_steps, env_configs=entries)
 
 
 def create_model_and_optimizer(
@@ -1262,10 +1256,10 @@ def create_model_and_optimizer(
     eval_dataset,
     reward_config: RewardConfig,
     generation_config,
+    base_env_config: EnvConfig,
     data_prep_actor_state: dict | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
-    base_env_config: dict | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
@@ -1865,8 +1859,10 @@ def run_training(
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
     checkpoint_state=None,
-    base_env_config: dict | None = None,
+    base_env_config: EnvConfig | None = None,
 ):
+    if base_env_config is None:
+        base_env_config = EnvConfig()
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
