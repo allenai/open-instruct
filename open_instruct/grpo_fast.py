@@ -1643,6 +1643,7 @@ def one_training_step(
     wandb_url: str,
     chat_template_name: str,
     model_dims: utils.ModelDims,
+    local_eval_start_time: float | None = None,
     actor_manager: ActorManager | None = None,
 ) -> int:
     """Train the model for one step. Returns the number of tokens processed."""
@@ -1710,6 +1711,10 @@ def one_training_step(
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
+    local_eval_time_during_training = 0.0
+    if local_eval_start_time is not None:
+        local_eval_time_during_training = min(time.perf_counter() - local_eval_start_time, train_timer.duration)
+    pure_training_time = max(train_timer.duration - local_eval_time_during_training, 0.0)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1719,7 +1724,7 @@ def one_training_step(
         samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
         num_engines=vllm_config.vllm_num_engines,
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
-        training_time=train_timer.duration,
+        training_time=max(pure_training_time, 1e-9),
         num_training_gpus=args.world_size,
     )
 
@@ -1733,12 +1738,12 @@ def one_training_step(
         "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
         "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
-        "time/training": train_timer.duration,
         "time/saving": save_time,
         **data_thread_metrics,
         **average_metrics,
         **utilization_metrics,
     }
+    metrics["time/training"] = pure_training_time
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
@@ -2352,6 +2357,7 @@ def run_training(
             wandb_url,
             tc.chat_template_name,
             model_dims,
+            local_eval_start_time,
             actor_manager,
         )
         num_total_tokens += num_step_tokens

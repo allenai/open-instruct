@@ -288,6 +288,14 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "qwen_base_boxed_math": (
+        "{{ 'Solve the math problem by reasoning step by step, and put your final answer within \\\\boxed{}.\n' }}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ message['content'] + '\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     "tulu_thinker": (
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
