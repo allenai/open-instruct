@@ -1248,7 +1248,13 @@ class DataPreparationActor:
                 packed_ground_truths = []
                 for dones in packed_sequences.dones:
                     unique_indices = sorted(set(int(d) for d in dones.tolist() if d > 0))
-                    gt_list = [lookup_ground_truths[idx] if idx < len(lookup_ground_truths) else "" for idx in unique_indices]
+                    gt_list = []
+                    for idx in unique_indices:
+                        gt = lookup_ground_truths[idx] if idx < len(lookup_ground_truths) else ""
+                        # Ground truths may be wrapped in a list (e.g., ["42"]). Unwrap to string.
+                        if isinstance(gt, list):
+                            gt = gt[0] if len(gt) > 0 else ""
+                        gt_list.append(str(gt))
                     packed_ground_truths.append(gt_list)
                 packed_sequences.ground_truths = packed_ground_truths
 
