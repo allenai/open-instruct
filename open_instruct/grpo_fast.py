@@ -1661,6 +1661,7 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
+    base_env_config: EnvConfig,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1684,6 +1685,7 @@ def maybe_evaluate(
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -2043,6 +2045,7 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
+            base_env_config,
             actor_manager,
         )
 
