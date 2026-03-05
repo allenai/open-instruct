@@ -221,6 +221,9 @@ def ray_get_with_progress(
             completion_times[idx] = time.perf_counter() - t0
     except TimeoutError as e:
         raise TimeoutError(f"{desc} failed.") from e
+    except Exception as e:
+        logger.error(f"{desc} failed with error: {e}")
+        raise
 
     return results, completion_times
 
