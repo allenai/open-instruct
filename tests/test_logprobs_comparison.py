@@ -129,7 +129,7 @@ def _get_vllm_logprobs(
     )
 
     outputs = llm.generate(
-        prompt_token_ids=[prompt], sampling_params=sampling_params,
+        [{"prompt_token_ids": prompt}], sampling_params=sampling_params,
     )
     output = outputs[0]
 
