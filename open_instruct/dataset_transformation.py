@@ -936,8 +936,8 @@ TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v3: Added per-sample env tool injection in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v3"
+# to invalidate old caches. v4: Invalidate corrupted v3 weka cache.
+DATASET_CACHE_VERSION = "v4"
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
