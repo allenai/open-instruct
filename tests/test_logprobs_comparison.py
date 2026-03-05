@@ -109,7 +109,11 @@ def _get_hf_logprobs(
         logits = output.logits.to(torch.float32)
         logprobs = model_utils.log_softmax_and_gather(logits, input_ids[:, 1:])
         logprobs = logprobs[:, len(query) - 1:]
-    return logprobs.flatten().tolist()
+    result = logprobs.flatten().tolist()
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+    return result
 
 
 def _get_vllm_logprobs(
@@ -146,6 +150,10 @@ def _get_vllm_logprobs(
 
         response.append(token_id)
         logprobs.append(logprob_info.logprob)
+
+    del llm
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return {
         "response": response,
