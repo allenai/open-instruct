@@ -94,7 +94,7 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
-    env_config: EnvConfig
+    env_config: EnvConfig = field(default_factory=EnvConfig)
 
 
 @dataclass
