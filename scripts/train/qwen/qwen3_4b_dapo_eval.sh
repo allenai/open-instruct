@@ -36,8 +36,8 @@ uv run open_instruct/grpo_fast.py \
     --exp_name "${EXP_NAME}" \
     --eval_only \
     --eval_pass_at_k 32 \
-    --eval_top_p 1.0 \
-    --eval_temperature 1.0 \
+    --eval_top_p 0.95 \
+    --eval_temperature 0.6 \
     --eval_response_length 16384 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
