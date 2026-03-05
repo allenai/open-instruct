@@ -876,6 +876,37 @@ class LLMRayActor:
         return int(max_concurrency)
 
 
+def _register_tool_dispatch(
+    pool_name: str,
+    target_actor: Any,
+    target_tools: list[dict[str, Any]] | None,
+    target_response_role: str,
+    existing_actor_map: dict[str, Any],
+) -> tuple[dict[str, Any], set[str], dict[str, str]]:
+    """Map individual tool names exposed by a pool actor for dispatch.
+
+    Returns (actor_map entries, tool names, response_role entries) to merge
+    into the caller's tables.  Raises on name clashes with existing actors.
+    """
+    actor_map: dict[str, Any] = {}
+    tool_names: set[str] = set()
+    response_roles: dict[str, str] = {}
+    if not target_tools:
+        return actor_map, tool_names, response_roles
+    for tool_def in target_tools:
+        name = tool_def["function"]["name"]
+        existing = existing_actor_map.get(name)
+        if existing is not None and existing != target_actor:
+            raise ValueError(
+                f"Target '{pool_name}' exposes tool name '{name}' that clashes with "
+                "another active target. Rename one side to avoid ambiguous dispatch."
+            )
+        actor_map[name] = target_actor
+        tool_names.add(name)
+        response_roles[name] = target_response_role
+    return actor_map, tool_names, response_roles
+
+
 @dataclasses.dataclass
 class PoolSetup:
     """Result of acquiring and resetting all configured tool/env pools for a request."""
@@ -912,25 +943,17 @@ async def _acquire_and_reset_pools(
         actor_map[pool_name] = target_actor
         active_env_names.append(pool_name)
 
-        # setup the environments
         entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
         _, target_tools = await target_actor.reset.remote(**entry.kwargs)
         target_response_role = await target_actor.get_response_role.remote()
         tool_response_roles[pool_name] = target_response_role
 
-        # map the tools to the actor we got them from for dispatch
-        if target_tools:
-            target_tool_names = {t["function"]["name"] for t in target_tools}
-            for name in target_tool_names:
-                existing_target = actor_map.get(name)
-                if existing_target is not None and existing_target != target_actor:
-                    raise ValueError(
-                        f"Target '{pool_name}' exposes tool name '{name}' that clashes with "
-                        "another active target. Rename one side to avoid ambiguous dispatch."
-                    )
-                actor_map[name] = target_actor
-                allowed_tools.add(name)
-                tool_response_roles[name] = target_response_role
+        new_actors, new_tools, new_roles = _register_tool_dispatch(
+            pool_name, target_actor, target_tools, target_response_role, actor_map
+        )
+        actor_map.update(new_actors)
+        allowed_tools.update(new_tools)
+        tool_response_roles.update(new_roles)
 
         if entry.is_text_env:
             text_env_names.append(pool_name)
