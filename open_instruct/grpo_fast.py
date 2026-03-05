@@ -2316,10 +2316,10 @@ def main(
             eval_dataset,
             reward_config,
             generation_configs["train"],
+            base_env_config,
             data_prep_actor_state,
             tool_definitions,
             tools_config,
-            base_env_config,
             pools,
             tool_stop_sequences,
         )
