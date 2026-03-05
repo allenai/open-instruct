@@ -564,8 +564,6 @@ def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, A
     """
     if sample_env_config is None:
         return base_env_config
-    if not isinstance(sample_env_config, dict):
-        raise TypeError(f"sample_env_config must be a dict or None, got {type(sample_env_config).__name__}")
 
     max_steps = sample_env_config.get("max_steps", base_env_config.max_steps)
 
@@ -587,10 +585,8 @@ def add_prompt_to_generator(
     param_prompt_Q: ray_queue.Queue,
     generation_config,
     is_eval: bool,
-    base_env_config: EnvConfig | None = None,
+    base_env_config: EnvConfig,
 ) -> None:
-    if base_env_config is None:
-        base_env_config = EnvConfig()
     index = int(example["index"])
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
@@ -616,7 +612,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
-    base_env_config: EnvConfig | None = None,
+    base_env_config: EnvConfig,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -633,9 +629,6 @@ def accumulate_inference_batches(
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
 ):
-    if base_env_config is None:
-        base_env_config = EnvConfig()
-
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
