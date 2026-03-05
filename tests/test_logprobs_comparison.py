@@ -128,6 +128,7 @@ def _get_vllm_logprobs(
         dtype=DTYPE,
         disable_cascade_attn=True,
         trust_remote_code=True,
+        gpu_memory_utilization=0.5,
     )
 
     sampling_params = vllm.SamplingParams(
