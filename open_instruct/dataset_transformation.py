@@ -936,8 +936,8 @@ TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v4: Normalized env_config into canonical payloads in preprocessing.
-DATASET_CACHE_VERSION = "v4"
+# to invalidate old caches. v5: Normalized env_config into canonical payloads in preprocessing.
+DATASET_CACHE_VERSION = "v5"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
