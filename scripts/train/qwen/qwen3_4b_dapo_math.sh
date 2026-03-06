@@ -40,7 +40,7 @@ uv run open_instruct/grpo_fast.py \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
     --beta 0.0 \
-    --async_steps 2 \
+    --async_steps 4 \
     --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -60,7 +60,7 @@ uv run open_instruct/grpo_fast.py \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
+    --total_episodes 128000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 2 \
     --vllm_num_engines 6 \
@@ -77,6 +77,6 @@ uv run open_instruct/grpo_fast.py \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
-    --load_ref_policy False \
+    --load_ref_policy True \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
