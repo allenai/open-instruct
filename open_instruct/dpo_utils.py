@@ -561,9 +561,14 @@ def build_reference_logprobs_cache(
     total_tokens = 0
     total_examples = 0
 
+    batch_count = 0
+    last_batch = None
+
     with torch.no_grad():
         pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
         for batch in pbar:
+            batch_count += 1
+            last_batch = batch
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -589,6 +594,20 @@ def build_reference_logprobs_cache(
                     "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 }
             )
+
+        if dist.is_initialized() and last_batch is not None:
+            local_count = torch.tensor([batch_count], device=device, dtype=torch.long)
+            max_count = local_count.clone()
+            dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
+            dummy_batches = int(max_count.item()) - batch_count
+            if dummy_batches > 0:
+                logger.info(f"Running {dummy_batches} dummy forward passes to sync with other ranks")
+            for _ in range(dummy_batches):
+                if use_lora and disable_adapter_context is not None:
+                    with disable_adapter_context():
+                        forward_fn(model, last_batch, average_log_prob=average_log_prob, **(forward_kwargs or {}))
+                else:
+                    forward_fn(model, last_batch, average_log_prob=average_log_prob, **(forward_kwargs or {}))
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
