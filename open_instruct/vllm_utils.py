@@ -1233,6 +1233,7 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
+    hf_overrides: dict | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1299,6 +1300,7 @@ def create_vllm_engines(
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
+                hf_overrides=hf_overrides or {},
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),

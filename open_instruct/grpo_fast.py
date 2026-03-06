@@ -48,6 +48,7 @@ from open_instruct.data_types import EnvConfig, EnvConfigEntry
 # isort: on
 import asyncio
 import dataclasses
+import json
 import logging
 import math
 import random
@@ -1356,6 +1357,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        hf_overrides=json.loads(vllm_config.vllm_hf_overrides) if vllm_config.vllm_hf_overrides else None,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
