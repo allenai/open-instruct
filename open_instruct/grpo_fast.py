@@ -1097,6 +1097,11 @@ class PolicyTrainerRayProcess(RayProcess):
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.reference_distribution == "opsd_teacher":
             with Timer("OPSD Teacher Logprob Calculation", noop=self.rank != 0):
+                if self.rank == 0:
+                    has_gts = data_BT.ground_truths is not None
+                    num_gt_batches = len(data_BT.ground_truths) if has_gts else 0
+                    sample_gt = data_BT.ground_truths[0] if has_gts and num_gt_batches > 0 else "NONE"
+                    logger.info(f"[OPSD] ground_truths available: {has_gts}, num_batches: {num_gt_batches}, sample: {sample_gt}")
                 with torch.no_grad():
                     for i in range(num_samples):
                         gt_for_teacher = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
