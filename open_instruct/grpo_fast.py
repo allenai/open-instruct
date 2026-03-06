@@ -1951,6 +1951,52 @@ def maybe_evaluate(
             logger.warning(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
             )
+        dataset_sequence_length_metrics: dict[str, Any] = {}
+        if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) > 0:
+            num_eval_prompts = len(eval_batch_stats.prompt_datasets)
+            if eval_sequence_lengths.size % num_eval_prompts == 0:
+                responses_per_prompt = eval_sequence_lengths.size // num_eval_prompts
+                response_dataset_names = np.repeat(
+                    np.array(eval_batch_stats.prompt_datasets, dtype=object), responses_per_prompt
+                )
+                solved_threshold = max_possible_score - 1e-8
+                solved_mask = scores >= solved_threshold
+
+                for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets):
+                    dataset_mask = response_dataset_names == dataset_name
+                    dataset_sequence_lengths = eval_sequence_lengths[dataset_mask].astype(float)
+                    dataset_sequence_lengths_solved = eval_sequence_lengths[dataset_mask & solved_mask].astype(float)
+                    dataset_sequence_lengths_unsolved = eval_sequence_lengths[dataset_mask & ~solved_mask].astype(
+                        float
+                    )
+                    metric_prefix = f"eval/{dataset_name}"
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_mean"] = float(
+                        dataset_sequence_lengths.mean()
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_solved_mean"] = (
+                        0.0
+                        if len(dataset_sequence_lengths_solved) == 0
+                        else float(dataset_sequence_lengths_solved.mean())
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_unsolved_mean"] = (
+                        0.0
+                        if len(dataset_sequence_lengths_unsolved) == 0
+                        else float(dataset_sequence_lengths_unsolved.mean())
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_solved_hist"] = (
+                        dataset_sequence_lengths_solved
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_unsolved_hist"] = (
+                        dataset_sequence_lengths_unsolved
+                    )
+            else:
+                logger.warning(
+                    "Eval sequence_lengths size %s is not divisible by prompt_datasets size %s; "
+                    "skipping per-dataset sequence length metrics.",
+                    eval_sequence_lengths.size,
+                    num_eval_prompts,
+                )
+
         eval_metrics = {
             "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
@@ -1967,6 +2013,7 @@ def maybe_evaluate(
         for metric_name, pass_rates in dataset_pass_at_by_k.items():
             for k, pass_rate in pass_rates.items():
                 eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
+        eval_metrics.update(dataset_sequence_length_metrics)
         if model_step_mean is not None:
             eval_metrics["eval/model_step_mean"] = float(model_step_mean)
         if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
