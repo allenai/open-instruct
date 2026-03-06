@@ -293,6 +293,7 @@ class VLLMConfig:
     vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
+    vllm_sync_backend: str = "nccl"  # Deprecated no-op; kept for CLI backwards compatibility.
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0

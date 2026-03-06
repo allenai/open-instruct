@@ -445,7 +445,6 @@ class PolicyTrainerRayProcess(RayProcess):
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
-        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
         iterator = vllm_utils.gathered_param_iterator(
             self.model.module, self.args.deepspeed_stage, self.args.gather_whole_model
@@ -455,6 +454,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 iterator=iterator, group=self.model_update_group, packed=self.args.gather_whole_model
             )
         else:
+            # GatheredParameters is collective; all ranks must iterate.
             for _ in iterator:
                 pass
 
