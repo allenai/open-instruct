@@ -13,7 +13,7 @@ model_name_or_path="allenai/Olmo-3-1025-7B"
 # cluster
 cluster=ai2/jupiter
 #template
-chat_template=olmo123 #olmo
+chat_template=olmo
 
 NUM_GPUS=${NUM_GPUS:-8}
 hosted_vllm=""
