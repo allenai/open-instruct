@@ -24,7 +24,7 @@ uv run python open_instruct/grpo_fast.py \
     --num_unique_prompts_rollout 2 \
     --num_samples_per_prompt_rollout 2 \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --temperature 0.7 \
+    --temperature 1.0 \
     --learning_rate 3e-7 \
     --total_episodes 16 \
     --deepspeed_stage 2 \
