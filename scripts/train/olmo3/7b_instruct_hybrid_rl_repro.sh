@@ -31,6 +31,7 @@ uv run python mason.py \
         --image $BEAKER_IMAGE \
         --preemptible \
         --num_nodes 2 \
+        --no_auto_dataset_cache \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env HOSTED_VLLM_API_BASE=$hosted_vllm \
         --env OLMO_SHARED_FS=1 \
