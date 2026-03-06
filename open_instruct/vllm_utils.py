@@ -683,8 +683,12 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
-        logger.info(f"Creating AsyncEngineArgs with hf_overrides={kwargs.get('hf_overrides', 'NOT SET')}")
+        hf_overrides = kwargs.pop("hf_overrides", None)
+        logger.info(f"Creating AsyncEngineArgs with hf_overrides={hf_overrides}")
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
+        if hf_overrides:
+            engine_args.hf_overrides = hf_overrides
+            logger.info(f"Set engine_args.hf_overrides = {engine_args.hf_overrides}")
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
 
