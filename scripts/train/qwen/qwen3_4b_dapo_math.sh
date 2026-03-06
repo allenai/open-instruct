@@ -36,9 +36,9 @@ uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
+    --eval_top_p 0.95 \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
-    --eval_response_length 32768 \
     --beta 0.0 \
     --async_steps 2 \
     --active_sampling \
@@ -56,11 +56,11 @@ uv run open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
-    --pack_length 36864 \
+    --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 256000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 2 \
     --vllm_num_engines 6 \
@@ -76,7 +76,7 @@ uv run open_instruct/grpo_fast.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
-    --chat_template qwen_instruct_boxed_math \
+    --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
