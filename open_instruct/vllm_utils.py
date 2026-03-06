@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import inspect
 import os
 import queue
 import socket
@@ -412,9 +413,10 @@ def init_process_group(
         store = PrefixStore(group_name, store)
 
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
-    # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
-    # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
+    # Detect by function signature instead of string version comparison
+    # (string comparison breaks for "2.10" < "2.6").
+    helper_params = inspect.signature(_new_process_group_helper).parameters
+    pg_options_param_name = "backend_options" if "backend_options" in helper_params else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -1302,6 +1304,7 @@ def create_vllm_engines(
                 dtype=vllm_dtype,
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
+                language_model_only=bool((hf_overrides or {}).get("language_model_only")),
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,

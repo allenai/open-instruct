@@ -41,7 +41,7 @@ uv run --no-sync python open_instruct/grpo_fast.py \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
-    --vllm_hf_overrides '{"language_model_only": true}' \
+    --vllm_hf_overrides '{"language_model_only": true, "architectures": ["Qwen3_5ForCausalLM"]}' \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
