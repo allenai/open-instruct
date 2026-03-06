@@ -136,7 +136,6 @@ COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 
 def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     if isinstance(tokens, dict):
-        logger.warning(f"visualize_token received dict instead of list[int]: keys={list(tokens.keys())}")
         tokens = tokens.get("input_ids", list(tokens.values())[0])
     i = 0
     console = Console()
