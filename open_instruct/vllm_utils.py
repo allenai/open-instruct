@@ -27,7 +27,6 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
-from datetime import timedelta
 from typing import Any
 
 import aiohttp
@@ -43,16 +42,8 @@ import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from torch.distributed.distributed_c10d import (
-    Backend,
-    PrefixStore,
-    ProcessGroup,
-    Store,
-    _new_process_group_helper,
-    _world,
-    default_pg_timeout,
-    rendezvous,
-)
+from vllm.config import WeightTransferConfig
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
@@ -373,63 +364,6 @@ def ray_noset_visible_devices(env_vars=os.environ):
         "RAY_EXPERIMENTAL_NOSET_ONEAPI_DEVICE_SELECTOR",
     ]
     return any(env_vars.get(env_var) for env_var in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST)
-
-
-# Copy from pytorch to allow creating multiple main groups.
-# https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py
-def init_process_group(
-    backend: str | Backend = None,
-    init_method: str | None = None,
-    timeout: timedelta | None = None,
-    world_size: int = -1,
-    rank: int = -1,
-    store: Store | None = None,
-    group_name: str | None = None,
-    pg_options: Any | None = None,
-    device_id: torch.device | int | None = None,
-) -> ProcessGroup:
-    assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
-
-    if store is not None:
-        assert world_size > 0, "world_size must be positive if using store"
-        assert rank >= 0, "rank must be non-negative if using store"
-    elif init_method is None:
-        init_method = "env://"
-
-    backend = Backend(backend) if backend else Backend("undefined")
-
-    if timeout is None:
-        timeout = default_pg_timeout
-
-    # backward compatible API
-    if store is None:
-        rendezvous_iterator = rendezvous(init_method, rank, world_size, timeout=timeout)
-        store, rank, world_size = next(rendezvous_iterator)
-        store.set_timeout(timeout)
-
-        # Use a PrefixStore to avoid accidental overrides of keys used by
-        # different systems (e.g. RPC) in case the store is multi-tenant.
-        store = PrefixStore(group_name, store)
-
-    # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
-    # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
-    # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
-    pg, _ = _new_process_group_helper(
-        world_size,
-        rank,
-        [],
-        backend,
-        store,
-        group_name=group_name,
-        **{pg_options_param_name: pg_options},
-        timeout=timeout,
-        device_id=device_id,
-    )
-
-    _world.pg_group_ranks[pg] = {i: i for i in range(world_size)}
-
-    return pg
 
 
 @backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
@@ -781,61 +715,20 @@ class LLMRayActor:
             [future.result() for future in done]
             finalize_futures = list(not_done)
 
-    def init_process_group(
-        self,
-        master_address: str,
-        master_port: int,
-        rank_offset: int,
-        world_size: int,
-        group_name: str,
-        backend: str,
-        use_ray: bool = False,
-        timeout_minutes: int = 120,
-    ) -> None:
-        future = asyncio.run_coroutine_threadsafe(
-            self.llm_engine.collective_rpc(
-                "init_process_group",
-                args=(
-                    master_address,
-                    master_port,
-                    rank_offset,
-                    world_size,
-                    group_name,
-                    backend,
-                    use_ray,
-                    timeout_minutes,
-                ),
-            ),
-            self.loop,
-        )
-        return future.result(timeout=timeout_minutes * 60)
+    def init_weight_transfer_engine(self, request: dict) -> None:
+        request = WeightTransferInitRequest(**request)
+        return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
+
+    def update_weights(self, request: dict) -> None:
+        while not self.inflight_updates and len(self.active_tasks) > 0:
+            self.check_background_threads()
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        request = WeightTransferUpdateRequest(**request)
+        return self._run_async(self.llm_engine.update_weights(request))
 
     def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
-
-    def _prepare_weight_update(self, name: str, dtype: str) -> None:
-        # Wait for all active requests to complete.
-        while not self.inflight_updates and len(self.active_tasks) > 0:
-            self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-
-        expected_dtype = str(self.llm_engine.model_config.dtype)
-        assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
-
-    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
-
-    def update_weight_cuda_ipc(
-        self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
-    ) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
-        )
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1290,7 +1183,7 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
+                weight_transfer_config=WeightTransferConfig(),
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
                 dtype=vllm_dtype,
@@ -1327,70 +1220,12 @@ def create_vllm_engines(
     return vllm_engines
 
 
-def _send_to_vllm(
-    name: str,
-    param: torch.nn.Parameter,
-    is_last: bool,
-    deepspeed_stage: int,
-    vllm_engines: list[ray.actor.ActorHandle],
-    model_update_group: torch.distributed.ProcessGroup,
-) -> list[ray.ObjectRef]:
-    """Send a parameter to vLLM engines via broadcast."""
-    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
-    refs = [
-        engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
-        for engine in vllm_engines
-    ]
-    torch.distributed.broadcast(param.data, 0, group=model_update_group)
-    return refs
-
-
-def broadcast_weights_to_vllm(
-    model: torch.nn.Module,
-    vllm_engines: list[ray.actor.ActorHandle],
-    model_update_group: torch.distributed.ProcessGroup | None,
-    deepspeed_stage: int,
-    gather_whole_model: bool = True,
-) -> list[ray.ObjectRef]:
-    """Broadcast DeepSpeed model weights to vLLM engines.
-
-    Must be called on ALL ranks when using DeepSpeed stage 3, since
-    GatheredParameters is a collective operation. Only rank 0 actually
-    sends weights to vLLM.
-
-    Args:
-        model: The unwrapped model (model.module from DeepSpeed engine)
-        vllm_engines: List of vLLM engine actor handles
-        model_update_group: Process group for distributed broadcast (only needed on rank 0)
-        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters)
-        gather_whole_model: If True, gather all params at once (more memory, faster).
-            If False, gather each param individually (less memory, slower).
-
-    Returns:
-        List of Ray ObjectRefs for the weight update calls (empty on non-rank-0)
-    """
-    is_rank_0 = torch.distributed.get_rank() == 0
-    params = list(model.named_parameters())
-    num_params = len(params)
-    all_refs: list[ray.ObjectRef] = []
-
+def gathered_param_iterator(model: torch.nn.Module, deepspeed_stage: int, gather_whole_model: bool):
+    ds3 = deepspeed_stage == 3
     if gather_whole_model:
-        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
-            if is_rank_0:
-                for i, (name, param) in enumerate(params):
-                    all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
-                    )
+        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=ds3):
+            yield from model.named_parameters()
     else:
-        for i, (name, param) in enumerate(params):
-            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
-                if is_rank_0:
-                    all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
-                    )
-
-    return all_refs
+        for name, param in model.named_parameters():
+            with deepspeed.zero.GatheredParameters([param], enabled=ds3):
+                yield name, param
