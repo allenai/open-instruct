@@ -24,7 +24,7 @@ uv run python open_instruct/grpo_fast.py \
     --num_unique_prompts_rollout 2 \
     --num_samples_per_prompt_rollout 2 \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --temperature 1.0 \
+    --temperature 0.7 \
     --learning_rate 3e-7 \
     --total_episodes 16 \
     --deepspeed_stage 2 \
@@ -45,6 +45,7 @@ uv run python open_instruct/grpo_fast.py \
     --pool_size 4 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
+    --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \
     --output_dir output/swerl_sandbox_qwen3_4b_debug

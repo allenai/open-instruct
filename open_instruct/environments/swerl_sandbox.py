@@ -32,6 +32,8 @@ logger = logger_utils.setup_logger(__name__)
 
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
+MAX_OUTPUT_CHARS = 10_000
+
 _BASH_TOOL = {
     "type": "function",
     "function": {
@@ -46,15 +48,13 @@ _BASH_TOOL = {
 }
 
 
-def _truncate_output(text: str, num_lines: int = 40) -> str:
-    """Truncate long output keeping first and last *num_lines* lines."""
-    lines = text.splitlines()
-    if len(lines) <= 2 * num_lines:
+def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+    """Truncate keeping first and last half, matching TassieAgent."""
+    if len(text) <= limit:
         return text
-    top = "\n".join(lines[:num_lines])
-    bottom = "\n".join(lines[-num_lines:])
-    divider = "-" * 50
-    return f"{top}\n{divider}\n<Observation truncated in middle for saving context>\n{divider}\n{bottom}"
+    half = limit // 2
+    n_elided = len(text) - limit
+    return f"{text[:half]}\n\n... [{n_elided} characters elided] ...\n\n{text[-half:]}"
 
 
 class SWERLSandboxEnv(RLEnvironment):
@@ -258,7 +258,7 @@ class SWERLSandboxEnv(RLEnvironment):
         if result.exit_code != 0:
             output = f"Exit code {result.exit_code}\n{output}"
 
-        output = _truncate_output(output) if output else "(no output)"
+        output = _truncate(output) if output else "(no output)"
 
         # Check for submit marker
         if SUBMIT_MARKER in (result.stdout or ""):
@@ -281,8 +281,8 @@ class SWERLSandboxEnv(RLEnvironment):
 
         reward = self._parse_reward()
 
-        stdout = _truncate_output(result.stdout) if result.stdout else ""
-        stderr = _truncate_output(result.stderr) if result.stderr else ""
+        stdout = _truncate(result.stdout) if result.stdout else ""
+        stderr = _truncate(result.stderr) if result.stderr else ""
 
         observation = (
             f"Test execution complete.\n"
