@@ -47,15 +47,9 @@ uv run --active open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --save_freq 200 \
-    --gradient_checkpointing \
     --vllm_enable_prefix_caching \
-    --num_learners_per_node 2 \
-    --colocate_train_inference_mode \
-    --vllm_num_engines 2 \
-    --vllm_enforce_eager \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
-    --vllm_tensor_parallel_size 1 \
+    --num_learners_per_node 1 \
+    --vllm_num_engines 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy True \
