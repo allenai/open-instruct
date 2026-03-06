@@ -1438,6 +1438,7 @@ def weight_sync_thread(
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+    pending_engine_update_refs: list[ray.ObjectRef] = []
 
     # Fetch weight metadata once (only rank 0 has it)
     names, dtype_names, shapes = ray.get(policy_group.models[0].get_weight_metadata.remote())
@@ -1463,6 +1464,15 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(True))
             logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
+            if inflight_updates and pending_engine_update_refs:
+                # Surface failures from the previous async engine update before scheduling a new one.
+                ray_get_with_progress(
+                    pending_engine_update_refs,
+                    desc="[Weight Sync Thread] Waiting for previous vLLM engine update RPCs",
+                    enable=False,
+                )
+                pending_engine_update_refs = []
+
             # Kick off engine-side receivers
             engine_update_refs = [engine.update_weights.remote(weight_update_request) for engine in vllm_engines]
 
@@ -1480,6 +1490,8 @@ def weight_sync_thread(
                 ray_get_with_progress(
                     engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
                 )
+            else:
+                pending_engine_update_refs = engine_update_refs
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1498,6 +1510,13 @@ def weight_sync_thread(
             weight_sync_metrics_Q.put_nowait(sync_time_stats)
         except Full:
             logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+
+    if inflight_updates and pending_engine_update_refs:
+        ray_get_with_progress(
+            pending_engine_update_refs,
+            desc="[Weight Sync Thread] Waiting for final vLLM engine update RPCs",
+            enable=False,
+        )
 
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
