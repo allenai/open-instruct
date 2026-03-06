@@ -686,14 +686,14 @@ class LLMRayActor:
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
         hf_overrides = kwargs.pop("hf_overrides", None)
-        logger.info(f"Creating AsyncEngineArgs with hf_overrides={hf_overrides}")
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
-        if hf_overrides:
-            # Try as dict first (native), fall back to JSON string (CLI compat)
+        if hf_overrides and hasattr(engine_args, "hf_overrides"):
             engine_args.hf_overrides = hf_overrides
-            logger.info(f"Set engine_args.hf_overrides = {engine_args.hf_overrides} (type={type(engine_args.hf_overrides).__name__})")
-        engine_args.disable_log_stats = True
-        engine_args.disable_cascade_attn = True
+            logger.info(f"Set engine_args.hf_overrides = {engine_args.hf_overrides}")
+        if hasattr(engine_args, "disable_log_stats"):
+            engine_args.disable_log_stats = True
+        if hasattr(engine_args, "disable_cascade_attn"):
+            engine_args.disable_cascade_attn = True
 
         init_complete = threading.Event()
         self.loop = None
@@ -1288,6 +1288,7 @@ def create_vllm_engines(
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={
+                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
                         "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
                         "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
                     }
@@ -1304,11 +1305,9 @@ def create_vllm_engines(
                 dtype=vllm_dtype,
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
-                language_model_only=bool((hf_overrides or {}).get("language_model_only")),
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
-                hf_overrides=hf_overrides or {},
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),
