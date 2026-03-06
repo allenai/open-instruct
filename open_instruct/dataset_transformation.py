@@ -44,6 +44,7 @@ The main things we are looking for are:
 """
 
 import copy
+import functools
 import hashlib
 import json
 import multiprocessing
@@ -73,6 +74,19 @@ from open_instruct import launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def _patch_apply_chat_template(tokenizer: PreTrainedTokenizer) -> PreTrainedTokenizer:
+    """Wrap apply_chat_template to default return_dict=False (transformers 5.x changed default to True)."""
+    original = tokenizer.apply_chat_template
+
+    @functools.wraps(original)
+    def patched(*args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("return_dict", False)
+        return original(*args, **kwargs)
+
+    tokenizer.apply_chat_template = patched  # type: ignore[method-assign]
+    return tokenizer
 
 
 # ----------------------------------------------------------------------------
@@ -904,7 +918,8 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        return _patch_apply_chat_template(tokenizer)
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
