@@ -1070,7 +1070,9 @@ def concatenated_forward_olmo(
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
-    Uses OLMo-core Transformer interface: model(input_ids) returns logits directly.
+    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
+    correctly under TP+compile, then computes per-token log-probs on the local logits shard
+    to avoid materializing the full (S, vocab) tensor.
 
     Args:
         model: The model to run (OLMo-core style model).
@@ -1089,8 +1091,8 @@ def concatenated_forward_olmo(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     concatenated_labels = concatenated_batch["concatenated_labels"]
-    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
-    per_token_logps = calculate_per_token_logps(logits, concatenated_labels)
+    output = model(concatenated_batch["concatenated_input_ids"], labels=concatenated_labels)
+    per_token_logps = output.loss
 
     if not packing:
         all_logps = _get_batch_logps(per_token_logps, concatenated_labels, average_log_prob=average_log_prob)
@@ -1116,7 +1118,9 @@ def separate_forward_olmo(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
-    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly.
+    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
+    correctly under TP+compile, then computes per-token log-probs on the local logits shard
+    to avoid materializing the full (S, vocab) tensor.
     Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
 
     Args:
@@ -1130,25 +1134,19 @@ def separate_forward_olmo(
     """
     del output_router_logits
     chosen_batch = process_batch(batch, "chosen")
-    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
+    chosen_output = model(chosen_batch["input_ids"], labels=chosen_batch["labels"])
 
-    chosen_logps = _get_batch_logps(
-        calculate_per_token_logps(chosen_logits, chosen_batch["labels"]),
-        chosen_batch["labels"],
-        average_log_prob=average_log_prob,
-    )
-    del chosen_batch, chosen_logits
+    chosen_logps = _get_batch_logps(chosen_output.loss, chosen_batch["labels"], average_log_prob=average_log_prob)
+    del chosen_batch
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
-    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
+    rejected_output = model(rejected_batch["input_ids"], labels=rejected_batch["labels"])
 
     rejected_logps = _get_batch_logps(
-        calculate_per_token_logps(rejected_logits, rejected_batch["labels"]),
-        rejected_batch["labels"],
-        average_log_prob=average_log_prob,
+        rejected_output.loss, rejected_batch["labels"], average_log_prob=average_log_prob
     )
-    del rejected_batch, rejected_logits
+    del rejected_batch
     torch.cuda.empty_cache()
 
     return chosen_logps, rejected_logps, None
@@ -1192,8 +1190,4 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
                 full_key = f"{prefix}{key}"
                 pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
                 result[full_key] = tensor_utils.pad_to_length(result[full_key], max_len, pad_value)
-        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
-        result["attention_mask"] = torch.cat(
-            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
-        )
         return result

@@ -15,6 +15,7 @@ from olmo_core.nn.transformer import TransformerConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from open_instruct import dpo_utils, model_utils
+from open_instruct.olmo_core_train_modules import DPOLMHead
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
@@ -78,6 +79,7 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.olmo_model = TransformerConfig.olmo2_30M(vocab_size=1000).build(init_device="cuda").to(torch.bfloat16)
+        cls.olmo_model.lm_head.__class__ = DPOLMHead
         cls.hf_model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
         cls.hf_model = AutoModelForCausalLM.from_pretrained(cls.hf_model_name, torch_dtype=torch.bfloat16).cuda()
 
