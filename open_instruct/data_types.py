@@ -61,6 +61,24 @@ class GenerationResult:
 
 
 @dataclass
+class EnvConfigEntry:
+    """Entry for a single environment configuration."""
+
+    env_name: str
+    is_text_env: bool
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EnvConfig:
+    """Wrapper for environment configuration + related metadata."""
+
+    max_steps: int = 100
+    env_configs: dict[str, EnvConfigEntry] = field(default_factory=dict)
+    """Mapping from env_name to its configuration entry."""
+
+
+@dataclass
 class PromptRequest:
     """Container for prompt requests sent via Ray queues.
 
@@ -76,8 +94,7 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
-    env_config: dict | None = None
-    """Environment config dict (env_name, max_steps, plus env-specific kwargs). If set, uses environment."""
+    env_config: EnvConfig = field(default_factory=EnvConfig)
 
 
 @dataclass

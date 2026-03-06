@@ -34,6 +34,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, padding_free_collator, utils
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
@@ -562,27 +563,64 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
+def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, Any] | None) -> EnvConfig:
+    """Merge base and sample env config into canonical payload.
+    Sample env_config overrides any base env_configs with the same name.
+    """
+    if sample_env_config is None:
+        return base_env_config
+
+    max_steps = sample_env_config.get("max_steps", base_env_config.max_steps)
+
+    merged = dict(base_env_config.env_configs)
+    for sample_entry in sample_env_config.get("env_configs", []):
+        env_name = sample_entry["env_name"]
+        base = merged.get(env_name)
+        is_text_env = sample_entry.get("is_text_env", base.is_text_env if base else False)
+        extra = {k: v for k, v in sample_entry.items() if k not in ("env_name", "is_text_env")}
+        merged_kwargs = {**(base.kwargs if base else {}), **extra}
+        merged[env_name] = EnvConfigEntry(env_name=env_name, is_text_env=is_text_env, kwargs=merged_kwargs)
+
+    return EnvConfig(max_steps=max_steps, env_configs=merged)
+
+
+def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
+    env_metrics: dict[str, dict[str, list[float]]] = {}
+    for rs in rollout_states:
+        info = rs.get("info", {})
+        multi_env_metrics = info.get("env_metrics")
+        if multi_env_metrics is not None:
+            for ename, per_env in multi_env_metrics.items():
+                bucket = env_metrics.setdefault(ename, {})
+                for k, v in per_env.items():
+                    bucket.setdefault(k, []).append(float(v))
+            continue
+
+        ename = info.get("env_name", "unknown")
+        bucket = env_metrics.setdefault(ename, {})
+        for k, v in info.items():
+            if k != "env_name" and isinstance(v, (int, float)):
+                bucket.setdefault(k, []).append(float(v))
+
+    return {
+        f"env/{ename}/{k}": float(np.mean(vals))
+        for ename, metrics in env_metrics.items()
+        for k, vals in metrics.items()
+    }
+
+
 def add_prompt_to_generator(
     example: dict[str, Any],
     epoch_number: int,
     param_prompt_Q: ray_queue.Queue,
     generation_config,
     is_eval: bool,
-    base_env_config: dict | None = None,
+    base_env_config: EnvConfig,
 ) -> None:
     index = int(example["index"])
 
-    # Merge base env_config with per-sample env_config.
-    # 1. Sample has env_config -> merge with base (sample overrides base)
-    # 2. Sample has no env_config but base has env_name -> use base as-is
-    # 3. Neither -> None (non-env sample)
-    env_config = None
     sample_env_config = example.get(ENV_CONFIG_KEY)
-    if sample_env_config is not None:
-        env_config = dict(base_env_config) if base_env_config else {}
-        env_config.update(sample_env_config)
-    elif base_env_config and base_env_config.get("env_name"):
-        env_config = dict(base_env_config)
+    env_config = _merge_env_config(base_env_config, sample_env_config)
 
     param_prompt_Q.put(
         data_types.PromptRequest(
@@ -604,6 +642,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
+    base_env_config: EnvConfig,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -616,7 +655,6 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
-    base_env_config: dict | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1021,8 +1059,8 @@ class DataPreparationActor:
         tool_names: list[str],
         run_name: str,
         model_name: str | None,
+        base_env_config: EnvConfig,
         initial_state: dict | None = None,
-        base_env_config: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1320,17 +1358,7 @@ class DataPreparationActor:
                     tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
 
-                env_metrics: dict[str, dict[str, list[float]]] = {}
-                for rs in result.request_info.rollout_states:
-                    info = rs.get("info", {})
-                    ename = info.get("env_name", "unknown")
-                    env_specific_metrics = env_metrics.setdefault(ename, {})
-                    for k, v in info.items():
-                        if k != "env_name" and isinstance(v, (int, float)):
-                            env_specific_metrics.setdefault(k, []).append(float(v))
-                for ename, metrics in env_metrics.items():
-                    for k, vals in metrics.items():
-                        step_metrics[f"env/{ename}/{k}"] = np.mean(vals)
+                step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens

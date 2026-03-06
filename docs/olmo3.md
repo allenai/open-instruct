@@ -1,6 +1,9 @@
-# OLMo 3
+# Olmo 3 & Olmo Hybrid
 
-For details on reproducing OLMo 3 models, see the [OLMo 3 training scripts README](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo3/README.md).
+For details on reproducing models, see:
+
+- [Olmo 3 training scripts](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo3/README.md)
+- [Olmo Hybrid training scripts](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo-hybrid/README.md)
 
 ## Tokenizer Settings
 
@@ -20,10 +23,10 @@ This document is a reference for the settings used for Olmo 3, based on the best
 - [32b](https://huggingface.co/allenai/Olmo-3-32B-Think): Training data tokenized with the `olmo_thinker_no_think_sft_tokenization` chat template (otherwise identical, doesn't have olmo identity in the prompt), released with that chat template + the think token in `add_generation_prompt`.
 - Reason for the difference between 7b and 32b: we learned as we went to not have the identity baked into the prompt (so it was easier to fix at the time of the demo in the form of a system prompt) but couldn't afford to retrain 7b thinking model at that point.
 
-**Olmo 3.2+ models:**
+**Olmo 3.2+ models (also used for Olmo Hybrid):**
 
 - **Think SFT data** is tokenized with the Instruct chat template [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev). This template does not include `<think>`, which prevents `<think>` from being masked out during tokenization so the model learns to generate it. (We plan to fix the underlying masking bug so this workaround is no longer needed.)
-- **Think evaluation** should use [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev), which is the instruct chat template plus `<think>` in `add_generation_prompt` (new models should combine tool use abilities from the instruct template with `<think>` for reasoning). Named `3.2` to distinguish from the original OLMo 3 think tokenizers, which did not include function calling.
+- **Think evaluation** should use [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev), which is the instruct chat template plus `<think>` in `add_generation_prompt` (new models should combine tool use abilities from the instruct template with `<think>` for reasoning). Named `3.2` to distinguish from the original Olmo 3 think tokenizers, which did not include function calling.
 - **Think release models** should use [`allenai/olmo-3.2-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-release), which is the same as the think-dev template but with the Olmo identity system prompt.
 - **Instruct release models** should use [`allenai/olmo-3-tokenizer-instruct-release`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-release), which is the same as `instruct-dev` but with the Olmo identity system prompt. This is analogous to how `think-release` differs from `think-dev`.
 
