@@ -16,7 +16,7 @@ echo "Starting SWERL Sandbox environment training (1 GPU, Qwen3.5-0.8B)..."
 
 # Ensure venv is synced first, then force-upgrade transformers (vLLM caps <5 but Qwen3.5 needs >=5.3.0)
 uv sync
-uv pip install --no-deps "transformers>=5.3.0"
+uv pip install --no-deps "transformers>=5.3.0" "huggingface_hub>=0.32.0"
 
 uv run --no-sync python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
