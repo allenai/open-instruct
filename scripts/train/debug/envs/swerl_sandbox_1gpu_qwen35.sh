@@ -14,8 +14,10 @@ export VLLM_USE_V1=1
 
 echo "Starting SWERL Sandbox environment training (1 GPU, Qwen3.5-0.8B)..."
 
-# Ensure venv is synced first, then force-upgrade transformers (vLLM caps <5 but Qwen3.5 needs >=5.3.0)
+# Ensure venv is synced, then install mnoukhov's custom vLLM build (has Qwen3.5 dtypes fix)
+# and force-upgrade transformers (vLLM caps <5 but Qwen3.5 needs >=5.3.0)
 uv sync
+uv pip install /weka/oe-adapt-default/michaeln/vllm/dist/vllm-0.13.0rc2.dev2265+gd35c05dbf.cu128-cp312-cp312-linux_x86_64.whl
 uv pip install --upgrade "huggingface_hub>=0.33.0" "tokenizers>=0.21"
 uv pip install --no-deps "transformers>=5.3.0"
 
