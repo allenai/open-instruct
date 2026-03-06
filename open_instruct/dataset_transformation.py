@@ -73,20 +73,22 @@ from transformers.utils.hub import extract_commit_hash
 from open_instruct import launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
+# Transformers 5.x changed apply_chat_template to return a dict by default.
+# Patch the base class method to default return_dict=False so all existing call
+# sites (20+) continue to get list[int] without modification.
+_original_apply_chat_template = PreTrainedTokenizer.apply_chat_template
+
+
+@functools.wraps(_original_apply_chat_template)
+def _patched_apply_chat_template(self: Any, *args: Any, **kwargs: Any) -> Any:
+    kwargs.setdefault("return_dict", False)
+    return _original_apply_chat_template(self, *args, **kwargs)
+
+
+PreTrainedTokenizer.apply_chat_template = _patched_apply_chat_template  # type: ignore[method-assign]
+
 logger = logger_utils.setup_logger(__name__)
 
-
-def _patch_apply_chat_template(tokenizer: PreTrainedTokenizer) -> PreTrainedTokenizer:
-    """Wrap apply_chat_template to default return_dict=False (transformers 5.x changed default to True)."""
-    original = tokenizer.apply_chat_template
-
-    @functools.wraps(original)
-    def patched(*args: Any, **kwargs: Any) -> Any:
-        kwargs.setdefault("return_dict", False)
-        return original(*args, **kwargs)
-
-    tokenizer.apply_chat_template = patched  # type: ignore[method-assign]
-    return tokenizer
 
 
 # ----------------------------------------------------------------------------
@@ -918,8 +920,7 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
-        return _patch_apply_chat_template(tokenizer)
+        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
