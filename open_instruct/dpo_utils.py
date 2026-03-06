@@ -1070,9 +1070,7 @@ def concatenated_forward_olmo(
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
-    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
-    correctly under TP+compile, then computes per-token log-probs on the local logits shard
-    to avoid materializing the full (S, vocab) tensor.
+    Uses OLMo-core Transformer interface: model(input_ids) returns logits directly.
 
     Args:
         model: The model to run (OLMo-core style model).
@@ -1091,8 +1089,8 @@ def concatenated_forward_olmo(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     concatenated_labels = concatenated_batch["concatenated_labels"]
-    output = model(concatenated_batch["concatenated_input_ids"], labels=concatenated_labels)
-    per_token_logps = output.loss
+    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
+    per_token_logps = calculate_per_token_logps(logits, concatenated_labels)
 
     if not packing:
         all_logps = _get_batch_logps(per_token_logps, concatenated_labels, average_log_prob=average_log_prob)
@@ -1132,19 +1130,25 @@ def separate_forward_olmo(
     """
     del output_router_logits
     chosen_batch = process_batch(batch, "chosen")
-    chosen_output = model(chosen_batch["input_ids"], labels=chosen_batch["labels"])
+    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
 
-    chosen_logps = _get_batch_logps(chosen_output.loss, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch
+    chosen_logps = _get_batch_logps(
+        calculate_per_token_logps(chosen_logits, chosen_batch["labels"]),
+        chosen_batch["labels"],
+        average_log_prob=average_log_prob,
+    )
+    del chosen_batch, chosen_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
-    rejected_output = model(rejected_batch["input_ids"], labels=rejected_batch["labels"])
+    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
 
     rejected_logps = _get_batch_logps(
-        rejected_output.loss, rejected_batch["labels"], average_log_prob=average_log_prob
+        calculate_per_token_logps(rejected_logits, rejected_batch["labels"]),
+        rejected_batch["labels"],
+        average_log_prob=average_log_prob,
     )
-    del rejected_batch
+    del rejected_batch, rejected_logits
     torch.cuda.empty_cache()
 
     return chosen_logps, rejected_logps, None
