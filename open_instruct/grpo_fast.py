@@ -78,6 +78,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -407,49 +408,55 @@ class PolicyTrainerRayProcess(RayProcess):
             with socket.socket() as sock:
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
-                self.vllm_config.vllm_num_engines,
-                self.vllm_config.vllm_tensor_parallel_size,
-            )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            backend = self.vllm_config.vllm_sync_backend
-            refs = [
-                engine.init_process_group.remote(
-                    master_address,
-                    master_port,
-                    i * vllm_tensor_parallel_size + 1,
-                    world_size,
-                    "openrlhf",
-                    backend=backend,
-                    timeout_minutes=self.args.backend_timeout,
+
+            vllm_num_engines = self.vllm_config.vllm_num_engines
+            vllm_tp = self.vllm_config.vllm_tensor_parallel_size
+            world_size = vllm_num_engines * vllm_tp + 1
+
+            engine_refs = [
+                engine.init_weight_transfer_engine.remote(
+                    dict(
+                        init_info=dict(
+                            master_address=master_address,
+                            master_port=master_port,
+                            rank_offset=i * vllm_tp + 1,
+                            world_size=world_size,
+                        )
+                    )
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
+
             torch.cuda.set_device(self.local_rank)
-            self.model_update_group = vllm_utils.init_process_group(
-                backend=backend,
-                init_method=f"tcp://{master_address}:{master_port}",
-                world_size=world_size,
-                rank=0,
-                group_name="openrlhf",
-                timeout=timedelta(minutes=self.args.backend_timeout),
+            self.model_update_group = NCCLWeightTransferEngine.trainer_init(
+                dict(master_address=master_address, master_port=master_port, world_size=world_size)
             )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
+            ray_get_with_progress(engine_refs, desc="Initializing vLLM weight transfer", timeout=600)
+
+            params = list(self.model.module.named_parameters())
+            ds3 = self.args.deepspeed_stage == 3
+            self.weight_names = [n for n, _ in params]
+            self.weight_dtype_names = [str(p.dtype).split(".")[-1] for _, p in params]
+            self.weight_shapes = [list(p.ds_shape if ds3 else p.shape) for _, p in params]
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
-        # Ensure CUDA device is set before broadcast operations.
-        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
-        return vllm_utils.broadcast_weights_to_vllm(
-            model=self.model.module,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            deepspeed_stage=self.args.deepspeed_stage,
-            gather_whole_model=self.args.gather_whole_model,
+        iterator = vllm_utils.gathered_param_iterator(
+            self.model.module, self.args.deepspeed_stage, self.args.gather_whole_model
         )
+        if self.rank == 0:
+            NCCLWeightTransferEngine.trainer_send_weights(
+                iterator=iterator, group=self.model_update_group, packed=self.args.gather_whole_model
+            )
+        else:
+            for _ in iterator:
+                pass
+
+    def get_weight_metadata(self):
+        return self.weight_names, self.weight_dtype_names, self.weight_shapes
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -1423,6 +1430,7 @@ def weight_sync_thread(
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
+    vllm_engines: list[ray.actor.ActorHandle],
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1430,6 +1438,13 @@ def weight_sync_thread(
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+
+    # Fetch weight metadata once (only rank 0 has it)
+    names, dtype_names, shapes = ray.get(policy_group.models[0].get_weight_metadata.remote())
+    weight_update_request = dict(
+        update_info=dict(names=names, dtype_names=dtype_names, shapes=shapes, packed=args.gather_whole_model)
+    )
+
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
 
@@ -1448,28 +1463,23 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(True))
             logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            # Kick off engine-side receivers
+            engine_update_refs = [engine.update_weights.remote(weight_update_request) for engine in vllm_engines]
+
+            # Kick off trainer-side senders
+            trainer_refs: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
             # Wait for all trainer-side broadcasts to finish and collect timing stats.
-            # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
-            weight_broadcast_results, actor_sync_times = ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
+            _, actor_sync_times = ray_get_with_progress(
+                trainer_refs, desc="[Weight Sync Thread] Waiting for weight updates to complete", enable=args.verbose
             )
 
             if not inflight_updates:
                 # Ensure all vLLM engine update RPCs have completed before unpausing actors.
                 # Without waiting here, should_stop may flip to False while updates are still queued.
-                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-                if engine_update_refs:
-                    ray_get_with_progress(
-                        engine_update_refs,
-                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
-                        enable=False,
-                    )
+                ray_get_with_progress(
+                    engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
+                )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1887,6 +1897,7 @@ def run_training(
         stop_event,
         weight_sync_trigger_event,
         policy_group,
+        vllm_engines,
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
