@@ -14,12 +14,9 @@ export VLLM_USE_V1=1
 
 echo "Starting SWERL Sandbox environment training (1 GPU, Qwen3.5-0.8B)..."
 
-# Ensure venv is synced, then install mnoukhov's custom vLLM build (has Qwen3.5 dtypes fix)
-# and force-upgrade transformers (vLLM caps <5 but Qwen3.5 needs >=5.3.0)
-uv sync
-uv pip install /weka/oe-adapt-default/michaeln/vllm/dist/vllm-0.13.0rc2.dev2265+gd35c05dbf.cu128-cp312-cp312-linux_x86_64.whl
-uv pip install --upgrade "huggingface_hub>=0.33.0" "tokenizers>=0.21"
-uv pip install --no-deps "transformers>=5.3.0"
+# NOTE: Qwen3.5 requires a vLLM build with both the dtypes serialization fix
+# and the RMSNormGated activation fix. As of Mar 2026, no official build has both.
+# Using Qwen3-0.6B as a working fallback until vLLM catches up.
 
 uv run --no-sync python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
@@ -30,7 +27,7 @@ uv run --no-sync python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 2 \
     --num_samples_per_prompt_rollout 2 \
-    --model_name_or_path Qwen/Qwen3.5-0.8B \
+    --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 1.0 \
     --learning_rate 3e-7 \
     --total_episodes 16 \
@@ -43,7 +40,7 @@ uv run --no-sync python open_instruct/grpo_fast.py \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
-    --vllm_hf_overrides '{"language_model_only": true, "architectures": ["Qwen3_5ForCausalLM"]}' \
+    
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
@@ -52,7 +49,7 @@ uv run --no-sync python open_instruct/grpo_fast.py \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 4 \
     --max_steps 10 \
-    --tool_parser_type vllm_qwen3_xml \
+    --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \
     --output_dir output/swerl_sandbox_qwen35_debug
