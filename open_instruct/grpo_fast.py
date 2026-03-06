@@ -409,40 +409,43 @@ class PolicyTrainerRayProcess(RayProcess):
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
 
-            vllm_num_engines = self.vllm_config.vllm_num_engines
-            vllm_tp = self.vllm_config.vllm_tensor_parallel_size
-            world_size = vllm_num_engines * vllm_tp + 1
+            world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
+            trainer_init_info = {
+                "master_address": master_address,
+                "master_port": master_port,
+                "world_size": world_size,
+            }
 
             engine_refs = [
                 engine.init_weight_transfer_engine.remote(
-                    dict(
-                        init_info=dict(
-                            master_address=master_address,
-                            master_port=master_port,
-                            rank_offset=i * vllm_tp + 1,
-                            world_size=world_size,
-                        )
-                    )
+                    {
+                        "init_info": {
+                            **trainer_init_info,
+                            "rank_offset": i * self.vllm_config.vllm_tensor_parallel_size + 1,
+                        }
+                    }
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
 
             torch.cuda.set_device(self.local_rank)
-            self.model_update_group = NCCLWeightTransferEngine.trainer_init(
-                dict(master_address=master_address, master_port=master_port, world_size=world_size)
-            )
+            self.model_update_group = NCCLWeightTransferEngine.trainer_init(trainer_init_info)
             ray_get_with_progress(engine_refs, desc="Initializing vLLM weight transfer", timeout=600)
 
             params = list(self.model.module.named_parameters())
             ds3 = self.args.deepspeed_stage == 3
-            self.weight_names = [n for n, _ in params]
-            self.weight_dtype_names = [str(p.dtype).split(".")[-1] for _, p in params]
-            self.weight_shapes = [list(p.ds_shape if ds3 else p.shape) for _, p in params]
+            self._weight_metadata = {
+                "names": [n for n, _ in params],
+                "dtype_names": [str(p.dtype).split(".")[-1] for _, p in params],
+                "shapes": [list(p.ds_shape if ds3 else p.shape) for _, p in params],
+            }
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
+        # Ensure CUDA device is set before broadcast operations.
+        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
         iterator = vllm_utils.gathered_param_iterator(
             self.model.module, self.args.deepspeed_stage, self.args.gather_whole_model
@@ -456,7 +459,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 pass
 
     def get_weight_metadata(self):
-        return self.weight_names, self.weight_dtype_names, self.weight_shapes
+        return self._weight_metadata
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -1440,10 +1443,8 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
 
     # Fetch weight metadata once (only rank 0 has it)
-    names, dtype_names, shapes = ray.get(policy_group.models[0].get_weight_metadata.remote())
-    weight_update_request = dict(
-        update_info=dict(names=names, dtype_names=dtype_names, shapes=shapes, packed=args.gather_whole_model)
-    )
+    weight_metadata = ray.get(policy_group.models[0].get_weight_metadata.remote())
+    weight_update_request = {"update_info": {**weight_metadata, "packed": args.gather_whole_model}}
 
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
