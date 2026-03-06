@@ -34,8 +34,8 @@ def prepare_validation_program_isomorphic(validation_program, positive_pred="eas
     validation_program = re.sub(rf"\b{negative_pred}\b", "neg", validation_program)
     # replace train with mytrain and car with mycar
     # trains must follow a digit pattern train\d+ and cars must follow a pattern car\d+_\d+
-    validation_program = validation_program.replace("(train", "(mytrain")
-    validation_program = validation_program.replace("(car", "(mycar").replace(", car", ", mycar")
+    validation_program = re.sub(r"\b(train)(\d+)\b", r"mytrain\2", validation_program)
+    validation_program = re.sub(r"\b(car)(\d+_\d+)\b", r"mycar\2", validation_program)
     return validation_program
 
 
