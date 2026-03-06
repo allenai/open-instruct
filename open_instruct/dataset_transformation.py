@@ -129,7 +129,7 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     rich_text = Text()
     for i, token in enumerate(tokens):
         color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode([token])
+        decoded_token = tokenizer.decode([int(token)])
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
 
@@ -141,8 +141,8 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
     # for i, token in enumerate():
     for i in range(min(len(tokens), len(masks))):
         token = tokens[i]
-        color = COLORS[masks[i] % len(COLORS)]
-        decoded_token = tokenizer.decode([token])
+        color = COLORS[int(masks[i]) % len(COLORS)]
+        decoded_token = tokenizer.decode([int(token)])
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
 
