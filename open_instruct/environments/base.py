@@ -2,12 +2,17 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal, TypedDict
 
 from openenv.core.env_server.types import Action, Observation, State
 from pydantic import Field
 
 from open_instruct.data_types import ToolCallStats
+
+
+class ToolDefinition(TypedDict):
+    type: Literal["function"]
+    function: dict[str, Any]
 
 
 class EnvCall(Action):
@@ -62,12 +67,12 @@ class RLEnvironment(ABC):
         return {}
 
     @classmethod
-    def get_tool_definitions(cls) -> list[dict]:
+    def get_tool_definitions(cls) -> list[ToolDefinition]:
         """Return tool definitions in OpenAI format for prompt injection."""
         return []
 
     @abstractmethod
-    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[ToolDefinition]]:
         """Initialize episode. Returns (initial observation, tool definitions)."""
         pass
 
@@ -109,7 +114,7 @@ class TextRLEnvironment(RLEnvironment):
         """Subclass hook: initialize episode and return the initial observation."""
         pass
 
-    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[ToolDefinition]]:
         """Initialize episode. Always returns empty tool list for text envs."""
         result = await self._reset(**kwargs)
         return result, []

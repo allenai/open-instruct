@@ -18,10 +18,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest, ChatCompletionToolsParam
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
-from open_instruct.environments.base import EnvCall
+from open_instruct.environments.base import EnvCall, ToolDefinition
 from open_instruct.logger_utils import setup_logger
 from open_instruct.utils import import_class_from_string
 
@@ -62,7 +62,7 @@ class OpenInstructLegacyToolParser(ToolParser):
     Tool names and parameter names are derived from OpenAI-format tool definitions.
     """
 
-    def __init__(self, tool_definitions: list[dict[str, Any]] | None = None, output_wrap_name: str = "output"):
+    def __init__(self, tool_definitions: list[ToolDefinition] | None = None, output_wrap_name: str = "output"):
         self.output_wrap_name = output_wrap_name
 
         if tool_definitions:
@@ -127,7 +127,7 @@ class VllmToolParser(ToolParser):
         tool_parser: VllmNativeToolParser,
         role_templates: dict[str, str],
         stop_sequences: list[str] | None = None,
-        tool_definitions: list[dict[str, Any]] | None = None,
+        tool_definitions: list[ToolDefinition] | None = None,
         output_prefix: str = "",
         output_postfix: str = "<|im_start|>assistant\n",
     ):
@@ -143,7 +143,12 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore
+        tools = (
+            [ChatCompletionToolsParam.model_validate(td) for td in self._tool_definitions]
+            if self._tool_definitions
+            else None
+        )
+        return ChatCompletionRequest(model="dummy", messages=[], tools=tools)
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.
@@ -254,7 +259,7 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
 def create_vllm_parser(
     parser_name: str,
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
-    tool_definitions: list[dict[str, Any]] | None = None,
+    tool_definitions: list[ToolDefinition] | None = None,
 ) -> VllmToolParser:
     """Create a VllmToolParser by name.
 
@@ -292,7 +297,7 @@ class DRTuluToolParser(ToolParser):
     Requires exactly one tool (dr_agent_mcp) in tool_definitions.
     """
 
-    def __init__(self, tool_definitions: list[dict[str, Any]], stop_sequences: list[str]):
+    def __init__(self, tool_definitions: list[ToolDefinition], stop_sequences: list[str]):
         if len(tool_definitions) != 1:
             raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_definitions)}")
 
@@ -327,7 +332,7 @@ def get_available_parsers() -> list[str]:
 def create_tool_parser(
     parser_type: str,
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
-    tool_definitions: list[dict[str, Any]] | None = None,
+    tool_definitions: list[ToolDefinition] | None = None,
     stop_sequences: list[str] | None = None,
 ) -> ToolParser:
     """Create a tool parser instance by type.

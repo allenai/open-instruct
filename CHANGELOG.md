@@ -20,5 +20,6 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fixed `VllmToolParser._make_request` typing by using `ChatCompletionToolsParam` for tool definitions and removing unnecessary casts/ignores (https://github.com/allenai/open-instruct/pull/1504).
 
 ### Removed

@@ -91,7 +91,7 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
-from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment
+from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment, ToolDefinition
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
@@ -2117,7 +2117,7 @@ def initialize_tools_and_envs(
 
     # Collect tool definitions from CLI-specified pools so we know inner tool names
     # (e.g., GenericSandboxEnv exposes "execute_bash" and "str_replace_editor").
-    tool_definitions: list[dict[str, Any]] = []
+    tool_definitions: list[ToolDefinition] = []
     for pool in pools.values():
         actor = ray.get(pool.acquire.remote())
         defs = ray.get(actor.get_tool_definitions.remote())
@@ -2166,7 +2166,7 @@ def initialize_tools_and_envs(
     def_results = all_results[: len(def_refs)]
     stop_results = all_results[len(def_refs) :]
 
-    tool_definitions: list[dict[str, Any]] = []
+    tool_definitions: list[ToolDefinition] = []
     for defs in def_results:
         tool_definitions.extend(defs)
 
