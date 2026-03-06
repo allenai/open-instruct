@@ -43,6 +43,7 @@ with contextlib.suppress(Exception):
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
 import asyncio
@@ -94,7 +95,7 @@ from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment, To
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig, Tool
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -1219,6 +1220,26 @@ def create_tool_pools(
     return pools, tool_call_names
 
 
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> EnvConfig:
+    """Build canonical base env config from active pools.
+
+    Includes auto-discovered dataset targets so text env routing metadata
+    (e.g., is_text_env) is available even when --tools is empty.
+    """
+    entries: dict[str, EnvConfigEntry] = {}
+    registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
+
+    for pool_name in sorted(pools):
+        registry_name = registry_name_by_call_name.get(pool_name, pool_name)
+        config_cls = TOOL_REGISTRY.get(registry_name)
+        if config_cls is None:
+            continue
+        entries[pool_name] = EnvConfigEntry(
+            env_name=pool_name, is_text_env=issubclass(config_cls.tool_class, TextRLEnvironment)
+        )
+    return EnvConfig(max_steps=tools_config.max_steps, env_configs=entries)
+
+
 def create_model_and_optimizer(
     args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
@@ -1235,10 +1256,10 @@ def create_model_and_optimizer(
     eval_dataset,
     reward_config: RewardConfig,
     generation_config,
+    base_env_config: EnvConfig,
     data_prep_actor_state: dict | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
-    base_env_config: dict | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
@@ -1640,6 +1661,7 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
+    base_env_config: EnvConfig,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1663,6 +1685,7 @@ def maybe_evaluate(
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -1838,8 +1861,10 @@ def run_training(
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
     checkpoint_state=None,
-    base_env_config: dict | None = None,
+    base_env_config: EnvConfig | None = None,
 ):
+    if base_env_config is None:
+        base_env_config = EnvConfig()
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
@@ -2020,6 +2045,7 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
+            base_env_config,
             actor_manager,
         )
 
@@ -2056,8 +2082,17 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
         if ENV_CONFIG_KEY in ds.column_names:
             for row in ds:
                 env_cfg = row.get(ENV_CONFIG_KEY)
-                if env_cfg and env_cfg.get("env_name"):
-                    tool_names.add(env_cfg["env_name"])
+                env_cfgs = None
+                if isinstance(env_cfg, dict):
+                    if env_cfg.get("env_name"):
+                        tool_names.add(env_cfg["env_name"])
+                    env_cfgs = env_cfg.get("env_configs")
+                elif isinstance(env_cfg, list):
+                    env_cfgs = env_cfg
+                if isinstance(env_cfgs, list):
+                    for cfg in env_cfgs:
+                        if isinstance(cfg, dict) and cfg.get("env_name"):
+                            tool_names.add(cfg["env_name"])
 
     return tool_names
 
@@ -2266,18 +2301,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = None
-    if tools_config.enabled:
-        base_env_config = {"max_steps": tools_config.max_steps}
-        # TODO: Support multiple concurrent envs per rollout. Currently only one
-        # stateful environment is supported; the rollout loop acquires/resets a
-        # single env and maps its inner tool names to that actor.
-        for parsed in tools_config._parsed_tools:
-            config_cls = TOOL_REGISTRY.get(parsed.name)
-            if config_cls and not issubclass(config_cls.tool_class, Tool):
-                base_env_config["env_name"] = parsed.call_name
-                base_env_config["is_text_env"] = issubclass(config_cls.tool_class, TextRLEnvironment)
-                break
+    base_env_config = build_base_env_config(tools_config, pools)
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2295,10 +2319,10 @@ def main(
             eval_dataset,
             reward_config,
             generation_configs["train"],
+            base_env_config,
             data_prep_actor_state,
             tool_definitions,
             tools_config,
-            base_env_config,
             pools,
             tool_stop_sequences,
         )

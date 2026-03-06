@@ -28,6 +28,11 @@
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_tests.sh`.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 
+# Naming conventions
+- Models OLMo and OLMo 2 (versions <=2) use the "OLMo" capitalization style.
+- Olmo 3, Olmo Hybrid, and later models use "Olmo" (standard proper noun capitalization).
+- Note: "OLMo-core" refers to the software repository and keeps its original capitalization.
+
 # Coding conventions
 - Never use `import logging` or `logging.info()` directly. Always use `logger = logger_utils.setup_logger(__name__)` and `logger.info()`.
 - Imports always go at the top of the file, never inline.
