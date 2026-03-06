@@ -17,7 +17,8 @@ chat_template=olmo
 
 NUM_GPUS=${NUM_GPUS:-8}
 hosted_vllm=""
-exp_name="grpo_hybrid_p64_4_8k_2node"
+commit_hash=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+exp_name="grpo_p64_4_8k_2node_repro_${commit_hash}"
 
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
