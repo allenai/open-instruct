@@ -66,6 +66,18 @@ _DANGEROUS_PREDICATES = frozenset(
 
 _TOKEN_RE = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 
+# Minimal environment for the swipl subprocess.  We intentionally do NOT
+# inherit the parent environment so that API keys, tokens, and other secrets
+# (e.g. from ``secrets.env``) are never visible to untrusted Prolog code.
+_SWIPL_ENV: dict[str, str] = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+
+# Prolog preamble injected at the top of every evaluation program.
+# * ``allow_dot_in_atom`` – disabled to prevent atom-concat tricks.
+# * ``sandboxed_load`` – SWI-Prolog flag that restricts directive execution
+#   during file loading (e.g. :- shell(...) is rejected).  MUST be last
+#   because it blocks all subsequent :- set_prolog_flag(...) directives.
+_PROLOG_SANDBOX_PREAMBLE = ":- set_prolog_flag(allow_dot_in_atom, false).\n:- set_prolog_flag(sandboxed_load, true).\n"
+
 
 def _is_prediction_safe(prediction: str) -> tuple:
     """Return ``(True, None)`` if *prediction* contains only safe Prolog constructs.
@@ -80,6 +92,7 @@ def _is_prediction_safe(prediction: str) -> tuple:
     if dangerous:
         return False, f"Dangerous predicates rejected: {sorted(dangerous)}"
     return True, None
+
 
 def prepare_validation_program(validation_program, positive_pred="eastbound", negative_pred="westbound"):
     """
@@ -184,7 +197,9 @@ check_all :- forall((pos({vars});neg({vars})), check({vars})).
 
     pos_negs = validation_program.count("pos(") + validation_program.count("neg(")
     validation_program = "\n".join(sorted(validation_program.splitlines()))
-    full_program = validation_program + "\n\n" + symbolic_judge + "\n\n" + prediction + "\n\n"
+    full_program = (
+        _PROLOG_SANDBOX_PREAMBLE + "\n" + validation_program + "\n\n" + symbolic_judge + "\n\n" + prediction + "\n\n"
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".pl", mode="w", delete=False) as f:
         f.write(full_program)
@@ -193,9 +208,24 @@ check_all :- forall((pos({vars});neg({vars})), check({vars})).
     result = None
     try:
         eval_start_time = time.time()
-        # Execute the Prolog program
-        cmd = ["swipl", "-s", temp_file, "-g", "check_count(Count), writeln(Count)", "-t", "halt"]
-        result = subprocess.run(cmd, capture_output=True, timeout=timeout, text=True)
+        # Execute the Prolog program in a sandboxed subprocess:
+        # --nosignals  : prevent Prolog from intercepting OS signals
+        # --no-tty     : disable terminal interaction
+        # -f none      : skip user .swiplrc init file
+        cmd = [
+            "swipl",
+            "--nosignals",
+            "--no-tty",
+            "-f",
+            "none",
+            "-s",
+            temp_file,
+            "-g",
+            "check_count(Count), writeln(Count)",
+            "-t",
+            "halt",
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout, text=True, env=_SWIPL_ENV)
         partial_score = 0.0 if result.stdout.strip() == "" else int(result.stdout.strip())
         partial_score = partial_score / pos_negs if pos_negs > 0 else 0.0
 
