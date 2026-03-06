@@ -68,6 +68,7 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import launch_utils, logger_utils
@@ -76,7 +77,7 @@ from open_instruct.utils import hf_whoami, max_num_processes
 # Transformers 5.x changed apply_chat_template to return a dict by default.
 # Patch the base class method to default return_dict=False so all existing call
 # sites (20+) continue to get list[int] without modification.
-_original_apply_chat_template = PreTrainedTokenizer.apply_chat_template
+_original_apply_chat_template = PreTrainedTokenizerBase.apply_chat_template
 
 
 @functools.wraps(_original_apply_chat_template)
@@ -85,7 +86,7 @@ def _patched_apply_chat_template(self: Any, *args: Any, **kwargs: Any) -> Any:
     return _original_apply_chat_template(self, *args, **kwargs)
 
 
-PreTrainedTokenizer.apply_chat_template = _patched_apply_chat_template  # type: ignore[method-assign]
+PreTrainedTokenizerBase.apply_chat_template = _patched_apply_chat_template  # type: ignore[method-assign]
 
 logger = logger_utils.setup_logger(__name__)
 
