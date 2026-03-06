@@ -15,7 +15,7 @@ export VLLM_USE_V1=1
 echo "Starting SWERL Sandbox environment training (1 GPU, Qwen3.5-0.8B)..."
 
 # vLLM nightly caps transformers<5 but Qwen3.5 needs >=5.3.0. Force-upgrade after deps resolve.
-uv run pip install --no-deps "transformers>=5.3.0"
+uv pip install --no-deps "transformers>=5.3.0"
 
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
