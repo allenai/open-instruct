@@ -26,8 +26,8 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
-    "transformers>=4.57.0",
-    "vllm==0.14.1; platform_system != 'Darwin'",
+    "transformers>=5.3.0",
+    "vllm>=0.16.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -74,6 +74,10 @@ explicit = true
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[[tool.uv.index]]
+name = "vllm-nightly"
+url = "https://wheels.vllm.ai/nightly"
 
 [project.optional-dependencies]
 code = [
