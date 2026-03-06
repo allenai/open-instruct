@@ -401,7 +401,6 @@ class PolicyTrainerRayProcess(RayProcess):
         return optimization_steps_done
 
     def setup_model_update_group(self, vllm_engines):
-        self.vllm_engines = vllm_engines
         self.model_update_group = None
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
@@ -1449,6 +1448,8 @@ def weight_sync_thread(
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
 
+    pending_engine_update_refs: list[ray.ObjectRef] = []
+
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
         if not weight_sync_trigger_event.wait(timeout=1.0):
@@ -1463,6 +1464,14 @@ def weight_sync_thread(
             # Set actors to stop
             ray.get(actor_manager.set_should_stop.remote(True))
             logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+
+            if pending_engine_update_refs:
+                ray_get_with_progress(
+                    pending_engine_update_refs,
+                    desc="[Weight Sync Thread] Awaiting previous inflight engine updates",
+                    enable=False,
+                )
+                pending_engine_update_refs = []
 
             # Kick off engine-side receivers
             engine_update_refs = [engine.update_weights.remote(weight_update_request) for engine in vllm_engines]
@@ -1481,6 +1490,8 @@ def weight_sync_thread(
                 ray_get_with_progress(
                     engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
                 )
+            else:
+                pending_engine_update_refs = engine_update_refs
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1499,6 +1510,13 @@ def weight_sync_thread(
             weight_sync_metrics_Q.put_nowait(sync_time_stats)
         except Full:
             logger.warning("[Weight Sync Thread] weight sync metrics queue full, skipping metric")
+
+    if pending_engine_update_refs:
+        ray_get_with_progress(
+            pending_engine_update_refs,
+            desc="[Weight Sync Thread] Awaiting final inflight engine updates",
+            enable=False,
+        )
 
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
