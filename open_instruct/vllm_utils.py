@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import inspect
 import os
 import queue
 import socket
@@ -56,6 +57,7 @@ from torch.distributed.distributed_c10d import (
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
+from vllm.v1.attention.backends.registry import AttentionBackendEnum
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
@@ -411,10 +413,11 @@ def init_process_group(
         # different systems (e.g. RPC) in case the store is multi-tenant.
         store = PrefixStore(group_name, store)
 
-    # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
-    # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
-    # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
+    # NOTE: The pg_options parameter was renamed into backend_options in newer
+    # PyTorch versions. Detect by function signature instead of string version
+    # comparison (e.g. "2.10" vs "2.6").
+    helper_params = inspect.signature(_new_process_group_helper).parameters
+    pg_options_param_name = "backend_options" if "backend_options" in helper_params else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -1215,6 +1218,7 @@ def create_vllm_engines(
     enable_prefix_caching: bool,
     max_model_len: int,
     vllm_gpu_memory_utilization: float = 0.9,
+    vllm_attention_backend: str = "FLASH_ATTN",
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
     tool_parser_type: str = "legacy",
@@ -1259,6 +1263,14 @@ def create_vllm_engines(
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
 
+    try:
+        attention_backend = AttentionBackendEnum[vllm_attention_backend]
+    except KeyError as exc:
+        raise ValueError(
+            f"Invalid vllm_attention_backend={vllm_attention_backend!r}. Must be one of: "
+            "FLASHINFER, FLASH_ATTN, NO_ATTENTION."
+        ) from exc
+
     for i in range(num_engines):
         if use_hybrid_engine:
             bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
@@ -1296,6 +1308,9 @@ def create_vllm_engines(
                 dtype=vllm_dtype,
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
+                attention_backend=attention_backend,
+                language_model_only=True,
+                hf_overrides={"architectures": ["Qwen3_5ForCausalLM"]},
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,

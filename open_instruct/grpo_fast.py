@@ -255,7 +255,6 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_config.attn_implementation,
-            use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
@@ -1339,7 +1338,8 @@ def create_model_and_optimizer(
         vllm_config.vllm_enable_prefix_caching,
         streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
         vllm_config.vllm_gpu_memory_utilization,
-        args.single_gpu_mode,
+        vllm_attention_backend=vllm_config.vllm_attention_backend,
+        single_gpu_mode=args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
@@ -2221,7 +2221,12 @@ def main(
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+    # In single_gpu_mode, avoid runtime_env packaging/rebuild to keep actor workers in
+    # the current Python environment.
+    ray_init_kwargs = {"dashboard_host": "0.0.0.0"}
+    if not args.single_gpu_mode:
+        ray_init_kwargs["runtime_env"] = {"excludes": [".git/"], "env_vars": dict(os.environ)}
+    ray.init(**ray_init_kwargs)
 
     pool_size = tools_config.pool_size
     if pool_size is None:
