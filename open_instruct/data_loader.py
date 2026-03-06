@@ -597,7 +597,7 @@ def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
             if k != "env_name" and isinstance(v, (int, float)):
                 bucket.setdefault(k, []).append(float(v))
 
-    return {f"env/{ename}/{k}": np.mean(vals) for ename, metrics in env_metrics.items() for k, vals in metrics.items()}
+    return {f"env/{ename}/{k}": float(np.mean(vals)) for ename, metrics in env_metrics.items() for k, vals in metrics.items()}
 
 
 def add_prompt_to_generator(
