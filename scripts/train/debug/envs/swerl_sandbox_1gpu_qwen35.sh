@@ -10,7 +10,7 @@ set -e
 
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_USE_V1=0
+export VLLM_USE_V1=1
 
 echo "Starting SWERL Sandbox environment training (1 GPU, Qwen3.5-0.8B)..."
 

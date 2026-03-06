@@ -687,8 +687,9 @@ class LLMRayActor:
         logger.info(f"Creating AsyncEngineArgs with hf_overrides={hf_overrides}")
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         if hf_overrides:
+            # Try as dict first (native), fall back to JSON string (CLI compat)
             engine_args.hf_overrides = hf_overrides
-            logger.info(f"Set engine_args.hf_overrides = {engine_args.hf_overrides}")
+            logger.info(f"Set engine_args.hf_overrides = {engine_args.hf_overrides} (type={type(engine_args.hf_overrides).__name__})")
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
 
@@ -1285,7 +1286,6 @@ def create_vllm_engines(
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={
-                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
                         "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
                         "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
                     }
