@@ -49,7 +49,7 @@ uv run --no-sync python open_instruct/grpo_fast.py \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 4 \
     --max_steps 10 \
-    --tool_parser_type vllm_hermes \
+    --tool_parser_type vllm_qwen3_xml \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \
     --output_dir output/swerl_sandbox_qwen35_debug
