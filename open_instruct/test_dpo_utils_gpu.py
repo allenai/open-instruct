@@ -11,6 +11,7 @@ import tempfile
 import unittest
 
 import torch
+from olmo_core.nn.transformer import TransformerConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from open_instruct import dpo_utils, model_utils
@@ -72,25 +73,11 @@ class TestDataCollatorDatasetIndex(unittest.TestCase):
         self.assertTrue(torch.equal(batch["index"], torch.tensor([0, 1, 2, 3])))
 
 
-class OlmoStyleModel(torch.nn.Module):
-    """Mock OLMo-style model that returns logits directly (not wrapped in an output object)."""
-
-    def __init__(self, vocab_size: int = 1000):
-        super().__init__()
-        self.embed = torch.nn.Embedding(vocab_size, 64)
-        self.linear = torch.nn.Linear(64, vocab_size)
-
-    def forward(
-        self, input_ids: torch.Tensor, doc_lens: torch.Tensor | None = None, max_doc_lens: list[int] | None = None
-    ) -> torch.Tensor:
-        return self.linear(self.embed(input_ids))
-
-
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
 class TestForwardFunctionsOlmo(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.olmo_model = OlmoStyleModel().cuda().to(torch.bfloat16)
+        cls.olmo_model = TransformerConfig.olmo2_30M(vocab_size=1000).build(init_device="cuda").to(torch.bfloat16)
         cls.hf_model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
         cls.hf_model = AutoModelForCausalLM.from_pretrained(cls.hf_model_name, torch_dtype=torch.bfloat16).cuda()
 
