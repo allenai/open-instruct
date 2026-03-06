@@ -75,6 +75,17 @@ from open_instruct.utils import hf_whoami, max_num_processes
 logger = logger_utils.setup_logger(__name__)
 
 
+def _ensure_token_ids(result: Any) -> list[int]:
+    """Extract token IDs from apply_chat_template result regardless of format.
+
+    Transformers 5.x may return a dict with 'input_ids' and 'attention_mask'
+    even when return_dict=False is passed (e.g. for some model-specific templates).
+    """
+    if isinstance(result, dict):
+        return result["input_ids"]
+    return result
+
+
 # ----------------------------------------------------------------------------
 # Utilities
 def get_commit_hash(
@@ -1061,8 +1072,8 @@ def sft_tokenize_v1(
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False))
+    row[INPUT_IDS_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False))
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1076,8 +1087,8 @@ def sft_tokenize_mask_out_prompt_v1(
     """mask out the prompt tokens by manipulating labels"""
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False))
+    row[INPUT_IDS_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False))
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
@@ -1261,15 +1272,15 @@ def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     prompt = row["chosen"][:-1]
 
     # Tokenize prompt
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False))
     row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
 
     # Tokenize chosen completion
-    row[CHOSEN_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["chosen"], return_dict=False)
+    row[CHOSEN_INPUT_IDS_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(row["chosen"], return_dict=False))
     row[CHOSEN_ATTENTION_MASK_KEY] = [1] * len(row[CHOSEN_INPUT_IDS_KEY])
 
     # Tokenize rejected completion
-    row[REJECTED_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["rejected"], return_dict=False)
+    row[REJECTED_INPUT_IDS_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(row["rejected"], return_dict=False))
     row[REJECTED_ATTENTION_MASK_KEY] = [1] * len(row[REJECTED_INPUT_IDS_KEY])
 
     return row
@@ -1400,13 +1411,13 @@ def rlvr_tokenize_v1(
         else:
             tools_for_template = tool_definitions
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+    row[INPUT_IDS_PROMPT_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
-        tools=tools_for_template,  # type: ignore[arg-type],
+        tools=tools_for_template,  # type: ignore[arg-type]
         return_dict=False,
-    )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    ))
+    row[INPUT_IDS_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False))
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1425,8 +1436,8 @@ def rlvr_tokenize_v2(
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False))
+    row[INPUT_IDS_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False))
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough
     if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
@@ -1500,12 +1511,12 @@ def rlvr_tokenize_v3(
 
     tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+    row[INPUT_IDS_PROMPT_KEY] = _ensure_token_ids(tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
-        tools=tools_for_template,  # type: ignore[arg-type],
+        tools=tools_for_template,  # type: ignore[arg-type]
         return_dict=False,
-    )
+    ))
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
     # Get the raw values from the source keys
