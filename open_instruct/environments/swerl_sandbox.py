@@ -14,7 +14,6 @@ Each task has its own files on disk at ``{task_data_dir}/{task_id}/``:
 import contextlib
 import io
 import os
-import shlex
 import tarfile
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -30,16 +29,6 @@ from .tools.utils import coerce_args
 
 logger = logger_utils.setup_logger(__name__)
 
-
-_BASH_WRAPPER = r"""#!/bin/bash
-set -a; source /tmp/.sandbox_env 2>/dev/null; set +a
-cd "$(cat /tmp/.sandbox_cwd 2>/dev/null || echo /workspace)" 2>/dev/null
-eval "$1"
-_exit_code=$?
-export -p > /tmp/.sandbox_env
-pwd > /tmp/.sandbox_cwd
-exit $_exit_code
-"""
 
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
@@ -159,12 +148,7 @@ class SWERLSandboxEnv(RLEnvironment):
         self._step_count = 0
         self._task_id = task_id
 
-        # Set up workspace
-        self._backend.run_command("mkdir -p /workspace")
-        self._backend.write_file("/tmp/.sandbox_bash_wrapper.sh", _BASH_WRAPPER)
-        self._backend.run_command("chmod +x /tmp/.sandbox_bash_wrapper.sh")
-        self._backend.run_command("echo /workspace > /tmp/.sandbox_cwd")
-        self._backend.run_command("mkdir -p /output /logs/verifier")
+        self._backend.run_command("mkdir -p /workspace /output /logs/verifier")
 
         # Load task data if available
         self._instruction = ""
@@ -266,7 +250,7 @@ class SWERLSandboxEnv(RLEnvironment):
         if not command:
             return StepResult(result="Error: 'command' parameter is required.", reward=self._penalty)
 
-        result = self._backend.run_command(f"bash /tmp/.sandbox_bash_wrapper.sh {shlex.quote(command)}")
+        result = self._backend.run_command(command)
 
         output = result.stdout or ""
         if result.stderr:
