@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `SWERLSandboxEnv` for per-sample Docker tasks with submit-based evaluation. Extends `RLEnvironment` directly with `execute_bash`, `str_replace_editor`, and `submit` tools. Each task provides its own instruction, seed files, and test scripts via a task data directory. Includes 1-GPU and 8-GPU debug scripts (https://github.com/allenai/open-instruct/pull/1492).
 - Tensor parallelism (TP) support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1467).
 
 ### Changed
