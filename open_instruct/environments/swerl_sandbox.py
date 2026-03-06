@@ -30,6 +30,8 @@ from .tools.utils import coerce_args
 logger = logger_utils.setup_logger(__name__)
 
 
+
+
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
 MAX_OUTPUT_CHARS = 10_000
@@ -41,7 +43,12 @@ _BASH_TOOL = {
         "description": "Execute a bash command. Each command runs in a new subshell.",
         "parameters": {
             "type": "object",
-            "properties": {"command": {"type": "string", "description": "The bash command to execute."}},
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute.",
+                },
+            },
             "required": ["command"],
         },
     },
@@ -239,7 +246,10 @@ class SWERLSandboxEnv(RLEnvironment):
             args = coerce_args(_BASH_TOOL["function"]["parameters"], call.args)
             return self._execute_bash(args)
         else:
-            return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash", reward=self._penalty)
+            return StepResult(
+                result=f"Error: Unknown tool '{call.name}'. Available: bash",
+                reward=self._penalty,
+            )
 
     # ------------------------------------------------------------------
     # execute_bash
@@ -261,7 +271,7 @@ class SWERLSandboxEnv(RLEnvironment):
         output = _truncate(output) if output else "(no output)"
 
         # Check for submit marker
-        if SUBMIT_MARKER in (result.stdout or ""):
+        if (result.stdout or "").startswith(SUBMIT_MARKER):
             return self._run_tests()
 
         return StepResult(result=output, metadata={"exit_code": result.exit_code})
