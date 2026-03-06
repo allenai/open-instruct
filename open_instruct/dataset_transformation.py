@@ -55,7 +55,7 @@ from typing import Any, Literal
 import numpy as np
 import torch
 import transformers
-from datasets import Dataset, concatenate_datasets, load_dataset
+from datasets import Dataset, Value, concatenate_datasets, load_dataset
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
@@ -1444,6 +1444,40 @@ def rlvr_tokenize_v2(
     return row
 
 
+def slr_bench_prepare_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, **kwargs: Any) -> dict[str, Any]:
+    """
+    Prepare a single AIML-TUDA/SLR-Bench row for RLVR training.
+
+    SLR-Bench provides scalable logical reasoning tasks with verifiable rewards
+    and structured curricula. This transform converts the raw dataset columns
+    (``prompt``, ``validation program``) into the standard RLVR format:
+    tokenised prompt, JSON-serialised ground truth, and verifier source tag.
+
+    Rows that already contain a ``messages`` column are returned unchanged.
+    """
+    if DEFAULT_SFT_MESSAGES_KEY in row:
+        return row
+    prompt = row.get("prompt")
+    validation_program = row.get("validation program") or row.get("validation_program")
+    if prompt is None or validation_program is None:
+        return row
+    prompt += (
+        "\n\nWrap your final Prolog rule in [RULE]...[/RULE] tags. "
+        "Only the content inside these tags will be evaluated. "
+        "Example: [RULE] eastbound(T) :- has_car(T,C), short(C). [/RULE]"
+    )
+    validation_program_dict = {
+        "validation_program": validation_program,
+        "evaluation_config": {"positive_predicate": "eastbound", "negative_predicate": "westbound"},
+    }
+    row[GROUND_TRUTHS_KEY] = json.dumps(validation_program_dict)
+    row[VERIFIER_SOURCE_KEY] = "slr_bench"
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    row[RAW_PROMPT_KEY] = prompt
+    row["id"] = str(row["id"]) + "_slr_bench"
+    return row
+
+
 def _resolve_tools_for_sample(
     row: dict[str, Any], tool_definitions: list[dict[str, Any]] | None, pass_tools: bool
 ) -> list[dict[str, Any]] | None:
@@ -1553,6 +1587,7 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
+    "slr_bench_prepare_v1": (slr_bench_prepare_v1, "map"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
@@ -1631,16 +1666,28 @@ class DatasetConfig:
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         else:
+            # Support dataset name with config, e.g. "AIML-TUDA/SLR-Bench:v1-All"
+            name_for_load = self.dataset_name
+            hf_config = None
+            if ":" in name_for_load:
+                name_for_load, hf_config = name_for_load.split(":", 1)
             # commit hash only works for hf datasets
-            self.dataset_commit_hash = get_commit_hash(
-                self.dataset_name, self.dataset_revision, "README.md", "dataset"
-            )
-            dataset = load_dataset(
-                self.dataset_name,
-                split=self.dataset_split,
-                revision=self.dataset_revision,
-                num_proc=max_num_processes(),
-            )
+            self.dataset_commit_hash = get_commit_hash(name_for_load, self.dataset_revision, "README.md", "dataset")
+            if hf_config:
+                dataset = load_dataset(
+                    name_for_load,
+                    hf_config,
+                    split=self.dataset_split,
+                    revision=self.dataset_revision,
+                    num_proc=max_num_processes(),
+                )
+            else:
+                dataset = load_dataset(
+                    name_for_load,
+                    split=self.dataset_split,
+                    revision=self.dataset_revision,
+                    num_proc=max_num_processes(),
+                )
         assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
         self.dataset = dataset
         if self.dataset_range is None:
@@ -1754,7 +1801,21 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
             raise ValueError(f"Unknown transform function type: {fn_type}")
 
     if len(dataset) == 0:
-        raise ValueError("No examples left after transformation")
+        max_pl = None
+        for d in dc.transform_fn_args or []:
+            if isinstance(d, dict) and "max_prompt_token_length" in d:
+                max_pl = d["max_prompt_token_length"]
+                break
+        hint = f" Try increasing --max_prompt_token_length (current: {max_pl})." if max_pl is not None else ""
+        raise ValueError(
+            f"No examples left after transformation for dataset '{dc.dataset_name}' split '{dc.dataset_split}'."
+            f" All rows may be filtered out by length or the split may be empty.{hint}"
+        )
+
+    # Cast int id to string so this dataset can be concatenated with others that use string id
+    if "id" in dataset.column_names:
+        dataset = dataset.cast_column("id", Value("string"))
+
     return dataset
 
 

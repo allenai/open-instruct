@@ -2074,7 +2074,11 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         split = splits[i // 2]
-        ds = datasets.load_dataset(dataset_name, split=split)
+        # Support dataset name with config, e.g. "AIML-TUDA/SLR-Bench:v1-All"
+        hf_config = None
+        if ":" in dataset_name:
+            dataset_name, hf_config = dataset_name.split(":", 1)
+        ds = datasets.load_dataset(dataset_name, hf_config, split=split)
         if TOOLS_COLUMN_KEY in ds.column_names:
             for tools in ds[TOOLS_COLUMN_KEY]:
                 if tools:

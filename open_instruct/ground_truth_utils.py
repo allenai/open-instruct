@@ -11,6 +11,7 @@ import copy
 import dataclasses
 import json
 import logging
+import math
 import os
 import re
 import string
@@ -95,10 +96,17 @@ class CodeVerifierConfig(VerifierConfig):
 
 
 @dataclasses.dataclass
+class SLRBenchVerifierConfig(VerifierConfig):
+    """Config for the SLR-Bench verifier (scalable logical reasoning with verifiable rewards)."""
+
+
+@dataclasses.dataclass
 class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
+    extra_scores: dict[str, float] | None = None
+    """Optional dict of additional scores for tracking (not used for training reward)."""
 
 
 @dataclasses.dataclass
@@ -1190,6 +1198,245 @@ class RubricVerifier(VerifierFunction):
         return RubricVerifierConfig
 
 
+class SLRBenchVerifier(VerifierFunction):
+    """
+    Verifier for SLR-Bench — scalable logical reasoning with verifiable rewards.
+
+    Each task asks the model to discover a rule that classifies labelled examples.
+    The verifier executes the predicted rule against the task's symbolic
+    validation program via SWI-Prolog (``swipl``) and returns a partial-credit
+    score based on how many examples are classified correctly, plus a simplicity
+    bonus.
+
+    Label format: JSON-serialised dict with:
+      - ``validation_program``: logic program defining positive/negative examples.
+      - ``evaluation_config``: dict with ``positive_predicate`` and
+        ``negative_predicate`` keys (e.g. ``"eastbound"`` / ``"westbound"``).
+    """
+
+    def __init__(self, verifier_config: SLRBenchVerifierConfig) -> None:
+        super().__init__("slr_bench", verifier_config=verifier_config, weight=1.0)
+        from open_instruct.slr.slr_verifier import evaluate_prediction  # noqa: PLC0415
+
+        self._evaluate_prediction = evaluate_prediction
+        logger.info("SLRBenchVerifier: loaded unified slr_verifier module.")
+
+    # Regex to extract content between [RULE] and [/RULE] tags (case-insensitive, dotall)
+    _RULE_TAG_PATTERN = re.compile(r"\[RULE\]\s*(.*?)\s*\[/RULE\]", re.IGNORECASE | re.DOTALL)
+    # Fallback: prolog-labelled code block, then any fenced code block
+    _PROLOG_BLOCK_PATTERN = re.compile(r"```prolog\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+    _CODE_BLOCK_PATTERN = re.compile(r"```(?:[a-zA-Z0-9]*\n)?(.*?)```", re.DOTALL)
+
+    @staticmethod
+    def _extract_prolog_rule(prediction: str) -> tuple[str, bool] | tuple[None, bool]:
+        """Extract the Prolog rule from model output.
+
+        Strips the thinking section, then tries extraction in priority order:
+
+        1. ``[RULE]...[/RULE]`` tags -> ``(content, True)``
+        2. ````prolog...```` fenced block -> ``(content, False)``
+        3. Any fenced code block -> ``(content, False)``
+        4. No match -> ``(None, False)`` (caller should return score 0.0)
+
+        Returns:
+            Tuple of ``(rule_text, format_ok)`` where ``format_ok`` is ``True``
+            only when the preferred ``[RULE]`` tags were used.
+        """
+        cleaned = remove_thinking_section(prediction)
+        if not cleaned.strip():
+            return None, False
+
+        # Tier 1: explicit [RULE] tags
+        match = SLRBenchVerifier._RULE_TAG_PATTERN.search(cleaned)
+        if match:
+            rule_text = match.group(1).strip()
+            if rule_text:
+                return rule_text, True
+
+        # Tier 2: ```prolog ... ``` code block
+        match = SLRBenchVerifier._PROLOG_BLOCK_PATTERN.search(cleaned)
+        if match:
+            rule_text = match.group(1).strip()
+            if rule_text:
+                return rule_text, False
+
+        # Tier 3: any fenced code block
+        match = SLRBenchVerifier._CODE_BLOCK_PATTERN.search(cleaned)
+        if match:
+            rule_text = match.group(1).strip()
+            if rule_text:
+                return rule_text, False
+
+        # No structured format found
+        return None, False
+
+    @staticmethod
+    def get_rule_simplicity_bonus(model_response: str) -> float:
+        """Compute a rule simplicity bonus in [0, 1].
+
+        Encourages concise rules by penalising excessive literals, rule count,
+        and total rule length.  The thresholds are calibrated for ILP domains
+        where correct rules typically require several body literals.
+
+        Returns:
+            Float in [0, 1]; higher means simpler.
+        """
+
+        if not model_response or not model_response.strip():
+            return 0.0
+
+        text = model_response.strip()
+
+        # Extract rule-like statements using regex
+        rule_pattern = r"[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)\s*(?::-\s*[^.]+)?\."
+        rules = re.findall(rule_pattern, text)
+
+        # If no formal rules found, return neutral bonus
+        if not rules:
+            return 0.8  # neutral-safe default
+
+        num_rules = len(rules)
+        total_literals = 0
+        total_length = sum(len(r) for r in rules)
+
+        for rule in rules:
+            if ":-" in rule:
+                _, body = rule.split(":-", 1)
+                literals = [lit.strip() for lit in body.split(",") if lit.strip()]
+                total_literals += len(literals)
+            else:
+                total_literals += 1
+
+        # Gentle penalties suitable for complex ILP domains
+        literal_score = math.exp(-0.035 * max(0, total_literals - 6))
+        rule_count_score = math.exp(-0.08 * max(0, num_rules - 2))
+        length_score = math.exp(-0.001 * max(0, total_length - 120))
+
+        simplicity = 0.6 * literal_score + 0.25 * rule_count_score + 0.15 * length_score
+
+        return max(0.0, min(1.0, simplicity))
+
+    @staticmethod
+    def compute_reward(
+        accuracy: float,
+        partial_score: float,
+        syntax_score: float,
+        rule_simplicity_bonus: float,
+        k: int = 6,
+        partial_gate: float = 0.5,
+    ) -> float:
+        """Compute a scalar reward in [0, 1] for a predicted Prolog rule.
+
+        Full accuracy yields a score in [0.95, 1.0] with a small simplicity
+        modifier.  Partial credit (in [0, 0.9]) is only granted when
+        ``partial_score >= partial_gate``; the raw partial score is raised to
+        the power ``k`` to require near-complete coverage before any reward is
+        given.  ``syntax_score`` is not used in the reward computation.
+
+        Args:
+            accuracy: 1.0 if the rule is fully correct, else 0.0.
+            partial_score: Fraction of examples covered correctly, in [0, 1].
+            syntax_score: Whether the rule parsed successfully (tracked only).
+            rule_simplicity_bonus: Simplicity bonus from
+                :meth:`get_rule_simplicity_bonus`, in [0, 1].
+            k: Exponent applied to partial_score to compress partial credit.
+            partial_gate: Minimum partial_score required for any reward.
+
+        Returns:
+            Float in [0, 1].
+        """
+        if accuracy == 1.0:
+            # Full marks.  Apply a small simplicity modifier [0.95, 1.0]
+            return 0.95 + 0.05 * rule_simplicity_bonus
+
+        # Partial credit: only when the rule covers a meaningful fraction.
+        if partial_score < partial_gate:
+            return 0.0
+
+        # partial_score**k compresses the range: 0.5->0.016, 0.8->0.26, 0.95->0.74
+        # Scale into [0, 0.9] so partial is always strictly below full accuracy.
+        base = partial_score**k
+        # Multiplicative simplicity modifier: scales base by [0.9, 1.0]
+        simplicity_mod = 0.9 + 0.1 * rule_simplicity_bonus
+        return min(0.9, base * simplicity_mod)
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | dict,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        """
+        Score a predicted rule against the SLR-Bench validation program.
+
+        Executes the symbolic judge via SWI-Prolog and returns a partial-credit
+        score. Additional metrics are returned in ``extra_scores`` for logging.
+        """
+        zero = VerificationResult(score=0.0, extra_scores={"slr_bench_isomorphic": 0.0})
+        if not prediction:
+            return zero
+
+        ref = label
+        if isinstance(ref, str):
+            try:
+                ref = json.loads(ref)
+            except json.JSONDecodeError:
+                ref = ref
+        if not isinstance(ref, dict) or "validation_program" not in ref or "evaluation_config" not in ref:
+            logger.warning(
+                "SLRBenchVerifier expected label to be a dict with 'validation_program' and 'evaluation_config'."
+                " Got type=%s. with value %s",
+                type(ref).__name__,
+                ref,
+            )
+            return zero
+
+        rule, format_ok = self._extract_prolog_rule(prediction)
+
+        # If no structured content was found (no tags, no code blocks), return 0.0.
+        if rule is None:
+            return VerificationResult(score=0.0, extra_scores={"slr_bench_isomorphic": 0.0, "slr_bench_format": 0.0})
+
+        rule_simplicity_bonus = self.get_rule_simplicity_bonus(rule)
+
+        validation_program = ref["validation_program"]
+        eval_config = ref.get(
+            "evaluation_config", {"positive_predicate": "eastbound", "negative_predicate": "westbound"}
+        )
+
+        scores: dict[str, float] = {}
+        scores["slr_bench_format"] = 1.0 if format_ok else 0.0  # 1.0 = [RULE] tags used
+        try:
+            result = self._evaluate_prediction(rule, validation_program, eval_config, timeout=5, isomorphic=True)
+        except Exception as e:
+            logger.warning("[SLRBenchVerifier] isomorphic metric failed: %s", e, exc_info=True)
+            scores["slr_bench_isomorphic"] = 0.0
+            return VerificationResult(score=0.0, extra_scores=scores)
+        if result is None:
+            logger.warning("[SLRBenchVerifier] evaluate_prediction returned None.")
+            scores["slr_bench_isomorphic"] = 0.0
+            return VerificationResult(score=0.0, extra_scores=scores)
+        try:
+            accuracy = 1.0 if result["is_correct"] else 0.0
+            partial_score = result["partial_score"]
+            syntax_score = 1.0 if result["syntax_valid"] else 0.0
+            scores["slr_bench_isomorphic"] = self.compute_reward(
+                accuracy, partial_score, syntax_score, rule_simplicity_bonus
+            )
+            scores["slr_bench_solved"] = 1.0 if accuracy == 1.0 else 0.0
+        except (TypeError, ValueError, KeyError) as e:
+            logger.warning("[SLRBenchVerifier] could not read score from result %s: %s", result, e)
+            scores["slr_bench_isomorphic"] = 0.0
+
+        return VerificationResult(score=scores.get("slr_bench_isomorphic", 0.0), extra_scores=scores)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return SLRBenchVerifierConfig
+
+
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given configs.
@@ -1213,6 +1460,11 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
             instance = CodeVerifier(stdio_config)
             instance.name = "code_stdio"
             verifiers["code_stdio"] = instance
+
+        if subclass == SLRBenchVerifier:
+            instance = SLRBenchVerifier(verifier_config)
+            instance.name = "slr_bench"
+            verifiers["slr_bench"] = instance
 
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
@@ -1311,6 +1563,12 @@ async def apply_verifiable_reward(
         response_per_func_rewards[response_idx][dataset] = (
             response_per_func_rewards[response_idx].get(dataset, 0) + weighted_reward
         )
+
+        # Collect extra tracking scores (e.g., both SLR judges)
+        if hasattr(result, "extra_scores") and result.extra_scores:
+            for key, val in result.extra_scores.items():
+                response_per_func_rewards[response_idx].setdefault(key, 0.0)
+                response_per_func_rewards[response_idx][key] += reward_mult * val * reward_weight
 
     return response_rewards, response_per_func_rewards
 
