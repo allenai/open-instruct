@@ -526,7 +526,10 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
+            wait_start_time = time.perf_counter()
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
+            trainer_idle_wait_time = time.perf_counter() - wait_start_time
+            batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
             yield batch_data
 
@@ -1097,13 +1100,21 @@ class DataPreparationActor:
             if self.shutdown_requested:
                 return
 
+            generation_idle_wait_start_time: float | None = None
             while step - self._last_consumed_step > self.config.async_steps:
+                if generation_idle_wait_start_time is None:
+                    generation_idle_wait_start_time = time.perf_counter()
                 if self.shutdown_requested:
                     return
                 logger.info(
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
+            generation_idle_wait_time = (
+                0.0
+                if generation_idle_wait_start_time is None
+                else time.perf_counter() - generation_idle_wait_start_time
+            )
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1148,7 +1159,7 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {}
+                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
                     self.current_prepared_step = step
                 continue
 
@@ -1224,7 +1235,7 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {}
+                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1246,6 +1257,7 @@ class DataPreparationActor:
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "scores": scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
