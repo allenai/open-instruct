@@ -8,6 +8,78 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
+# Prolog built-ins that must never appear in an LLM-predicted rule.
+# Executing untrusted Prolog without this check would allow RCE.
+_DANGEROUS_PREDICATES = frozenset(
+    {
+        # OS / process interaction
+        "shell",
+        "win_exec",
+        "process_create",
+        "exec",
+        # File I/O
+        "open",
+        "close",
+        "read",
+        "write",
+        "read_term",
+        "write_term",
+        "see",
+        "seen",
+        "tell",
+        "told",
+        "stream_property",
+        # Module / file loading
+        "consult",
+        "use_module",
+        "load_files",
+        "ensure_loaded",
+        "include",
+        "load_foreign_library",
+        # Environment
+        "getenv",
+        "setenv",
+        "environ",
+        # Process control
+        "halt",
+        "abort",
+        # Dynamic DB manipulation
+        "assert",
+        "asserta",
+        "assertz",
+        "retract",
+        "retractall",
+        "abolish",
+        # Meta-programming that could bypass restrictions
+        "atom_to_term",
+        "term_to_atom",
+        "term_string",
+        # Threading
+        "thread_create",
+        "thread_join",
+        # Networking
+        "http_open",
+        "tcp_connect",
+        "tcp_socket",
+    }
+)
+
+_TOKEN_RE = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
+
+
+def _is_prediction_safe(prediction: str) -> tuple:
+    """Return ``(True, None)`` if *prediction* contains only safe Prolog constructs.
+
+    Returns ``(False, reason)`` when dangerous predicates or standalone
+    directives are detected.  This is *not* a sandbox — it is a fast reject
+    filter that blocks the most common injection vectors before ``swipl`` is
+    invoked.
+    """
+    tokens = set(_TOKEN_RE.findall(prediction.lower()))
+    dangerous = tokens & _DANGEROUS_PREDICATES
+    if dangerous:
+        return False, f"Dangerous predicates rejected: {sorted(dangerous)}"
+    return True, None
 
 def prepare_validation_program(validation_program, positive_pred="eastbound", negative_pred="westbound"):
     """
@@ -62,6 +134,12 @@ def evaluate_prediction(prediction, validation_program, eval_config, timeout=5, 
     # Extract configuration
     positive_pred = eval_config.get("positive_predicate", "eastbound")
     negative_pred = eval_config.get("negative_predicate", "westbound")
+
+    # Reject predictions containing dangerous Prolog built-ins before execution.
+    safe, reason = _is_prediction_safe(prediction)
+    if not safe:
+        logger.warning("[SLR Reward Model] Unsafe prediction rejected: %s", reason)
+        return {"is_correct": False, "partial_score": 0.0, "syntax_valid": False, "error": reason}
 
     if positive_pred not in prediction:
         p = prediction.replace("\n", " ")
