@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add SLR-Bench support for RLVR training to improve logical reasoning via structured curricula and verifiable rewards. Learning curriculum with increasing difficulty. Verification via logic program execution with efficient and precise feedback with partial credit for partially correct reasoning. Includes SLRBenchVerifier, slr_bench_prepare_v1 dataset transform, SWI-Prolog Docker integration, colon-based HF dataset configs (e.g. AIML-TUDA/SLR-Bench:v1-All), and extra_scores tracking in VerificationResult.
 - Tensor parallelism (TP) support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1467).
 
 ### Changed
