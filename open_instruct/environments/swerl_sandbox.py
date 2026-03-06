@@ -1,6 +1,7 @@
-"""SWERL Sandbox environment — per-sample Docker tasks with submit-based evaluation.
+"""SWERL Sandbox environment — per-sample Docker tasks with bash-only tool loop.
 
-Provides execute_bash, str_replace_editor, and submit tools inside a Docker container.
+Provides a single ``bash`` tool inside a Docker container. The agent submits
+by echoing ``COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT``.
 
 Each task has its own files on disk at ``{task_data_dir}/{task_id}/``:
 - ``instruction.md`` — task description (returned as observation on reset)
@@ -30,10 +31,6 @@ from .tools.utils import coerce_args
 logger = logger_utils.setup_logger(__name__)
 
 
-class _EditorError(Exception):
-    pass
-
-
 _BASH_WRAPPER = r"""#!/bin/bash
 set -a; source /tmp/.sandbox_env 2>/dev/null; set +a
 cd "$(cat /tmp/.sandbox_cwd 2>/dev/null || echo /workspace)" 2>/dev/null
@@ -44,77 +41,18 @@ pwd > /tmp/.sandbox_cwd
 exit $_exit_code
 """
 
-_EXECUTE_BASH_TOOL = {
+SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+
+_BASH_TOOL = {
     "type": "function",
     "function": {
-        "name": "execute_bash",
-        "description": (
-            "Execute a bash command in the terminal.\n"
-            "* Long running commands: Wrap with `timeout`, e.g., `timeout 10 <command>`.\n"
-            "* Interactive: Not possible. Use `yes`/`no`, etc. as appropriate.\n"
-            "* Output: May be truncated. Use `head`/`tail`/`grep` to filter."
-        ),
+        "name": "bash",
+        "description": "Execute a bash command. Each command runs in a new subshell.",
         "parameters": {
             "type": "object",
             "properties": {"command": {"type": "string", "description": "The bash command to execute."}},
             "required": ["command"],
         },
-    },
-}
-
-_STR_REPLACE_EDITOR_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "str_replace_editor",
-        "description": (
-            "Custom editing tool for viewing, creating, and editing files.\n"
-            "* State is persistent across command calls and discussions.\n"
-            "* `view` for reading files/directories, `create` for new files,\n"
-            "  `str_replace` for editing, `insert` for adding lines,\n"
-            "  `undo_edit` to revert the last edit to a file."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "enum": ["view", "create", "str_replace", "insert", "undo_edit"],
-                    "description": "The editor command to run.",
-                },
-                "path": {"type": "string", "description": "Absolute path to file or directory."},
-                "file_text": {
-                    "type": "string",
-                    "description": "Required for `create`. The full content of the new file.",
-                },
-                "old_str": {
-                    "type": "string",
-                    "description": "Required for `str_replace`. The exact string to replace (must appear exactly once).",
-                },
-                "new_str": {
-                    "type": "string",
-                    "description": "Optional for `str_replace` (omit to delete old_str), required for `insert`.",
-                },
-                "insert_line": {
-                    "type": "integer",
-                    "description": "Required for `insert`. Line number after which to insert `new_str`.",
-                },
-                "view_range": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "Optional for `view`. Two-element [start, end] line range.",
-                },
-            },
-            "required": ["command", "path"],
-        },
-    },
-}
-
-_SUBMIT_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "submit",
-        "description": "Submit your solution and run the test suite. Only call when you believe the task is complete.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
 
@@ -133,14 +71,13 @@ def _truncate_output(text: str, num_lines: int = 40) -> str:
 class SWERLSandboxEnv(RLEnvironment):
     """Environment for per-sample coding tasks with Docker-based evaluation.
 
-    Provides three tools:
-    * ``execute_bash`` — stateful bash (env vars, cwd persist between calls)
-    * ``str_replace_editor`` — file viewer/editor (view/create/str_replace/insert)
-    * ``submit`` — runs per-task test script and returns the reward
+    Provides a single ``bash`` tool. The agent submits by echoing
+    ``COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT``, which triggers test
+    execution and returns the reward.
     """
 
     config_name = "swerl_sandbox"
-    _tool_definitions = (_EXECUTE_BASH_TOOL, _STR_REPLACE_EDITOR_TOOL, _SUBMIT_TOOL)
+    _tool_definitions = (_BASH_TOOL,)
 
     def __init__(
         self,
@@ -314,19 +251,11 @@ class SWERLSandboxEnv(RLEnvironment):
 
         self._step_count += 1
 
-        if call.name in ("execute_bash", "bash"):
-            args = coerce_args(_EXECUTE_BASH_TOOL["function"]["parameters"], call.args)
+        if call.name in ("bash", "execute_bash"):
+            args = coerce_args(_BASH_TOOL["function"]["parameters"], call.args)
             return self._execute_bash(args)
-        elif call.name == "str_replace_editor":
-            args = coerce_args(_STR_REPLACE_EDITOR_TOOL["function"]["parameters"], call.args)
-            return self._execute_editor(args)
-        elif call.name == "submit":
-            return self._run_tests()
         else:
-            return StepResult(
-                result=f"Error: Unknown tool '{call.name}'. Available: execute_bash, bash, str_replace_editor, submit",
-                reward=self._penalty,
-            )
+            return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash", reward=self._penalty)
 
     # ------------------------------------------------------------------
     # execute_bash
@@ -335,153 +264,23 @@ class SWERLSandboxEnv(RLEnvironment):
         assert self._backend is not None
         command = args.get("command", "")
         if not command:
-            return StepResult(result="Error: 'command' parameter is required for execute_bash.", reward=self._penalty)
+            return StepResult(result="Error: 'command' parameter is required.", reward=self._penalty)
 
         result = self._backend.run_command(f"bash /tmp/.sandbox_bash_wrapper.sh {shlex.quote(command)}")
 
-        stdout = _truncate_output(result.stdout) if result.stdout else ""
-        stderr = _truncate_output(result.stderr) if result.stderr else ""
-
-        observation = (
-            f"Exit code: {result.exit_code}\n"
-            f"Execution output of [execute_bash]:\n"
-            f"[STDOUT]\n{stdout}\n"
-            f"[STDERR]\n{stderr}"
-        )
-
-        reward = 0.0 if result.exit_code == 0 else self._penalty
-        return StepResult(result=observation, reward=reward, metadata={"exit_code": result.exit_code})
-
-    # ------------------------------------------------------------------
-    # str_replace_editor
-    # ------------------------------------------------------------------
-    def _execute_editor(self, args: dict) -> StepResult:
-        assert self._backend is not None
-        command = args.get("command", "")
-        path = args.get("path", "")
-
-        if not command:
-            return self._editor_error("'command' parameter is required.")
-        if not path:
-            return self._editor_error("'path' parameter is required.")
-
-        try:
-            if command == "view":
-                output = self._editor_view(path, args.get("view_range"))
-            elif command == "create":
-                output = self._editor_create(path, args.get("file_text"))
-            elif command == "str_replace":
-                output = self._editor_str_replace(path, args.get("old_str"), args.get("new_str"))
-            elif command == "insert":
-                output = self._editor_insert(path, args.get("insert_line"), args.get("new_str"))
-            elif command == "undo_edit":
-                output = self._editor_undo(path)
-            else:
-                return self._editor_error(
-                    f"Unknown command '{command}'. Use view/create/str_replace/insert/undo_edit."
-                )
-        except (_EditorError, FileNotFoundError, IsADirectoryError) as exc:
-            return self._editor_error(str(exc))
-
-        return StepResult(result=f"Execution output of [str_replace_editor]:\n{output}")
-
-    def _editor_view(self, path: str, view_range: list[int] | None = None) -> str:
-        assert self._backend is not None
-        check = self._backend.run_command(f"test -d {shlex.quote(path)}")
-        is_dir = check.exit_code == 0
-
-        if is_dir:
-            result = self._backend.run_command(
-                f'find {shlex.quote(path)} -maxdepth 2 -not -path "*/.*" | sort | head -100'
-            )
-            return _truncate_output(result.stdout)
-
-        if view_range and len(view_range) == 2:
-            start, end = view_range
-            cmd = f"cat -n {shlex.quote(path)} | sed -n '{start},{end}p'"
-        else:
-            cmd = f"cat -n {shlex.quote(path)}"
-
-        result = self._backend.run_command(cmd)
+        output = result.stdout or ""
+        if result.stderr:
+            output += f"\nSTDERR:\n{result.stderr}"
         if result.exit_code != 0:
-            raise _EditorError(f"Failed to view '{path}': {result.stderr or result.stdout}")
-        return _truncate_output(result.stdout)
+            output = f"Exit code {result.exit_code}\n{output}"
 
-    def _editor_create(self, path: str, file_text: str | None) -> str:
-        assert self._backend is not None
-        if file_text is None:
-            raise _EditorError("'file_text' parameter is required for create.")
+        output = _truncate_output(output) if output else "(no output)"
 
-        if self._backend.run_command(f"test -d {shlex.quote(path)}").exit_code == 0:
-            raise _EditorError(f"'{path}' is a directory. Cannot create a file with the same name.")
-        if self._backend.run_command(f"test -e {shlex.quote(path)}").exit_code == 0:
-            raise _EditorError(f"File '{path}' already exists. Use str_replace to edit.")
+        # Check for submit marker
+        if SUBMIT_MARKER in (result.stdout or ""):
+            return self._run_tests()
 
-        parent = "/".join(path.rsplit("/", 1)[:-1]) or "/"
-        mkdir_result = self._backend.run_command(f"mkdir -p {shlex.quote(parent)}")
-        if mkdir_result.exit_code != 0:
-            raise _EditorError(f"Failed to create directory '{parent}': {mkdir_result.stderr or mkdir_result.stdout}")
-
-        try:
-            self._backend.write_file(path, file_text)
-        except Exception as e:
-            raise _EditorError(f"Failed to write file '{path}': {e}") from e
-        return f"File created successfully at: {path}"
-
-    def _editor_str_replace(self, path: str, old_str: str | None, new_str: str | None) -> str:
-        assert self._backend is not None
-        if old_str is None:
-            raise _EditorError("'old_str' parameter is required for str_replace.")
-        if new_str is None:
-            new_str = ""
-
-        content = self._backend.read_file(path)
-        if isinstance(content, bytes):
-            content = content.decode("utf-8", errors="replace")
-
-        count = content.count(old_str)
-        if count == 0:
-            raise _EditorError(f"old_str not found in {path}. Make sure it matches exactly.")
-        if count > 1:
-            raise _EditorError(f"old_str found {count} times in {path}. It must appear exactly once.")
-
-        self._backend.run_command(f"cp {shlex.quote(path)} {shlex.quote(path + '.bak')}")
-        new_content = content.replace(old_str, new_str, 1)
-        self._backend.write_file(path, new_content)
-        return f"The file {path} has been edited. Review the changes with `view`."
-
-    def _editor_insert(self, path: str, insert_line: int | None, new_str: str | None) -> str:
-        assert self._backend is not None
-        if insert_line is None:
-            raise _EditorError("'insert_line' parameter is required for insert.")
-        if new_str is None:
-            raise _EditorError("'new_str' parameter is required for insert.")
-
-        content = self._backend.read_file(path)
-        if isinstance(content, bytes):
-            content = content.decode("utf-8", errors="replace")
-
-        lines = content.splitlines(keepends=True)
-        idx = max(0, min(insert_line, len(lines)))
-        insert_text = new_str if new_str.endswith("\n") else new_str + "\n"
-        insert_lines = insert_text.splitlines(keepends=True)
-        new_lines = lines[:idx] + insert_lines + lines[idx:]
-        self._backend.run_command(f"cp {shlex.quote(path)} {shlex.quote(path + '.bak')}")
-        self._backend.write_file(path, "".join(new_lines))
-        return f"The file {path} has been edited. Review the changes with `view`."
-
-    def _editor_undo(self, path: str) -> str:
-        """Revert the last edit to a file by restoring from .bak."""
-        assert self._backend is not None
-        bak_path = path + ".bak"
-        check = self._backend.run_command(f"test -f {shlex.quote(bak_path)} && echo EXISTS")
-        if check.stdout.strip() != "EXISTS":
-            raise _EditorError(f"No undo history for {path}.")
-        self._backend.run_command(f"mv {shlex.quote(bak_path)} {shlex.quote(path)}")
-        return f"Last edit to {path} has been undone."
-
-    def _editor_error(self, message: str) -> StepResult:
-        return StepResult(result=f"Execution output of [str_replace_editor]:\nERROR: {message}", reward=self._penalty)
+        return StepResult(result=output, metadata={"exit_code": result.exit_code})
 
     # ------------------------------------------------------------------
     # submit (test execution)
