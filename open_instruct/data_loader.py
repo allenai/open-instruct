@@ -39,6 +39,7 @@ from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    INPUT_IDS_PROMPT_TEACHER_KEY,
     RAW_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
@@ -611,15 +612,17 @@ def add_prompt_to_generator(
     generation_config,
     is_eval: bool,
     base_env_config: EnvConfig,
+    pi_distill: bool = False,
 ) -> None:
     index = int(example["index"])
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
 
+    prompt_key = INPUT_IDS_PROMPT_TEACHER_KEY if (pi_distill and INPUT_IDS_PROMPT_TEACHER_KEY in example) else INPUT_IDS_PROMPT_KEY
     param_prompt_Q.put(
         data_types.PromptRequest(
-            prompt=example[INPUT_IDS_PROMPT_KEY],
+            prompt=example[prompt_key],
             generation_config=generation_config,
             index=index,
             prompt_id=f"{epoch_number}_{index}",
@@ -650,6 +653,7 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    pi_distill: bool = False,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -734,6 +738,7 @@ def accumulate_inference_batches(
                 generation_config,
                 is_eval=False,
                 base_env_config=base_env_config,
+                pi_distill=pi_distill,
             )
 
         for i in range(len(result.finish_reasons)):
@@ -951,6 +956,9 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_packed_ground_truths = None
+        if packed_sequences.ground_truths is not None:
+            per_device_packed_ground_truths = packed_sequences.ground_truths[B * i : B * (i + 1)]
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -960,6 +968,7 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_ground_truths = [] if per_device_packed_ground_truths is not None else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -980,6 +989,10 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            if collated_ground_truths is not None:
+                collated_ground_truths.append(
+                    [per_device_packed_ground_truths[idx] for idx in micro_range]
+                )
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -988,6 +1001,7 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                ground_truths=collated_ground_truths,
             )
         )
     return collated_data
@@ -1025,11 +1039,13 @@ class DataPreparationActor:
         model_name: str | None,
         base_env_config: EnvConfig,
         initial_state: dict | None = None,
+        pi_distill: bool = False,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
         self.config = config
+        self.pi_distill = pi_distill
         self.config.max_possible_score = max_possible_score
         self.generation_config = generation_config
         self.num_training_steps = num_training_steps
@@ -1091,6 +1107,7 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
                 base_env_config=self.base_env_config,
+                pi_distill=self.pi_distill,
             )
 
         for step in range(self.training_step, self.num_training_steps):
@@ -1126,6 +1143,7 @@ class DataPreparationActor:
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
+                pi_distill=self.pi_distill,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1218,6 +1236,25 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+
+            if self.pi_distill and batch.ground_truths is not None:
+                packed_ground_truths: list[list[str]] = []
+                for dones_tensor in packed_sequences.dones:
+                    dones_np = dones_tensor.numpy()
+                    pack_gts: list[str] = []
+                    for d in dones_np:
+                        if d > 0:
+                            seq_idx = int(d) - 1
+                            gt = batch.ground_truths[seq_idx]
+                            if isinstance(gt, list):
+                                gt_text = gt[0] if len(gt) > 0 else ""
+                                if isinstance(gt_text, list) and len(gt_text) > 0:
+                                    gt_text = gt_text[0]
+                            else:
+                                gt_text = str(gt)
+                            pack_gts.append(str(gt_text))
+                    packed_ground_truths.append(pack_gts)
+                packed_sequences.ground_truths = packed_ground_truths
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id

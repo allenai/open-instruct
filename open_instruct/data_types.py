@@ -107,9 +107,15 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    # pi-Distill: per-packed-sequence ground truths for GT-conditioned teacher forward pass.
+    # Each element is a list of ground truth strings, one per sub-sequence in the pack.
+    ground_truths: list[list[str]] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+        return CollatedBatchData(**{
+            f.name: getattr(self, f.name)[idx] if getattr(self, f.name) is not None else None
+            for f in dataclasses.fields(self)
+        })
 
     def __len__(self) -> int:
         return len(self.query_responses)

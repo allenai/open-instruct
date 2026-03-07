@@ -1040,6 +1040,12 @@ REJECTED_ATTENTION_MASK_KEY = "rejected_attention_mask"
 REJECTED_LABELS_KEY = "rejected_labels"
 
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
+INPUT_IDS_PROMPT_TEACHER_KEY = "input_ids_prompt_teacher"
+
+PI_DISTILL_TEACHER_TEMPLATE = (
+    "Here is a reference answer: {answer}. "
+    "After understanding the reference solution, solve the problem using your own approach."
+)
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
 
 TOKENIZED_PREFERENCE_DATASET_KEYS = [
@@ -1369,6 +1375,7 @@ def rlvr_tokenize_v1(
     system_prompt_override: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
+    pi_distill: bool = False,
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
@@ -1402,6 +1409,25 @@ def rlvr_tokenize_v1(
     row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
+
+    if pi_distill:
+        gt = row[ground_truths_key]
+        gt_text = gt[0] if isinstance(gt, list) and len(gt) > 0 else str(gt)
+        teacher_system_content = PI_DISTILL_TEACHER_TEMPLATE.format(answer=gt_text)
+        teacher_prompt = list(prompt)
+        if teacher_prompt and teacher_prompt[0]["role"] == "system":
+            teacher_prompt[0] = {
+                "role": "system",
+                "content": teacher_prompt[0]["content"] + "\n\n" + teacher_system_content,
+            }
+        else:
+            teacher_prompt = [{"role": "system", "content": teacher_system_content}] + teacher_prompt
+        row[INPUT_IDS_PROMPT_TEACHER_KEY] = tokenizer.apply_chat_template(
+            teacher_prompt,
+            add_generation_prompt=True,
+            tools=tools_for_template,  # type: ignore[arg-type]
+        )
+
     return row
 
 
@@ -1474,6 +1500,7 @@ def rlvr_tokenize_v3(
     system_prompt_override: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
+    pi_distill: bool = False,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1513,6 +1540,34 @@ def rlvr_tokenize_v3(
 
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
+
+    if pi_distill:
+        gt = ground_truths_val
+        if isinstance(gt, list):
+            gt_text = gt[0] if len(gt) > 0 else ""
+            if isinstance(gt_text, list) and len(gt_text) > 0:
+                gt_text = gt_text[0]
+        else:
+            gt_text = str(gt)
+        teacher_system_content = PI_DISTILL_TEACHER_TEMPLATE.format(answer=gt_text)
+        teacher_prompt = list(prompt)
+        if teacher_prompt and teacher_prompt[0]["role"] == "system":
+            teacher_prompt[0] = {
+                "role": "system",
+                "content": teacher_prompt[0]["content"] + "\n\n" + teacher_system_content,
+            }
+        else:
+            teacher_prompt = [{"role": "system", "content": teacher_system_content}] + teacher_prompt
+        row[INPUT_IDS_PROMPT_TEACHER_KEY] = tokenizer.apply_chat_template(
+            teacher_prompt,
+            add_generation_prompt=True,
+            tools=tools_for_template,  # type: ignore[arg-type]
+        )
+        if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_TEACHER_KEY]:
+            row[INPUT_IDS_PROMPT_TEACHER_KEY] = [
+                x for x in row[INPUT_IDS_PROMPT_TEACHER_KEY] if x != tokenizer.pad_token_id
+            ]
+
     return row
 
 

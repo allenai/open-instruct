@@ -505,6 +505,137 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
         self.local_metrics["_token_count"] = total_valid_tokens
 
+    def _compute_teacher_logprobs_with_gt(
+        self,
+        query_response: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        ground_truths: list[str],
+    ) -> torch.Tensor:
+        """Compute teacher logprobs by inserting GT prefix into each sub-sequence.
+
+        For each sub-sequence in the packed batch, inserts a teacher prompt containing
+        the ground truth answer before the response tokens. Runs the model on the
+        expanded sequence and extracts logprobs at the original response token positions.
+
+        Returns logprobs of shape (B, L-1), aligned with standard logprobs.
+        """
+        from open_instruct.dataset_transformation import PI_DISTILL_TEACHER_TEMPLATE
+
+        batch_size, orig_len = query_response.shape
+        device = query_response.device
+        padding_mask = query_response != self.pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+
+        expanded_ids_list = []
+        expanded_attn_list = []
+        expanded_pos_list = []
+        orig_position_masks = []
+
+        for b in range(batch_size):
+            gt_list = ground_truths[b] if b < len(ground_truths) else []
+            if isinstance(gt_list, str):
+                gt_list = [gt_list]
+            seq_ids = input_ids[b]
+            seq_attn = attention_mask[b].clamp(0, 1)
+            seq_pos = position_ids[b]
+
+            boundary_indices = [0]
+            for t in range(1, orig_len):
+                if seq_pos[t] == 0 and seq_attn[t] > 0:
+                    boundary_indices.append(t)
+
+            new_ids_parts = []
+            new_attn_parts = []
+            new_pos_parts = []
+            is_orig = []
+            gt_idx = 0
+
+            for seg_i, start in enumerate(boundary_indices):
+                end_pos = boundary_indices[seg_i + 1] if seg_i + 1 < len(boundary_indices) else orig_len
+                gt_text = gt_list[gt_idx] if gt_idx < len(gt_list) else ""
+                gt_idx += 1
+
+                seg_resp_mask = response_mask[b, start:end_pos]
+                resp_start_in_seg = None
+                for t in range(len(seg_resp_mask)):
+                    if seg_resp_mask[t] > 0:
+                        resp_start_in_seg = t
+                        break
+
+                if gt_text and resp_start_in_seg is not None:
+                    prefix_text = PI_DISTILL_TEACHER_TEMPLATE.format(answer=gt_text) + "\n"
+                    prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
+                    prefix_len = len(prefix_tokens)
+                    prefix_ids = torch.tensor(prefix_tokens, device=device, dtype=seq_ids.dtype)
+                    prefix_attn = torch.ones(prefix_len, device=device, dtype=seq_attn.dtype)
+
+                    query_end = start + resp_start_in_seg
+                    query_ids = seq_ids[start:query_end]
+                    query_attn = seq_attn[start:query_end]
+                    query_pos = seq_pos[start:query_end]
+
+                    resp_ids = seq_ids[query_end:end_pos]
+                    resp_attn = seq_attn[query_end:end_pos]
+
+                    query_max_pos = query_pos[-1].item() + 1 if len(query_pos) > 0 else 0
+                    prefix_pos = torch.arange(query_max_pos, query_max_pos + prefix_len, device=device, dtype=seq_pos.dtype)
+                    resp_pos = torch.arange(query_max_pos + prefix_len, query_max_pos + prefix_len + len(resp_ids), device=device, dtype=seq_pos.dtype)
+
+                    new_ids_parts.extend([query_ids, prefix_ids, resp_ids])
+                    new_attn_parts.extend([query_attn, prefix_attn, resp_attn])
+                    new_pos_parts.extend([query_pos, prefix_pos, resp_pos])
+                    is_orig.extend([True] * len(query_ids))
+                    is_orig.extend([False] * prefix_len)
+                    is_orig.extend([True] * len(resp_ids))
+                else:
+                    new_ids_parts.append(seq_ids[start:end_pos])
+                    new_attn_parts.append(seq_attn[start:end_pos])
+                    new_pos_parts.append(seq_pos[start:end_pos])
+                    is_orig.extend([True] * (end_pos - start))
+
+            expanded_ids_list.append(torch.cat(new_ids_parts))
+            expanded_attn_list.append(torch.cat(new_attn_parts))
+            expanded_pos_list.append(torch.cat(new_pos_parts))
+            orig_position_masks.append(is_orig)
+
+        max_len = max(t.shape[0] for t in expanded_ids_list)
+        padded_ids = torch.full((batch_size, max_len), self.pad_token_id, device=device, dtype=input_ids.dtype)
+        padded_attn = torch.zeros(batch_size, max_len, device=device, dtype=attention_mask.dtype)
+        padded_pos = torch.zeros(batch_size, max_len, device=device, dtype=position_ids.dtype)
+
+        for b in range(batch_size):
+            L = expanded_ids_list[b].shape[0]
+            padded_ids[b, :L] = expanded_ids_list[b]
+            padded_attn[b, :L] = expanded_attn_list[b]
+            padded_pos[b, :L] = expanded_pos_list[b]
+
+        output = self.model(
+            input_ids=padded_ids,
+            attention_mask=padded_attn.clamp(0, 1),
+            position_ids=padded_pos,
+            return_dict=True,
+        )
+        logits = getattr(output, "logits", output)
+        logits = logits / (self.streaming_config.temperature + 1e-7)
+
+        result_logprobs = torch.zeros(batch_size, orig_len - 1, device=device, dtype=torch.float32)
+        labels = query_response[:, 1:].clone()
+        labels[labels == self.pad_token_id] = 0
+
+        for b in range(batch_size):
+            orig_indices = [j for j, is_o in enumerate(orig_position_masks[b]) if is_o]
+            for orig_idx in range(orig_len - 1):
+                if orig_idx < len(orig_indices):
+                    expanded_idx = orig_indices[orig_idx]
+                    if expanded_idx < max_len:
+                        token_id = labels[b, orig_idx].item()
+                        log_probs = torch.nn.functional.log_softmax(logits[b, expanded_idx], dim=-1)
+                        result_logprobs[b, orig_idx] = log_probs[int(token_id)]
+
+        return result_logprobs
+
     def step(self):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -523,7 +654,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
         for f in dataclasses.fields(data_BT):
-            to_device_inplace(getattr(data_BT, f.name), self.device)
+            val = getattr(data_BT, f.name)
+            if val is not None and isinstance(val, list) and len(val) > 0 and isinstance(val[0], torch.Tensor):
+                to_device_inplace(val, self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
@@ -540,6 +673,25 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
+
+        # pi-Distill: pre-compute teacher logprobs (GT-conditioned) for all samples
+        teacher_logprobs_BT: list[torch.Tensor] = []
+        if self.args.pi_distill:
+            with Timer("pi-Distill Teacher Logprob Calculation", noop=self.rank != 0):
+                with torch.no_grad():
+                    for i in range(num_samples):
+                        gt_for_teacher = data_BT.ground_truths[i] if data_BT.ground_truths is not None else []
+                        teacher_lp = self._compute_teacher_logprobs_with_gt(
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i],
+                            data_BT.position_ids[i],
+                            data_BT.response_masks[i],
+                            gt_for_teacher,
+                        )
+                        response_mask_shifted = data_BT.response_masks[i][:, 1:]
+                        teacher_lp = torch.masked_fill(teacher_lp, ~response_mask_shifted.bool(), INVALID_LOGPROB)
+                        teacher_logprobs_BT.append(teacher_lp)
+                        torch.cuda.empty_cache()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -700,35 +852,107 @@ class PolicyTrainerRayProcess(RayProcess):
                                 tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                             )
 
-                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
-                        new_logprobs=new_logprobs_BT,
-                        ratio=ratio_BT,
-                        advantages=data_BT.advantages[i][:, 1:],
-                        ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
-                        config=self.args,
-                        tis_weights=tis_imp_ratio_BT,
-                    )
-
-                    per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
-                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
-
-                    # we already took world size into account via the tokens
-                    # but deepspeed will try to average over ranks, so multiply back
-                    # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    loss *= self.args.world_size // self.args.sequence_parallel_size
-
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
-                    torch.cuda.empty_cache()
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    # Tell deepspeed whether this backward is the last in the accumulation group.
-                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                    self.model.backward(loss)
-                    if is_accumulation_boundary:
-                        self.model.step()
+                    dp_scale = self.args.world_size // self.args.sequence_parallel_size
+                    advantages_BT = data_BT.advantages[i][:, 1:]
+
+                    if self.args.pi_distill and len(teacher_logprobs_BT) > 0:
+                        # ============================================================
+                        # pi-Distill: joint teacher-student loss
+                        # ============================================================
+                        alpha = self.args.pi_distill_alpha
+                        teacher_lp = teacher_logprobs_BT[i]
+
+                        # --- Student loss (student forward is already done above as local_logprobs_BT) ---
+                        # Forward KL: KL(sg[pi_T] || pi_S) per token
+                        # = sg[log pi_T] - log pi_S (gradient through pi_S only)
+                        student_kl_BT = torch.where(
+                            response_mask_BT,
+                            (teacher_lp.detach() - new_logprobs_BT).clamp(-40.0, 40.0),
+                            torch.zeros_like(new_logprobs_BT),
+                        )
+                        # Importance-weighted PG for student
+                        imp_ratio_BT = torch.exp((new_logprobs_BT - teacher_lp.detach()).clamp(-40.0, 40.0))
+                        imp_ratio_clipped_BT = torch.clamp(imp_ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher)
+                        student_pg_BT = torch.max(-imp_ratio_BT * advantages_BT, -imp_ratio_clipped_BT * advantages_BT)
+
+                        student_per_token_loss_BT = student_pg_BT + self.args.beta * student_kl_BT
+                        student_loss = masked_mean(student_per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                        student_loss = student_loss * dp_scale * (1.0 - alpha)
+
+                        # --- Teacher loss (requires teacher forward with grad) ---
+                        gt_for_teacher = data_BT.ground_truths[i] if data_BT.ground_truths is not None else []
+                        teacher_logprobs_grad = self._compute_teacher_logprobs_with_gt(
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i],
+                            data_BT.position_ids[i],
+                            data_BT.response_masks[i],
+                            gt_for_teacher,
+                        )
+                        teacher_logprobs_grad = torch.masked_fill(teacher_logprobs_grad, ~response_mask_BT, INVALID_LOGPROB)
+
+                        # Teacher PG: standard clipped PG using teacher logprobs
+                        teacher_ratio_BT = torch.exp((teacher_logprobs_grad - old_logprob_BT).clamp(-40.0, 40.0))
+                        teacher_pg1_BT = -advantages_BT * teacher_ratio_BT
+                        teacher_pg2_BT = -advantages_BT * torch.clamp(teacher_ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher)
+                        teacher_pg_loss_BT = torch.max(teacher_pg1_BT, teacher_pg2_BT)
+
+                        # Reverse KL: KL(pi_T || sg[pi_S]) per token (gradient through pi_T only)
+                        teacher_kl_BT = torch.where(
+                            response_mask_BT,
+                            (teacher_logprobs_grad - new_logprobs_BT.detach()).clamp(-40.0, 40.0),
+                            torch.zeros_like(teacher_logprobs_grad),
+                        )
+
+                        teacher_per_token_loss_BT = teacher_pg_loss_BT + self.args.beta * teacher_kl_BT
+                        teacher_loss = masked_mean(teacher_per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                        teacher_loss = teacher_loss * dp_scale * alpha
+
+                        total_loss = student_loss + teacher_loss
+
+                        torch.cuda.empty_cache()
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        self.model.backward(total_loss)
+                        if is_accumulation_boundary:
+                            self.model.step()
+
+                        pg_loss_max_BT = alpha * teacher_pg_loss_BT + (1 - alpha) * student_pg_BT
+                        pg_losses_BT = pg_loss_max_BT
+                        pg_losses2_BT = pg_loss_max_BT
+                        per_token_loss_BT = alpha * teacher_per_token_loss_BT + (1 - alpha) * student_per_token_loss_BT
+
+                        with torch.no_grad():
+                            self.local_metrics["pi_distill/teacher_loss"] = masked_mean(teacher_per_token_loss_BT, response_mask_BT).item()
+                            self.local_metrics["pi_distill/student_loss"] = masked_mean(student_per_token_loss_BT, response_mask_BT).item()
+                            self.local_metrics["pi_distill/teacher_kl"] = masked_mean(teacher_kl_BT, response_mask_BT).item()
+                            self.local_metrics["pi_distill/student_kl"] = masked_mean(student_kl_BT, response_mask_BT).item()
+                            self.local_metrics["pi_distill/imp_ratio"] = masked_mean(imp_ratio_BT, response_mask_BT).item()
+                    else:
+                        # ============================================================
+                        # Standard GRPO loss
+                        # ============================================================
+                        pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                            new_logprobs=new_logprobs_BT,
+                            ratio=ratio_BT,
+                            advantages=advantages_BT,
+                            ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                            config=self.args,
+                            tis_weights=tis_imp_ratio_BT,
+                        )
+
+                        per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
+                        loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                        loss *= dp_scale
+
+                        torch.cuda.empty_cache()
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        self.model.backward(loss)
+                        if is_accumulation_boundary:
+                            self.model.step()
+
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
-                            # NOTE: in packed implementation, kl calculation are averages over response tokens
                             ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprobs_BT[i]).clamp(-40.0, 40.0)
                             kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
@@ -737,7 +961,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
                         )
                         loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
-                        loss_stats_B["loss"][i] = loss
+                        loss_stats_B["loss"][i] = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
                         loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
@@ -1124,6 +1348,7 @@ def setup_datasets(
             "system_prompt_override": system_prompt_override,
             "tool_definitions": tool_definitions,
             "pass_tools_to_chat_template": pass_tools_to_chat_template,
+            "pi_distill": args.pi_distill,
         },
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
@@ -1305,6 +1530,7 @@ def create_model_and_optimizer(
         model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
         base_env_config=base_env_config,
+        pi_distill=args.pi_distill,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).

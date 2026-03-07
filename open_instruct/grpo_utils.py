@@ -103,6 +103,15 @@ class ExperimentConfig:
     temperature: float = field(default=1.0, init=False)
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
+    # pi-Distill (joint teacher-student training with privileged information)
+    pi_distill: bool = False
+    """Enable pi-Distill: joint training of a GT-conditioned teacher and unconditioned student
+    sharing the same parameters. vLLM generates teacher rollouts (conditioned on ground truth),
+    and both teacher and student losses are computed on these rollouts."""
+    pi_distill_alpha: float = 0.5
+    """Weight on teacher loss; student loss weight is (1 - alpha).
+    alpha=1 trains teacher only, alpha=0 trains student only, alpha=0.5 is joint."""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -230,11 +239,19 @@ class ExperimentConfig:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if not self.load_ref_policy and self.beta != 0.0:
+        if not self.load_ref_policy and self.beta != 0.0 and not self.pi_distill:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.pi_distill:
+            if self.load_ref_policy:
+                raise ValueError(
+                    "pi_distill provides its own KL reference (teacher<->student). "
+                    "Set --load_ref_policy false when using --pi_distill."
+                )
+            if not 0.0 <= self.pi_distill_alpha <= 1.0:
+                raise ValueError(f"pi_distill_alpha must be in [0, 1], got {self.pi_distill_alpha}")
 
 
 def compute_grpo_loss(
