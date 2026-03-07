@@ -39,7 +39,6 @@ uv run mason.py \
     --budget ai2/oe-adapt \
     -- bash -lc "
 set -euo pipefail
-source configs/beaker_configs/ray_node_setup.sh
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
@@ -128,7 +127,7 @@ UV_LINK_MODE=copy uv run --active open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits ${DATASET_SPLITS} \
     --max_prompt_token_length 512 \
     --response_length 4096 \
-    --pack_length 32768 \
+    --pack_length 8192 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
