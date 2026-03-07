@@ -361,6 +361,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
+        self._training_step_counter = 0
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -538,7 +539,7 @@ class PolicyTrainerRayProcess(RayProcess):
             if isinstance(gt_list, str):
                 gt_list = [gt_list]
             seq_ids = input_ids[b]
-            seq_attn = attention_mask[b].clamp(0, 1)
+            seq_attn = attention_mask[b]
             seq_pos = position_ids[b]
 
             boundary_indices = [0]
@@ -564,12 +565,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         resp_start_in_seg = t
                         break
 
+                seg_attn_val = seq_attn[start].item()
+
                 if gt_text and resp_start_in_seg is not None:
                     prefix_text = PI_DISTILL_TEACHER_TEMPLATE.format(answer=gt_text) + "\n"
                     prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
                     prefix_len = len(prefix_tokens)
                     prefix_ids = torch.tensor(prefix_tokens, device=device, dtype=seq_ids.dtype)
-                    prefix_attn = torch.ones(prefix_len, device=device, dtype=seq_attn.dtype)
+                    prefix_attn = torch.full((prefix_len,), seg_attn_val, device=device, dtype=seq_attn.dtype)
 
                     query_end = start + resp_start_in_seg
                     query_ids = seq_ids[start:query_end]
@@ -613,7 +616,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         output = self.model(
             input_ids=padded_ids,
-            attention_mask=padded_attn.clamp(0, 1),
+            attention_mask=padded_attn,
             position_ids=padded_pos,
             return_dict=True,
         )
@@ -642,6 +645,7 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        self._training_step_counter += 1
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
@@ -860,7 +864,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         # ============================================================
                         # pi-Distill: joint teacher-student loss
                         # ============================================================
-                        alpha = self.args.pi_distill_alpha
+                        is_teacher_warmup = (
+                            self.args.pi_distill_teacher_warmup_steps > 0
+                            and self._training_step_counter <= self.args.pi_distill_teacher_warmup_steps
+                        )
+                        alpha = 1.0 if is_teacher_warmup else self.args.pi_distill_alpha
                         teacher_lp = teacher_logprobs_BT[i]
 
                         # --- Student loss (student forward is already done above as local_logprobs_BT) ---
@@ -927,6 +935,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.local_metrics["pi_distill/teacher_kl"] = masked_mean(teacher_kl_BT, response_mask_BT).item()
                             self.local_metrics["pi_distill/student_kl"] = masked_mean(student_kl_BT, response_mask_BT).item()
                             self.local_metrics["pi_distill/imp_ratio"] = masked_mean(imp_ratio_BT, response_mask_BT).item()
+                            self.local_metrics["pi_distill/effective_alpha"] = alpha
+                            self.local_metrics["pi_distill/teacher_warmup"] = 1.0 if is_teacher_warmup else 0.0
                     else:
                         # ============================================================
                         # Standard GRPO loss

@@ -26,6 +26,7 @@ uv run python mason.py \
     --exp_name ${exp_name} \
     --pi_distill \
     --pi_distill_alpha 0.5 \
+    --pi_distill_teacher_warmup_steps 50 \
     --beta 1.0 \
     --load_ref_policy false \
     --async_steps 8 \

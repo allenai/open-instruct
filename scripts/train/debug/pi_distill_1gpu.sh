@@ -8,6 +8,7 @@ uv run python open_instruct/grpo_fast.py \
     --exp_name pi_distill_1gpu_debug \
     --pi_distill \
     --pi_distill_alpha 0.5 \
+    --pi_distill_teacher_warmup_steps 10 \
     --beta 1.0 \
     --load_ref_policy false \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \

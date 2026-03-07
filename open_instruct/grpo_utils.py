@@ -111,6 +111,9 @@ class ExperimentConfig:
     pi_distill_alpha: float = 0.5
     """Weight on teacher loss; student loss weight is (1 - alpha).
     alpha=1 trains teacher only, alpha=0 trains student only, alpha=0.5 is joint."""
+    pi_distill_teacher_warmup_steps: int = 0
+    """Number of initial training steps to use alpha=1.0 (teacher-only) before switching to
+    the configured pi_distill_alpha. Teaches the model to leverage GT conditioning."""
 
     # Ray
     single_gpu_mode: bool = False
