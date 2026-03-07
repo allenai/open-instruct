@@ -231,6 +231,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
+        ds_config["checkpoint"] = {"load_universal": args.deepspeed_checkpoint_load_universal}
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
