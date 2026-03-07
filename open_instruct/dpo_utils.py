@@ -561,14 +561,26 @@ def build_reference_logprobs_cache(
     total_tokens = 0
     total_examples = 0
 
-    batch_count = 0
-    last_batch = None
-
     with torch.no_grad():
-        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
-            batch_count += 1
-            last_batch = batch
+        all_batches = list(dataloader)
+        batch_count = len(all_batches)
+
+        if dist.is_initialized():
+            local_count = torch.tensor([batch_count], device=device, dtype=torch.long)
+            max_count = local_count.clone()
+            dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
+            target_count = int(max_count.item())
+        else:
+            target_count = batch_count
+
+        if target_count > batch_count:
+            logger.info(f"Running {target_count - batch_count} dummy forward passes to sync with other ranks")
+
+        pbar = tqdm(range(target_count), disable=not is_main_process, desc="Caching reference logprobs")
+        for i in pbar:
+            is_real = i < batch_count
+            batch = all_batches[i] if is_real else all_batches[-1]
+
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -580,34 +592,21 @@ def build_reference_logprobs_cache(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
 
-            chosen_tensor[batch["index"]] = chosen_logps
-            rejected_tensor[batch["index"]] = rejected_logps
+            if is_real:
+                chosen_tensor[batch["index"]] = chosen_logps
+                rejected_tensor[batch["index"]] = rejected_logps
 
-            batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
-            total_tokens += batch_tokens
-            total_examples += batch_size
-            pbar.set_postfix(
-                {
-                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
-                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
-                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
-                }
-            )
-
-        if dist.is_initialized() and last_batch is not None:
-            local_count = torch.tensor([batch_count], device=device, dtype=torch.long)
-            max_count = local_count.clone()
-            dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
-            dummy_batches = int(max_count.item()) - batch_count
-            if dummy_batches > 0:
-                logger.info(f"Running {dummy_batches} dummy forward passes to sync with other ranks")
-            for _ in range(dummy_batches):
-                if use_lora and disable_adapter_context is not None:
-                    with disable_adapter_context():
-                        forward_fn(model, last_batch, average_log_prob=average_log_prob, **(forward_kwargs or {}))
-                else:
-                    forward_fn(model, last_batch, average_log_prob=average_log_prob, **(forward_kwargs or {}))
+                batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
+                total_tokens += batch_tokens
+                total_examples += batch_size
+                pbar.set_postfix(
+                    {
+                        "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                        "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
+                        "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                        "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
+                    }
+                )
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
