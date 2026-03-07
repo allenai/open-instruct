@@ -1101,7 +1101,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     has_gts = data_BT.ground_truths is not None
                     num_gt_batches = len(data_BT.ground_truths) if has_gts else 0
                     sample_gt = data_BT.ground_truths[0] if has_gts and num_gt_batches > 0 else "NONE"
+                    attn_shape = data_BT.attention_masks[0].shape if len(data_BT.attention_masks) > 0 else "N/A"
                     logger.info(f"[OPSD] ground_truths available: {has_gts}, num_batches: {num_gt_batches}, sample: {sample_gt}")
+                    logger.info(f"[OPSD] attention_mask shape: {attn_shape}, query_response shape: {data_BT.query_responses[0].shape}")
                 with torch.no_grad():
                     for i in range(num_samples):
                         gt_for_teacher = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
@@ -1115,6 +1117,21 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_mask_shifted = data_BT.response_masks[i][:, 1:]
                         teacher_logprobs = torch.masked_fill(teacher_logprobs, ~response_mask_shifted.bool(), INVALID_LOGPROB)
                         ref_logprobs_BT.append(teacher_logprobs)
+                        if self.rank == 0 and i == 0:
+                            # Log sample KL between student and teacher
+                            student_lp = grpo_utils.forward_for_logprobs(
+                                self.model, data_BT.query_responses[0],
+                                data_BT.attention_masks[0], data_BT.position_ids[0],
+                                self.pad_token_id, self.streaming_config.temperature,
+                            )[0]
+                            mask = response_mask_shifted.bool()
+                            valid_teacher = teacher_logprobs[mask]
+                            valid_student = student_lp[mask]
+                            kl_sample = (valid_student - valid_teacher).mean().item()
+                            logger.info(f"[OPSD] sample KL (student - teacher): {kl_sample:.6f}, "
+                                       f"teacher mean lp: {valid_teacher.mean().item():.4f}, "
+                                       f"student mean lp: {valid_student.mean().item():.4f}, "
+                                       f"num valid tokens: {mask.sum().item()}")
                         torch.cuda.empty_cache()
         elif self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
