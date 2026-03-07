@@ -921,6 +921,44 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     )
 
 
+def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
+    latest_path = os.path.join(checkpoint_state_dir, "latest")
+    if not os.path.isfile(latest_path):
+        return
+
+    with open(latest_path) as f:
+        latest_checkpoint_tag = f.read().strip()
+
+    if not latest_checkpoint_tag:
+        return
+
+    latest_checkpoint_dir = os.path.join(checkpoint_state_dir, latest_checkpoint_tag)
+    if not os.path.isdir(latest_checkpoint_dir):
+        raise ValueError(f"Invalid checkpoint: {latest_checkpoint_dir} does not exist")
+
+    latest_universal_tag = f"ds_universal_{latest_checkpoint_tag}"
+    latest_universal_path = os.path.join(checkpoint_state_dir, "latest_universal")
+    latest_universal_dir = os.path.join(checkpoint_state_dir, latest_universal_tag)
+    if os.path.isdir(latest_universal_dir):
+        with open(latest_universal_path, "w") as f:
+            f.write(latest_universal_tag)
+        return
+
+    subprocess.run(
+        [
+            "python",
+            "-m",
+            "deepspeed.checkpoint.ds_to_universal",
+            "--input_folder",
+            latest_checkpoint_dir,
+            "--output_folder",
+            latest_universal_dir,
+            "--inject_missing_state",
+        ],
+        check=True,
+    )
+
+
 # ----------------------------------------------------------------------------
 # Ai2 user utilities
 @dataclass

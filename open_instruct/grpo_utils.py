@@ -10,6 +10,7 @@ from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
     download_latest_checkpoint_from_gs,
+    ensure_universal_checkpoint_exists,
     get_beaker_whoami,
 )
 
@@ -232,6 +233,8 @@ class ExperimentConfig:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(self.checkpoint_state_dir)
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
