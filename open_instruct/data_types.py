@@ -107,6 +107,12 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    # For PPO with value model: raw rewards and done flags for GAE computation
+    rewards: list[torch.Tensor] | None = None
+    dones: list[torch.Tensor] | None = None
+    # Per-packed-sequence ground truths for value model conditioning
+    # Each element is a list of ground truth strings, one per sub-sequence in the pack
+    ground_truths: list[list[str]] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
         return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
