@@ -27,7 +27,13 @@ from litellm import acompletion
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
+from open_instruct.judge_utils import (
+    EXTRACTOR_MAP,
+    JUDGE_PROMPT_MAP,
+    PRICE_PER_TOKEN,
+    REQUIRED_OUTPUT_SUFFIX_MAP,
+    build_messages,
+)
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -623,8 +629,10 @@ class LMJudgeVerifier(VerifierFunction):
 
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
+        self.judge_type = judge_type
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.extractor = EXTRACTOR_MAP[judge_type]
+        self.required_output_suffix = REQUIRED_OUTPUT_SUFFIX_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
@@ -676,8 +684,15 @@ class LMJudgeVerifier(VerifierFunction):
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
         # client = self._get_client()
-        final_answer = extract_final_answer(prediction)
-        prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
+        judged_output = prediction if self.judge_type == "compass_verifier" else extract_final_answer(prediction)
+        prompt = self.prompt_template.format(
+            input=query,
+            output=judged_output,
+            label=label,
+            question=query,
+            gold_answer=label,
+            llm_response=judged_output,
+        )
 
         max_retries = 3  # for rate limits
         retry_delay = 1.0
@@ -702,6 +717,7 @@ class LMJudgeVerifier(VerifierFunction):
                         model_name=self.verifier_config.llm_judge_model,
                         max_context_length=self.verifier_config.llm_judge_max_context_length,
                         safety_margin=200,
+                        required_suffix=self.required_output_suffix,
                     )
 
                     # Check again after truncation
@@ -949,6 +965,16 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
+
+    if streaming_config and streaming_config.llm_judge_override_verifier:
+        override_verifier = streaming_config.llm_judge_override_verifier.lower()
+        assert override_verifier in verifiers, (
+            f"`llm_judge_override_verifier` must be one of {sorted(verifiers.keys())}, got: {override_verifier}"
+        )
+        judge_type = "compass_verifier" if override_verifier == "gsm8k" else "quality"
+        verifiers[override_verifier] = LMJudgeVerifier(
+            judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config)
+        )
 
     # if we have remap arg, remap!
     if streaming_config and streaming_config.remap_verifier:

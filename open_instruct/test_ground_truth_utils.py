@@ -12,7 +12,15 @@ import numpy as np
 from parameterized import parameterized
 
 from open_instruct.data_types import RequestInfo
-from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier, RewardConfig, apply_verifiable_reward
+from open_instruct.ground_truth_utils import (
+    F1Verifier,
+    LMJudgeVerifier,
+    PuzzleMatcherVerifier,
+    RewardConfig,
+    apply_verifiable_reward,
+    build_all_verifiers,
+)
+from open_instruct.judge_utils import extract_score_compass_verifier
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -252,6 +260,54 @@ class TestApplyVerifiableRewardDatasetAliases(unittest.TestCase):
         )
         self.assertEqual(scores, [10.0])
         self.assertEqual(per_func_scores, [{"math": 10.0}])
+
+
+class TestBuildAllVerifiers(unittest.TestCase):
+    def test_llm_judge_override_verifier_replaces_gsm8k_with_compass_verifier(self):
+        args = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            code_api_url="http://localhost:1234/test_program",
+            code_max_execution_time=1.0,
+            code_pass_rate_reward_threshold=0.0,
+            code_apply_perf_penalty=False,
+            max_length_verifier_max_length=32768,
+        )
+        streaming_config = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_override_verifier="gsm8k",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            remap_verifier=None,
+        )
+
+        verifiers = build_all_verifiers(args, streaming_config)
+        self.assertIsInstance(verifiers["gsm8k"], LMJudgeVerifier)
+        self.assertEqual(verifiers["gsm8k"].verifier_config.llm_judge_model, "opencompass/CompassVerifier-3B")
+        self.assertEqual(verifiers["gsm8k"].judge_type, "compass_verifier")
+
+
+class TestCompassVerifierExtractor(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("plain_a", "A", 1.0),
+            ("plain_b", "B", 0.0),
+            ("plain_c", "C", 0.0),
+            ("boxed", r"Final Judgment: \\boxed{A} - CORRECT", 1.0),
+            ("incorrect_word", "INCORRECT", 0.0),
+            ("invalid_word", "INVALID", 0.0),
+        ]
+    )
+    def test_extract_score_compass_verifier(self, _name, text, expected_score):
+        _, score = extract_score_compass_verifier(text)
+        self.assertEqual(score, expected_score)
 
 
 if __name__ == "__main__":

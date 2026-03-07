@@ -169,6 +169,7 @@ def truncate_messages_to_fit_context(
     model_name: str,
     max_context_length: int = 8192,
     safety_margin: int = 100,
+    required_suffix: str | None = None,
 ) -> list[dict[str, str]]:
     """
     Truncate messages to fit within the context window while preserving system messages.
@@ -236,17 +237,14 @@ def truncate_messages_to_fit_context(
                     logger.warning("Truncated message content to fit judge context window")
                 break
 
-        # append judgment format to the last message, only if there are messages
+        # Re-append any required output format instruction after truncation.
         if (
-            truncated_messages
+            required_suffix is not None
+            and truncated_messages
             and truncated_messages[-1]["role"] == "user"
-            and not truncated_messages[-1]["content"].endswith(
-                'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
-            )
+            and not truncated_messages[-1]["content"].endswith(required_suffix)
         ):
-            truncated_messages[-1]["content"] = (
-                f'{truncated_messages[-1]["content"]}\nRespond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}'
-            )
+            truncated_messages[-1]["content"] = f"{truncated_messages[-1]['content']}\n{required_suffix}"
         return truncated_messages
 
     except Exception as e:
@@ -304,17 +302,13 @@ def truncate_messages_to_fit_context(
                         logger.warning("Truncated message content to fit judge context window")
                     break
 
-            # append judgment format to the last message, only if there are messages
             if (
-                truncated_messages
+                required_suffix is not None
+                and truncated_messages
                 and truncated_messages[-1]["role"] == "user"
-                and not truncated_messages[-1]["content"].endswith(
-                    'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
-                )
+                and not truncated_messages[-1]["content"].endswith(required_suffix)
             ):
-                truncated_messages[-1]["content"] = (
-                    f'{truncated_messages[-1]["content"]}\nRespond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}'
-                )
+                truncated_messages[-1]["content"] = f"{truncated_messages[-1]['content']}\n{required_suffix}"
             return truncated_messages
 
         except Exception as e:

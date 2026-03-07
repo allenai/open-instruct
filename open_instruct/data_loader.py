@@ -364,6 +364,7 @@ class StreamingDataLoaderConfig:
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
     remap_verifier: str | None = None
+    llm_judge_override_verifier: str | None = None
 
     # Reward - Spurious reward
     spurious_reward_mode: bool = False
