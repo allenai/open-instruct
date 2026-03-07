@@ -52,7 +52,7 @@ uv run --active open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits $DATASET_SPLITS \
     --max_prompt_token_length 512 \
     --response_length 4096 \
-    --pack_length 32768 \
+    --pack_length 8192 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name qwen_instruct_boxed_math \
     --non_stop_penalty False \
