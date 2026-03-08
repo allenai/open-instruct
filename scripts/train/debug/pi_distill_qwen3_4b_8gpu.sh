@@ -44,7 +44,7 @@ uv run python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 14336 \
     --pack_length 16384 \
-    --model_name_or_path Qwen/Qwen3-4B-2507 \
+    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 4096000 \
