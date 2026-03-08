@@ -946,7 +946,7 @@ def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
 
     subprocess.run(
         [
-            "python",
+            sys.executable,
             "-m",
             "deepspeed.checkpoint.ds_to_universal",
             "--input_folder",
