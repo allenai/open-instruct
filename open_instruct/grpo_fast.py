@@ -2221,7 +2221,15 @@ def main(
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+    ray.init(
+        dashboard_host="0.0.0.0",
+        runtime_env={
+            "excludes": [".git/"],
+            "env_vars": {
+                k: v for k, v in os.environ.items() if k not in {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+            },
+        },
+    )
 
     pool_size = tools_config.pool_size
     if pool_size is None:
