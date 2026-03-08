@@ -1723,8 +1723,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
+        tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{json.dumps(tc_dict, sort_keys=True)}".encode()
         ).hexdigest()[:16]
 
         # perform the transformation
