@@ -929,7 +929,7 @@ def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
     with open(latest_path) as f:
         latest_checkpoint_tag = f.read().strip()
 
-    if not latest_checkpoint_tag:
+    if not latest_checkpoint_tag or os.path.basename(latest_checkpoint_tag) != latest_checkpoint_tag:
         return
 
     latest_checkpoint_dir = os.path.join(checkpoint_state_dir, latest_checkpoint_tag)
