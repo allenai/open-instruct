@@ -1960,6 +1960,17 @@ def setup_datasets(
     else:
         eval_dataset = None
 
+    # Debug: print raw data and tokenizer info to diagnose tokenization issues
+    row0 = train_dataset[0]
+    logger.info(f"[Dataset Debug] columns: {train_dataset.column_names}")
+    logger.info(f"[Dataset Debug] tokenizer: {type(tokenizer).__name__}, vocab_size: {tokenizer.vocab_size}")
+    logger.info(f"[Dataset Debug] pad_token_id: {tokenizer.pad_token_id}, eos_token_id: {tokenizer.eos_token_id}")
+    ids = row0[INPUT_IDS_PROMPT_KEY]
+    logger.info(f"[Dataset Debug] input_ids_prompt length: {len(ids)}, first 10 ids: {ids[:10]}")
+    if 'messages' in row0:
+        logger.info(f"[Dataset Debug] messages[0]: {str(row0['messages'])[:300]}")
+    if 'prompt' in row0:
+        logger.info(f"[Dataset Debug] prompt: {str(row0['prompt'])[:300]}")
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
     return train_dataset, eval_dataset
