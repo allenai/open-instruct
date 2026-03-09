@@ -124,14 +124,10 @@ COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 
 
 def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
-    i = 0
     console = Console()
-    rich_text = Text()
-    for i, token in enumerate(tokens):
-        color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
-        rich_text.append(f"{decoded_token}", style=color)
-    console.print(rich_text)
+    decoded = tokenizer.decode(tokens)
+    console.print(f"[bold]Prompt ({len(tokens)} tokens):[/bold]")
+    console.print(decoded[:2000] + ("..." if len(decoded) > 2000 else ""))
 
 
 def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer):
