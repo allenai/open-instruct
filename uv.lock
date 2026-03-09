@@ -15,6 +15,10 @@ supported-markers = [
 [manifest]
 overrides = [{ name = "transformers", specifier = ">=5.0.0" }]
 
+[[manifest.dependency-metadata]]
+name = "flash-attn"
+requires-dist = ["torch", "einops"]
+
 [[package]]
 name = "absl-py"
 version = "2.3.1"

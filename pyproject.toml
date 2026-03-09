@@ -92,6 +92,7 @@ preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
 prerelease = "if-necessary-or-explicit"
+no-build-isolation-package = ["flash-attn"]
 override-dependencies = [
     "transformers>=5.0.0",
 ]
@@ -100,6 +101,10 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'darwin'",
 ]
+
+[[tool.uv.dependency-metadata]]
+name = "flash-attn"
+requires-dist = ["torch", "einops"]
 
 [dependency-groups]
 dev = [
