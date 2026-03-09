@@ -551,8 +551,7 @@ def build_reference_logprobs_cache(
                 f"Cannot write to cache directory {cache_path.parent}: {e}. "
                 f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
             ) from e
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
@@ -565,13 +564,10 @@ def build_reference_logprobs_cache(
         all_batches = list(dataloader)
         batch_count = len(all_batches)
 
-        if dist.is_initialized():
-            local_count = torch.tensor([batch_count], device=device, dtype=torch.long)
-            max_count = local_count.clone()
-            dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
-            target_count = int(max_count.item())
-        else:
-            target_count = batch_count
+        local_count = torch.tensor([batch_count], device=device, dtype=torch.long)
+        max_count = local_count.clone()
+        dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
+        target_count = int(max_count.item())
 
         if target_count > batch_count:
             logger.info(f"Running {target_count - batch_count} dummy forward passes to sync with other ranks")
@@ -610,9 +606,8 @@ def build_reference_logprobs_cache(
                 }
             )
 
-    if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
 
     missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
     missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
