@@ -63,7 +63,7 @@ uv run python mason.py \
     --vllm_enable_prefix_caching \
     --eval_on_step_0 True \
     --dataset_skip_cache \
-    --dataset_local_cache_dir local_dataset_cache_qwen3 \
+    --dataset_local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache_qwen3 \
     --loss_fn dapo \
     --clip_higher 0.28 \
     --push_to_hub False \

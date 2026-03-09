@@ -1826,7 +1826,7 @@ def setup_runtime_variables(
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
-    if is_beaker_job():
+    if is_beaker_job() and streaming_config.dataset_local_cache_dir == os.path.abspath("local_dataset_cache"):
         streaming_config.dataset_local_cache_dir = (
             "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
         )
