@@ -22,7 +22,7 @@ uv run python mason.py \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
-    --beta 0.01 \
+    --beta 0.0 \
     --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
