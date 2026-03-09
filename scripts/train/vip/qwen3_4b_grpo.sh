@@ -41,8 +41,7 @@ uv run python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
-    --model_name_or_path Qwen/Qwen3-4B-Base \
-    --chat_template_name r1_simple_chat_postpend_think \
+    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 4096000 \
