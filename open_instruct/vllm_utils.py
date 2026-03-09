@@ -732,11 +732,17 @@ class LLMRayActor:
         self._check_weights_for_nan()
 
     def _check_weights_for_nan(self) -> None:
-        model = self.llm_engine.engine.model_executor.driver_worker.model_runner.model
-        for name, param in model.named_parameters():
-            if torch.isnan(param.data).any():
-                logger.error(f"NaN in vLLM engine weight AFTER update: {name}")
-                return
+        def _check_nan(worker) -> list[str]:
+            nan_params = []
+            for name, param in worker.model_runner.model.named_parameters():
+                if torch.isnan(param.data).any():
+                    nan_params.append(name)
+            return nan_params
+
+        results = self._run_async(self.llm_engine.collective_rpc(_check_nan))
+        for i, nan_params in enumerate(results):
+            for name in nan_params:
+                logger.error(f"NaN in vLLM engine weight AFTER update (worker {i}): {name}")
 
     def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
