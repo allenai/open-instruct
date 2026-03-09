@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="qwen3_4b_think_deepscaler"
+EXP_NAME="qwen3_4b_think_deepscaler_eval"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Thinking-2507"
@@ -15,8 +15,8 @@ LOCAL_EVAL_SPLITS="train"
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/ceres ai2/titan}"
-PRIORITY="${PRIORITY:-high}"
+CLUSTER="${CLUSTER:-ai2/prometheus}"
+PRIORITY="${PRIORITY:-low}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -29,7 +29,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 8 \
+    --gpus 4 \
     --budget ai2/oe-adapt \
     -- \
 uv run open_instruct/grpo_fast.py \
@@ -37,6 +37,8 @@ uv run open_instruct/grpo_fast.py \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
     --eval_top_p 0.95 \
+    --eval_response_length 16384 \
+    --eval_only \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
     --beta 0.0 \
@@ -63,7 +65,7 @@ uv run open_instruct/grpo_fast.py \
     --total_episodes 256000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
