@@ -16,6 +16,7 @@ uv run python mason.py \
     --gpus 8 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env VLLM_DISABLE_COMPILE_CACHE=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
@@ -53,6 +54,7 @@ uv run python mason.py \
     --sequence_parallel_size 1 \
     --vllm_num_engines 8 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_enforce_eager \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
