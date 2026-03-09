@@ -17,6 +17,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --gpus 8 \
     --max_retries 0 \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
