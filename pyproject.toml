@@ -25,9 +25,9 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.9.0,<2.10",
-    "transformers>=4.57.0",
-    "vllm==0.16.0; platform_system != 'Darwin'",
+    "torch>=2.10.0,<2.11",
+    "transformers>=5.0.0",
+    "vllm==0.17.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -75,6 +75,7 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+
 [project.optional-dependencies]
 code = [
     "pydantic>=2.0.0",
@@ -90,6 +91,10 @@ dr-tulu = [
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
+prerelease = "if-necessary-or-explicit"
+override-dependencies = [
+    "transformers>=5.0.0",
+]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
