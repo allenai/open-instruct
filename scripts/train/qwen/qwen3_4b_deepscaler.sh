@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="qwen3_4b_base_dapo"
+EXP_NAME="qwen3_4b_think_deepscaler"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Thinking-2507"
@@ -15,7 +15,7 @@ LOCAL_EVAL_SPLITS="train"
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
+CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
