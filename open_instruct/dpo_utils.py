@@ -592,21 +592,23 @@ def build_reference_logprobs_cache(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
 
-            if is_real:
-                chosen_tensor[batch["index"]] = chosen_logps
-                rejected_tensor[batch["index"]] = rejected_logps
+            if not is_real:
+                continue
 
-                batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
-                total_tokens += batch_tokens
-                total_examples += batch_size
-                pbar.set_postfix(
-                    {
-                        "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                        "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
-                        "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
-                        "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
-                    }
-                )
+            chosen_tensor[batch["index"]] = chosen_logps
+            rejected_tensor[batch["index"]] = rejected_logps
+
+            batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
+            total_tokens += batch_tokens
+            total_examples += batch_size
+            pbar.set_postfix(
+                {
+                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
+                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
+                }
+            )
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
@@ -1151,23 +1153,16 @@ def separate_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
-    chosen_batch = process_batch(batch, "chosen")
-    chosen_output = model(chosen_batch["input_ids"], labels=chosen_batch["labels"])
 
-    chosen_logps = _get_batch_logps(chosen_output.loss, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch
-    torch.cuda.empty_cache()
+    def _get_logps(branch: str) -> torch.Tensor:
+        branch_batch = process_batch(batch, branch)
+        output = model(branch_batch["input_ids"], labels=branch_batch["labels"])
+        logps = _get_batch_logps(output.loss, branch_batch["labels"], average_log_prob=average_log_prob)
+        del branch_batch
+        torch.cuda.empty_cache()
+        return logps
 
-    rejected_batch = process_batch(batch, "rejected")
-    rejected_output = model(rejected_batch["input_ids"], labels=rejected_batch["labels"])
-
-    rejected_logps = _get_batch_logps(
-        rejected_output.loss, rejected_batch["labels"], average_log_prob=average_log_prob
-    )
-    del rejected_batch
-    torch.cuda.empty_cache()
-
-    return chosen_logps, rejected_logps, None
+    return _get_logps("chosen"), _get_logps("rejected"), None
 
 
 @dataclass
