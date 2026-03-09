@@ -12,7 +12,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --workspace ai2/olmo-instruct \
-    --priority high \
+    --priority urgent \
     --preemptible \
     --num_nodes 1 \
     --gpus 8 \
