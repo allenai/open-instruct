@@ -40,8 +40,8 @@ uv run python mason.py \
     --dataset_mixer_eval_list allenai/Dolci-RLZero-Math-7B 16 \
     --dataset_mixer_eval_list_splits train train \
     --max_prompt_token_length 2048 \
-    --response_length 6144 \
-    --pack_length 8192 \
+    --response_length 8192 \
+    --pack_length 10240 \
     --model_name_or_path Qwen/Qwen3-4B-Base \
     --chat_template_name r1_simple_chat_postpend_think \
     --non_stop_penalty False \
