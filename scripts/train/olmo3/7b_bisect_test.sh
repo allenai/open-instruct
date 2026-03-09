@@ -1,0 +1,64 @@
+#!/bin/bash
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+exp_name=bisect_after_70beeac
+uv run python mason.py \
+    --cluster ai2/jupiter \
+    --image "$BEAKER_IMAGE" \
+    --pure_docker_mode \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --preemptible \
+    --num_nodes 2 \
+    --description "Bisect after 70beeac with vllm 0.16.0 base" \
+    --timeout 1h \
+    --max_retries 0 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --exp_name ${exp_name} \
+    --beta 0.0 \
+    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 64 \
+    --num_mini_batches 4 \
+    --num_epochs 1 \
+    --learning_rate 1e-6 \
+    --per_device_train_batch_size 1 \
+    --kl_estimator 2 \
+    --dataset_mixer_list hamishivi/rlvr_acecoder_filtered_filtered 20000 hamishivi/omega-combined-no-boxed_filtered 20000 hamishivi/rlvr_orz_math_57k_collected_filtered 14000 hamishivi/polaris_53k 14000 hamishivi/MathSub-30K_filtered 9000 hamishivi/DAPO-Math-17k-Processed_filtered 7000 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 38000 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 50000 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list hamishivi/omega-combined 4 allenai/IF_multi_constraints_upto5 4 saurabh5/rlvr_acecoder_filtered 4 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4 \
+    --dataset_mixer_eval_list_splits train \
+    --max_prompt_token_length 2048 \
+    --response_length 8192 \
+    --pack_length 11264 \
+    --model_name_or_path allenai/Olmo-3-1025-7B \
+    --vllm_enforce_eager \
+    --chat_template_name olmo \
+    --stop_strings '</answer>' \
+    --non_stop_penalty False \
+    --temperature 1.0 \
+    --total_episodes 2048 \
+    --deepspeed_stage 3 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 8 \
+    --lr_scheduler_type constant \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --local_eval_every 9999 \
+    --save_freq 9999 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --vllm_enable_prefix_caching \
+    --clip_higher 0.272 \
+    --mask_truncated_completions False \
+    --inflight_updates true \
+    --async_steps 8 \
+    --active_sampling \
+    --advantage_normalization_type centered \
+    --no_resampling_pass_rate 0.875 \
+    --save_traces \
+    --send_slack_alerts \
+    --hf_entity allenai \
+    --wandb_entity ai2-llm \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/
