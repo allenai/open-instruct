@@ -61,6 +61,7 @@ uv run python mason.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --eval_on_step_0 True \
+    --dataset_skip_cache \
     --loss_fn dapo \
     --clip_higher 0.28 \
     --push_to_hub False
