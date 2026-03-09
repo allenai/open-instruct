@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.environments.base import EnvCall
@@ -235,6 +235,15 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
         import_path="vllm.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
         role_templates={
             "tool": "<|im_start|>environment\n{output}<|im_end|>\n",
+            "user": "<|im_start|>user\n{output}<|im_end|>\n",
+        },
+        output_postfix="<|im_start|>assistant\n",
+    ),
+    # Qwen3 XML tool-calling templates (<tool_call><function=...><parameter=...>)
+    "vllm_qwen3xml": VllmParserConfig(
+        import_path="vllm.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
+        role_templates={
+            "tool": "<|im_start|>user\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
             "user": "<|im_start|>user\n{output}<|im_end|>\n",
         },
         output_postfix="<|im_start|>assistant\n",
