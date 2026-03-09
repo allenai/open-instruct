@@ -441,19 +441,23 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        # avoid OOM
         torch.cuda.empty_cache()
-        # Ensure CUDA device is set before broadcast operations.
         torch.cuda.set_device(self.local_rank)
         iterator = vllm_utils.gathered_param_iterator(
             self.model.module, self.args.deepspeed_stage, self.args.gather_whole_model
         )
         if self.rank == 0:
+
+            def checked_iterator():
+                for name, param in iterator:
+                    if torch.isnan(param.data).any():
+                        logger.error(f"NaN in trainer weight BEFORE send: {name}")
+                    yield name, param
+
             NCCLWeightTransferEngine.trainer_send_weights(
-                iterator=iterator, group=self.model_update_group, packed=self.args.gather_whole_model
+                iterator=checked_iterator(), group=self.model_update_group, packed=self.args.gather_whole_model
             )
         else:
-            # GatheredParameters is collective; all ranks must iterate.
             for _ in iterator:
                 pass
 

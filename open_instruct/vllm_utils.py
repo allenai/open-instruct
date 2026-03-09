@@ -728,7 +728,15 @@ class LLMRayActor:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         request = WeightTransferUpdateRequest(**request)
-        return self._run_async(self.llm_engine.update_weights(request))
+        self._run_async(self.llm_engine.update_weights(request))
+        self._check_weights_for_nan()
+
+    def _check_weights_for_nan(self) -> None:
+        model = self.llm_engine.engine.model_executor.driver_worker.model_runner.model
+        for name, param in model.named_parameters():
+            if torch.isnan(param.data).any():
+                logger.error(f"NaN in vLLM engine weight AFTER update: {name}")
+                return
 
     def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
