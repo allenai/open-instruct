@@ -73,7 +73,7 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv venv && \
-    uv pip install setuptools torch --index-url https://download.pytorch.org/whl/cu129 && \
+    uv pip install setuptools packaging wheel torch --index-url https://download.pytorch.org/whl/cu129 && \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
