@@ -55,7 +55,6 @@ uv run python mason.py \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 100 \
-    --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
