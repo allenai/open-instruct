@@ -77,6 +77,10 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv pip install torch --index-url https://download.pytorch.org/whl/cu129 && \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
+# Stub flash_attn_2_cuda so flash_attn's triton ops can be imported
+# without the CUDA extension (FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE).
+COPY open_instruct/_flash_attn_2_cuda_stub.py .venv/lib/python3.12/site-packages/flash_attn_2_cuda.py
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
