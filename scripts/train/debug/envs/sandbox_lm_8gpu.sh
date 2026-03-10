@@ -62,7 +62,7 @@ uv run python mason.py \
     --tools generic_sandbox \
     --pool_size 16 \
     --max_steps 30 \
-    --tool_parser_type vllm_hermes \
+    --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/sandbox_lm_system_prompt.txt \
     --no_filter_zero_std_samples \
     --vllm_enable_prefix_caching \
