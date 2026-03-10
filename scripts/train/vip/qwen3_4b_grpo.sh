@@ -63,5 +63,9 @@ uv run python mason.py \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
     --load_ref_policy True \
+    --oe_eval_max_length 10240 \
+    --try_launch_beaker_eval_jobs_on_weka True \
+    --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero \
+    --oe_eval_gpu_multiplier 4 \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False
