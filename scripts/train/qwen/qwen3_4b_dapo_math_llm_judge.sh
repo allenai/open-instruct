@@ -6,7 +6,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_llm_judge}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B-Base}"
-LLM_JUDGE_MODEL="${LLM_JUDGE_MODEL:-hosted_vllm/Qwen/Qwen3-4B-Instruct}"
+LLM_JUDGE_MODEL="${LLM_JUDGE_MODEL:-hosted_vllm/opencompass/CompassVerifier-3B}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 DATASETS="${DATASETS:-mnoukhov/dapo_math_14k_en_openinstruct 1.0}"
@@ -17,14 +17,23 @@ LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
 
 CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
 PRIORITY="${PRIORITY:-high}"
-
-JUDGE_SERVER_PORT="${JUDGE_SERVER_PORT:-8001}"
+VLLM_NUM_ENGINES="${VLLM_NUM_ENGINES:-6}"
 JUDGE_SERVER_MAX_MODEL_LEN="${JUDGE_SERVER_MAX_MODEL_LEN:-32768}"
-JUDGE_SERVER_GPU_MEMORY_UTILIZATION="${JUDGE_SERVER_GPU_MEMORY_UTILIZATION:-0.5}"
-JUDGE_SERVER_TENSOR_PARALLEL_SIZE="${JUDGE_SERVER_TENSOR_PARALLEL_SIZE:-1}"
-JUDGE_SERVER_LOG="${JUDGE_SERVER_LOG:-/tmp/qwen3_4b_judge_vllm.log}"
-VLLM_NUM_ENGINES="${VLLM_NUM_ENGINES:-5}"
-VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.85}"
+JUDGE_SERVER_PORT="${JUDGE_SERVER_PORT:-8001}"
+JUDGE_WORKSPACE="${JUDGE_WORKSPACE:-ai2/oe-adapt-code}"
+JUDGE_CONFIG="${JUDGE_CONFIG:-configs/judge_configs/compass_verifier_3b_judge.yaml}"
+JUDGE_EXPERIMENT_NAME="${JUDGE_EXPERIMENT_NAME:-${RUN_NAME}_judge}"
+JUDGE_EXPERIMENT_ID="${JUDGE_EXPERIMENT_ID:-}"
+
+extract_json_field() {
+    local expr="$1"
+    python -c 'import json,sys; data=json.load(sys.stdin); print(eval(sys.argv[1], {"__builtins__": {}}, {"data": data}))' "${expr}"
+}
+
+if [[ -z "${JUDGE_EXPERIMENT_ID}" ]]; then
+    judge_create_json="$(beaker experiment create "${JUDGE_CONFIG}" --name "${JUDGE_EXPERIMENT_NAME}" --workspace "${JUDGE_WORKSPACE}" --format json)"
+    JUDGE_EXPERIMENT_ID="$(printf '%s\n' "${judge_create_json}" | extract_json_field 'data[0]["id"]')"
+fi
 
 uv run mason.py \
     --task_name "${EXP_NAME}" \
@@ -37,77 +46,18 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND=FLASHINFER \
+    --env JUDGE_SERVER_PORT="${JUDGE_SERVER_PORT}" \
+    --env JUDGE_WORKSPACE="${JUDGE_WORKSPACE}" \
+    --env JUDGE_CONFIG="${JUDGE_CONFIG}" \
+    --env JUDGE_EXPERIMENT_NAME="${JUDGE_EXPERIMENT_NAME}" \
+    --env JUDGE_EXPERIMENT_ID="${JUDGE_EXPERIMENT_ID}" \
+    --env HOSTED_VLLM_API_BASE="${HOSTED_VLLM_API_BASE:-}" \
     --gpus 8 \
     --budget ai2/oe-adapt \
-    -- bash -lc "
-set -euo pipefail
-export TORCH_COMPILE_DISABLE=1
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1
-export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_USE_V1=1
-export UV_LINK_MODE=\${UV_LINK_MODE:-copy}
-export HOSTED_VLLM_API_BASE=http://127.0.0.1:${JUDGE_SERVER_PORT}/v1
-JUDGE_SERVER_PID=
-
-cleanup() {
-    if [[ -n \"\${JUDGE_SERVER_PID}\" ]]; then
-        kill \"\${JUDGE_SERVER_PID}\" >/dev/null 2>&1 || true
-        wait \"\${JUDGE_SERVER_PID}\" >/dev/null 2>&1 || true
-    fi
-}
-
-trap cleanup EXIT
-
-if [[ -n \"\${JUDGE_SERVER_VISIBLE_DEVICES:-}\" ]]; then
-    JUDGE_VISIBLE_DEVICES=\"\${JUDGE_SERVER_VISIBLE_DEVICES}\"
-elif [[ -n \"\${CUDA_VISIBLE_DEVICES:-}\" ]]; then
-    IFS=',' read -r -a _visible_devices <<< \"\${CUDA_VISIBLE_DEVICES}\"
-    _device_count=\${#_visible_devices[@]}
-    _judge_device_count=${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}
-    if (( _device_count < _judge_device_count + 2 )); then
-        echo \"Need at least \$(( _judge_device_count + 2 )) visible GPUs to leave room for learners and judge, found \${_device_count}\" >&2
-        exit 1
-    fi
-    _start_idx=\$(( _device_count - _judge_device_count ))
-    JUDGE_VISIBLE_DEVICES=\"\$(IFS=,; echo \"\${_visible_devices[*]:_start_idx:_judge_device_count}\")\"
-else
-    mapfile -t _all_devices < <(nvidia-smi --query-gpu=index --format=csv,noheader)
-    _device_count=\${#_all_devices[@]}
-    _judge_device_count=${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}
-    if (( _device_count < _judge_device_count + 2 )); then
-        echo \"Need at least \$(( _judge_device_count + 2 )) GPUs to leave room for learners and judge, found \${_device_count}\" >&2
-        exit 1
-    fi
-    _start_idx=\$(( _device_count - _judge_device_count ))
-    JUDGE_VISIBLE_DEVICES=\"\$(IFS=,; echo \"\${_all_devices[*]:_start_idx:_judge_device_count}\")\"
-fi
-
-echo \"Using judge CUDA_VISIBLE_DEVICES=\${JUDGE_VISIBLE_DEVICES}\" >&2
-
-CUDA_VISIBLE_DEVICES=\${JUDGE_VISIBLE_DEVICES} uv run python -m vllm.entrypoints.openai.api_server \
-    --model \"${LLM_JUDGE_MODEL#hosted_vllm/}\" \
-    --port \"${JUDGE_SERVER_PORT}\" \
-    --tensor-parallel-size \"${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}\" \
-    --max-model-len \"${JUDGE_SERVER_MAX_MODEL_LEN}\" \
-    --gpu-memory-utilization \"${JUDGE_SERVER_GPU_MEMORY_UTILIZATION}\" \
-    >\"${JUDGE_SERVER_LOG}\" 2>&1 &
-JUDGE_SERVER_PID=\$!
-
-for _ in \$(seq 1 60); do
-    if curl -fsS \"\${HOSTED_VLLM_API_BASE}/models\" >/dev/null 2>&1; then
-        break
-    fi
-    sleep 2
-done
-
-if ! curl -fsS \"\${HOSTED_VLLM_API_BASE}/models\" >/dev/null 2>&1; then
-    echo \"Judge vLLM server failed to start; see ${JUDGE_SERVER_LOG}\" >&2
-    exit 1
-fi
-
-UV_LINK_MODE=copy uv run --active open_instruct/grpo_fast.py \
-    --run_name \"${RUN_NAME}\" \
-    --exp_name \"${EXP_NAME}\" \
+    -- source scripts/train/qwen/setup_compass_verifier_judge.sh \
+\&\& uv run open_instruct/grpo_fast.py \
+    --run_name "${RUN_NAME}" \
+    --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
     --eval_top_p 0.95 \
     --vllm_top_p 1.0 \
@@ -130,22 +80,21 @@ UV_LINK_MODE=copy uv run --active open_instruct/grpo_fast.py \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
-    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --model_name_or_path "${MODEL_NAME_OR_PATH}" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 2 \
-    --vllm_num_engines ${VLLM_NUM_ENGINES} \
+    --vllm_num_engines "${VLLM_NUM_ENGINES}" \
     --vllm_tensor_parallel_size 1 \
-    --vllm_gpu_memory_utilization ${VLLM_GPU_MEMORY_UTILIZATION} \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
-    --llm_judge_model \"${LLM_JUDGE_MODEL}\" \
-    --llm_judge_override_verifier math \
-    --llm_judge_max_tokens 256 \
+    --remap_verifier math=general-compass_verifier \
+    --llm_judge_model "${LLM_JUDGE_MODEL}" \
+    --llm_judge_max_tokens 32 \
     --llm_judge_temperature 0.0 \
-    --llm_judge_max_context_length \"${JUDGE_SERVER_MAX_MODEL_LEN}\" \
+    --llm_judge_max_context_length "${JUDGE_SERVER_MAX_MODEL_LEN}" \
     --llm_judge_timeout 240 \
     --seed 1 \
     --save_freq 100 \
@@ -158,6 +107,4 @@ UV_LINK_MODE=copy uv run --active open_instruct/grpo_fast.py \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy True \
     --keep_last_n_checkpoints -1 \
-    --push_to_hub False \
-    \"\$@\"
-" -- "$@"
+    --push_to_hub False "$@"
