@@ -1850,6 +1850,9 @@ class ModelDims:
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        # Some models (e.g. Qwen3.5) use a sub-config for the text model
+        if hasattr(config, "text_config") and not hasattr(config, "hidden_size"):
+            config = config.text_config
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)

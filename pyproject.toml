@@ -27,7 +27,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.10.0,<2.11",
     "transformers>=5.0.0",
-    "vllm==0.17.0; platform_system != 'Darwin'",
+    "vllm>=0.17.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -59,6 +59,7 @@ torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
+vllm = { index = "vllm-nightly" }
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
@@ -73,6 +74,11 @@ explicit = true
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "vllm-nightly"
+url = "https://wheels.vllm.ai/nightly"
 explicit = true
 
 
