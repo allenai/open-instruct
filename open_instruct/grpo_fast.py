@@ -48,7 +48,6 @@ from open_instruct.data_types import EnvConfig, EnvConfigEntry
 # isort: on
 import asyncio
 import dataclasses
-import json
 import logging
 import math
 import random
@@ -134,7 +133,7 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-WEIGHT_SYNC_TIMEOUT_S = 180.0
+WEIGHT_SYNC_TIMEOUT_S = 120.0
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -1357,7 +1356,6 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        hf_overrides=json.loads(vllm_config.vllm_hf_overrides) if vllm_config.vllm_hf_overrides else None,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
