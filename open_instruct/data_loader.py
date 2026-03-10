@@ -1100,21 +1100,15 @@ class DataPreparationActor:
             if self.shutdown_requested:
                 return
 
-            generation_idle_wait_start_time: float | None = None
+            generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
-                if generation_idle_wait_start_time is None:
-                    generation_idle_wait_start_time = time.perf_counter()
                 if self.shutdown_requested:
                     return
                 logger.info(
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
-            generation_idle_wait_time = (
-                0.0
-                if generation_idle_wait_start_time is None
-                else time.perf_counter() - generation_idle_wait_start_time
-            )
+            generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
