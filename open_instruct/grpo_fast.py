@@ -1881,7 +1881,12 @@ def maybe_evaluate(
                 return False
 
         # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        timeout = max(300, args.backend_timeout * 5) if is_final_step else 0.01
+        if not is_final_step:
+            timeout = 0.01
+        elif args.eval_timeout_minutes is not None:
+            timeout = args.eval_timeout_minutes * 60
+        else:
+            timeout = max(300, args.backend_timeout * 5)
 
         eval_dataset_index_map = {eval_dataset[i]["index"]: i for i in range(num_eval_prompts)}
 

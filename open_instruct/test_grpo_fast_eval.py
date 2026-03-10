@@ -37,7 +37,9 @@ class TestMaybeEvaluate(unittest.TestCase):
         )
 
     def test_non_final_step_defers_when_eval_results_incomplete(self):
-        args = SimpleNamespace(num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False)
+        args = SimpleNamespace(
+            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
+        )
         eval_dataset = self._build_eval_dataset(num_prompts=3)
         eval_queue = _QueueWithSize(size=2)
         eval_generation_config = SimpleNamespace(n=32)
@@ -58,7 +60,9 @@ class TestMaybeEvaluate(unittest.TestCase):
         mock_accumulate.assert_not_called()
 
     def test_final_step_calls_accumulate_even_when_queue_is_incomplete(self):
-        args = SimpleNamespace(num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False)
+        args = SimpleNamespace(
+            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
+        )
         eval_dataset = self._build_eval_dataset(num_prompts=3)
         eval_queue = _QueueWithSize(size=0)
         eval_generation_config = SimpleNamespace(n=32)
@@ -79,7 +83,13 @@ class TestMaybeEvaluate(unittest.TestCase):
         mock_accumulate.assert_called_once()
 
     def test_records_eval_model_step_mean(self):
-        args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120, eval_only=False)
+        args = SimpleNamespace(
+            num_training_steps=200,
+            with_tracking=False,
+            backend_timeout=120,
+            eval_only=False,
+            eval_timeout_minutes=None,
+        )
         eval_dataset = self._build_eval_dataset(num_prompts=1)
         eval_queue = _QueueWithSize(size=1)
         eval_generation_config = SimpleNamespace(n=2)
@@ -134,7 +144,13 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertNotIn("eval/model_step_diff_span", logged)
 
     def test_records_eval_pass_at_powers_of_two_k(self):
-        args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120, eval_only=False)
+        args = SimpleNamespace(
+            num_training_steps=200,
+            with_tracking=False,
+            backend_timeout=120,
+            eval_only=False,
+            eval_timeout_minutes=None,
+        )
         eval_dataset = self._build_eval_dataset(num_prompts=2)
         eval_queue = _QueueWithSize(size=2)
         eval_generation_config = SimpleNamespace(n=4)
@@ -182,7 +198,13 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertGreaterEqual(logged["eval/pass_at_4"], logged["eval/pass_at_2"])
 
     def test_records_eval_pass_at_powers_of_two_k_per_dataset_subset(self):
-        args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120, eval_only=False)
+        args = SimpleNamespace(
+            num_training_steps=200,
+            with_tracking=False,
+            backend_timeout=120,
+            eval_only=False,
+            eval_timeout_minutes=None,
+        )
         eval_dataset = Dataset.from_dict(
             {
                 INPUT_IDS_PROMPT_KEY: [[1, 2, 3], [1, 2, 3]],
@@ -245,7 +267,13 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertGreaterEqual(logged["eval/subset_b/pass_at_4"], logged["eval/subset_b/pass_at_2"])
 
     def test_records_eval_sequence_lengths_per_dataset(self):
-        args = SimpleNamespace(num_training_steps=200, with_tracking=False, backend_timeout=120, eval_only=False)
+        args = SimpleNamespace(
+            num_training_steps=200,
+            with_tracking=False,
+            backend_timeout=120,
+            eval_only=False,
+            eval_timeout_minutes=None,
+        )
         eval_dataset = Dataset.from_dict(
             {
                 INPUT_IDS_PROMPT_KEY: [[1, 2, 3], [1, 2, 3]],
@@ -309,6 +337,52 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/subset_b/sequence_length_unsolved_mean"], 7.5)
         np.testing.assert_array_equal(logged["eval/subset_b/sequence_length_solved_hist"], np.array([5.0, 6.0]))
         np.testing.assert_array_equal(logged["eval/subset_b/sequence_length_unsolved_hist"], np.array([7.0, 8.0]))
+
+    def test_final_step_uses_legacy_eval_timeout_by_default(self):
+        args = SimpleNamespace(
+            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
+        )
+        eval_dataset = self._build_eval_dataset(num_prompts=3)
+        eval_queue = _QueueWithSize(size=0)
+        eval_generation_config = SimpleNamespace(n=32)
+
+        with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
+            maybe_evaluate(
+                args=args,
+                training_step=10,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=Mock(),
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                max_possible_score=1.0,
+            )
+
+        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 600)
+
+    def test_final_step_uses_eval_timeout_minutes_override(self):
+        args = SimpleNamespace(
+            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=30
+        )
+        eval_dataset = self._build_eval_dataset(num_prompts=3)
+        eval_queue = _QueueWithSize(size=0)
+        eval_generation_config = SimpleNamespace(n=32)
+
+        with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
+            maybe_evaluate(
+                args=args,
+                training_step=10,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=Mock(),
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                max_possible_score=1.0,
+            )
+
+        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 1800)
 
     def test_estimate_pass_at_k_matches_known_values(self):
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=0, k=1), 0.0)

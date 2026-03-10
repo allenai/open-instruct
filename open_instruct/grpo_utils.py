@@ -198,6 +198,8 @@ class ExperimentConfig:
     """Optional eval-only top_p override. If None, uses training top_p."""
     eval_response_length: int | None = None
     """Optional eval-only max response length override. If None, uses training response_length."""
+    eval_timeout_minutes: int | None = None
+    """Optional timeout in minutes for final local eval result collection. If None, uses legacy behavior."""
 
     def __post_init__(self):
         # Backwards-compatible alias handling:
@@ -253,6 +255,8 @@ class ExperimentConfig:
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
         if self.eval_response_length is not None and self.eval_response_length < 1:
             raise ValueError(f"`eval_response_length` must be >= 1, got {self.eval_response_length}")
+        if self.eval_timeout_minutes is not None and self.eval_timeout_minutes < 1:
+            raise ValueError(f"`eval_timeout_minutes` must be >= 1, got {self.eval_timeout_minutes}")
         if self.eval_pass_at_k < 1:
             raise ValueError(f"`eval_pass_at_k` must be >= 1, got {self.eval_pass_at_k}")
         if self.eval_pass_at_k & (self.eval_pass_at_k - 1) != 0:
