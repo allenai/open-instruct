@@ -262,17 +262,18 @@ class SWERLSandboxEnv(RLEnvironment):
 
         result = self._backend.run_command(command)
 
+        # Build output string exactly like TassieAgent._execute_bash
         output = result.stdout or ""
         if result.stderr:
             output += f"\nSTDERR:\n{result.stderr}"
         if result.exit_code != 0:
             output = f"Exit code {result.exit_code}\n{output}"
 
-        output = _truncate(output) if output else "(no output)"
-
-        # Check for submit marker
-        if (result.stdout or "").startswith(SUBMIT_MARKER):
+        # Check for submit marker before truncation (matches TassieAgent)
+        if output.startswith(SUBMIT_MARKER):
             return self._run_tests()
+
+        output = _truncate(output) or "(no output)"
 
         return StepResult(result=output, metadata={"exit_code": result.exit_code})
 
