@@ -47,6 +47,7 @@ uv run python open_instruct/grpo_fast.py \
     --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --no_filter_zero_std_samples \
+    --no_resampling_pass_rate 0.875 \
     --dataset_skip_cache \
     --output_dir output/swerl_sandbox_qwen3_4b_debug
 

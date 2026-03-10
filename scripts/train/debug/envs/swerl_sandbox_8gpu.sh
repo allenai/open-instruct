@@ -67,6 +67,7 @@ uv run python mason.py \
     --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
+    --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name swerl_sandbox_qwen3_4b_grpo \
