@@ -24,7 +24,7 @@ JUDGE_EXPERIMENT_ID="${JUDGE_EXPERIMENT_ID:-}"
 
 extract_json_field() {
     local expr="$1"
-    python -c 'import json,sys; data=json.load(sys.stdin); print(eval(sys.argv[1], {"__builtins__": {}}, {"data": data}))' "${expr}"
+    python -c 'import json,sys; data=json.load(sys.stdin); print(eval(sys.argv[1], {"__builtins__": {"next": next}}, {"data": data}))' "${expr}"
 }
 
 if [[ -z "${HOSTED_VLLM_API_BASE:-}" ]]; then

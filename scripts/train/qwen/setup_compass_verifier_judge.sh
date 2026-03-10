@@ -23,7 +23,7 @@ trap cleanup_compass_judge EXIT
 
 extract_json_field() {
     local expr="$1"
-    python -c 'import json,sys; data=json.load(sys.stdin); print(eval(sys.argv[1], {"__builtins__": {}}, {"data": data}))' "${expr}"
+    python -c 'import json,sys; data=json.load(sys.stdin); print(eval(sys.argv[1], {"__builtins__": {"next": next}}, {"data": data}))' "${expr}"
 }
 
 if [[ -z "${JUDGE_EXPERIMENT_ID:-}" ]]; then
