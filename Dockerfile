@@ -84,6 +84,9 @@ COPY open_instruct/_flash_attn_2_cuda_stub.py .venv/lib/python3.12/site-packages
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
+
+# Patch vLLM to skip vision encoder init when language_model_only=True (Qwen3.5).
+RUN uv run python scripts/vllm_patches/patch_qwen35_vision_skip.py
 COPY mason.py mason.py
 COPY open_instruct open_instruct
 COPY oe-eval-interna[l] oe-eval-internal/
