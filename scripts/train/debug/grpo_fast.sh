@@ -2,6 +2,11 @@
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
+# Fix CUDA 12.8 vs cu129 torch mismatch by pointing to the uv-managed nvidia-nvjitlink libs
+NVJITLINK_DIR=$(uv run python -c "import nvidia.nvjitlink; print(list(nvidia.nvjitlink.__path__)[0] + '/lib')" 2>/dev/null)
+if [ -n "$NVJITLINK_DIR" ]; then
+    export LD_LIBRARY_PATH="${NVJITLINK_DIR}:${LD_LIBRARY_PATH:-}"
+fi
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
@@ -13,7 +18,7 @@ uv run python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-0.6B \
+    --model_name_or_path Qwen/Qwen3.5-0.8B \
     --stop_strings "</answer>" \
     --apply_verifiable_reward true \
     --temperature 0.7 \
@@ -36,5 +41,7 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --system_prompt_override_file scripts/train/debug/cute_debug_system_prompt.txt \
+    --attn_implementation sdpa \
+    --vllm_language_model_only \
     --active_sampling --async_steps 8
     # --with_tracking

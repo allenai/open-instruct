@@ -40,6 +40,15 @@ import torch
 import torch.distributed
 import uvicorn
 import vllm
+import vllm.v1.kv_cache_interface as _kv_iface
+
+# Monkey-patch MambaSpec to accept variable-length dtypes tuple.
+# Qwen3.5 GDN layers produce 2 dtypes (bfloat16 + float32) but the
+# annotation says tuple[torch.dtype] (exactly 1). This causes msgspec
+# deserialization to fail in the async engine IPC path.
+if _kv_iface.MambaSpec.__annotations__.get("dtypes") == tuple[torch.dtype]:
+    _kv_iface.MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
+
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -414,7 +423,8 @@ def init_process_group(
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
     # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
     # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
+    torch_version = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
+    pg_options_param_name = "backend_options" if torch_version >= (2, 6) else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -601,6 +611,12 @@ class LLMRayActor:
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
+        # Detect if vLLM wraps the text model under a prefix (e.g. VL models like Qwen3.5
+        # use language_model.* while the HF training model uses model.* directly)
+        arch = self.llm_engine.model_config.hf_config.architectures[0]
+        self._weight_prefix = "language_model." if "ForConditionalGeneration" in arch else ""
+        if self._weight_prefix:
+            logger.info(f"Weight name prefix for vLLM model: '{self._weight_prefix}'")
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
@@ -827,14 +843,26 @@ class LLMRayActor:
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
+    def _remap_weight_name(self, name: str) -> str:
+        """Remap HF training model weight names to vLLM model weight names.
+
+        For VL models like Qwen3.5 used in language_model_only mode, vLLM wraps
+        the text model under `language_model.` prefix while HF loads it directly.
+        """
+        if self._weight_prefix:
+            return f"{self._weight_prefix}{name}"
+        return name
+
     def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
+        name = self._remap_weight_name(name)
         return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
 
     def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
     ) -> None:
         self._prepare_weight_update(name, dtype)
+        name = self._remap_weight_name(name)
         return self._run_async(
             self.llm_engine.collective_rpc(
                 "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
@@ -1237,6 +1265,8 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
+    language_model_only: bool = False,
+    hf_overrides: dict[str, Any] | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1286,6 +1316,11 @@ def create_vllm_engines(
                         "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
                         "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
                         "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+                        **(
+                            {"LD_LIBRARY_PATH": os.environ["LD_LIBRARY_PATH"]}
+                            if "LD_LIBRARY_PATH" in os.environ
+                            else {}
+                        ),
                     }
                 ),
             )
@@ -1321,6 +1356,8 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                language_model_only=language_model_only,
+                **({"hf_overrides": hf_overrides} if hf_overrides else {}),
             )
         )
 

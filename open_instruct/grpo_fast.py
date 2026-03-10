@@ -48,6 +48,7 @@ from open_instruct.data_types import EnvConfig, EnvConfigEntry
 # isort: on
 import asyncio
 import dataclasses
+import json
 import logging
 import math
 import random
@@ -255,9 +256,9 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_config.attn_implementation,
-            use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -1356,6 +1357,8 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        language_model_only=vllm_config.vllm_language_model_only,
+        hf_overrides=json.loads(vllm_config.vllm_hf_overrides) if vllm_config.vllm_hf_overrides else None,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
