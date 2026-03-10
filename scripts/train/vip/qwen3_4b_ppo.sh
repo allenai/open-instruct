@@ -44,10 +44,10 @@ uv run python mason.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
-    --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
+    --deepspeed_stage 3 \
+    --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 6 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --lr_scheduler_type constant \
