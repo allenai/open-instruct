@@ -24,7 +24,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 1 \
+    --gpus 2 \
     --budget ai2/oe-adapt \
     -- \
 uv run --active open_instruct/grpo_fast.py \
@@ -54,7 +54,7 @@ uv run --active open_instruct/grpo_fast.py \
     --non_stop_penalty False \
     --apply_verifiable_reward true \
     --vllm_enable_prefix_caching \
-    --vllm_num_engines 1 \
+    --vllm_num_engines 2 \
     --eval_on_step_0 \
     --eval_only \
     --eval_temperature 1.0 \

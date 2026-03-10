@@ -41,7 +41,6 @@ uv run open_instruct/grpo_fast.py \
     --local_eval_every 100 \
     --beta 0.0 \
     --async_steps 2 \
-    --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
