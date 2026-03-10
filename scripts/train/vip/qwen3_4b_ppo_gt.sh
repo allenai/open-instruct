@@ -60,6 +60,7 @@ uv run python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
+    --eval_on_step_0 True \
     --loss_fn dapo \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
