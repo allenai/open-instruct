@@ -67,9 +67,11 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
     UV_COMPILE_BYTECODE=0
 
 # Install dependencies
+# Pre-install setuptools for flash-attn's no-build-isolation build
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv pip install setuptools && \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
