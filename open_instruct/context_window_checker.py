@@ -21,10 +21,14 @@ Usage:
 
 import tiktoken
 from transformers import AutoTokenizer
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+_TOKENIZER_CACHE: dict[str, PreTrainedTokenizerBase] = {}
+_TOKENIZER_MAX_LENGTH_CACHE: dict[str, int] = {}
 
 
 def get_encoding_for_model(model_name: str):
@@ -67,6 +71,21 @@ def get_encoding_for_model(model_name: str):
         return tiktoken.get_encoding("cl100k_base")
 
 
+def get_cached_tokenizer(model_name: str) -> PreTrainedTokenizerBase:
+    resolved_model_name = model_name.replace("hosted_vllm/", "")
+    if resolved_model_name not in _TOKENIZER_CACHE:
+        _TOKENIZER_CACHE[resolved_model_name] = AutoTokenizer.from_pretrained(resolved_model_name)
+        _TOKENIZER_MAX_LENGTH_CACHE[resolved_model_name] = _TOKENIZER_CACHE[resolved_model_name].model_max_length
+    return _TOKENIZER_CACHE[resolved_model_name]
+
+
+def get_cached_tokenizer_max_length(model_name: str) -> int:
+    resolved_model_name = model_name.replace("hosted_vllm/", "")
+    if resolved_model_name not in _TOKENIZER_MAX_LENGTH_CACHE:
+        get_cached_tokenizer(model_name)
+    return _TOKENIZER_MAX_LENGTH_CACHE[resolved_model_name]
+
+
 def check_context_window_limit(
     messages: list[dict[str, str]],
     max_completion_tokens: int,
@@ -88,9 +107,10 @@ def check_context_window_limit(
         bool: True if the request would fit within context window, False otherwise
     """
     try:
-        # First try to load the actual model tokenizer from HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
-        max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
+        tokenizer = get_cached_tokenizer(model_name)
+        max_context_length = (
+            get_cached_tokenizer_max_length(model_name) if max_context_length is None else max_context_length
+        )
 
         # Count tokens in all messages using HuggingFace tokenizer
         total_message_tokens = 0
@@ -185,9 +205,10 @@ def truncate_messages_to_fit_context(
         List[Dict[str, str]]: Truncated messages that fit within context window
     """
     try:
-        # First try to load the actual model tokenizer from HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
-        max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
+        tokenizer = get_cached_tokenizer(model_name)
+        max_context_length = (
+            get_cached_tokenizer_max_length(model_name) if max_context_length is None else max_context_length
+        )
 
         # Calculate available tokens for messages
         available_tokens = max_context_length - max_completion_tokens - safety_margin
