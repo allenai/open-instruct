@@ -34,10 +34,8 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/dpo_utils__123__1769051928/hf_model \
-    --add_bos \
+    --model_name_or_path Qwen/Qwen3.5-0.8B \
     --stop_strings "</answer>" \
-    --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --inflight_updates True \
@@ -60,4 +58,6 @@ uv run python mason.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
-    --single_gpu_mode
+    --single_gpu_mode \
+    --attn_implementation sdpa \
+    --vllm_language_model_only

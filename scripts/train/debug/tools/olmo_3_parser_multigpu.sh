@@ -42,7 +42,9 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
-    --model_name_or_path allenai/Olmo-3-7B-Instruct-SFT \
+    --model_name_or_path Qwen/Qwen3.5-0.8B \
+    --attn_implementation sdpa \
+    --vllm_language_model_only \
     --apply_verifiable_reward true \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
