@@ -36,8 +36,6 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0 \
-    --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
@@ -62,9 +60,6 @@ uv run python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
-    --eval_on_step_0 True \
-    --eval_pass_at_k 32 \
-    --eval_top_p 0.95 \
     --loss_fn dapo \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
