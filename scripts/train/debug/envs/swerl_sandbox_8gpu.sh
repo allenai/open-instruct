@@ -1,8 +1,7 @@
 #!/bin/bash
 # Training script for GRPO with SWERL Sandbox environment (8 GPUs on Beaker)
 #
-# SWERL Sandbox: Per-sample Docker tasks with submit-based evaluation.
-# Provides execute_bash, str_replace_editor, and submit tools.
+# SWERL Sandbox: Per-sample Docker tasks with bash-only tool loop (TassieAgent style).
 #
 # Requirements:
 # - 8 GPUs (launched on Beaker)
@@ -66,6 +65,7 @@ uv run python mason.py \
     --pool_size 128 \
     --max_steps 30 \
     --tool_parser_type vllm_hermes \
+    --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
