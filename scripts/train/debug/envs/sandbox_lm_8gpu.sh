@@ -16,7 +16,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SandboxLM 8-GPU (4L/4E) 32k Qwen3-4B test" \
+       --description "SandboxLM 8-GPU (4L/4E) 32k Qwen3.5-4B test" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -39,7 +39,9 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
+    --model_name_or_path Qwen/Qwen3.5-4B \
+    --attn_implementation sdpa \
+    --vllm_language_model_only \
     --temperature 1.0 \
     --learning_rate 5e-7 \
     --total_episodes 3200 \
