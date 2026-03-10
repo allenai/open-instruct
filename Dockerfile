@@ -67,11 +67,13 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
     UV_COMPILE_BYTECODE=0
 
 # Install dependencies
-# Pre-install setuptools for flash-attn's no-build-isolation build
+# Pre-install torch + setuptools for flash-attn's no-build-isolation build.
+# extra-build-dependencies requires a newer uv than the Docker image has.
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv venv && uv pip install setuptools && \
+    uv venv && \
+    uv pip install setuptools torch --index-url https://download.pytorch.org/whl/cu129 && \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
