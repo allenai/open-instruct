@@ -25,7 +25,9 @@ def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
         data["chosen_labels"].append(torch.randint(0, 1000, (chosen_len,), generator=rng))
         data["rejected_input_ids"].append(torch.randint(0, 1000, (rejected_len,), generator=rng))
         data["rejected_labels"].append(torch.randint(0, 1000, (rejected_len,), generator=rng))
-    return Dataset.from_dict(data)
+    ds = Dataset.from_dict(data)
+    ds.set_format(type="pt")
+    return ds
 
 
 class TestWorldAwarePacking(unittest.TestCase):
