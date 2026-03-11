@@ -573,7 +573,7 @@ def build_reference_logprobs_cache(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
 
-            if batch["is_padding"]:
+            if batch.get("is_padding", False):
                 continue
 
             chosen_tensor[batch["index"]] = chosen_logps
@@ -618,8 +618,7 @@ def build_reference_logprobs_cache(
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     return cache
 

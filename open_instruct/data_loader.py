@@ -143,6 +143,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._overflow: list[dict[str, Any]] = []
         self._precomputed_batch_sizes: list[int] | None = None
+        self._num_padding_batches: int = 0
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
