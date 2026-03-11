@@ -74,7 +74,6 @@ uv run python mason.py \
     --value_learning_rate 2e-6 \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
-    --whiten_advantages \
     --gamma 1.0 \
     --gae_lambda 0.95 \
     --vf_clip_range 0.2 \
