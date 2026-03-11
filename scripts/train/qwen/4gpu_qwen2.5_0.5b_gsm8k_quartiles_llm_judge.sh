@@ -37,75 +37,21 @@ uv run mason.py \
     --env VLLM_ATTENTION_BACKEND=FLASHINFER \
     --gpus 4 \
     --budget ai2/oe-adapt \
-    -- bash -lc "
-set -euo pipefail
-export TORCH_COMPILE_DISABLE=1
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1
-export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_USE_V1=1
-export UV_LINK_MODE=\${UV_LINK_MODE:-copy}
-export HOSTED_VLLM_API_BASE=http://127.0.0.1:${JUDGE_SERVER_PORT}/v1
-JUDGE_SERVER_PID=
-
-cleanup() {
-    if [[ -n \"\${JUDGE_SERVER_PID}\" ]]; then
-        kill \"\${JUDGE_SERVER_PID}\" >/dev/null 2>&1 || true
-        wait \"\${JUDGE_SERVER_PID}\" >/dev/null 2>&1 || true
-    fi
-}
-
-trap cleanup EXIT
-
-if [[ -n \"\${JUDGE_SERVER_VISIBLE_DEVICES:-}\" ]]; then
-    JUDGE_VISIBLE_DEVICES=\"\${JUDGE_SERVER_VISIBLE_DEVICES}\"
-elif [[ -n \"\${CUDA_VISIBLE_DEVICES:-}\" ]]; then
-    IFS=',' read -r -a _visible_devices <<< \"\${CUDA_VISIBLE_DEVICES}\"
-    _device_count=\${#_visible_devices[@]}
-    _judge_device_count=${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}
-    if (( _device_count < _judge_device_count )); then
-        echo \"Need at least \${_judge_device_count} visible GPUs for the judge, found \${_device_count}\" >&2
-        exit 1
-    fi
-    _start_idx=\$(( _device_count - _judge_device_count ))
-    JUDGE_VISIBLE_DEVICES=\"\$(IFS=,; echo \"\${_visible_devices[*]:_start_idx:_judge_device_count}\")\"
-else
-    mapfile -t _all_devices < <(nvidia-smi --query-gpu=index --format=csv,noheader)
-    _device_count=\${#_all_devices[@]}
-    _judge_device_count=${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}
-    if (( _device_count < _judge_device_count )); then
-        echo \"Need at least \${_judge_device_count} GPUs for the judge, found \${_device_count}\" >&2
-        exit 1
-    fi
-    _start_idx=\$(( _device_count - _judge_device_count ))
-    JUDGE_VISIBLE_DEVICES=\"\$(IFS=,; echo \"\${_all_devices[*]:_start_idx:_judge_device_count}\")\"
-fi
-
-echo \"Using judge CUDA_VISIBLE_DEVICES=\${JUDGE_VISIBLE_DEVICES}\" >&2
-
-CUDA_VISIBLE_DEVICES=\${JUDGE_VISIBLE_DEVICES} uv run python -m vllm.entrypoints.openai.api_server \
-    --model \"${LLM_JUDGE_MODEL#hosted_vllm/}\" \
-    --port \"${JUDGE_SERVER_PORT}\" \
-    --tensor-parallel-size \"${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}\" \
-    --max-model-len \"${JUDGE_SERVER_MAX_MODEL_LEN}\" \
-    --gpu-memory-utilization \"${JUDGE_SERVER_GPU_MEMORY_UTILIZATION}\" \
-    >\"${JUDGE_SERVER_LOG}\" 2>&1 &
-JUDGE_SERVER_PID=\$!
-
-for _ in \$(seq 1 60); do
-    if curl -fsS \"\${HOSTED_VLLM_API_BASE}/models\" >/dev/null 2>&1; then
-        break
-    fi
-    sleep 2
-done
-
-if ! curl -fsS \"\${HOSTED_VLLM_API_BASE}/models\" >/dev/null 2>&1; then
-    echo \"CompassVerifier vLLM server failed to start; see ${JUDGE_SERVER_LOG}\" >&2
-    exit 1
-fi
-
-UV_LINK_MODE=copy uv run --active open_instruct/grpo_fast.py \
-    --run_name \"${RUN_NAME}\" \
-    --exp_name \"${EXP_NAME}\" \
+    --env TORCH_COMPILE_DISABLE=1 \
+    --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
+    --env VLLM_DISABLE_COMPILE_CACHE=1 \
+    --env VLLM_USE_V1=1 \
+    --env UV_LINK_MODE=copy \
+    --env LLM_JUDGE_MODEL="${LLM_JUDGE_MODEL}" \
+    --env JUDGE_SERVER_PORT="${JUDGE_SERVER_PORT}" \
+    --env JUDGE_SERVER_MAX_MODEL_LEN="${JUDGE_SERVER_MAX_MODEL_LEN}" \
+    --env JUDGE_SERVER_GPU_MEMORY_UTILIZATION="${JUDGE_SERVER_GPU_MEMORY_UTILIZATION}" \
+    --env JUDGE_SERVER_TENSOR_PARALLEL_SIZE="${JUDGE_SERVER_TENSOR_PARALLEL_SIZE}" \
+    --env JUDGE_SERVER_LOG="${JUDGE_SERVER_LOG}" \
+    -- bash scripts/train/qwen/run_with_hosted_vllm_judge.sh \
+    uv run --active open_instruct/grpo_fast.py \
+    --run_name "${RUN_NAME}" \
+    --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 128 \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
@@ -146,12 +92,11 @@ UV_LINK_MODE=copy uv run --active open_instruct/grpo_fast.py \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy True \
-    --llm_judge_model \"${LLM_JUDGE_MODEL}\" \
+    --llm_judge_model "${LLM_JUDGE_MODEL}" \
     --llm_judge_override_verifier gsm8k \
     --llm_judge_max_tokens 32 \
     --llm_judge_temperature 0.0 \
-    --llm_judge_max_context_length \"${JUDGE_SERVER_MAX_MODEL_LEN}\" \
+    --llm_judge_max_context_length "${JUDGE_SERVER_MAX_MODEL_LEN}" \
     --llm_judge_timeout 240 \
     --with_tracking \
-    --push_to_hub False \$@
-"
+    --push_to_hub False "$@"
