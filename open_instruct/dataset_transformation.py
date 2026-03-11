@@ -124,14 +124,10 @@ COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 
 
 def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
-    i = 0
     console = Console()
-    rich_text = Text()
-    for i, token in enumerate(tokens):
-        color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
-        rich_text.append(f"{decoded_token}", style=color)
-    console.print(rich_text)
+    decoded = tokenizer.decode(tokens)
+    console.print(f"[bold]Prompt ({len(tokens)} tokens):[/bold]")
+    console.print(decoded[:2000] + ("..." if len(decoded) > 2000 else ""))
 
 
 def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer):
@@ -629,6 +625,18 @@ CHAT_TEMPLATES = {
         "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinjia template escape
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "qwen_instruct_user_boxed_math": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and put your final answer within \\\\boxed{}<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -1723,8 +1731,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
+        tokenizer_id = getattr(tokenizer, "name_or_path", "") if tokenizer is not None else ""
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tokenizer_id}".encode()
         ).hexdigest()[:16]
 
         # perform the transformation
