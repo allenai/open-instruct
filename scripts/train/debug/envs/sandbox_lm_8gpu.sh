@@ -37,14 +37,14 @@ uv run python mason.py \
     --response_length 30720 \
     --pack_length 32768 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 32 \
+    --num_samples_per_prompt_rollout 8 \
     --model_name_or_path Qwen/Qwen3.5-4B \
     --attn_implementation sdpa \
     --vllm_language_model_only \
     --temperature 1.0 \
     --learning_rate 5e-7 \
-    --total_episodes 8000 \
+    --total_episodes 128000 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 4 \
