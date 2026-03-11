@@ -1419,7 +1419,7 @@ def create_model_and_optimizer(
 
     # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0]["optimization_steps_done"]
+    resume_training_step = results[0]["optimization_steps_done"] + 1
     checkpoint_state = results[0]["checkpoint_state"]
     episode = (
         (resume_training_step - 1)
