@@ -348,8 +348,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
             batches = batches[:num_batches]
         else:
-            remainder = num_batches % self.dp_world_size
-            if remainder > 0:
+            if (remainder := num_batches % self.dp_world_size) > 0:
                 for _ in range(self.dp_world_size - remainder):
                     batches.append(batches[-1])
 
