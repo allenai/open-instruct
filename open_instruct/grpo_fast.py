@@ -511,6 +511,9 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
         weighted_mean_ratio = self.local_metrics["val/ratio"]
         self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
+        if "tv_divergence_avg" in loss_stats_B:
+            self.local_metrics["policy/tv_divergence_avg"] = (loss_stats_B["tv_divergence_avg"] * weights).sum()
+            self.local_metrics["policy/tv_divergence_max"] = loss_stats_B["tv_divergence_max"].max()
         if self.args.record_entropy:
             self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
 
@@ -599,6 +602,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 "entropy": torch.zeros(num_samples, device=device),
                 "token_count": token_counts_per_sample,
             }
+            if self.args.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                loss_stats_B["tv_divergence_avg"] = torch.zeros(num_samples, device=device)
+                loss_stats_B["tv_divergence_max"] = torch.zeros(num_samples, device=device)
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -778,6 +784,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
                         loss_stats_B["loss"][i] = loss
                         loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
+                        if tv_divergence_BT is not None:
+                            loss_stats_B["tv_divergence_avg"][i] = masked_mean(tv_divergence_BT, response_mask_BT)
+                            loss_stats_B["tv_divergence_max"][i] = tv_divergence_BT[response_mask_BT].max()
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 

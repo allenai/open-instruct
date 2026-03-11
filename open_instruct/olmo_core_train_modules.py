@@ -254,6 +254,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
             ),
         }
+        if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+            loss_stats_B["tv_divergence_avg"] = torch.zeros(num_samples, device=self.device)
+            loss_stats_B["tv_divergence_max"] = torch.zeros(num_samples, device=self.device)
 
         num_steps = 0
         local_step = 0
@@ -312,6 +315,9 @@ class GRPOTrainModule(TransformerTrainModule):
                         tv_divergence=tv_divergence,
                     )
                     loss_stats_B["clip_frac"][sample_idx] = masked_mean(clip_mask.float(), response_mask)
+                    if tv_divergence is not None:
+                        loss_stats_B["tv_divergence_avg"][sample_idx] = masked_mean(tv_divergence, response_mask)
+                        loss_stats_B["tv_divergence_max"][sample_idx] = tv_divergence[response_mask].max()
                     if entropy is not None:
                         loss_stats_B["entropy"][sample_idx] = entropy[response_mask].mean()
 
@@ -337,6 +343,11 @@ class GRPOTrainModule(TransformerTrainModule):
             local_total_tokens = local_token_counts.sum()
 
             local_sums_list = [local_total_tokens, local_pg_loss_sum, local_kl_sum, local_clip_frac_sum]
+            local_tv_max = None
+            if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                local_tv_avg_sum = (loss_stats_B["tv_divergence_avg"] * local_token_counts).sum()
+                local_tv_max = loss_stats_B["tv_divergence_max"].max()
+                local_sums_list.append(local_tv_avg_sum)
             if self.grpo_config.record_entropy:
                 local_entropy_sum = (loss_stats_B["entropy"] * local_token_counts).sum()
                 local_sums_list.append(local_entropy_sum)
@@ -351,8 +362,18 @@ class GRPOTrainModule(TransformerTrainModule):
             self.record_metric(
                 "train/clip_frac", (global_clip_frac_sum / global_total_tokens).item(), reduce_type=None
             )
+            cursor = 4
+            if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                global_tv_avg_sum = local_sums[cursor]
+                cursor += 1
+                global_tv_max = local_tv_max
+                dist.all_reduce(global_tv_max, op=dist.ReduceOp.MAX, group=self.trainer.dp_process_group)
+                self.record_metric(
+                    "train/tv_divergence_avg", (global_tv_avg_sum / global_total_tokens).item(), reduce_type=None
+                )
+                self.record_metric("train/tv_divergence_max", global_tv_max.item(), reduce_type=None)
             if self.grpo_config.record_entropy:
-                global_entropy_sum = local_sums[4]
+                global_entropy_sum = local_sums[cursor]
                 self.record_metric(
                     "train/entropy", (global_entropy_sum / global_total_tokens).item(), reduce_type=None
                 )
