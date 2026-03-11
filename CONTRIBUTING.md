@@ -87,26 +87,26 @@ Example: `./scripts/train/build_image_and_launch.sh scripts/train/debug/single_g
 
 These are the main GRPO debug/test scripts. Use these to verify GRPO changes work end-to-end.
 
-| Script | Hardware | Description | Runtime |
-|--------|----------|-------------|---------|
-| `scripts/train/debug/grpo_fast.sh` | 1 GPU local | Minimal local test with Qwen3-0.6B, no tools | Fast |
-| `scripts/train/debug/grpo_fast_3_gpu.sh` | 3 GPUs local | Tests sequence parallelism (2 training + 1 inference) | Fast |
-| `scripts/train/debug/single_gpu_on_beaker.sh` | 1 GPU Beaker | Single GPU on Beaker, no tools, GSM8K dataset | ~15 min |
-| `scripts/train/debug/large_test_script.sh` | 2x8 GPUs Beaker | Multi-node with Qwen2.5-7B, DeepSpeed stage 3, seq parallelism | ~32 min |
-| `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` | 2x8 GPUs Beaker | Multi-node with tool use (python, serper, jina), OLMo-3 model | ~1 hr |
-| `scripts/train/debug/tools/tool_regression_beaker.sh` | 1 GPU Beaker | Tool use regression test with Qwen3-1.7B, hermes parser | ~30 min |
+| Script | Hardware | Description | Runtime | Time to first step | Example |
+|--------|----------|-------------|---------|--------------------|---------|
+| `scripts/train/debug/grpo_fast.sh` | 1 GPU local | Minimal local test with Qwen3-0.6B, no tools | Fast | Unknown | Local only |
+| `scripts/train/debug/grpo_fast_3_gpu.sh` | 3 GPUs local | Tests sequence parallelism (2 training + 1 inference) | Fast | Unknown | Local only |
+| `scripts/train/debug/single_gpu_on_beaker.sh` | 1 GPU Beaker | Single GPU on Beaker, no tools, GSM8K dataset | ~4 min | ~2 min | [01KHC0ZX…](https://beaker.org/ex/01KHC0ZXVCNVGWM6QJSNFWN09R) |
+| `scripts/train/debug/large_test_script.sh` | 2x8 GPUs Beaker | Multi-node with Qwen2.5-7B, DeepSpeed stage 3, seq parallelism | ~12 min | ~4 min | [01KK24AS…](https://beaker.org/ex/01KK24ASY65M27Q2P7RA85SA0Q) |
+| `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` | 2x8 GPUs Beaker | Multi-node with tool use (python, serper, jina), OLMo-3 model | ~10 min | ~4 min | [01KFEZBX…](https://beaker.org/ex/01KFEZBXWHDQ6PG6KZ63316M8J) |
+| `scripts/train/debug/tools/tool_regression_beaker.sh` | 1 GPU Beaker | Tool use regression test with Qwen3-1.7B, hermes parser | ~4 min | ~3 min | [01KJE7T8…](https://beaker.org/ex/01KJE7T8N7S0Q1R55ACTJCJAQY) |
 
 To launch any Beaker script: `./scripts/train/build_image_and_launch.sh <script_path>`
 
 ## DPO Test Scripts
 
-| Script | Hardware | Description | Runtime |
-|--------|----------|-------------|---------|
-| `scripts/train/debug/dpo/local.sh` | 1 GPU local | Local single-GPU DPO with OLMo-2-1B, no Beaker needed |
-| `scripts/train/debug/dpo/single_gpu.sh` | 1 GPU Beaker | Single GPU on Beaker with OLMo-2-1B |
-| `scripts/train/debug/dpo/multi_node.sh` | 2x8 GPUs Beaker | Multi-node DPO with OLMo-2-7B, FSDP + tensor parallelism |
-| `scripts/train/debug/dpo/multi_node_cache.sh` | 2x8 GPUs Beaker | Multi-node cache-based DPO (`dpo_tune_cache.py`) with Qwen3-0.6B |
-| `scripts/train/debug/dpo/checkpoint_integration_test.sh` | 2x8 GPUs Beaker | Two-part test: trains, then resumes from checkpoint to verify checkpointing works |
+| Script | Hardware | Description | Runtime | Time to first step | Example |
+|--------|----------|-------------|---------|--------------------|---------|
+| `scripts/train/debug/dpo/local.sh` | 1 GPU local | Local single-GPU DPO with OLMo-2-1B, no Beaker needed | Fast | Unknown | Local only |
+| `scripts/train/debug/dpo/single_gpu.sh` | 1 GPU Beaker | Single GPU on Beaker with OLMo-2-1B | ~2 min | ~1 min | [01KHEJMG…](https://beaker.org/ex/01KHEJMG3HJ1MP6S3K0KMRGB1M) |
+| `scripts/train/debug/dpo/multi_node.sh` | 2x8 GPUs Beaker | Multi-node DPO with OLMo-2-7B, FSDP + tensor parallelism | ~9 min | ~4 min | [01KH9RZD…](https://beaker.org/ex/01KH9RZD11EPNFEVJPZWT1A32G) |
+| `scripts/train/debug/dpo/multi_node_cache.sh` | 2x8 GPUs Beaker | Multi-node cache-based DPO (`dpo_tune_cache.py`) with Qwen3-0.6B | ~2 min | ~1 min | [01KJX7JH…](https://beaker.org/ex/01KJX7JHZJETY6J20T5V02CD0T) |
+| `scripts/train/debug/dpo/checkpoint_integration_test.sh` | 2x8 GPUs Beaker | Two-part test: trains, then resumes from checkpoint to verify checkpointing works | ~2 min | ~1 min | [01KH4TQA…](https://beaker.org/ex/01KH4TQA2F3JJV06081G3QT0FG) |
 
 ## Environment Variables
 
