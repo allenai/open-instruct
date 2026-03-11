@@ -200,7 +200,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         This method implements the GRPO training algorithm with:
         - Multi-epoch PPO-style training
-        - DAPO/CISPO loss variants
+        - DAPO/CISPO/TVPO loss variants
         - KL penalty computation
         - Importance sampling with clipping
         """
@@ -275,9 +275,16 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 old_logprobs = old_logprobs_BT[sample_idx]
                 advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
+                tv_divergence = None
 
                 log_ratio = new_logprobs - old_logprobs
                 ratio = torch.exp(log_ratio)
+                if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                    vllm_logprobs = data_BT.vllm_logprobs[sample_idx].to(new_logprobs.device)
+                    vllm_logprobs = vllm_logprobs[:, 1:]
+                    old_probs = torch.exp(torch.where(response_mask, old_logprobs, torch.zeros_like(old_logprobs)))
+                    vllm_probs = torch.exp(torch.where(response_mask, vllm_logprobs, torch.zeros_like(vllm_logprobs)))
+                    tv_divergence = 0.5 * torch.abs(old_probs - vllm_probs)
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -285,6 +292,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
+                    tv_divergence=tv_divergence,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps

@@ -675,6 +675,28 @@ class PolicyTrainerRayProcess(RayProcess):
                     ratio_BT = torch.exp(logprobs_diff_BT)
                     # Apply truncated importance sampling if enabled
                     tis_imp_ratio_BT = None
+                    tv_divergence_BT = None
+                    if self.args.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                        assert vllm_logprobs_BT is not None, "TVPO loss requires vLLM logprobs."
+                        old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                        vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
+                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
+                            f"Old logprobs mask should match response mask. "
+                            f"old_mask sum={old_logprobs_mask_BT.sum()}, "
+                            f"response_mask sum={response_mask_BT.sum()}"
+                        )
+                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
+                            f"vLLM logprobs mask should match response mask. "
+                            f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
+                            f"response_mask sum={response_mask_BT.sum()}"
+                        )
+                        old_probs_BT = torch.exp(
+                            torch.where(response_mask_BT, old_logprob_BT, torch.zeros_like(old_logprob_BT))
+                        )
+                        vllm_probs_BT = torch.exp(
+                            torch.where(response_mask_BT, vllm_logprobs_BT, torch.zeros_like(vllm_logprobs_BT))
+                        )
+                        tv_divergence_BT = 0.5 * torch.abs(old_probs_BT - vllm_probs_BT)
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
@@ -719,6 +741,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         tis_weights=tis_imp_ratio_BT,
+                        tv_divergence=tv_divergence_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT

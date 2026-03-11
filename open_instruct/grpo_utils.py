@@ -18,6 +18,7 @@ from open_instruct.utils import (
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
+    tvpo = "tvpo"
 
 
 @dataclass
@@ -96,7 +97,7 @@ class ExperimentConfig:
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
-    """Whether to use DAPO or CISPO loss function."""
+    """Whether to use DAPO, CISPO, or TVPO loss function."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -212,6 +213,11 @@ class ExperimentConfig:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.loss_fn == GRPOLossType.tvpo and self.use_vllm_logprobs:
+            raise ValueError(
+                "Cannot use `loss_fn=tvpo` with `use_vllm_logprobs=True`. "
+                "TVPO compares old_logprobs against vLLM logprobs, which would collapse to zero divergence."
+            )
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
@@ -289,6 +295,7 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: ExperimentConfig,
     tis_weights: torch.Tensor | None = None,
+    tv_divergence: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -297,6 +304,12 @@ def compute_grpo_loss(
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
         pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
+        pg_losses2 = pg_losses
+    elif config.loss_fn == GRPOLossType.tvpo:
+        if tv_divergence is None:
+            raise ValueError("TVPO loss requires `tv_divergence`.")
+        clipped_ratio = torch.where(tv_divergence > config.clip_higher, torch.ones_like(ratio), ratio)
+        pg_losses = -advantages * clipped_ratio
         pg_losses2 = pg_losses
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")

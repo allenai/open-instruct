@@ -1,6 +1,6 @@
 import pytest
 
-from open_instruct.grpo_utils import ExperimentConfig
+from open_instruct.grpo_utils import ExperimentConfig, GRPOLossType
 
 
 def test_local_eval_every_accepts_minus_one():
@@ -24,3 +24,8 @@ def test_eval_pass_at_k_rejects_non_power_of_two_values(value):
 def test_eval_pass_at_k_accepts_power_of_two_values(value):
     cfg = ExperimentConfig(eval_pass_at_k=value)
     assert cfg.eval_pass_at_k == value
+
+
+def test_tvpo_rejects_use_vllm_logprobs():
+    with pytest.raises(ValueError, match="loss_fn=tvpo"):
+        ExperimentConfig(loss_fn=GRPOLossType.tvpo, use_vllm_logprobs=True)
