@@ -3,8 +3,8 @@
 set -euo pipefail
 
 CHECKPOINT_ROOT="${CHECKPOINT_ROOT:-/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen25_05b_it_gsm8k_checkpoints}"
-STEP_START="${STEP_START:-200}"
-STEP_END="${STEP_END:-2000}"
+STEP_START="${STEP_START:-100}"
+STEP_END="${STEP_END:-1000}"
 STEP_INCREMENT="${STEP_INCREMENT:-100}"
 
 EXP_NAME="${EXP_NAME:-qwen25_05b_it_eval_only_gsm8k_quartiles}"
@@ -22,7 +22,7 @@ for step in $(seq "${STEP_START}" "${STEP_INCREMENT}" "${STEP_END}"); do
     fi
 
     echo "Launching eval for ${checkpoint_path}"
-    bash scripts/train/qwen/eval_only_qwen2.5_0.5b_gsm8k_quartiles.sh \
+    bash scripts/train/qwen/qwen2.5_0.5b_gsm8k_eval.sh \
         --model_name_or_path "${checkpoint_path}" \
         --exp_name "${EXP_NAME}" \
         --run_name "${RUN_NAME}" \
