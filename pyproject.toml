@@ -25,7 +25,7 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.9.0,<2.10",
+    "torch>=2.9.0,<2.11",
     "transformers>=4.57.0",
     "vllm; platform_system != 'Darwin'",
     "wandb==0.23.1",
@@ -56,7 +56,7 @@ torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
-vllm = { git = "https://github.com/yanhong-lbh/vllm", rev = "411aac2e22b6ce9ee84cd1127431432162a42177" }
+vllm = { git = "https://github.com/yanhong-lbh/vllm", rev = "3677c274d" }
 transformers = { git = "https://github.com/yanhong-lbh/transformers", branch = "olmo-3.5-hybrid-clean" }
 flash-linear-attention = { git = "https://github.com/tyler-romero/flash-linear-attention", branch = "tyler/fewer-l2norm-recompilations" }
 
@@ -89,8 +89,10 @@ preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
 override-dependencies = [
-    "torch>=2.9.0,<2.10",
+    "torch>=2.9.0,<2.11",
     "transformers>=4.57.0",
+    "torchvision>=0.25.0",
+    "torchaudio>=2.10.0",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
