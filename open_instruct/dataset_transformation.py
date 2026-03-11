@@ -920,6 +920,19 @@ DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff 
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
 
+# Distillation dataset
+COMPRESSED_LOGPROBS_KEY = "compressed_logprobs"
+BYTEPACKED_INDICES_KEY = "bytepacked_indices"
+MESSAGES_KEY = "messages"
+TEXT_KEY = "text"
+TOKENIZED_DISTILL_DATASET_KEYS = [
+    INPUT_IDS_KEY,
+    ATTENTION_MASK_KEY,
+    LABELS_KEY,
+    COMPRESSED_LOGPROBS_KEY,
+    BYTEPACKED_INDICES_KEY,
+]
+
 
 def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     """Remove dataset_source field from dataset if it exists.
@@ -1543,6 +1556,88 @@ def rlvr_max_length_filter_v2(
     return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
 
 
+def distill_pretokenized_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+):
+    """Transform pre-tokenized distillation rows with compressed teacher logits."""
+    input_ids = row[INPUT_IDS_KEY]
+    if len(input_ids) > max_seq_length:
+        raise ValueError(
+            f"Sequence length {len(input_ids)} exceeds max_seq_length {max_seq_length}."
+        )
+
+    row[ATTENTION_MASK_KEY] = [1] * len(input_ids)
+    labels = list(input_ids)
+
+    messages_raw = row.get(MESSAGES_KEY)
+    messages = None
+    if isinstance(messages_raw, str) and messages_raw:
+        try:
+            messages = json.loads(messages_raw)
+        except json.JSONDecodeError:
+            messages = None
+    elif isinstance(messages_raw, list):
+        messages = messages_raw
+
+    if messages and isinstance(messages, list):
+        for message_idx, message in enumerate(messages):
+            if message.get("role") == "assistant":
+                continue
+
+            if message_idx == 0:
+                message_start_idx = 0
+            else:
+                message_start_idx = len(
+                    tokenizer.apply_chat_template(
+                        conversation=messages[:message_idx],
+                        tokenize=True,
+                        add_generation_prompt=False,
+                    )
+                )
+
+            if (
+                message_idx < len(messages) - 1
+                and messages[message_idx + 1].get("role") == "assistant"
+            ):
+                message_end_idx = len(
+                    tokenizer.apply_chat_template(
+                        conversation=messages[: message_idx + 1],
+                        tokenize=True,
+                        add_generation_prompt=True,
+                    )
+                )
+            else:
+                message_end_idx = len(
+                    tokenizer.apply_chat_template(
+                        conversation=messages[: message_idx + 1],
+                        tokenize=True,
+                        add_generation_prompt=False,
+                    )
+                )
+
+            message_end_idx = min(message_end_idx, len(labels))
+            for i in range(message_start_idx, message_end_idx):
+                labels[i] = -100
+
+            if message_end_idx >= max_seq_length:
+                break
+
+    row[LABELS_KEY] = labels
+    return row
+
+
+def distill_pretokenized_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
+    """Filter for distillation data with valid trainable labels."""
+    del tokenizer
+    if INPUT_IDS_KEY not in row or not row[INPUT_IDS_KEY]:
+        return False
+    if LABELS_KEY in row:
+        return any(x != -100 for x in row[LABELS_KEY])
+    return True
+
+
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -1555,6 +1650,8 @@ TRANSFORM_FNS = {
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
+    "distill_pretokenized_v1": (distill_pretokenized_v1, "map"),
+    "distill_pretokenized_filter_v1": (distill_pretokenized_filter_v1, "filter"),
 }
 
 
