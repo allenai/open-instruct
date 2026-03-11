@@ -46,7 +46,6 @@ uv run python mason.py \
     --learning_rate 5e-7 \
     --total_episodes 128000 \
     --deepspeed_stage 3 \
-    --sequence_parallel_size 2 \
     --num_epochs 1 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \

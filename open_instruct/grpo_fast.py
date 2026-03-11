@@ -142,6 +142,31 @@ def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
+def _patch_vl_config_for_sp(model_name_or_path: str) -> None:
+    """Patch VL model configs (e.g. Qwen3.5) so text_config attrs are accessible
+    at the top level. DeepSpeed SP reads num_attention_heads from the config
+    directly, which fails for VL models where it lives in text_config."""
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    if not hasattr(config, "text_config") or hasattr(config, "num_attention_heads"):
+        return
+    # Patch the config class to delegate missing attrs to text_config
+    config_cls = type(config)
+    if not hasattr(config_cls, "_sp_patched"):
+        original_getattr = config_cls.__getattribute__
+
+        def _patched_getattr(self, name):
+            try:
+                return original_getattr(self, name)
+            except AttributeError:
+                tc = original_getattr(self, "text_config")
+                return getattr(tc, name)
+
+        config_cls.__getattribute__ = _patched_getattr
+        config_cls._sp_patched = True
+
+
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
@@ -244,6 +269,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # set sequence parallel
         # note this returns None if sequence_parallel_size == 1
+        # Patch: ensure VL model configs (e.g. Qwen3.5) expose text_config attrs
+        # at the top level so DeepSpeed SP can read num_attention_heads etc.
+        _patch_vl_config_for_sp(model_config.model_name_or_path)
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
             core_attn_implementation=model_config.attn_implementation,
