@@ -573,6 +573,9 @@ def build_reference_logprobs_cache(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
 
+            if batch["is_padding"]:
+                continue
+
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 

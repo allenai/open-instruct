@@ -173,6 +173,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         # batches. Each entry in _precomputed_batch_sizes is the number of
         # examples in that batch (variable due to packing).
         if self._precomputed_batch_sizes is not None:
+            num_real = len(self._precomputed_batch_sizes) - self._num_padding_batches
             offset = 0
             for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
                 if batch_idx < self.batches_processed:
@@ -182,7 +183,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 for i in range(offset, offset + batch_size):
                     example = self.dataset[i]
                     examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
-                batch = to_device(self._collator(examples), self._device)
+                batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
                 offset += batch_size
                 yield batch
             return
@@ -269,6 +270,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             return
 
         self._precomputed_batch_sizes = None
+        self._num_padding_batches = 0
         self._overflow = []
 
         global_size = len(all_indices)
@@ -328,16 +330,17 @@ class HFDataLoader(data_loader.DataLoaderBase):
             batches.append(current_batch)
 
         num_batches = len(batches)
+        padding_start = num_batches
         if self._drop_last:
             num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
             batches = batches[:num_batches]
         else:
-            # Duplicate the last batch to pad up to a multiple of dp_world_size.
-            # The only caller using drop_last=False is the reference-logprobs cache,
-            # where reprocessed examples simply overwrite already-cached values.
             if (remainder := num_batches % self.dp_world_size) > 0:
                 for _ in range(self.dp_world_size - remainder):
                     batches.append(batches[-1])
+
+        rank_global_indices = list(range(self.dp_rank, len(batches), self.dp_world_size))
+        self._num_padding_batches = sum(1 for gi in rank_global_indices if gi >= padding_start)
 
         rank_batches = batches[self.dp_rank :: self.dp_world_size]
 
