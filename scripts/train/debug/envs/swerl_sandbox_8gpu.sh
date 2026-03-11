@@ -14,7 +14,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL Sandbox 8-GPU GRPO with Qwen3-4B-Instruct" \
+       --description "SWERL Sandbox 8-GPU GRPO with Qwen3.5-4B" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -43,7 +43,9 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 8 \
     --inflight_updates true \
-    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
+    --model_name_or_path Qwen/Qwen3.5-4B \
+    --attn_implementation sdpa \
+    --vllm_language_model_only \
     --temperature 1.0 \
     --learning_rate 3e-7 \
     --total_episodes 128000 \
@@ -64,13 +66,13 @@ uv run python mason.py \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 128 \
     --max_steps 100 \
-    --tool_parser_type vllm_hermes \
+    --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
     --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_sandbox_qwen3_4b_grpo \
+    --exp_name swerl_sandbox_qwen35_4b_grpo \
     --local_eval_every 10 \
     --save_freq 100 \
     --try_launch_beaker_eval_jobs_on_weka False
