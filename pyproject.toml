@@ -91,6 +91,8 @@ link-mode = "hardlink"
 override-dependencies = [
     "torch>=2.9.0,<2.11",
     "transformers>=4.57.0",
+    "torchvision>=0.25.0",
+    "torchaudio>=2.10.0",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
