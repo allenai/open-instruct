@@ -100,8 +100,8 @@ To launch any Beaker script: `./scripts/train/build_image_and_launch.sh <script_
 
 ## DPO Test Scripts
 
-| Script | Hardware | Description |
-|--------|----------|-------------|
+| Script | Hardware | Description | Runtime |
+|--------|----------|-------------|---------|
 | `scripts/train/debug/dpo/local.sh` | 1 GPU local | Local single-GPU DPO with OLMo-2-1B, no Beaker needed |
 | `scripts/train/debug/dpo/single_gpu.sh` | 1 GPU Beaker | Single GPU on Beaker with OLMo-2-1B |
 | `scripts/train/debug/dpo/multi_node.sh` | 2x8 GPUs Beaker | Multi-node DPO with OLMo-2-7B, FSDP + tensor parallelism |
