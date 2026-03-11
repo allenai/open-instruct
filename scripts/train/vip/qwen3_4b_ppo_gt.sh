@@ -24,7 +24,7 @@ uv run python mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 8 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
@@ -77,6 +77,7 @@ uv run python mason.py \
     --reset_optimizer_after_value_warmup \
     --gamma 1.0 \
     --gae_lambda 0.95 \
+    --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
     --decoupled_gae \
     --length_adaptive_gae \
