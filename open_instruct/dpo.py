@@ -321,6 +321,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
+        # We need to process every example to cache reference logprobs, so we can't drop the last batch.
         drop_last=False,
         fs_local_rank=global_rank,
     )
