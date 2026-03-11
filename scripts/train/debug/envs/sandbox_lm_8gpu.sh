@@ -44,7 +44,7 @@ uv run python mason.py \
     --vllm_language_model_only \
     --temperature 1.0 \
     --learning_rate 5e-7 \
-    --total_episodes 3200 \
+    --total_episodes 8000 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 4 \
