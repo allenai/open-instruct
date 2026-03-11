@@ -551,8 +551,7 @@ def build_reference_logprobs_cache(
                 f"Cannot write to cache directory {cache_path.parent}: {e}. "
                 f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
             ) from e
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
@@ -562,8 +561,7 @@ def build_reference_logprobs_cache(
     total_examples = 0
 
     with torch.no_grad():
-        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
+        for batch in (pbar := tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -574,6 +572,9 @@ def build_reference_logprobs_cache(
                 chosen_logps, rejected_logps, _ = forward_fn(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
+
+            if batch.get("is_padding", False):
+                continue
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
@@ -590,9 +591,8 @@ def build_reference_logprobs_cache(
                 }
             )
 
-    if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
 
     missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
     missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
@@ -618,8 +618,7 @@ def build_reference_logprobs_cache(
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     return cache
 
@@ -1118,7 +1117,9 @@ def separate_forward_olmo(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
-    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly.
+    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
+    correctly under TP+compile, then computes per-token log-probs on the local logits shard
+    to avoid materializing the full (S, vocab) tensor.
     Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
 
     Args:
@@ -1131,23 +1132,16 @@ def separate_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
-    chosen_batch = process_batch(batch, "chosen")
-    chosen_output = model(chosen_batch["input_ids"], labels=chosen_batch["labels"])
 
-    chosen_logps = _get_batch_logps(chosen_output.loss, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch
-    torch.cuda.empty_cache()
+    def _get_logps(branch: str) -> torch.Tensor:
+        branch_batch = process_batch(batch, branch)
+        output = model(branch_batch["input_ids"], labels=branch_batch["labels"])
+        logps = _get_batch_logps(output.loss, branch_batch["labels"], average_log_prob=average_log_prob)
+        del branch_batch
+        torch.cuda.empty_cache()
+        return logps
 
-    rejected_batch = process_batch(batch, "rejected")
-    rejected_output = model(rejected_batch["input_ids"], labels=rejected_batch["labels"])
-
-    rejected_logps = _get_batch_logps(
-        rejected_output.loss, rejected_batch["labels"], average_log_prob=average_log_prob
-    )
-    del rejected_batch
-    torch.cuda.empty_cache()
-
-    return chosen_logps, rejected_logps, None
+    return _get_logps("chosen"), _get_logps("rejected"), None
 
 
 @dataclass
@@ -1188,8 +1182,4 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
                 full_key = f"{prefix}{key}"
                 pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
                 result[full_key] = tensor_utils.pad_to_length(result[full_key], max_len, pad_value)
-        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
-        result["attention_mask"] = torch.cat(
-            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
-        )
         return result
