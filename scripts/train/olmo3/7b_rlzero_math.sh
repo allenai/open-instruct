@@ -18,7 +18,7 @@ if [[ "$1" == "$BEAKER_USER"* ]]; then
     shift
 fi
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
@@ -80,4 +80,4 @@ uv run mason.py \
     --eval_priority high \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4 $@
+    --oe_eval_gpu_multiplier 4 "$@"

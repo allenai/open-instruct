@@ -72,7 +72,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
+from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -1174,31 +1174,7 @@ def launch_ai2_evals_on_weka(
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    beaker_users = get_beaker_whoami()
-
-    if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
-        if beaker_users is not None:
-            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
-        else:
-            gs_saved_path = f"{gs_bucket_path}/{path}"
-        # save the model to the gs bucket first
-        # TODO: use upload_to_gs_bucket instead
-        gs_command = f"""gsutil \\
-            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
-            cp -r {path} \\
-            {gs_saved_path}"""
-        print(f"Copying model to GS bucket with command: {gs_command}")
-        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(f"GS bucket copy stdout:\n{stdout.decode()}")
-        print(f"GS bucket copy stderr:\n{stderr.decode()}")
-        print(f"GS bucket copy process return code: {process.returncode}")
-
-        # Update path to use the GS bucket path for evaluation
-        path = gs_saved_path
-    else:
-        cluster_str = ""
+    cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \

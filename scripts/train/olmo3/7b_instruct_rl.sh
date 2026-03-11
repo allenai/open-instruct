@@ -11,7 +11,7 @@ general_evals_int="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-cha
 model_name_or_path="/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-instruct-dpo-1116-vibes/olmo3-7b-DPO-1115-newb-tpc-d5-lbc100-bal-1e-6-1__42__1763293644" # nov 16 tentative final checkpoint row 33 # was replace by row 27
 
 # cluster
-cluster=ai2/augusta
+cluster=ai2/jupiter
 #template
 chat_template=olmo123 #olmo
 
