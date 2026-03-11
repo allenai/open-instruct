@@ -13,7 +13,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
