@@ -300,49 +300,29 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         max_seq_length = self._collator.max_seq_length
         column_names = self._full_dataset.column_names
-        is_dpo = "chosen_input_ids" in column_names
-
         subset = self._full_dataset.select(all_indices.tolist())
-        if is_dpo:
-            chosen_lengths = [len(x) for x in subset["chosen_input_ids"]]
-            rejected_lengths = [len(x) for x in subset["rejected_input_ids"]]
+        if "chosen_input_ids" in column_names:
+            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
         else:
-            sample_lengths = [len(x) for x in subset["input_ids"]]
+            lengths = [[len(x)] for x in subset["input_ids"]]
 
+        num_streams = len(lengths[0])
         batches: list[list[int]] = []
         current_batch: list[int] = []
-        current_chosen_total = 0
-        current_rejected_total = 0
-        current_total = 0
+        running_totals = [0] * num_streams
 
         for i in range(len(all_indices)):
-            if is_dpo:
-                new_chosen = current_chosen_total + chosen_lengths[i]
-                new_rejected = current_rejected_total + rejected_lengths[i]
-                would_exceed = len(current_batch) > 0 and (
-                    new_chosen > max_seq_length or new_rejected > max_seq_length
-                )
-            else:
-                new_total = current_total + sample_lengths[i]
-                would_exceed = len(current_batch) > 0 and new_total > max_seq_length
-
+            new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
+            would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
             at_max_samples = len(current_batch) >= self._per_rank_batch_size
 
             if would_exceed or at_max_samples:
                 batches.append(current_batch)
                 current_batch = [i]
-                if is_dpo:
-                    current_chosen_total = chosen_lengths[i]
-                    current_rejected_total = rejected_lengths[i]
-                else:
-                    current_total = sample_lengths[i]
+                running_totals = list(lengths[i])
             else:
                 current_batch.append(i)
-                if is_dpo:
-                    current_chosen_total = new_chosen
-                    current_rejected_total = new_rejected
-                else:
-                    current_total = new_total
+                running_totals = new_totals
 
         if current_batch:
             batches.append(current_batch)
@@ -352,6 +332,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
             num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
             batches = batches[:num_batches]
         else:
+            # Duplicate the last batch to pad up to a multiple of dp_world_size.
+            # The only caller using drop_last=False is the reference-logprobs cache,
+            # where reprocessed examples simply overwrite already-cached values.
             if (remainder := num_batches % self.dp_world_size) > 0:
                 for _ in range(self.dp_world_size - remainder):
                     batches.append(batches[-1])
