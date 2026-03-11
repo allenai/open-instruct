@@ -13,6 +13,7 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
+    "huggingface-hub>=0.30.0",
     "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
     "multiprocess<0.70.18", # avoid AttributeError in ResourceTracker.__del__
@@ -22,10 +23,15 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
+    "pyarrow>=20.0.0",
+    "pyyaml>=6.0.2",
     "ray[default]>=2.49.2",
+    "rich>=13.7.0",
+    "s3fs>=2025.9.0",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
+    "tqdm>=4.66.0",
     "transformers>=4.57.0",
     "vllm==0.16.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
