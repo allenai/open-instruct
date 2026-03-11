@@ -1049,11 +1049,23 @@ class PolicyTrainerRayProcess(RayProcess):
             and self.args.value_warmup_steps > 0
             and training_step <= self.args.value_warmup_steps
         )
-        if is_value_warmup and self.rank == 0:
-            logger.info(
-                f"[Value Warmup] Step {training_step}/{self.args.value_warmup_steps} - "
-                "Training value model only, policy frozen"
-            )
+        # Policy warmup: skip policy updates for fair comparison with PPO value warmup
+        is_policy_warmup = (
+            self.args.policy_warmup_steps > 0
+            and training_step <= self.args.policy_warmup_steps
+        )
+        skip_policy_update = is_value_warmup or is_policy_warmup
+        if skip_policy_update and self.rank == 0:
+            if is_value_warmup:
+                logger.info(
+                    f"[Value Warmup] Step {training_step}/{self.args.value_warmup_steps} - "
+                    "Training value model only, policy frozen"
+                )
+            else:
+                logger.info(
+                    f"[Policy Warmup] Step {training_step}/{self.args.policy_warmup_steps} - "
+                    "Skipping policy update"
+                )
 
         # Reset optimizer after value warmup ends (first step after warmup)
         if (
@@ -1500,7 +1512,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     torch.cuda.empty_cache()
 
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    if not is_value_warmup:
+                    if not skip_policy_update:
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                         self.model.backward(policy_loss)
                         if is_accumulation_boundary:

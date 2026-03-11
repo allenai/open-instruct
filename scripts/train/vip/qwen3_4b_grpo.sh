@@ -69,4 +69,5 @@ uv run python mason.py \
     --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero \
     --oe_eval_gpu_multiplier 4 \
     --keep_last_n_checkpoints -1 \
+    --policy_warmup_steps 100 \
     --push_to_hub False
