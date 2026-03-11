@@ -305,7 +305,13 @@ class GRPOTrainModule(TransformerTrainModule):
                 with torch.no_grad():
                     loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
                     loss_stats_B["kl"][sample_idx] = masked_mean(kl, response_mask)
-                    loss_stats_B["clip_frac"][sample_idx] = (pg_losses2 > pg_losses).float().mean()
+                    clip_mask = grpo_utils.compute_grpo_clip_mask(
+                        pg_losses=pg_losses,
+                        pg_losses2=pg_losses2,
+                        config=self.grpo_config,
+                        tv_divergence=tv_divergence,
+                    )
+                    loss_stats_B["clip_frac"][sample_idx] = masked_mean(clip_mask.float(), response_mask)
                     if entropy is not None:
                         loss_stats_B["entropy"][sample_idx] = entropy[response_mask].mean()
 

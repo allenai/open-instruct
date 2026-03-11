@@ -310,6 +310,17 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 config=config,
             )
 
+    def test_tvpo_clip_mask_tracks_tv_threshold(self):
+        config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo, clip_higher=0.1)
+        clip_mask = grpo_utils.compute_grpo_clip_mask(
+            pg_losses=torch.zeros(1, 3),
+            pg_losses2=torch.zeros(1, 3),
+            config=config,
+            tv_divergence=torch.tensor([[0.05, 0.2, 0.1]]),
+        )
+
+        torch.testing.assert_close(clip_mask, torch.tensor([[False, True, False]]))
+
     def test_invalid_loss_fn(self):
         config = _make_grpo_config(loss_fn="invalid")
         with self.assertRaises(ValueError):

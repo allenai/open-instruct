@@ -333,6 +333,20 @@ def compute_grpo_loss(
     return pg_losses, pg_losses2, pg_loss_max, kl
 
 
+def compute_grpo_clip_mask(
+    pg_losses: torch.Tensor,
+    pg_losses2: torch.Tensor,
+    config: ExperimentConfig,
+    tv_divergence: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Return the token-level mask used for clip-fraction accounting."""
+    if config.loss_fn == GRPOLossType.tvpo:
+        if tv_divergence is None:
+            raise ValueError("TVPO clip fraction requires `tv_divergence`.")
+        return tv_divergence > config.clip_higher
+    return pg_losses2 > pg_losses
+
+
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,

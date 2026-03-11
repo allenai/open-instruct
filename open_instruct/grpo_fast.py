@@ -768,9 +768,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
-                        loss_stats_B["pg_clipfrac"][i] = masked_mean(
-                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
+                        clip_mask_BT = grpo_utils.compute_grpo_clip_mask(
+                            pg_losses=pg_losses_BT,
+                            pg_losses2=pg_losses2_BT,
+                            config=self.args,
+                            tv_divergence=tv_divergence_BT,
                         )
+                        loss_stats_B["pg_clipfrac"][i] = masked_mean(clip_mask_BT.float(), response_mask_BT)
                         loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
                         loss_stats_B["loss"][i] = loss
                         loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
