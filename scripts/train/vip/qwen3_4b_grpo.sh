@@ -27,6 +27,7 @@ uv run python mason.py \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
+    --no_resampling_pass_rate 0.875 \
     --active_sampling \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
