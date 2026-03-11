@@ -505,30 +505,6 @@ def _get_batch_stats(batch: dict) -> tuple[int, int, list[int], list[int]]:
     return batch_tokens, batch_size, chosen_lengths, rejected_lengths
 
 
-def _collect_batches_with_sync(
-    dataloader: torch.utils.data.DataLoader, device: torch.device
-) -> tuple[list[dict], int]:
-    """Collect all batches and sync count across ranks so all ranks iterate the same number of times.
-
-    With packing, different ranks can end up with different batch counts due to
-    variable-length overflow. Returns (all_batches, target_count) where target_count
-    is the max across all ranks. Ranks with fewer real batches should run dummy
-    forward passes (reusing the last batch) to keep FSDP/TP collectives in sync.
-    """
-    all_batches = list(dataloader)
-    batch_count = len(all_batches)
-
-    local_count = torch.tensor([batch_count], device=device, dtype=torch.long)
-    max_count = local_count.clone()
-    dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
-    target_count = int(max_count.item())
-
-    if target_count > batch_count:
-        logger.info(f"Running {target_count - batch_count} dummy forward passes to sync with other ranks")
-
-    return all_batches, target_count
-
-
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -585,13 +561,7 @@ def build_reference_logprobs_cache(
     total_examples = 0
 
     with torch.no_grad():
-        all_batches, target_count = _collect_batches_with_sync(dataloader, device)
-        batch_count = len(all_batches)
-
-        for i in (pbar := tqdm(range(target_count), disable=not is_main_process, desc="Caching reference logprobs")):
-            is_real = i < batch_count
-            batch = all_batches[i] if is_real else all_batches[-1]
-
+        for batch in (pbar := tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -602,9 +572,6 @@ def build_reference_logprobs_cache(
                 chosen_logps, rejected_logps, _ = forward_fn(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
-
-            if not is_real:
-                continue
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps

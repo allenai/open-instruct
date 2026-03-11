@@ -142,6 +142,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
         self._overflow: list[dict[str, Any]] = []
+        self._precomputed_batch_sizes: list[int] | None = None
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
@@ -167,6 +168,21 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
+        if self._precomputed_batch_sizes is not None:
+            offset = 0
+            for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
+                if batch_idx < self.batches_processed:
+                    offset += batch_size
+                    continue
+                examples = []
+                for i in range(offset, offset + batch_size):
+                    example = self.dataset[i]
+                    examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                batch = to_device(self._collator(examples), self._device)
+                offset += batch_size
+                yield batch
+            return
+
         start_example = self.batches_processed * self._per_rank_batch_size
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
@@ -189,6 +205,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
+        if self._precomputed_batch_sizes is not None:
+            return len(self._precomputed_batch_sizes)
         return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
@@ -241,6 +259,14 @@ class HFDataLoader(data_loader.DataLoaderBase):
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
+        packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
+        if packing_enabled:
+            self._reshard_with_packing(all_indices)
+            return
+
+        self._precomputed_batch_sizes = None
+        self._overflow = []
+
         global_size = len(all_indices)
         total_batches = global_size // self._batch_size
         usable_size = total_batches * self._batch_size
@@ -259,6 +285,85 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
+
+    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
+        """Reshard with world-aware packing so all ranks get the same batch count.
+
+        Instead of distributing examples to ranks and letting each rank pack
+        independently (which can produce different batch counts due to variable
+        overflow), this packs globally first and then distributes packed batches
+        round-robin to ranks.
+        """
+        max_seq_length = self._collator.max_seq_length
+        column_names = self._full_dataset.column_names
+        is_dpo = "chosen_input_ids" in column_names
+
+        subset = self._full_dataset.select(all_indices.tolist())
+        if is_dpo:
+            chosen_lengths = [len(x) for x in subset["chosen_input_ids"]]
+            rejected_lengths = [len(x) for x in subset["rejected_input_ids"]]
+        else:
+            sample_lengths = [len(x) for x in subset["input_ids"]]
+
+        batches: list[list[int]] = []
+        current_batch: list[int] = []
+        current_chosen_total = 0
+        current_rejected_total = 0
+        current_total = 0
+
+        for i in range(len(all_indices)):
+            if is_dpo:
+                new_chosen = current_chosen_total + chosen_lengths[i]
+                new_rejected = current_rejected_total + rejected_lengths[i]
+                would_exceed = len(current_batch) > 0 and (
+                    new_chosen > max_seq_length or new_rejected > max_seq_length
+                )
+            else:
+                new_total = current_total + sample_lengths[i]
+                would_exceed = len(current_batch) > 0 and new_total > max_seq_length
+
+            at_max_samples = len(current_batch) >= self._per_rank_batch_size
+
+            if would_exceed or at_max_samples:
+                batches.append(current_batch)
+                current_batch = [i]
+                if is_dpo:
+                    current_chosen_total = chosen_lengths[i]
+                    current_rejected_total = rejected_lengths[i]
+                else:
+                    current_total = sample_lengths[i]
+            else:
+                current_batch.append(i)
+                if is_dpo:
+                    current_chosen_total = new_chosen
+                    current_rejected_total = new_rejected
+                else:
+                    current_total = new_total
+
+        if current_batch:
+            batches.append(current_batch)
+
+        num_batches = len(batches)
+        if self._drop_last:
+            num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
+            batches = batches[:num_batches]
+        else:
+            remainder = num_batches % self.dp_world_size
+            if remainder > 0:
+                for _ in range(self.dp_world_size - remainder):
+                    batches.append(batches[-1])
+
+        rank_batches = batches[self.dp_rank :: self.dp_world_size]
+
+        rank_indices: list[int] = []
+        self._precomputed_batch_sizes = []
+        for batch in rank_batches:
+            for pos in batch:
+                rank_indices.append(int(all_indices[pos]))
+            self._precomputed_batch_sizes.append(len(batch))
+
+        self.effective_size = len(rank_indices)
+        self.dataset = self._full_dataset.select(rank_indices)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
