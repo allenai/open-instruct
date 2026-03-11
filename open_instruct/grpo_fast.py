@@ -896,7 +896,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
                 stop_strings=streaming_config.stop_strings,
-                gs_bucket_path=args.gs_bucket_path,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,

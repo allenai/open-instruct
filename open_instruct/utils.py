@@ -1168,24 +1168,23 @@ def launch_ai2_evals_on_weka(
     training_step: int | None = None,
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
-    gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} {cluster_str} \
+--location {path} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
---skip_oi_evals"""
+--skip_oi_evals \
+--evaluate_on_weka"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
         wandb_run_path = wandb_url_to_run_path(wandb_url)
@@ -1194,8 +1193,6 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if gs_bucket_path is None:
-        command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:

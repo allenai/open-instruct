@@ -196,7 +196,6 @@ def _handle_post_training(
                 oe_eval_max_length=args.oe_eval_max_length,
                 wandb_url=wandb_url,
                 oe_eval_tasks=args.oe_eval_tasks,
-                gs_bucket_path=args.gs_bucket_path,
                 eval_workspace=args.eval_workspace,
                 eval_priority=args.eval_priority,
                 oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
