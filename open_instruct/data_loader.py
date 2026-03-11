@@ -168,6 +168,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
+        # World-aware packing: batch boundaries were precomputed by
+        # _reshard_with_packing so that every rank has the same number of
+        # batches. Each entry in _precomputed_batch_sizes is the number of
+        # examples in that batch (variable due to packing).
         if self._precomputed_batch_sizes is not None:
             offset = 0
             for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
