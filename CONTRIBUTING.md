@@ -129,12 +129,3 @@ These are injected into every Beaker experiment:
 | `VLLM_LOGGING_LEVEL` | `WARNING` | Reduce vLLM log verbosity |
 | `NCCL_DEBUG` | `ERROR` | Minimal NCCL logging (set to `INFO` or `WARN` when debugging communication issues) |
 | `RAY_CGRAPH_get_timeout` | `300` | 5-minute timeout for Ray computation graph operations |
-
-### Weka/Jupiter cluster — multi-node NCCL settings
-
-These are added automatically by `mason.py` for multi-node jobs on Weka/Jupiter clusters:
-
-| Variable | Value | Why |
-|----------|-------|-----|
-| `NCCL_SOCKET_IFNAME` | `ib` | Route NCCL traffic over the InfiniBand network interface |
-| `NCCL_IB_HCA` | `^=mlx5_bond_0` | Exclude the bonded HCA device to avoid routing conflicts |
