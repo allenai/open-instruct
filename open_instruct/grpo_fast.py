@@ -1689,6 +1689,24 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             self.tokenizer.save_pretrained(output_dir)
+
+        # Save value model alongside policy if it exists
+        if self.args.use_value_model and hasattr(self, "value_model"):
+            value_model_dir = output_path / "value_model"
+            if self.rank == 0:
+                value_model_dir.mkdir(parents=True, exist_ok=True)
+            vm = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+            vm_state_dict = {}
+            for k, v in vm.named_parameters():
+                params_to_fetch = _z3_params_to_fetch([v])
+                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                    if self.rank == 0:
+                        vm_state_dict[k] = v.data.cpu()
+            if self.rank == 0:
+                torch.save(vm_state_dict, value_model_dir / "value_model.bin")
+                logger.info(f"Saved value model to {value_model_dir}")
+
+        if self.rank == 0:
             marker_path.touch()
 
     # we need this because we don't know which node is rank 0 is on
