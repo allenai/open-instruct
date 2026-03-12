@@ -142,6 +142,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
         self._overflow: list[dict[str, Any]] = []
+        self._precomputed_batch_sizes: list[int] | None = None
+        self._num_padding_batches: int = 0
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
@@ -167,6 +169,26 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
+        # World-aware packing: batch boundaries were precomputed by
+        # _reshard_with_packing so that every rank has the same number of
+        # batches. Each entry in _precomputed_batch_sizes is the number of
+        # examples in that batch (variable due to packing).
+        if self._precomputed_batch_sizes is not None:
+            num_real = len(self._precomputed_batch_sizes) - self._num_padding_batches
+            offset = 0
+            for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
+                if batch_idx < self.batches_processed:
+                    offset += batch_size
+                    continue
+                examples = []
+                for i in range(offset, offset + batch_size):
+                    example = self.dataset[i]
+                    examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
+                offset += batch_size
+                yield batch
+            return
+
         start_example = self.batches_processed * self._per_rank_batch_size
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
@@ -189,6 +211,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
+        if self._precomputed_batch_sizes is not None:
+            return len(self._precomputed_batch_sizes)
         return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
@@ -241,6 +265,15 @@ class HFDataLoader(data_loader.DataLoaderBase):
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
+        packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
+        if packing_enabled:
+            self._reshard_with_packing(all_indices)
+            return
+
+        self._precomputed_batch_sizes = None
+        self._num_padding_batches = 0
+        self._overflow = []
+
         global_size = len(all_indices)
         total_batches = global_size // self._batch_size
         usable_size = total_batches * self._batch_size
@@ -259,6 +292,68 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
+
+    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
+        """Reshard with world-aware packing so all ranks get the same batch count.
+
+        Instead of distributing examples to ranks and letting each rank pack
+        independently (which can produce different batch counts due to variable
+        overflow), this packs globally first and then distributes packed batches
+        round-robin to ranks.
+        """
+        max_seq_length = self._collator.max_seq_length
+        column_names = self._full_dataset.column_names
+        subset = self._full_dataset.select(all_indices.tolist())
+        if "chosen_input_ids" in column_names:
+            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
+        else:
+            lengths = [[len(x)] for x in subset["input_ids"]]
+
+        num_streams = len(lengths[0])
+        batches: list[list[int]] = []
+        current_batch: list[int] = []
+        running_totals = [0] * num_streams
+
+        for i in range(len(all_indices)):
+            new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
+            would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
+            at_max_samples = len(current_batch) >= self._per_rank_batch_size
+
+            if would_exceed or at_max_samples:
+                batches.append(current_batch)
+                current_batch = [i]
+                running_totals = list(lengths[i])
+            else:
+                current_batch.append(i)
+                running_totals = new_totals
+
+        if current_batch:
+            batches.append(current_batch)
+
+        num_batches = len(batches)
+        padding_start = num_batches
+        if self._drop_last:
+            num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
+            batches = batches[:num_batches]
+        else:
+            if (remainder := num_batches % self.dp_world_size) > 0:
+                for _ in range(self.dp_world_size - remainder):
+                    batches.append(batches[-1])
+
+        rank_global_indices = list(range(self.dp_rank, len(batches), self.dp_world_size))
+        self._num_padding_batches = sum(1 for gi in rank_global_indices if gi >= padding_start)
+
+        rank_batches = batches[self.dp_rank :: self.dp_world_size]
+
+        rank_indices: list[int] = []
+        self._precomputed_batch_sizes = []
+        for batch in rank_batches:
+            for pos in batch:
+                rank_indices.append(int(all_indices[pos]))
+            self._precomputed_batch_sizes.append(len(batch))
+
+        self.effective_size = len(rank_indices)
+        self.dataset = self._full_dataset.select(rank_indices)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
@@ -526,7 +621,10 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
+            wait_start_time = time.perf_counter()
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
+            trainer_idle_wait_time = time.perf_counter() - wait_start_time
+            batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
             yield batch_data
 
@@ -1097,6 +1195,7 @@ class DataPreparationActor:
             if self.shutdown_requested:
                 return
 
+            generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
                 if self.shutdown_requested:
                     return
@@ -1104,6 +1203,7 @@ class DataPreparationActor:
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
+            generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1148,7 +1248,7 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {}
+                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
                     self.current_prepared_step = step
                 continue
 
@@ -1224,7 +1324,7 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {}
+                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1246,6 +1346,7 @@ class DataPreparationActor:
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "scores": scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,

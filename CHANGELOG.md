@@ -5,8 +5,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Tensor parallelism (TP) support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1467).
+- Pulls out weight sync code from GRPO into a more generic function (https://github.com/allenai/open-instruct/pull/1411#pullrequestreview-3694117967)
+- Adds callbacks for GRPO training with Olmo-core's trainer (https://github.com/allenai/open-instruct/pull/1397).
+- Adds FSDP2 block-by-block weight gathering support for vLLM weight sync.
+
+### Fixed
+- Fixed GPU test failures: DPO `get_num_tokens` attention mask matching, DPO forward pass logps computation, mock model interface in `test_dpo_utils_gpu.py`, patch target in `test_olmo_core_callbacks_gpu.py`, reference logprobs cache `drop_last`, and flaky streaming dataloader tool test (https://github.com/allenai/open-instruct/pull/1514).
+- Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Removed all Augusta cluster (`ai2/augusta`) references and GCP-cluster-specific code paths since the cluster has been decommissioned.
+- Added GRPO fast idle wait-time metrics for trainer waiting on inference and generation waiting on trainer consumption (`time/trainer_idle_waiting_for_inference`, `time/generation_idle_waiting_for_trainer`) (https://github.com/allenai/open-instruct/pull/1516).
 - Updated vLLM to 0.16.0 and fixed `ChatCompletionRequest` import path which moved to `vllm.entrypoints.openai.chat_completion.protocol` (https://github.com/allenai/open-instruct/pull/1510).
 - Enable multiple active targets per rollout in RL training by unifying tool and environment dispatch in vLLM with upfront pool activation (no lazy tool acquisition), normalizing row-level `env_config` during preprocessing (`dict`/`list` forms -> canonical `{"env_configs": [...]}`), enforcing canonical-only runtime parsing, validating unknown configured targets early, and reporting per-target metrics while retaining text-environment handling (https://github.com/allenai/open-instruct/pull/1500).
 - Bound async data preparation to stay within `async_steps` of training, preventing training data getting too far out of sync with trainer. (https://github.com/allenai/open-instruct/pull/1496).
@@ -22,6 +31,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
+- Fixed `grpo_fast` local eval rounds enqueueing 0 prompts after the first run by resetting `eval_data_loader` after each eval pass (stateful `DataLoaderBase` requires reset after epoch exhaustion); also switched eval prompt ID prefix from constant `0` to `training_step` to avoid cross-round metadata key collisions in vLLM request tracking (https://github.com/allenai/open-instruct/pull/1493).
 - Force `generation_config="vllm"` in vLLM engine kwargs to prevent model HF generation defaults from capping OpenAI request `max_tokens` (https://github.com/allenai/open-instruct/pull/1512).
 
 ### Removed

@@ -196,7 +196,6 @@ def _handle_post_training(
                 oe_eval_max_length=args.oe_eval_max_length,
                 wandb_url=wandb_url,
                 oe_eval_tasks=args.oe_eval_tasks,
-                gs_bucket_path=args.gs_bucket_path,
                 eval_workspace=args.eval_workspace,
                 eval_priority=args.eval_priority,
                 oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
@@ -321,7 +320,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        drop_last=True,
+        # We need to process every example to cache reference logprobs, so we can't drop the last batch.
+        drop_last=False,
         fs_local_rank=global_rank,
     )
 

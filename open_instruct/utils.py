@@ -72,7 +72,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
+from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -1168,48 +1168,23 @@ def launch_ai2_evals_on_weka(
     training_step: int | None = None,
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
-    gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    beaker_users = get_beaker_whoami()
-
-    if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
-        if beaker_users is not None:
-            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
-        else:
-            gs_saved_path = f"{gs_bucket_path}/{path}"
-        # save the model to the gs bucket first
-        # TODO: use upload_to_gs_bucket instead
-        gs_command = f"""gsutil \\
-            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
-            cp -r {path} \\
-            {gs_saved_path}"""
-        print(f"Copying model to GS bucket with command: {gs_command}")
-        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(f"GS bucket copy stdout:\n{stdout.decode()}")
-        print(f"GS bucket copy stderr:\n{stderr.decode()}")
-        print(f"GS bucket copy process return code: {process.returncode}")
-
-        # Update path to use the GS bucket path for evaluation
-        path = gs_saved_path
-    else:
-        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} {cluster_str} \
+--location {path} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
---skip_oi_evals"""
+--skip_oi_evals \
+--evaluate_on_weka"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
         wandb_run_path = wandb_url_to_run_path(wandb_url)
@@ -1218,8 +1193,6 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if gs_bucket_path is None:
-        command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
