@@ -94,19 +94,13 @@ so during runtime we issue fewer HF API calls, which sometimes could fail due to
 mason.py will auto call `--cache_dataset_only` for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.
 
 
-**Auto upload to Google Cloud Storage:**
-
-When submitting to the `ai2/augusta` cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).
-
-
-
 ## update_command_args.py (for sweep, benchmark, etc.)
 
 The [/scripts/train](/scripts/train) directory contains many examples on how to launch jobs with mason.py. Sometimes the commands can get long and hard to manage, so we wrote a script called [update_command_args.py](/update_command_args.py) that can be used to add or update arguments in a shell script. For example,
 
 ```bash
 python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --priority normal \
     --image costah/open_instruct_dev0320_11  --non_stop_penalty False | uv run bash
 ```
@@ -209,7 +203,7 @@ python scripts/submit_eval_jobs.py \
 python scripts/submit_eval_jobs.py \
     --model_name test_gs_location \
     --location gs://ai2-llm/post-training/allenai/Llama-3.1-Tulu-3.1-8B \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --is_tuned \
     --workspace tulu-3-results \
     --preemptible \
