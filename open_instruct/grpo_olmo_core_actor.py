@@ -97,7 +97,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if not torch.distributed.is_initialized():
             logger.info(f"[Rank {self.rank}] Calling init_process_group with NCCL backend...")
-            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=120))
+            torch.distributed.init_process_group(
+                backend="nccl", timeout=timedelta(minutes=self.grpo_config.backend_timeout)
+            )
             logger.info(f"[Rank {self.rank}] init_process_group completed successfully")
         else:
             logger.info(f"[Rank {self.rank}] Process group already initialized")
@@ -112,23 +114,18 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
         vocab_size = hf_config.vocab_size
 
+        torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
+        olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
+
         self.model_config = olmo_core_utils.get_transformer_config(self.model_name_or_path, vocab_size)
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model = self.model_config.build(init_device="cpu")
-
-        logger.info(f"[Rank {self.rank}] Loading HuggingFace weights from {self.model_name_or_path}")
-        load_hf_model(self.model_name_or_path, self.model.state_dict(), work_dir=self.grpo_config.output_dir)
-
-        if self.grpo_config.single_gpu_mode:
-            # In distributed mode, FSDP handles dtype via dp_config.param_dtype
-            logger.info(f"[Rank {self.rank}] Converting model to bfloat16 for single_gpu_mode")
-            self.model = self.model.to(dtype=torch.bfloat16)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
             self.ref_policy = self.model_config.build(init_device="cpu")
             load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir)
-            self.ref_policy = self.ref_policy.to(device=device, dtype=torch.bfloat16).eval()
+            self.ref_policy = self.ref_policy.to(device=device, dtype=torch_dtype).eval()
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
@@ -159,7 +156,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if not self.grpo_config.single_gpu_mode and self.world_size > 1:
             dp_config = TransformerDataParallelConfig(
                 name=DataParallelType.hsdp,
-                param_dtype=DType.bfloat16,
+                param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
@@ -179,6 +176,17 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             scheduler=scheduler,
             device=device,
         )
+
+        # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
+        # We must reload HF weights after parallelization (FSDP-first loading pattern).
+        logger.info(f"[Rank {self.rank}] Reloading HuggingFace weights after parallelization...")
+        sd = self.train_module.model.state_dict()
+        load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
+        self.train_module.model.load_state_dict(sd)
+
+        if self.grpo_config.single_gpu_mode:
+            logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
+            self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
@@ -204,7 +212,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 vllm_world_size,
                 "openrlhf",
                 backend=backend,
-                timeout_minutes=120,
+                timeout_minutes=self.grpo_config.backend_timeout,
             )
             for i, engine in enumerate(vllm_engines)
         ]
@@ -217,7 +225,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             world_size=vllm_world_size,
             rank=0,
             group_name="openrlhf",
-            timeout=timedelta(minutes=120),
+            timeout=timedelta(minutes=self.grpo_config.backend_timeout),
         )
 
         ray.get(refs)
