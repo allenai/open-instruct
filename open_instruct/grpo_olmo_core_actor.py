@@ -6,7 +6,6 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 """
 
 import os
-import socket
 from datetime import timedelta
 from typing import Any
 
@@ -17,7 +16,6 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import AdamWConfig, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.train_module.transformer import (
@@ -27,7 +25,7 @@ from olmo_core.train.train_module.transformer import (
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, olmo_core_utils, vllm_utils
 from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -80,7 +78,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.num_nodes = num_nodes
         self.local_world_size = local_world_size
         self.tokenizer = tokenizer
-        self.pad_token_id = tokenizer.pad_token_id
         self.model_name_or_path = model_name_or_path
         self.grpo_config = grpo_config
         self.learning_rate = learning_rate
@@ -96,7 +93,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.max_sequence_length = max_sequence_length
         self.single_gpu_mode = single_gpu_mode
         self.load_ref_policy = load_ref_policy
-        self.beta = beta
         self.seed = seed
         self.output_dir = output_dir
         self.streaming_config = streaming_config
@@ -106,7 +102,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.ref_policy = None
         self.vllm_engines = None
         self.model_update_group = None
-        self.local_metrics = {}
+        self.actor_manager = None
+        self.with_tracking = False
+        self.wandb_project = None
+        self.wandb_entity = None
+        self.run_name = None
+        self.json_config = None
+        self.ref_policy_update_freq = None
 
     def setup_model(self) -> int:
         """Initialize the OLMo-core model and training infrastructure.
@@ -116,6 +118,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         """
         os.environ["NUM_NODES"] = str(self.num_nodes)
         os.environ["LOCAL_WORLD_SIZE"] = str(self.local_world_size)
+        os.environ["FS_LOCAL_RANK"] = str(self.rank)
 
         torch.cuda.set_device(0)
         logger.info(
@@ -136,24 +139,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        model_basename = self.model_name_or_path.split("/")[-1]
-        config_name = model_basename.replace("-", "_").replace(".", "_")
-        config_name = config_name[:-1].lower() + "B" if config_name.endswith("B") else config_name.lower()
-
-        if not hasattr(TransformerConfig, config_name):
-            available = [
-                m for m in dir(TransformerConfig) if not m.startswith("_") and callable(getattr(TransformerConfig, m))
-            ]
-            raise ValueError(f"No TransformerConfig.{config_name}() found. Available: {available}")
-
         hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
         vocab_size = hf_config.vocab_size
 
-        logger.info(
-            f"[Rank {self.rank}] Building OLMo-core model with TransformerConfig.{config_name}(vocab_size={vocab_size})"
-        )
-        model_config_olmo = getattr(TransformerConfig, config_name)(vocab_size=vocab_size)
-        self.model = model_config_olmo.build(init_device="cpu")
+        self.model_config = olmo_core_utils.get_transformer_config(self.model_name_or_path, vocab_size)
+        logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
+        self.model = self.model_config.build(init_device="cpu")
 
         logger.info(f"[Rank {self.rank}] Loading HuggingFace weights from {self.model_name_or_path}")
         load_hf_model(self.model_name_or_path, self.model.state_dict(), work_dir=self.output_dir)
@@ -162,9 +153,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             logger.info(f"[Rank {self.rank}] Converting model to bfloat16 for single_gpu_mode")
             self.model = self.model.to(dtype=torch.bfloat16)
 
-        if self.load_ref_policy and self.beta > 0:
+        if self.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
-            self.ref_policy = model_config_olmo.build(init_device="cpu")
+            self.ref_policy = self.model_config.build(init_device="cpu")
             load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.output_dir)
             self.ref_policy = self.ref_policy.to(device=device, dtype=torch.bfloat16).eval()
 
@@ -177,7 +168,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             work_dir=self.output_dir,
             dp_world_size=self.world_size,
         )
-        self.dataloader_iter = iter(self.dataloader)
 
         num_scheduler_steps = self.num_training_steps * self.num_epochs * self.num_mini_batches
         warmup_steps = self.warm_up_steps
@@ -216,13 +206,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             device=device,
         )
 
-        os.environ["FS_LOCAL_RANK"] = str(self.rank)
-        self.trainer = train.TrainerConfig(
-            save_folder=self.output_dir,
-            max_duration=train.Duration.steps(self.num_training_steps),
-            metrics_collect_interval=10,
-        ).build(self.train_module, self.dataloader)
-
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
 
@@ -233,10 +216,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if not vllm_engines or self.rank != 0:
             return
 
-        master_address = ray._private.services.get_node_ip_address()
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            master_port = sock.getsockname()[1]
+        master_address = self.get_current_node_ip()
+        master_port = self.get_free_port()
 
         vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
         backend = self.vllm_config.vllm_sync_backend
@@ -294,11 +275,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         """
         trainer_callbacks: dict[str, callbacks.Callback] = {}
 
-        if hasattr(self, "vllm_engines") and self.vllm_engines:
+        if self.vllm_engines:
             trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
                 vllm_engines=self.vllm_engines,
-                model_update_group=getattr(self, "model_update_group", None),
-                actor_manager=getattr(self, "actor_manager", None),
+                model_update_group=self.model_update_group,
+                actor_manager=self.actor_manager,
                 name_mapper=olmo_core_to_hf_name,
             )
 
@@ -307,18 +288,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 ref_policy=self.ref_policy, alpha=self.grpo_config.alpha, update_interval=self.ref_policy_update_freq
             )
 
-        if is_beaker_job() and hasattr(self, "json_config"):
+        if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
 
-        if hasattr(self, "with_tracking") and self.with_tracking:
+        if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(
-                name=self.run_name,
-                project=self.wandb_project,
-                entity=self.wandb_entity,
-                config=getattr(self, "json_config", None),
+                name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
             )
 
-        os.environ["FS_LOCAL_RANK"] = str(self.rank)
         self.trainer = train.TrainerConfig(
             save_folder=self.output_dir,
             max_duration=train.Duration.steps(self.num_training_steps),
@@ -341,14 +318,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         os.makedirs(output_dir, exist_ok=True)
 
-        state_dict = {}
-        model = self.train_module.model
-        for name, param in model.named_parameters():
-            hf_name = olmo_core_to_hf_name(name)
-            state_dict[hf_name] = param.data.cpu()
-
-        torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-        tokenizer.save_pretrained(output_dir)
+        state_dict = self.train_module.model.state_dict()
+        olmo_core_utils.save_state_dict_as_hf(
+            self.model_config, state_dict, output_dir, self.model_name_or_path, tokenizer
+        )
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 
@@ -402,6 +375,33 @@ class OLMoCoreModelGroup:
                 node_idx += 1
             return node_idx, remaining_rank, num_gpus_per_node[node_idx]
 
+        common_kwargs = {
+            "world_size": world_size,
+            "num_nodes": num_nodes,
+            "model_name_or_path": model_name_or_path,
+            "grpo_config": grpo_config,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "max_grad_norm": max_grad_norm,
+            "lr_scheduler_type": lr_scheduler_type,
+            "warm_up_steps": warm_up_steps,
+            "warmup_ratio": warmup_ratio,
+            "num_training_steps": num_training_steps,
+            "num_epochs": num_epochs,
+            "num_mini_batches": num_mini_batches,
+            "per_device_train_batch_size": per_device_train_batch_size,
+            "max_sequence_length": max_sequence_length,
+            "single_gpu_mode": single_gpu_mode,
+            "load_ref_policy": load_ref_policy,
+            "beta": beta,
+            "seed": seed,
+            "output_dir": output_dir,
+            "streaming_config": streaming_config,
+            "vllm_config": vllm_config,
+            "data_prep_actor_name": data_prep_actor_name,
+            "tokenizer": tokenizer,
+        }
+
         node_idx, local_rank, local_world_size = get_node_info(0, num_gpus_per_node)
 
         master_policy = PolicyTrainerOLMoCoreProcess.options(  # ty: ignore[unresolved-attribute]
@@ -409,35 +409,12 @@ class OLMoCoreModelGroup:
             num_gpus=self.num_gpus_per_actor,
             scheduling_strategy=PlacementGroupSchedulingStrategy(placement_group=pg, placement_group_bundle_index=0),
         ).remote(
-            world_size=world_size,
             rank=0,
             local_rank=local_rank,
             master_addr=None,
             master_port=None,
-            num_nodes=num_nodes,
             local_world_size=local_world_size,
-            model_name_or_path=model_name_or_path,
-            grpo_config=grpo_config,
-            learning_rate=learning_rate,
-            weight_decay=weight_decay,
-            max_grad_norm=max_grad_norm,
-            lr_scheduler_type=lr_scheduler_type,
-            warm_up_steps=warm_up_steps,
-            warmup_ratio=warmup_ratio,
-            num_training_steps=num_training_steps,
-            num_epochs=num_epochs,
-            num_mini_batches=num_mini_batches,
-            per_device_train_batch_size=per_device_train_batch_size,
-            max_sequence_length=max_sequence_length,
-            single_gpu_mode=single_gpu_mode,
-            load_ref_policy=load_ref_policy,
-            beta=beta,
-            seed=seed,
-            output_dir=output_dir,
-            streaming_config=streaming_config,
-            vllm_config=vllm_config,
-            data_prep_actor_name=data_prep_actor_name,
-            tokenizer=tokenizer,
+            **common_kwargs,
         )
 
         self.models.append(master_policy)
@@ -456,34 +433,11 @@ class OLMoCoreModelGroup:
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
             ).remote(
-                world_size=world_size,
                 rank=rank,
                 local_rank=local_rank,
                 master_addr=master_addr,
                 master_port=master_port,
-                num_nodes=num_nodes,
                 local_world_size=local_world_size,
-                model_name_or_path=model_name_or_path,
-                grpo_config=grpo_config,
-                learning_rate=learning_rate,
-                weight_decay=weight_decay,
-                max_grad_norm=max_grad_norm,
-                lr_scheduler_type=lr_scheduler_type,
-                warm_up_steps=warm_up_steps,
-                warmup_ratio=warmup_ratio,
-                num_training_steps=num_training_steps,
-                num_epochs=num_epochs,
-                num_mini_batches=num_mini_batches,
-                per_device_train_batch_size=per_device_train_batch_size,
-                max_sequence_length=max_sequence_length,
-                single_gpu_mode=single_gpu_mode,
-                load_ref_policy=load_ref_policy,
-                beta=beta,
-                seed=seed,
-                output_dir=output_dir,
-                streaming_config=streaming_config,
-                vllm_config=vllm_config,
-                data_prep_actor_name=data_prep_actor_name,
-                tokenizer=tokenizer,
+                **common_kwargs,
             )
             self.models.append(worker_policy)
