@@ -33,6 +33,7 @@ uv run python mason.py \
         --num_nodes 2 \
         --no_auto_dataset_cache \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
         --env HOSTED_VLLM_API_BASE=$hosted_vllm \
         --env OLMO_SHARED_FS=1 \
         --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
