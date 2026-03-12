@@ -49,52 +49,21 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
-        num_nodes: int,
         local_world_size: int,
         model_name_or_path: str,
         grpo_config: grpo_utils.ExperimentConfig,
-        learning_rate: float,
-        weight_decay: float,
-        max_grad_norm: float,
-        lr_scheduler_type: str,
-        warm_up_steps: int,
-        warmup_ratio: float,
-        num_training_steps: int,
-        num_epochs: int,
-        num_mini_batches: int,
-        per_device_train_batch_size: int,
         max_sequence_length: int,
-        single_gpu_mode: bool,
-        load_ref_policy: bool,
-        beta: float,
-        seed: int,
-        output_dir: str,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
-        self.num_nodes = num_nodes
         self.local_world_size = local_world_size
         self.tokenizer = tokenizer
         self.model_name_or_path = model_name_or_path
         self.grpo_config = grpo_config
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.max_grad_norm = max_grad_norm
-        self.lr_scheduler_type = lr_scheduler_type
-        self.warm_up_steps = warm_up_steps
-        self.warmup_ratio = warmup_ratio
-        self.num_training_steps = num_training_steps
-        self.num_epochs = num_epochs
-        self.num_mini_batches = num_mini_batches
-        self.per_device_train_batch_size = per_device_train_batch_size
         self.max_sequence_length = max_sequence_length
-        self.single_gpu_mode = single_gpu_mode
-        self.load_ref_policy = load_ref_policy
-        self.seed = seed
-        self.output_dir = output_dir
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
         self.data_prep_actor_name = data_prep_actor_name
@@ -116,10 +85,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Returns:
             The training step to resume from (1 if starting fresh).
         """
-        os.environ["NUM_NODES"] = str(self.num_nodes)
+        os.environ["NUM_NODES"] = str(self.grpo_config.num_nodes)
         os.environ["LOCAL_WORLD_SIZE"] = str(self.local_world_size)
         os.environ["FS_LOCAL_RANK"] = str(self.rank)
 
+        # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
         torch.cuda.set_device(0)
         logger.info(
             f"[Rank {self.rank}] Set CUDA device to 0, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}"
@@ -134,7 +104,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         backend = "cpu:gloo,cuda:nccl"
         logger.info(f"[Rank {self.rank}] Calling train.prepare_training_environment...")
-        train.prepare_training_environment(seed=self.seed, backend=backend)
+        train.prepare_training_environment(seed=self.grpo_config.seed, backend=backend)
         logger.info(f"[Rank {self.rank}] train.prepare_training_environment completed")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -147,42 +117,46 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.model = self.model_config.build(init_device="cpu")
 
         logger.info(f"[Rank {self.rank}] Loading HuggingFace weights from {self.model_name_or_path}")
-        load_hf_model(self.model_name_or_path, self.model.state_dict(), work_dir=self.output_dir)
+        load_hf_model(self.model_name_or_path, self.model.state_dict(), work_dir=self.grpo_config.output_dir)
 
-        if self.single_gpu_mode:
+        if self.grpo_config.single_gpu_mode:
+            # In distributed mode, FSDP handles dtype via dp_config.param_dtype
             logger.info(f"[Rank {self.rank}] Converting model to bfloat16 for single_gpu_mode")
             self.model = self.model.to(dtype=torch.bfloat16)
 
-        if self.load_ref_policy and self.grpo_config.beta > 0:
+        if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
             self.ref_policy = self.model_config.build(init_device="cpu")
-            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.output_dir)
+            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir)
             self.ref_policy = self.ref_policy.to(device=device, dtype=torch.bfloat16).eval()
 
+        assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
             data_prep_actor_name=self.data_prep_actor_name,
             tokenizer=self.tokenizer,
             dp_rank=self.rank,
             fs_local_rank=self.rank,
-            num_training_steps=self.num_training_steps,
-            work_dir=self.output_dir,
+            num_training_steps=self.grpo_config.num_training_steps,
+            work_dir=self.grpo_config.output_dir,
             dp_world_size=self.world_size,
         )
 
-        num_scheduler_steps = self.num_training_steps * self.num_epochs * self.num_mini_batches
-        warmup_steps = self.warm_up_steps
-        if self.warmup_ratio > 0.0:
-            warmup_steps = int(num_scheduler_steps * self.warmup_ratio)
+        num_scheduler_steps = (
+            self.grpo_config.num_training_steps * self.grpo_config.num_epochs * self.grpo_config.num_mini_batches
+        )
+        warmup_steps = self.grpo_config.warm_up_steps
+        if self.grpo_config.warmup_ratio > 0.0:
+            warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
 
-        if self.lr_scheduler_type == "cosine":
+        if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
         else:
             scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
 
-        optim_config = AdamWConfig(lr=self.learning_rate, weight_decay=self.weight_decay)
+        optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
 
         dp_config = None
-        if not self.single_gpu_mode and self.world_size > 1:
+        if not self.grpo_config.single_gpu_mode and self.world_size > 1:
             dp_config = TransformerDataParallelConfig(
                 name=DataParallelType.hsdp,
                 param_dtype=DType.bfloat16,
@@ -195,13 +169,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.train_module = GRPOTrainModule(
             model=self.model,
             optim=optim_config,
-            rank_microbatch_size=self.per_device_train_batch_size,
+            rank_microbatch_size=self.grpo_config.per_device_train_batch_size,
             max_sequence_length=self.max_sequence_length,
             grpo_config=self.grpo_config,
             tokenizer=self.tokenizer,
             ref_policy=self.ref_policy,
             dp_config=dp_config,
-            max_grad_norm=self.max_grad_norm,
+            max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
         )
@@ -235,6 +209,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             for i, engine in enumerate(vllm_engines)
         ]
 
+        # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
         torch.cuda.set_device(0)
         self.model_update_group = vllm_utils.init_process_group(
             backend=backend,
@@ -296,9 +271,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
             )
 
+        assert self.grpo_config.num_training_steps is not None
         self.trainer = train.TrainerConfig(
-            save_folder=self.output_dir,
-            max_duration=train.Duration.steps(self.num_training_steps),
+            save_folder=self.grpo_config.output_dir,
+            max_duration=train.Duration.steps(self.grpo_config.num_training_steps),
             metrics_collect_interval=10,
             callbacks=trainer_callbacks,
         ).build(self.train_module, self.dataloader)
@@ -312,13 +288,20 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
     def save_model(
         self, output_dir: str, chat_template_name: str, tokenizer: transformers.PreTrainedTokenizer
     ) -> None:
-        """Save model checkpoint."""
+        """Save model checkpoint.
+
+        All ranks must call this method because state_dict() and full_tensor()
+        are collective operations when FSDP is enabled.
+        """
+        state_dict = self.train_module.model.state_dict()
+        state_dict = {
+            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
+        }
+
         if self.rank != 0:
             return
 
         os.makedirs(output_dir, exist_ok=True)
-
-        state_dict = self.train_module.model.state_dict()
         olmo_core_utils.save_state_dict_as_hf(
             self.model_config, state_dict, output_dir, self.model_name_or_path, tokenizer
         )
@@ -335,24 +318,9 @@ class OLMoCoreModelGroup:
         self,
         pg,
         num_gpus_per_node: list[int],
-        single_gpu_mode: bool,
         model_name_or_path: str,
         grpo_config: grpo_utils.ExperimentConfig,
-        learning_rate: float,
-        weight_decay: float,
-        max_grad_norm: float,
-        lr_scheduler_type: str,
-        warm_up_steps: int,
-        warmup_ratio: float,
-        num_training_steps: int,
-        num_epochs: int,
-        num_mini_batches: int,
-        per_device_train_batch_size: int,
         max_sequence_length: int,
-        load_ref_policy: bool,
-        beta: float,
-        seed: int,
-        output_dir: str,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -360,11 +328,10 @@ class OLMoCoreModelGroup:
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
-        self.num_gpus_per_actor = 0.48 if single_gpu_mode else 1
+        self.num_gpus_per_actor = 0.5 if grpo_config.single_gpu_mode else 1
         self.num_cpus_per_actor = 4
         self.models = []
         world_size = sum(num_gpus_per_node)
-        num_nodes = len(num_gpus_per_node)
 
         def get_node_info(rank, num_gpus_per_node):
             """Returns (node_index, local_rank, local_world_size) for a given global rank."""
@@ -377,25 +344,9 @@ class OLMoCoreModelGroup:
 
         common_kwargs = {
             "world_size": world_size,
-            "num_nodes": num_nodes,
             "model_name_or_path": model_name_or_path,
             "grpo_config": grpo_config,
-            "learning_rate": learning_rate,
-            "weight_decay": weight_decay,
-            "max_grad_norm": max_grad_norm,
-            "lr_scheduler_type": lr_scheduler_type,
-            "warm_up_steps": warm_up_steps,
-            "warmup_ratio": warmup_ratio,
-            "num_training_steps": num_training_steps,
-            "num_epochs": num_epochs,
-            "num_mini_batches": num_mini_batches,
-            "per_device_train_batch_size": per_device_train_batch_size,
             "max_sequence_length": max_sequence_length,
-            "single_gpu_mode": single_gpu_mode,
-            "load_ref_policy": load_ref_policy,
-            "beta": beta,
-            "seed": seed,
-            "output_dir": output_dir,
             "streaming_config": streaming_config,
             "vllm_config": vllm_config,
             "data_prep_actor_name": data_prep_actor_name,
