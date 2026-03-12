@@ -2225,7 +2225,7 @@ def main(
         runtime_env={
             "excludes": [".git/"],
             "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
-        },
+        }
     )
 
     pool_size = tools_config.pool_size
