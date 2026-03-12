@@ -712,7 +712,8 @@ class LLMRayActor:
         self.llm_engine = None
         self.client = None
         self.server_port = None
-        self._inference_gate: asyncio.Event | None = None  # Created on the event loop thread
+        self._inference_gate = threading.Event()
+        self._inference_gate.set()  # Start open (inference allowed)
 
         async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
@@ -749,8 +750,6 @@ class LLMRayActor:
             try:
                 self.loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self.loop)
-                self._inference_gate = asyncio.Event()
-                self._inference_gate.set()  # Start open (inference allowed)
                 self.llm_engine = self.loop.run_until_complete(_init_engine_and_server())
             finally:
                 # Signal completion to the waiting main thread even if init failed.
@@ -1085,8 +1084,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             # Wait if weight sync is in progress (gate is closed).
-            if actor._inference_gate is not None:
-                await actor._inference_gate.wait()
+            while not actor._inference_gate.is_set():
+                await asyncio.sleep(0.05)
 
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
