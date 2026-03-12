@@ -134,6 +134,7 @@ logger = logger_utils.setup_logger(__name__)
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
+EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -2220,7 +2221,12 @@ def main(
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+    ray.init(
+        runtime_env={
+            "excludes": [".git/"],
+            "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
+        }
+    )
 
     pool_size = tools_config.pool_size
     if pool_size is None:

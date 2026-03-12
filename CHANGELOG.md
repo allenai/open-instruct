@@ -31,6 +31,8 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
+- Include tokenizer configuration in per-transform dataset cache fingerprints so rerunning transformations with a different tokenizer does not silently reuse stale cached outputs (https://github.com/allenai/open-instruct/pull/1518).
 - Fixed `grpo_fast` local eval rounds enqueueing 0 prompts after the first run by resetting `eval_data_loader` after each eval pass (stateful `DataLoaderBase` requires reset after epoch exhaustion); also switched eval prompt ID prefix from constant `0` to `training_step` to avoid cross-round metadata key collisions in vLLM request tracking (https://github.com/allenai/open-instruct/pull/1493).
 - Force `generation_config="vllm"` in vLLM engine kwargs to prevent model HF generation defaults from capping OpenAI request `max_tokens` (https://github.com/allenai/open-instruct/pull/1512).
 
