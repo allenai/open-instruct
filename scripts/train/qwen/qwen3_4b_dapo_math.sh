@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="qwen3_4b_base_dapo"
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
