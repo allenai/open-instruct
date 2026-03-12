@@ -15,8 +15,9 @@ LOCAL_EVAL_SPLITS="test"
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
+CLUSTER="${CLUSTER:-ai2/neptune ai2/saturn ai2/ceres}"
 PRIORITY="${PRIORITY:-high}"
+NUM_GPUS="${NUM_GPUS:-4}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -29,13 +30,13 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
-    --gpus 4 \
+    --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \
 uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
-    --eval_pass_at_k 32 \
+    --eval_pass_at_k 4 \
     --eval_top_p 0.95 \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
