@@ -1072,7 +1072,7 @@ class DataPreparationActor:
         self._prep_future = None
 
         if initial_state is not None:
-            logger.info(f"[DataPreparationActor] Given initial state, setting state and starting preparation loop")
+            logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
             self.set_state(initial_state)
             self.start()
 
@@ -1352,4 +1352,6 @@ class DataPreparationActor:
         self._last_consumed_step = state.get("last_consumed_step", state["training_step"] - 1)
         self.training_step = self._last_consumed_step + 1
 
-        logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}")
+        logger.info(
+            f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}"
+        )

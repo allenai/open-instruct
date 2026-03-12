@@ -157,6 +157,7 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
     resume_state["training_step"] = last_consumed_step + 1
     return resume_state
 
+
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
 
@@ -424,10 +425,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.dataloader = iter(self._streaming_dataloader)
 
-        return {
-            "optimization_steps_done": optimization_steps_done,
-            "checkpoint_state": checkpoint_state,
-        }
+        return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -1431,8 +1429,7 @@ def create_model_and_optimizer(
     data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
     if data_prep_actor_state is not None:
         ray_get_with_progress(
-            [_data_prep_actor.set_state.remote(data_prep_actor_state)],
-            desc="Restoring data prep actor state",
+            [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
         )
         logger.info(
             "Restored data prep actor state from checkpoint "
@@ -2356,29 +2353,27 @@ def main(
         model_dims,
         _data_prep_actor,
         checkpoint_state,
-    ) = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            prompt_Q,
-            evaluation_inference_results_Q,
-            streaming_config,
-            vllm_config,
-            train_dataset,
-            eval_dataset,
-            reward_config,
-            generation_configs["train"],
-            base_env_config,
-            tool_definitions,
-            tools_config,
-            pools,
-            tool_stop_sequences,
-        )
+    ) = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        prompt_Q,
+        evaluation_inference_results_Q,
+        streaming_config,
+        vllm_config,
+        train_dataset,
+        eval_dataset,
+        reward_config,
+        generation_configs["train"],
+        base_env_config,
+        tool_definitions,
+        tools_config,
+        pools,
+        tool_stop_sequences,
     )
 
     if checkpoint_state:
