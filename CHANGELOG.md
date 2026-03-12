@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fix GRPO data prep actor checkpoint resume so resumed runs restore data prep client state and continue from the next unseen learner step (https://github.com/allenai/open-instruct/pull/1523).
 - Force `generation_config="vllm"` in vLLM engine kwargs to prevent model HF generation defaults from capping OpenAI request `max_tokens` (https://github.com/allenai/open-instruct/pull/1512).
 
 ### Removed

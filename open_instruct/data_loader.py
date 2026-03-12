@@ -1163,14 +1163,20 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
+        self._executor: ThreadPoolExecutor | None = None
+        self._prep_future = None
 
         if initial_state is not None:
-            self.training_step = initial_state["training_step"]
-            self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
-            logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
+            logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
+            self.set_state(initial_state)
+            self.start()
 
+    def start(self):
+        if self._prep_future is not None:
+            return
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
         self._prep_future = self._executor.submit(self._data_preparation_loop)
+        logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
@@ -1392,6 +1398,8 @@ class DataPreparationActor:
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
+        if self._prep_future is None:
+            self.start()
         logger.info(
             f"[DataPreparationActor.get_data] rank={rank} requesting step={step}, current_prepared_step={self.current_prepared_step}"
         )
@@ -1426,10 +1434,19 @@ class DataPreparationActor:
 
     def get_state(self) -> dict:
         return {
-            "training_step": self.current_prepared_step + 1,
+            "training_step": self.training_step,
+            "last_consumed_step": self._last_consumed_step,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
 
     def set_state(self, state: dict):
-        self.training_step = state["training_step"]
+        if self._prep_future is not None:
+            raise RuntimeError("Cannot update DataPreparationActor state after preparation has started")
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
+
+        self._last_consumed_step = state.get("last_consumed_step", state["training_step"] - 1)
+        self.training_step = self._last_consumed_step + 1
+
+        logger.info(
+            f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}"
+        )
