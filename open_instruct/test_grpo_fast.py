@@ -15,7 +15,7 @@ from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import rl_utils, utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -238,11 +238,11 @@ class TestGrpoFastBase(unittest.TestCase):
             dp_rank=0,
             dp_world_size=1,
             work_dir="/tmp",
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False)
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         return prompt_Q, inference_results_Q, mock_dataset
 
@@ -487,6 +487,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
             dataset=mock_dataset,
+            base_env_config=EnvConfig(),
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -531,6 +532,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
                     dataset=mock_dataset,
+                    base_env_config=EnvConfig(),
                 )
                 completed.set()
             except Exception:
@@ -568,11 +570,11 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             dp_rank=0,
             dp_world_size=1,
             work_dir="/tmp",
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False)
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
 
@@ -605,11 +607,11 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             dp_rank=0,
             dp_world_size=1,
             work_dir="/tmp",
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False)
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         request_count = 0
         while not prompt_Q.empty():
@@ -732,6 +734,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
             dataset=mock_dataset,
+            base_env_config=EnvConfig(),
             filter_zero_std_samples=True,
         )
 

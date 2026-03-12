@@ -298,8 +298,6 @@ class FlatArguments:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
 
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
@@ -390,10 +388,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Set up runtime variables
 
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
@@ -440,7 +434,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -892,7 +886,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         current_step=completed_steps,
                         total_steps=args.max_train_steps,
                         start_time=start_time,
-                        wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+                        wandb_url=wandb_tracker.run.url if wandb_tracker is not None else None,
                     )
                     total_loss = 0
                     total_aux_loss = 0
@@ -946,9 +940,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+            wandb_url=wandb_tracker.run.url if wandb_tracker is not None else None,
             oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
         )
     if args.push_to_hub and accelerator.is_main_process:
         push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)

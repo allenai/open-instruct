@@ -152,6 +152,9 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
 # Chat templates
 # note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
 # because we want the template to not output eos_token if `add_generation_prompt=True`
+#
+# For Olmo 3 tokenizer settings and chat template decisions, see:
+# docs/olmo3.md (https://allenai.github.io/open-instruct/olmo3/#tokenizer-settings)
 CHAT_TEMPLATES = {
     "simple_concat_with_space": (
         "{% for message in messages %}"
@@ -930,10 +933,51 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 
 TOOLS_COLUMN_KEY = "tools"
+ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v2"
+# to invalidate old caches. v5: Normalized env_config into canonical payloads in preprocessing.
+DATASET_CACHE_VERSION = "v5"
+
+
+def _normalize_env_config_column(row: dict[str, Any]) -> None:
+    """Normalize row-level env_config to canonical dict form.
+
+    We turn dict-only or list-only configs into the same form.
+    """
+    env_config = row.get(ENV_CONFIG_KEY)
+    if env_config is None:
+        return
+
+    if isinstance(env_config, list):
+        row[ENV_CONFIG_KEY] = {"env_configs": [dict(cfg) for cfg in env_config]}
+        return
+
+    if not isinstance(env_config, dict):
+        raise TypeError(f"{ENV_CONFIG_KEY} must be a dict, list, or None, got {type(env_config).__name__}")
+
+    if "env_configs" in env_config:
+        normalized = dict(env_config)
+        normalized["env_configs"] = [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    if "env_name" in env_config:
+        single_env = dict(env_config)
+        max_steps = single_env.pop("max_steps", None)
+        normalized: dict[str, Any] = {"env_configs": [single_env]}
+        if max_steps is not None:
+            normalized["max_steps"] = max_steps
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    row[ENV_CONFIG_KEY] = {"env_configs": []}
+
+
+def _normalize_env_config_row(row: dict[str, Any]) -> dict[str, Any]:
+    """HF map wrapper for env_config normalization."""
+    _normalize_env_config_column(row)
+    return row
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1380,22 +1424,45 @@ def rlvr_tokenize_v2(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     # drop the messages field as it often causes issues.
     row.pop(sft_messages_key)
     return row
+
+
+def _resolve_tools_for_sample(
+    row: dict[str, Any], tool_definitions: list[dict[str, Any]] | None, pass_tools: bool
+) -> list[dict[str, Any]] | None:
+    """Resolve which tool definitions to inject into this sample's prompt.
+
+    Filters global tool_definitions by per-sample active_tools column.
+    """
+    if not pass_tools or not tool_definitions:
+        return None
+
+    sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+    if sample_active_tools is not None:
+        known_names = {t.get("function", {}).get("name") for t in tool_definitions}
+        unknown = set(sample_active_tools) - known_names
+        if unknown:
+            logger.warning(f"Sample references unknown tools: {sorted(unknown)}. Known: {sorted(known_names)}")
+        filtered = [t for t in tool_definitions if t.get("function", {}).get("name") in sample_active_tools]
+        return filtered or None
+    return tool_definitions
 
 
 def rlvr_tokenize_v3(
@@ -1419,16 +1486,7 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    tools_for_template: list[dict[str, Any]] | None = None
-    if pass_tools_to_chat_template and tool_definitions:
-        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        if sample_active_tools is not None:
-            active_tool_names = set(sample_active_tools)
-            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            if filtered_tools:
-                tools_for_template = filtered_tools
-        else:
-            tools_for_template = tool_definitions
+    tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
@@ -1437,19 +1495,24 @@ def rlvr_tokenize_v3(
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     return row
 
 
@@ -1639,6 +1702,19 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         num_proc=num_proc,
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
+
+    # Normalize env_config before tokenization so downstream always sees canonical payloads.
+    if ENV_CONFIG_KEY in dataset.column_names:
+        env_config_fingerprint = hashlib.sha256(
+            f"{DATASET_CACHE_VERSION}:normalize_env_config:{dataset._fingerprint}".encode()
+        ).hexdigest()[:16]
+        dataset = dataset.map(
+            _normalize_env_config_row,
+            num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+            new_fingerprint=env_config_fingerprint,
+            desc=f"Normalizing {ENV_CONFIG_KEY} for {dc.dataset_name}",
+        )
+
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1656,6 +1732,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
         target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(
@@ -1681,16 +1758,31 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
+def _get_serializable_dataset_config_dict(dc: DatasetConfig, exclude_none: bool = False) -> dict:
+    """Convert DatasetConfig to a JSON-serializable dict.
+
+    Args:
+        dc: The DatasetConfig to convert.
+        exclude_none: If True, exclude keys with None values (useful for hashing).
+
+    Returns:
+        A dictionary representation of the DatasetConfig, excluding the non-serializable
+        'dataset' field.
+    """
+    d = asdict(dc)
+    d.pop("dataset", None)
+    if exclude_none:
+        d = {k: v for k, v in d.items() if v is not None}
+    return d
+
+
 def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching.
 
     The hash includes DATASET_CACHE_VERSION to invalidate old caches when
     transformation logic changes significantly.
     """
-    non_serializable_keys = {"dataset"}
-    dc_dicts = [
-        {k: v for k, v in asdict(dc).items() if v is not None and k not in non_serializable_keys} for dc in dcs
-    ]
+    dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
     combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
@@ -1804,9 +1896,10 @@ class LocalDatasetTransformationCache:
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
+        # Filter out `dataset` field because HuggingFace Dataset objects are not JSON serializable
         config_dict = {
             "tokenizer_config": asdict(tc),
-            "dataset_configs": [asdict(dc) for dc in dcs],
+            "dataset_configs": [_get_serializable_dataset_config_dict(dc) for dc in dcs],
             "config_hash": config_hash,
         }
         with open(config_path, "w") as f:
@@ -1917,6 +2010,32 @@ def load_dataset_configs(
     target_columns: list[str] | None = None,
     dataset_config_seed: int = 42,
 ) -> list[DatasetConfig]:
+    """
+    Load and configure datasets from a mixer list.
+
+    Args:
+        dataset_mixer_list: Alternating list of [dataset_name, amount, dataset_name, amount, ...].
+            The 'amount' value determines how many samples to use:
+
+            - Float values (must contain a decimal point): Interpreted as a PROPORTION of the dataset.
+              Examples: "1.0" = 100% of dataset, "0.5" = 50%, "3.0" = 300% (3x upsampling)
+
+            - Integer values (no decimal point): Interpreted as an absolute SAMPLE COUNT.
+              Examples: "100" = exactly 100 samples, "1000" = exactly 1000 samples
+
+            IMPORTANT: "1" means 1 sample, NOT 100% of the dataset. Use "1.0" for 100%.
+            This is a common source of errors - always use decimal notation for proportions.
+
+        dataset_mixer_list_splits: Split names for each dataset (e.g., ["train"]).
+            If a single split is provided, it's used for all datasets.
+        dataset_transform_fn: Transform function names to apply.
+        transform_fn_args: Arguments for transform functions.
+        target_columns: Optional list of columns to keep.
+        dataset_config_seed: Random seed for sampling.
+
+    Returns:
+        List of configured DatasetConfig objects.
+    """
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
@@ -1930,6 +2049,8 @@ def load_dataset_configs(
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         frac_or_num_samples = dataset_mixer_list[i + 1]
+        # Parse amount: strings with "." become floats (proportions), without become ints (counts).
+        # IMPORTANT: "1" = 1 sample, "1.0" = 100% of dataset. This is a common mistake!
         frac_or_num_samples = float(frac_or_num_samples) if "." in frac_or_num_samples else int(frac_or_num_samples)
         # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
         # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
@@ -1958,6 +2079,15 @@ def load_dataset_configs(
             new_range = int(frac_or_num_samples)
 
         print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
+
+        # Warn if using a suspiciously small integer count - likely a typo (meant "1.0" not "1")
+        if isinstance(frac_or_num_samples, int) and frac_or_num_samples <= 10 and original_size > 100:
+            logger.warning(
+                f"Dataset '{dataset_name}': Using only {frac_or_num_samples} sample(s) from {original_size} available. "
+                f"Did you mean '{float(frac_or_num_samples)}' for {frac_or_num_samples * 100}% of the dataset? "
+                f"Integer values (no decimal) = sample count, float values (with decimal) = proportion."
+            )
+
         dataset_config.update_range(new_range)
         dcs.append(dataset_config)
     return dcs

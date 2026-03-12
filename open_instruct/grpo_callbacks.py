@@ -6,21 +6,40 @@ These callbacks handle:
 - Reference policy Polyak updates
 """
 
+import contextlib
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
 import ray
+import ray.exceptions
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
+from olmo_core.train.train_module import TransformerTrainModule
+from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+_BLOCK_PATTERN = re.compile(r"blocks\.(\d+)\.(.*)")
+_OLMO_CORE_TO_HF_LAYER_MAPPINGS = {
+    "attention.w_q.weight": "self_attn.q_proj.weight",
+    "attention.w_k.weight": "self_attn.k_proj.weight",
+    "attention.w_v.weight": "self_attn.v_proj.weight",
+    "attention.w_out.weight": "self_attn.o_proj.weight",
+    "attention.q_norm.weight": "self_attn.q_norm.weight",
+    "attention.k_norm.weight": "self_attn.k_norm.weight",
+    "feed_forward.w1.weight": "mlp.gate_proj.weight",
+    "feed_forward.w2.weight": "mlp.down_proj.weight",
+    "feed_forward.w3.weight": "mlp.up_proj.weight",
+    "attention_norm.weight": "input_layernorm.weight",
+    "feed_forward_norm.weight": "post_attention_layernorm.weight",
+}
 
 
 def olmo_core_to_hf_name(name: str) -> str:
@@ -32,27 +51,12 @@ def olmo_core_to_hf_name(name: str) -> str:
     if name == "lm_head.w_out.weight":
         return "lm_head.weight"
 
-    layer_match = re.match(r"blocks\.(\d+)\.(.*)", name)
+    layer_match = _BLOCK_PATTERN.match(name)
     if layer_match:
         layer_idx = layer_match.group(1)
         rest = layer_match.group(2)
-
-        mappings = {
-            "attention.w_q.weight": "self_attn.q_proj.weight",
-            "attention.w_k.weight": "self_attn.k_proj.weight",
-            "attention.w_v.weight": "self_attn.v_proj.weight",
-            "attention.w_out.weight": "self_attn.o_proj.weight",
-            "attention.q_norm.weight": "self_attn.q_norm.weight",
-            "attention.k_norm.weight": "self_attn.k_norm.weight",
-            "feed_forward.w1.weight": "mlp.gate_proj.weight",
-            "feed_forward.w2.weight": "mlp.down_proj.weight",
-            "feed_forward.w3.weight": "mlp.up_proj.weight",
-            "attention_norm.weight": "input_layernorm.weight",
-            "feed_forward_norm.weight": "post_attention_layernorm.weight",
-        }
-
-        if rest in mappings:
-            return f"model.layers.{layer_idx}.{mappings[rest]}"
+        if rest in _OLMO_CORE_TO_HF_LAYER_MAPPINGS:
+            return f"model.layers.{layer_idx}.{_OLMO_CORE_TO_HF_LAYER_MAPPINGS[rest]}"
 
     return name
 
@@ -71,9 +75,12 @@ class VLLMWeightSyncCallback(Callback):
     vllm_engines: list[ray.actor.ActorHandle]
     model_update_group: dist.ProcessGroup | None = None
     actor_manager: ray.actor.ActorHandle | None = None
-    gather_whole_model: bool = True
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
+
+    @property
+    def train_module(self) -> TransformerTrainModule:
+        return cast(TransformerTrainModule, self.trainer.train_module)
 
     def post_step(self) -> None:
         if self.trainer.global_step % self.sync_interval != 0:
@@ -84,7 +91,7 @@ class VLLMWeightSyncCallback(Callback):
         if self.actor_manager is not None:
             ray.get(self.actor_manager.set_should_stop.remote(True))
 
-        model = self.trainer.train_module.model  # ty: ignore[unresolved-attribute]
+        model = self.train_module.model
 
         try:
             self._broadcast_weights(model)
@@ -94,67 +101,14 @@ class VLLMWeightSyncCallback(Callback):
 
     def _broadcast_weights(self, model: nn.Module) -> None:
         """Broadcast weights from training model to vLLM engines."""
-        refss = []
-        count = 0
-        num_params = len(list(model.named_parameters()))
-
-        is_distributed = dist.is_initialized()
-        is_rank0 = (not is_distributed) or (dist.get_rank() == 0)
-        is_fsdp = isinstance(model, FSDP)
-
-        def get_vllm_name(name: str) -> str:
-            return self.name_mapper(name) if self.name_mapper else name
-
-        if self.gather_whole_model and is_fsdp:
-            with FSDP.summon_full_params(model, writeback=False, rank0_only=True):
-                for name, param in model.named_parameters():
-                    count += 1
-                    vllm_name = get_vllm_name(name)
-                    if is_rank0:
-                        refs = [
-                            engine.update_weight.remote(
-                                vllm_name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
-
-                    if self.model_update_group is not None:
-                        dist.broadcast(param.data, 0, group=self.model_update_group)
-        elif is_fsdp:
-            for name, param in model.named_parameters():
-                count += 1
-                vllm_name = get_vllm_name(name)
-                with FSDP.summon_full_params(model, writeback=False, rank0_only=True):
-                    if is_rank0:
-                        refs = [
-                            engine.update_weight.remote(
-                                vllm_name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
-
-                    if self.model_update_group is not None:
-                        dist.broadcast(param.data, 0, group=self.model_update_group)
-        else:
-            for name, param in model.named_parameters():
-                count += 1
-                vllm_name = get_vllm_name(name)
-                if is_rank0:
-                    refs = [
-                        engine.update_weight.remote(
-                            vllm_name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
-                        )
-                        for engine in self.vllm_engines
-                    ]
-                    refss.extend(refs)
-
-                if self.model_update_group is not None:
-                    dist.broadcast(param.data, 0, group=self.model_update_group)
-
-        if is_rank0 and refss:
-            ray.get(refss)
+        refs = vllm_utils.broadcast_weights_to_vllm(
+            model=model,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            name_mapper=self.name_mapper,
+        )
+        if refs:
+            ray.get(refs)
 
 
 @dataclass
@@ -170,21 +124,41 @@ class RefPolicyUpdateCallback(Callback):
     ref_policy: nn.Module
     alpha: float = 0.6
     update_interval: int = 1
+    _fsdp2_submodules: list[FSDPModule] | None = field(default=None, init=False, repr=False)
+
+    @property
+    def train_module(self) -> TransformerTrainModule:
+        return cast(TransformerTrainModule, self.trainer.train_module)
+
+    def _get_fsdp2_submodules(self, model: nn.Module) -> list[FSDPModule]:
+        if self._fsdp2_submodules is None:
+            self._fsdp2_submodules = [m for _, m in vllm_utils._get_fsdp2_submodules(model)]
+        return self._fsdp2_submodules
 
     def post_step(self) -> None:
         if self.trainer.global_step % self.update_interval != 0:
             return
 
-        model = self.trainer.train_module.model  # ty: ignore[unresolved-attribute]
-        is_fsdp = isinstance(model, FSDP)
+        model = self.train_module.model
 
-        if is_fsdp:
-            with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
+        if isinstance(model, FSDP):
+            ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+        else:
+            ctx = contextlib.nullcontext()
+
+        fsdp2_submodules: list[FSDPModule] = []
+        if isinstance(model, FSDPModule):
+            fsdp2_submodules = self._get_fsdp2_submodules(model)
+            for m in fsdp2_submodules:
+                m.unshard()
+
+        try:
+            with ctx:
                 for ref_param, param in zip(self.ref_policy.parameters(), model.parameters(), strict=True):
                     ref_param.data.mul_(1.0 - self.alpha).add_(param.data, alpha=self.alpha)
-        else:
-            for ref_param, param in zip(self.ref_policy.parameters(), model.parameters(), strict=True):
-                ref_param.data.mul_(1.0 - self.alpha).add_(param.data, alpha=self.alpha)
+        finally:
+            for m in fsdp2_submodules:
+                m.reshard()
 
 
 @dataclass
@@ -193,23 +167,23 @@ class DataPreparationActorCheckpointCallback(Callback):
 
     data_prep_actor_name: str = "data_prep_singleton"
 
-    def pre_checkpoint(self) -> dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Save DataPreparationActor state before checkpointing."""
         try:
             data_prep_actor = ray.get_actor(self.data_prep_actor_name)
             return {"data_prep_state": ray.get(data_prep_actor.get_state.remote())}
-        except Exception as e:
+        except (ray.exceptions.RayError, ValueError) as e:
             logger.warning(f"Failed to get DataPreparationActor state: {e}")
             return {}
 
-    def post_checkpoint_load(self, state: dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore DataPreparationActor state after loading checkpoint."""
-        if "data_prep_state" not in state:
+        if "data_prep_state" not in state_dict:
             return
 
         try:
             data_prep_actor = ray.get_actor(self.data_prep_actor_name)
-            ray.get(data_prep_actor.restore_state.remote(state["data_prep_state"]))
+            ray.get(data_prep_actor.restore_state.remote(state_dict["data_prep_state"]))
             logger.info("Restored DataPreparationActor state from checkpoint")
-        except Exception as e:
+        except (ray.exceptions.RayError, ValueError) as e:
             logger.warning(f"Failed to restore DataPreparationActor state: {e}")
