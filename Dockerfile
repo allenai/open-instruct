@@ -71,7 +71,9 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')" \
-    && uv pip uninstall torchvision torchaudio
+    && uv pip uninstall torchvision torchaudio \
+    && sed -i 's/dtypes: tuple\[torch\.dtype\]/dtypes: tuple[torch.dtype, ...]/' \
+       .venv/lib/python3.12/site-packages/vllm/v1/kv_cache_interface.py
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
