@@ -15,7 +15,7 @@ LOCAL_EVAL_SPLITS="train"
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
+CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
@@ -55,8 +55,8 @@ uv run open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
-    --pack_length 18432 \
+    --response_length 8192 \
+    --pack_length 10240 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
