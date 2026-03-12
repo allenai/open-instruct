@@ -712,6 +712,7 @@ class LLMRayActor:
         self.llm_engine = None
         self.client = None
         self.server_port = None
+        self._inference_gate: asyncio.Event | None = None  # Created on the event loop thread
 
         async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
@@ -748,6 +749,8 @@ class LLMRayActor:
             try:
                 self.loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self.loop)
+                self._inference_gate = asyncio.Event()
+                self._inference_gate.set()  # Start open (inference allowed)
                 self.llm_engine = self.loop.run_until_complete(_init_engine_and_server())
             finally:
                 # Signal completion to the waiting main thread even if init failed.
@@ -840,6 +843,14 @@ class LLMRayActor:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
+        if self.inflight_updates and self._inference_gate is not None and self._inference_gate.is_set():
+            # Pause process_request coroutines so the EngineCore can drain its
+            # inference queue and process the upcoming collective_rpc for weight
+            # sync.  Without this, continuous inference from tool-use loops
+            # starves the EngineCore RPC channel and the NCCL broadcast deadlocks.
+            self._inference_gate.clear()
+            time.sleep(1.0)  # Give EngineCore time to finish current batch
+
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
@@ -856,7 +867,11 @@ class LLMRayActor:
     def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
         self._prepare_weight_update(name, dtype)
         name = self._remap_weight_name(name)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+        result = self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+        # Reopen the inference gate after the last parameter (empty_cache=True on last param).
+        if empty_cache and self._inference_gate is not None:
+            self._inference_gate.set()
+        return result
 
     def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
@@ -1069,6 +1084,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 break
 
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            # Wait if weight sync is in progress (gate is closed).
+            if actor._inference_gate is not None:
+                await actor._inference_gate.wait()
+
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
