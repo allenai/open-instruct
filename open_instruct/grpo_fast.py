@@ -43,6 +43,7 @@ with contextlib.suppress(Exception):
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
 import asyncio
@@ -90,11 +91,11 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
-from open_instruct.environments.base import BaseEnvConfig
+from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment
 from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig, Tool
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -446,7 +447,6 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
-            deepspeed_stage=self.args.deepspeed_stage,
             gather_whole_model=self.args.gather_whole_model,
         )
 
@@ -718,8 +718,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                    # Tell deepspeed whether this backward is the last in the accumulation group.
+                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
-                    if (local_step + 1) % accumulation_steps == 0:
+                    if is_accumulation_boundary:
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
@@ -892,7 +895,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
                 stop_strings=streaming_config.stop_strings,
-                gs_bucket_path=args.gs_bucket_path,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,
@@ -1216,6 +1218,26 @@ def create_tool_pools(
     return pools, tool_call_names
 
 
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> EnvConfig:
+    """Build canonical base env config from active pools.
+
+    Includes auto-discovered dataset targets so text env routing metadata
+    (e.g., is_text_env) is available even when --tools is empty.
+    """
+    entries: dict[str, EnvConfigEntry] = {}
+    registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
+
+    for pool_name in sorted(pools):
+        registry_name = registry_name_by_call_name.get(pool_name, pool_name)
+        config_cls = TOOL_REGISTRY.get(registry_name)
+        if config_cls is None:
+            continue
+        entries[pool_name] = EnvConfigEntry(
+            env_name=pool_name, is_text_env=issubclass(config_cls.tool_class, TextRLEnvironment)
+        )
+    return EnvConfig(max_steps=tools_config.max_steps, env_configs=entries)
+
+
 def create_model_and_optimizer(
     args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
@@ -1232,10 +1254,10 @@ def create_model_and_optimizer(
     eval_dataset,
     reward_config: RewardConfig,
     generation_config,
+    base_env_config: EnvConfig,
     data_prep_actor_state: dict | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
-    base_env_config: dict | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
@@ -1321,6 +1343,7 @@ def create_model_and_optimizer(
         tool_definitions=tool_definitions,
         tool_stop_sequences=tool_stop_sequences,
         max_steps=tools_config.max_steps if tools_config else 5,
+        per_turn_max_tokens=tools_config.per_turn_max_tokens if tools_config else None,
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
@@ -1401,6 +1424,7 @@ def weight_sync_thread(
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
+    inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
@@ -1434,13 +1458,16 @@ def weight_sync_thread(
                 enable=args.verbose,
             )
 
-            # Ensure all vLLM engine update RPCs have completed before unpausing actors.
-            # Without waiting here, should_stop may flip to False while updates are still queued.
-            engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-            if engine_update_refs:
-                ray_get_with_progress(
-                    engine_update_refs, desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs", enable=False
-                )
+            if not inflight_updates:
+                # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+                # Without waiting here, should_stop may flip to False while updates are still queued.
+                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+                if engine_update_refs:
+                    ray_get_with_progress(
+                        engine_update_refs,
+                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
+                        enable=False,
+                    )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1632,6 +1659,7 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
+    base_env_config: EnvConfig,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1655,6 +1683,7 @@ def maybe_evaluate(
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -1830,8 +1859,10 @@ def run_training(
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
     checkpoint_state=None,
-    base_env_config: dict | None = None,
+    base_env_config: EnvConfig | None = None,
 ):
+    if base_env_config is None:
+        base_env_config = EnvConfig()
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
@@ -1857,6 +1888,7 @@ def run_training(
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
+        streaming_config.inflight_updates,
     )
 
     """Run the main training loop with worker threads."""
@@ -2012,6 +2044,7 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
+            base_env_config,
             actor_manager,
         )
 
@@ -2048,8 +2081,17 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
         if ENV_CONFIG_KEY in ds.column_names:
             for row in ds:
                 env_cfg = row.get(ENV_CONFIG_KEY)
-                if env_cfg and env_cfg.get("env_name"):
-                    tool_names.add(env_cfg["env_name"])
+                env_cfgs = None
+                if isinstance(env_cfg, dict):
+                    if env_cfg.get("env_name"):
+                        tool_names.add(env_cfg["env_name"])
+                    env_cfgs = env_cfg.get("env_configs")
+                elif isinstance(env_cfg, list):
+                    env_cfgs = env_cfg
+                if isinstance(env_cfgs, list):
+                    for cfg in env_cfgs:
+                        if isinstance(cfg, dict) and cfg.get("env_name"):
+                            tool_names.add(cfg["env_name"])
 
     return tool_names
 
@@ -2258,17 +2300,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    base_env_config = None
-    if tools_config.enabled:
-        base_env_config = {"max_steps": tools_config.max_steps}
-        # TODO: Support multiple concurrent envs per rollout. Currently only one
-        # stateful environment is supported; the rollout loop acquires/resets a
-        # single env and maps its inner tool names to that actor.
-        for parsed in tools_config._parsed_tools:
-            config_cls = TOOL_REGISTRY.get(parsed.name)
-            if config_cls and not issubclass(config_cls.tool_class, Tool):
-                base_env_config["env_name"] = parsed.call_name
-                break
+    base_env_config = build_base_env_config(tools_config, pools)
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2286,10 +2318,10 @@ def main(
             eval_dataset,
             reward_config,
             generation_configs["train"],
+            base_env_config,
             data_prep_actor_state,
             tool_definitions,
             tools_config,
-            base_env_config,
             pools,
             tool_stop_sequences,
         )

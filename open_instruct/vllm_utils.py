@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
@@ -43,6 +43,7 @@ import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
@@ -53,13 +54,22 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
+from open_instruct.data_types import (
+    EnvConfig,
+    EnvConfigEntry,
+    GenerationResult,
+    PromptRequest,
+    RequestInfo,
+    TokenStatistics,
+    ToolCallStats,
+)
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
@@ -141,6 +151,7 @@ def process_tool_tokens(
     max_model_len: int,
     max_tokens: int,
     mask_tool_use: bool,
+    role: str = "tool",
 ) -> tuple[list[int], list[float], list[int], int]:
     """Format, tokenize, and truncate tool outputs.
 
@@ -153,11 +164,12 @@ def process_tool_tokens(
         max_model_len: Maximum model sequence length.
         max_tokens: Maximum response tokens.
         mask_tool_use: Whether to mask tool tokens in loss computation.
+        role: Chat role for formatting (e.g. "tool", "user" for text envs).
 
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
-    formatted_output = tool_parser.format_tool_outputs(tool_outputs)
+    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
     tokens, excess = truncate_tool_output_tokens(
@@ -558,6 +570,7 @@ class LLMRayActor:
         tool_definitions: list[dict] | None = None,
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
+        per_turn_max_tokens: int | None = None,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
@@ -575,7 +588,14 @@ class LLMRayActor:
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
         self._init_config(
-            max_steps, mask_tool_use, pools, inflight_updates, reward_config, train_dataset, eval_dataset
+            max_steps,
+            per_turn_max_tokens,
+            mask_tool_use,
+            pools,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -592,6 +612,7 @@ class LLMRayActor:
     def _init_config(
         self,
         max_steps: int,
+        per_turn_max_tokens: int | None,
         mask_tool_use: bool,
         pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
@@ -600,6 +621,7 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.max_steps = max_steps
+        self.per_turn_max_tokens = per_turn_max_tokens
         self.mask_tool_use = mask_tool_use
         self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
@@ -663,6 +685,10 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
+        # Force vLLM-native generation defaults at the engine level so
+        # model-provided HF generation_config (e.g., max_new_tokens=2048)
+        # cannot cap request max_tokens via OpenAI serving defaults.
+        kwargs["generation_config"] = "vllm"
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
@@ -856,6 +882,109 @@ class LLMRayActor:
         return int(max_concurrency)
 
 
+def _register_tool_dispatch(
+    pool_name: str,
+    target_actor: Any,
+    target_tools: list[dict[str, Any]] | None,
+    target_response_role: str,
+    existing_actor_map: dict[str, Any],
+) -> tuple[dict[str, Any], set[str], dict[str, str]]:
+    """Map individual tool names exposed by a pool actor for dispatch.
+
+    Returns (actor_map entries, tool names, response_role entries) to merge
+    into the caller's tables.  Raises on name clashes with existing actors.
+    """
+    actor_map: dict[str, Any] = {}
+    tool_names: set[str] = set()
+    response_roles: dict[str, str] = {}
+    if not target_tools:
+        return actor_map, tool_names, response_roles
+    for tool_def in target_tools:
+        name = tool_def["function"]["name"]
+        existing = existing_actor_map.get(name)
+        if existing is not None and existing != target_actor:
+            raise ValueError(
+                f"Target '{pool_name}' exposes tool name '{name}' that clashes with "
+                "another active target. Rename one side to avoid ambiguous dispatch."
+            )
+        actor_map[name] = target_actor
+        tool_names.add(name)
+        response_roles[name] = target_response_role
+    return actor_map, tool_names, response_roles
+
+
+@dataclasses.dataclass
+class PoolSetup:
+    """Result of acquiring and resetting all configured tool/env pools for a request."""
+
+    acquired: dict[str, tuple[Any, Any]]
+    actor_map: dict[str, Any]
+    allowed_tools: set[str]
+    tool_response_roles: dict[str, str]
+    active_env_names: list[str]
+    text_env_names: list[str]
+
+
+async def _acquire_and_reset_pools(
+    pools: dict[str, Any], configured_tools: set[str], env_config: EnvConfig, allowed_tools: set[str]
+) -> PoolSetup:
+    """Acquire an actor from each pool and reset it with per-env kwargs.
+
+    Populates the actor dispatch map (pool names + individual tool names)
+    and discovers text environments.
+    """
+    acquired: dict[str, tuple[Any, Any]] = {}
+    actor_map: dict[str, Any] = {}
+    tool_response_roles: dict[str, str] = {}
+    active_env_names: list[str] = []
+    text_env_names: list[str] = []
+
+    for pool_name in sorted(configured_tools):
+        pool = pools.get(pool_name)
+        if pool is None:
+            raise ValueError(f"No pool for target '{pool_name}'. Available: {list(pools.keys())}")
+
+        target_actor = await pool.acquire.remote()
+        acquired[pool_name] = (pool, target_actor)
+        actor_map[pool_name] = target_actor
+        active_env_names.append(pool_name)
+
+        entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
+        _, target_tools = await target_actor.reset.remote(**entry.kwargs)
+        target_response_role = await target_actor.get_response_role.remote()
+        tool_response_roles[pool_name] = target_response_role
+
+        new_actors, new_tools, new_roles = _register_tool_dispatch(
+            pool_name, target_actor, target_tools, target_response_role, actor_map
+        )
+        actor_map.update(new_actors)
+        allowed_tools.update(new_tools)
+        tool_response_roles.update(new_roles)
+
+        if entry.is_text_env:
+            text_env_names.append(pool_name)
+            allowed_tools.add(pool_name)
+
+    if len(text_env_names) > 1:
+        raise ValueError(f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}")
+
+    unresolved = allowed_tools - set(actor_map.keys())
+    if unresolved:
+        raise ValueError(
+            f"Some allowed tools have no active dispatch target: {sorted(unresolved)}. "
+            f"Active targets: {sorted(actor_map.keys())}"
+        )
+
+    return PoolSetup(
+        acquired=acquired,
+        actor_map=actor_map,
+        allowed_tools=allowed_tools,
+        tool_response_roles=tool_response_roles,
+        active_env_names=active_env_names,
+        text_env_names=text_env_names,
+    )
+
+
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool/environment support."""
     await _check_health(actor.server_port)
@@ -870,42 +999,37 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
     active_tools = request_metadata["active_tools"]
-    env_config = request_metadata.get("env_config")
+    env_config: EnvConfig = request_metadata.get("env_config", EnvConfig())
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
 
     configured_tools = set(actor.pools.keys())
-    allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
+    allowed_tools = configured_tools & set(active_tools) if active_tools is not None else set(configured_tools)
 
-    max_steps = env_config.get("max_steps", actor.max_steps) if env_config else actor.max_steps
-
-    # Acquired actors: pool_key -> actor (released in finally block)
-    acquired: dict[str, Any] = {}
-    actor_map: dict[str, Any] = {}
+    max_steps = env_config.max_steps
 
     output = None
+    pool_setup = PoolSetup(
+        acquired={},
+        actor_map={},
+        allowed_tools=allowed_tools,
+        tool_response_roles={},
+        active_env_names=[],
+        text_env_names=[],
+    )
     try:
-        # If env_config is present, acquire from the env's pool and call reset
-        if env_config is not None:
-            env_name = env_config["env_name"]
-            pool = actor.pools.get(env_name)
-            if pool is None:
-                raise ValueError(f"No pool for env '{env_name}'. Available: {list(actor.pools.keys())}")
-            env_actor = await pool.acquire.remote()
-            acquired[env_name] = (pool, env_actor)
-            task_id = env_config.get("task_id")
-            _, env_tools = await env_actor.reset.remote(task_id=task_id)
-            if env_tools:
-                env_tool_names = {t["function"]["name"] for t in env_tools}
-                clashes = env_tool_names & set(actor.pools.keys())
-                if clashes:
-                    raise ValueError(
-                        f"Env '{env_name}' tool names clash with tool pool names: {sorted(clashes)}. "
-                        f"Rename one side to avoid ambiguous dispatch."
-                    )
-                for name in env_tool_names:
-                    actor_map[name] = env_actor
-                    allowed_tools.add(name)
+        unknown_targets = set(env_config.env_configs) - configured_tools
+        if unknown_targets:
+            raise ValueError(
+                f"env_config references envs/tools that are not configured: {sorted(unknown_targets)}. "
+                f"Available envs/tools: {sorted(configured_tools)}"
+            )
+
+        pool_setup = await _acquire_and_reset_pools(actor.pools, configured_tools, env_config, allowed_tools)
+        actor_map = pool_setup.actor_map
+        allowed_tools = pool_setup.allowed_tools
+        tool_response_roles = pool_setup.tool_response_roles
+        text_env_names = pool_setup.text_env_names
 
         while rollout.step_count < max_steps:
             if rollout.done:
@@ -913,7 +1037,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             remaining_budget = sampling_params.max_tokens - len(response_masks)
             remaining_room = max_model_len - len(current_prompt)
-            current_max_tokens = max(1, min(remaining_budget, remaining_room))
+            per_turn_budget = actor.per_turn_max_tokens if actor.per_turn_max_tokens is not None else remaining_budget
+            current_max_tokens = max(1, min(remaining_budget, remaining_room, per_turn_budget))
             if remaining_budget <= 0 or remaining_room <= 0:
                 break
 
@@ -942,26 +1067,25 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             response_masks.extend([1] * len(model_tokens))
 
             tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
+
+            # Text envs: inject a shadow tool call so dispatch handles it uniformly
+            for text_env_name in text_env_names:
+                tool_calls.append(EnvCall(id="", name=text_env_name, args={"text": output.text}))
+
             if not tool_calls:
                 break
 
-            observations: list[str] = []
+            observations: list[tuple[str, str]] = []
             for tc in tool_calls:
                 if rollout.step_count >= max_steps:
                     break
 
-                # Lazily acquire from pool on first use of this tool name
-                if tc.name not in actor_map:
-                    pool = actor.pools.get(tc.name)
-                    if pool is None:
-                        raise ValueError(
-                            f"Model called tool '{tc.name}' but no pool exists for it. "
-                            f"Available pools: {list(actor.pools.keys())}"
-                        )
-                    acq = await pool.acquire.remote()
-                    acquired[tc.name] = (pool, acq)
-                    actor_map[tc.name] = acq
-                target = actor_map[tc.name]
+                target = actor_map.get(tc.name)
+                if target is None:
+                    raise ValueError(
+                        f"Model called tool '{tc.name}' but no active dispatch target exists. "
+                        f"Available targets: {sorted(actor_map.keys())}"
+                    )
 
                 rollout.step_count += 1
 
@@ -969,7 +1093,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     step_result: StepResult = await target.step.remote(
                         EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
                     )
-                    observations.append(step_result.result)
+                    observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
                     rollout.tool_output += step_result.result
                     rollout.rewards.append(step_result.reward)
                     if step_result.done:
@@ -988,7 +1112,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 except Exception as e:
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
-                    observations.append(error_msg)
+                    observations.append((error_msg, "tool"))
                     rollout.tool_error += error_msg
                     rollout.rewards.append(0.0)
                     rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
@@ -997,26 +1121,41 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     break
 
             if observations:
-                tokens, logprobs, masks, excess = process_tool_tokens(
-                    observations,
-                    actor.tool_parser,
-                    actor.llm_engine.tokenizer,
-                    len(current_prompt),
-                    len(response_masks),
-                    max_model_len,
-                    sampling_params.max_tokens,
-                    actor.mask_tool_use,
-                )
-                response_tokens.extend(tokens)
-                response_logprobs.extend(logprobs)
-                response_masks.extend(masks)
-                current_prompt.extend(tokens)
-                if excess > 0:
+                exceeded_context_budget = False
+                for observation, response_role in observations:
+                    tokens, logprobs, masks, excess = process_tool_tokens(
+                        [observation],
+                        actor.tool_parser,
+                        actor.llm_engine.tokenizer,
+                        len(current_prompt),
+                        len(response_masks),
+                        max_model_len,
+                        sampling_params.max_tokens,
+                        actor.mask_tool_use,
+                        role=response_role,
+                    )
+                    response_tokens.extend(tokens)
+                    response_logprobs.extend(logprobs)
+                    response_masks.extend(masks)
+                    current_prompt.extend(tokens)
+                    if excess > 0:
+                        exceeded_context_budget = True
+                        break
+                if exceeded_context_budget:
                     break
     finally:
-        # TODO: In future, health-check actors and gracefully degrade (skip dead actors)
-        # instead of crashing. For now, let RayActorError propagate if an actor died.
-        for pool, acq_actor in acquired.values():
+        env_metrics: dict[str, dict[str, float]] = {}
+        for env_name in pool_setup.active_env_names:
+            if env_name in pool_setup.acquired:
+                _, env_act = pool_setup.acquired[env_name]
+                env_metrics[env_name] = await env_act.get_metrics.remote()
+        if len(env_metrics) == 1:
+            env_name, metrics = next(iter(env_metrics.items()))
+            rollout.info["env_name"] = env_name
+            rollout.info.update(metrics)
+        elif env_metrics:
+            rollout.info["env_metrics"] = env_metrics
+        for pool, acq_actor in pool_setup.acquired.values():
             pool.release.remote(acq_actor)
 
     if len(response_tokens) == 0:
@@ -1088,6 +1227,7 @@ def create_vllm_engines(
     tool_definitions: list[dict] | None = None,
     tool_stop_sequences: list[str] | None = None,
     max_steps: int = 5,
+    per_turn_max_tokens: int | None = None,
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
@@ -1176,6 +1316,7 @@ def create_vllm_engines(
                 tool_definitions=tool_definitions,
                 tool_stop_sequences=tool_stop_sequences,
                 max_steps=max_steps,
+                per_turn_max_tokens=per_turn_max_tokens,
                 mask_tool_use=mask_tool_use,
                 pools=pools,
                 inflight_updates=inflight_updates,
@@ -1195,13 +1336,12 @@ def create_vllm_engines(
 def _send_to_vllm(
     name: str,
     param: torch.nn.Parameter,
+    shape: torch.Size,
     is_last: bool,
-    deepspeed_stage: int,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
 ) -> list[ray.ObjectRef]:
     """Send a parameter to vLLM engines via broadcast."""
-    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
     refs = [
         engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
         for engine in vllm_engines
@@ -1210,24 +1350,79 @@ def _send_to_vllm(
     return refs
 
 
+def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]]:
+    """Get all FSDP2-wrapped submodules (excluding the root if it's FSDP2)."""
+    fsdp_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, FSDPModule) and module is not model:
+            fsdp_modules.append((name, module))
+    return fsdp_modules
+
+
+def _broadcast_fsdp2_block_params(
+    block_name: str,
+    block: FSDPModule,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+    is_last_block: bool,
+    is_rank_0: bool,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters from one FSDP2 block to vLLM engines.
+
+    All ranks must call this (unshard/reshard are collective ops).
+    Only rank 0 actually sends to vLLM.
+    """
+    block.unshard()
+    try:
+        refs: list[ray.ObjectRef] = []
+        if is_rank_0:
+            params = list(block.named_parameters())
+            num_params = len(params)
+            for i, (name, param) in enumerate(params):
+                full_name = f"{block_name}.{name}" if block_name else name
+                mapped_name = name_mapper(full_name) if name_mapper else full_name
+                is_last = is_last_block and (i == num_params - 1)
+                refs.extend(_send_to_vllm(mapped_name, param, param.shape, is_last, vllm_engines, model_update_group))
+        return refs
+    finally:
+        block.reshard()
+
+
+def _broadcast_params_to_vllm(
+    params: list[tuple[str, torch.nn.Parameter]],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
+    refs: list[ray.ObjectRef] = []
+    num_params = len(params)
+    for i, (name, param) in enumerate(params):
+        mapped_name = name_mapper(name) if name_mapper else name
+        shape = getattr(param, "ds_shape", param.shape)
+        refs.extend(_send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group))
+    return refs
+
+
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup | None,
-    deepspeed_stage: int,
+    name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
-    """Broadcast DeepSpeed model weights to vLLM engines.
+    """Broadcast model weights to vLLM engines.
 
-    Must be called on ALL ranks when using DeepSpeed stage 3, since
-    GatheredParameters is a collective operation. Only rank 0 actually
-    sends weights to vLLM.
+    Supports both DeepSpeed and FSDP sharded models. Must be called on ALL ranks
+    when using DeepSpeed stage 3 or FSDP, since gathering is a collective operation.
+    Only rank 0 actually sends weights to vLLM.
 
     Args:
-        model: The unwrapped model (model.module from DeepSpeed engine)
+        model: The unwrapped model (model.module from DeepSpeed/FSDP engine)
         vllm_engines: List of vLLM engine actor handles
         model_update_group: Process group for distributed broadcast (only needed on rank 0)
-        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters)
+        name_mapper: Optional function to map parameter names (e.g., OLMo-core to HF format)
         gather_whole_model: If True, gather all params at once (more memory, faster).
             If False, gather each param individually (less memory, slower).
 
@@ -1235,27 +1430,44 @@ def broadcast_weights_to_vllm(
         List of Ray ObjectRefs for the weight update calls (empty on non-rank-0)
     """
     is_rank_0 = torch.distributed.get_rank() == 0
+
+    if isinstance(model, FSDP) and not gather_whole_model:
+        raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+
+    if isinstance(model, FSDPModule):
+        fsdp_submodules = _get_fsdp2_submodules(model)
+        if not fsdp_submodules:
+            raise ValueError("FSDP2 model has no FSDP submodules.")
+        all_refs: list[ray.ObjectRef] = []
+        num_blocks = len(fsdp_submodules)
+        for i, (block_name, block) in enumerate(fsdp_submodules):
+            refs = _broadcast_fsdp2_block_params(
+                block_name, block, vllm_engines, model_update_group, name_mapper, i == num_blocks - 1, is_rank_0
+            )
+            all_refs.extend(refs)
+        return all_refs
+
     params = list(model.named_parameters())
-    num_params = len(params)
-    all_refs: list[ray.ObjectRef] = []
+    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
     if gather_whole_model:
-        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
+        if isinstance(model, FSDP):
+            ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+        else:
+            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+        with ctx:
             if is_rank_0:
-                for i, (name, param) in enumerate(params):
-                    all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
-                    )
+                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+            return []
     else:
+        all_refs: list[ray.ObjectRef] = []
+        num_params = len(params)
         for i, (name, param) in enumerate(params):
-            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
                 if is_rank_0:
+                    mapped_name = name_mapper(name) if name_mapper else name
+                    shape = getattr(param, "ds_shape", param.shape)
                     all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
+                        _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
                     )
-
-    return all_refs
+        return all_refs
