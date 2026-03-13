@@ -296,29 +296,28 @@ def compute_grpo_loss(
     config: ExperimentConfig,
     tis_weights: torch.Tensor | None = None,
     tv_divergence: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        pg_loss = torch.max(pg_losses, pg_losses2)
+        clip_mask = pg_losses2 > pg_losses
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
-        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-        pg_losses2 = pg_losses
+        pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
+        clip_mask = torch.zeros_like(pg_loss, dtype=torch.bool)
     elif config.loss_fn == GRPOLossType.tvpo:
         if tv_divergence is None:
             raise ValueError("TVPO loss requires `tv_divergence`.")
         clipped_ratio = torch.where(tv_divergence > config.clip_higher, torch.ones_like(ratio), ratio)
-        pg_losses = -advantages * clipped_ratio
-        pg_losses2 = pg_losses
+        pg_loss = -advantages * clipped_ratio
+        clip_mask = tv_divergence > config.clip_higher
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
     if tis_weights is not None:
-        pg_losses = pg_losses * tis_weights
-        pg_losses2 = pg_losses2 * tis_weights
-
-    pg_loss_max = torch.max(pg_losses, pg_losses2)
+        pg_loss = pg_loss * tis_weights
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
@@ -328,23 +327,9 @@ def compute_grpo_loss(
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
     else:
-        kl = torch.zeros_like(pg_loss_max)
+        kl = torch.zeros_like(pg_loss)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
-
-
-def compute_grpo_clip_mask(
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
-    config: ExperimentConfig,
-    tv_divergence: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Return the token-level mask used for clip-fraction accounting."""
-    if config.loss_fn == GRPOLossType.tvpo:
-        if tv_divergence is None:
-            raise ValueError("TVPO clip fraction requires `tv_divergence`.")
-        return tv_divergence > config.clip_higher
-    return pg_losses2 > pg_losses
+    return pg_loss, clip_mask, kl
 
 
 def forward_for_logprobs(

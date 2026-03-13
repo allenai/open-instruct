@@ -289,7 +289,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     vllm_probs = torch.exp(torch.where(response_mask, vllm_logprobs, torch.zeros_like(vllm_logprobs)))
                     tv_divergence = 0.5 * torch.abs(old_probs - vllm_probs)
 
-                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                pg_loss, clip_mask, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
@@ -308,12 +308,6 @@ class GRPOTrainModule(TransformerTrainModule):
                 with torch.no_grad():
                     loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
                     loss_stats_B["kl"][sample_idx] = masked_mean(kl, response_mask)
-                    clip_mask = grpo_utils.compute_grpo_clip_mask(
-                        pg_losses=pg_losses,
-                        pg_losses2=pg_losses2,
-                        config=self.grpo_config,
-                        tv_divergence=tv_divergence,
-                    )
                     loss_stats_B["clip_frac"][sample_idx] = masked_mean(clip_mask.float(), response_mask)
                     if tv_divergence is not None:
                         loss_stats_B["tv_divergence_avg"][sample_idx] = masked_mean(tv_divergence, response_mask)

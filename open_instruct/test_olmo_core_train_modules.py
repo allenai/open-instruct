@@ -184,7 +184,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.randn(batch_size, seq_len)
         tv_divergence = torch.rand(batch_size, seq_len) if loss_type == grpo_utils.GRPOLossType.tvpo else None
 
-        pg_losses, pg_losses2, pg_loss_max, kl = grpo_utils.compute_grpo_loss(
+        pg_loss_max, clip_mask, kl = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
@@ -193,9 +193,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
             tv_divergence=tv_divergence,
         )
 
-        self.assertEqual(pg_losses.shape, (batch_size, seq_len))
-        self.assertEqual(pg_losses2.shape, (batch_size, seq_len))
         self.assertEqual(pg_loss_max.shape, (batch_size, seq_len))
+        self.assertEqual(clip_mask.shape, (batch_size, seq_len))
         self.assertEqual(kl.shape, (batch_size, seq_len))
 
     def test_dapo_clipping(self):
@@ -204,12 +203,15 @@ class TestComputeGRPOLoss(unittest.TestCase):
         new_logprobs = torch.randn(1, 3)
         advantages = torch.ones(1, 3)
 
-        pg_losses, pg_losses2, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
+        pg_loss_max, clip_mask, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
         )
 
         expected_clamped = torch.clamp(ratio, 0.8, 1.2)
-        torch.testing.assert_close(pg_losses2, -advantages * expected_clamped)
+        expected_pg_losses = -advantages * ratio
+        expected_pg_losses2 = -advantages * expected_clamped
+        torch.testing.assert_close(pg_loss_max, torch.max(expected_pg_losses, expected_pg_losses2))
+        torch.testing.assert_close(clip_mask, expected_pg_losses2 > expected_pg_losses)
 
     def test_cispo_uses_detached_ratio(self):
         config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.cispo, clip_higher=0.2)
@@ -217,13 +219,14 @@ class TestComputeGRPOLoss(unittest.TestCase):
         new_logprobs = torch.randn(1, 3, requires_grad=True)
         advantages = torch.ones(1, 3)
 
-        pg_losses, pg_losses2, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
+        pg_loss_max, clip_mask, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
         )
 
         pg_loss_max.sum().backward()
         self.assertIsNone(ratio.grad)
         self.assertIsNotNone(new_logprobs.grad)
+        torch.testing.assert_close(clip_mask, torch.zeros_like(clip_mask))
 
     def test_with_ref_logprobs(self):
         config = _make_grpo_config(beta=0.05, kl_estimator=2)
@@ -233,7 +236,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.randn(batch_size, seq_len)
         ref_logprobs = torch.randn(batch_size, seq_len)
 
-        _, _, _, kl = grpo_utils.compute_grpo_loss(
+        _, _, kl = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=ref_logprobs, config=config
         )
 
@@ -245,7 +248,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         ratio = torch.exp(torch.randn(2, 4))
         advantages = torch.randn(2, 4)
 
-        _, _, _, kl = grpo_utils.compute_grpo_loss(
+        _, _, kl = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
         )
 
@@ -258,7 +261,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.randn(2, 4)
         tis_weights = torch.full((2, 4), 2.0)
 
-        pg_no_tis, pg2_no_tis, _, _ = grpo_utils.compute_grpo_loss(
+        pg_no_tis, clip_no_tis, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
@@ -267,7 +270,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             tis_weights=None,
         )
 
-        pg_tis, pg2_tis, _, _ = grpo_utils.compute_grpo_loss(
+        pg_tis, clip_tis, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
@@ -277,7 +280,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         )
 
         torch.testing.assert_close(pg_tis, pg_no_tis * 2.0)
-        torch.testing.assert_close(pg2_tis, pg2_no_tis * 2.0)
+        torch.testing.assert_close(clip_tis, clip_no_tis)
 
     def test_tvpo_uses_clip_higher_as_tv_threshold(self):
         config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo, clip_higher=0.1)
@@ -286,7 +289,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.ones(1, 3)
         tv_divergence = torch.tensor([[0.05, 0.2, 0.1]])
 
-        pg_losses, pg_losses2, _, _ = grpo_utils.compute_grpo_loss(
+        pg_loss, clip_mask, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
@@ -296,8 +299,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
         )
 
         expected_ratio = torch.tensor([[1.5, 1.0, 1.5]])
-        torch.testing.assert_close(pg_losses, -advantages * expected_ratio)
-        torch.testing.assert_close(pg_losses2, pg_losses)
+        torch.testing.assert_close(pg_loss, -advantages * expected_ratio)
+        torch.testing.assert_close(clip_mask, torch.tensor([[False, True, False]]))
 
     def test_tvpo_requires_tv_divergence(self):
         config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo)
@@ -309,17 +312,6 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 ref_logprobs=None,
                 config=config,
             )
-
-    def test_tvpo_clip_mask_tracks_tv_threshold(self):
-        config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo, clip_higher=0.1)
-        clip_mask = grpo_utils.compute_grpo_clip_mask(
-            pg_losses=torch.zeros(1, 3),
-            pg_losses2=torch.zeros(1, 3),
-            config=config,
-            tv_divergence=torch.tensor([[0.05, 0.2, 0.1]]),
-        )
-
-        torch.testing.assert_close(clip_mask, torch.tensor([[False, True, False]]))
 
     def test_invalid_loss_fn(self):
         config = _make_grpo_config(loss_fn="invalid")
