@@ -32,6 +32,7 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
+    "flash-attn-3>=3.0.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "flashinfer-python",
     # "flashinfer-cubin",
@@ -49,15 +50,20 @@ py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
+flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+flash-attn-3 = [
+  { index = "flash-attn-3-wheels", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
 
 [[tool.uv.index]]
@@ -73,6 +79,12 @@ explicit = true
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "flash-attn-3-wheels"
+url = "https://windreamer.github.io/flash-attention3-wheels/cu129_torch290"
+format = "flat"
 explicit = true
 
 [project.optional-dependencies]

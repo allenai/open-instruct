@@ -206,6 +206,7 @@ einops==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     # via
     #   deepspeed
     #   flash-attn
+    #   flash-attn-3
     #   flashinfer-python
     #   vllm
 email-validator==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -247,6 +248,8 @@ filelock==3.20.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   virtualenv
     #   vllm
 flash-attn==2.8.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via open-instruct
+flash-attn-3==3.0.0+20260216.cu129torch290cxx11abitrue.fec3a6 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
 flashinfer-python==0.5.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
@@ -502,6 +505,7 @@ networkx==3.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
 ninja==1.13.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   deepspeed
+    #   flash-attn-3
     #   flashinfer-python
     #   vllm
 nltk==3.9.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -685,6 +689,7 @@ packaging==25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     #   cached-path
     #   datasets
     #   deepspeed
+    #   flash-attn-3
     #   flashinfer-python
     #   huggingface-hub
     #   lm-format-enforcer
@@ -1082,6 +1087,7 @@ torch==2.9.1+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   compressed-tensors
     #   deepspeed
     #   flash-attn
+    #   flash-attn-3
     #   flashinfer-python
     #   liger-kernel
     #   open-instruct
