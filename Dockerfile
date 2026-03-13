@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     sudo \
     nginx \
+    swi-prolog \
     && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
