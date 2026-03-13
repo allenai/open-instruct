@@ -4,34 +4,34 @@
 import torch
 
 
-def pack_to_bytes(x: torch.LongTensor, elem_bits: int) -> torch.ByteTensor:
+def pack_to_bytes(x: torch.Tensor, elem_bits: int) -> torch.Tensor:
     """Pack integer tensor values into byte tensors."""
-    assert 1 <= elem_bits <= 64, "elem_bits must be between 1 and 64"
+    if not 1 <= elem_bits <= 64:
+        raise ValueError("elem_bits must be between 1 and 64")
 
-    mask = (1 << elem_bits) - 1
-    x = x & mask
+    # keep only low elem_bits bits from each element before bit-packing
+    x = x & ((1 << elem_bits) - 1)
 
-    bit_positions = torch.arange(elem_bits - 1, -1, -1, device=x.device)
-    bits = ((x.unsqueeze(-1) >> bit_positions) & 1).to(torch.uint8)
+    # expand each element to big-endian bit values
+    bits = ((x.unsqueeze(-1) >> torch.arange(elem_bits - 1, -1, -1, device=x.device)) & 1).to(torch.uint8)
 
-    original_shape = x.shape
-    bits = bits.view(*original_shape[:-1], -1)
+    # flatten per-element bits into trailing bitstream
+    bits = bits.view(*x.shape[:-1], -1)
 
-    total_bits = bits.size(-1)
-    pad_length = (8 - (total_bits % 8)) % 8
-    if pad_length > 0:
-        bits = torch.nn.functional.pad(bits, (0, pad_length))
-    bits = bits.contiguous()
+    bits = torch.nn.functional.pad(bits, (0, (8 - (bits.size(-1) % 8)) % 8)).contiguous()
 
-    bits = bits.view(*original_shape[:-1], -1, 8)
+    # regroup trailing bitstream into bytes
+    bits = bits.view(*x.shape[:-1], -1, 8)
     power = torch.tensor([128, 64, 32, 16, 8, 4, 2, 1], dtype=torch.uint8, device=x.device)
     return (bits * power).sum(dim=-1).to(torch.uint8)
 
 
-def unpack_from_bytes(bytes_tensor: torch.ByteTensor, elem_bits: int, original_num_elements: int) -> torch.LongTensor:
+def unpack_from_bytes(bytes_tensor: torch.Tensor, elem_bits: int, original_num_elements: int) -> torch.Tensor:
     """Unpack byte tensors into integer tensor values."""
-    assert 1 <= elem_bits <= 64, "elem_bits must be between 1 and 64"
-    assert original_num_elements >= 0, "original_num_elements must be non-negative"
+    if not 1 <= elem_bits <= 64:
+        raise ValueError("elem_bits must be between 1 and 64")
+    if original_num_elements < 0:
+        raise ValueError("original_num_elements must be non-negative")
 
     total_bits_needed = original_num_elements * elem_bits
     original_shape = bytes_tensor.shape
@@ -46,8 +46,7 @@ def unpack_from_bytes(bytes_tensor: torch.ByteTensor, elem_bits: int, original_n
     bits_flat = bits.view(*original_shape[:-1], -1)
     bits_needed = bits_flat[..., :total_bits_needed]
 
-    new_shape = list(original_shape[:-1]) + [original_num_elements, elem_bits]
-    bits_needed = bits_needed.contiguous().view(*new_shape)
+    bits_needed = bits_needed.contiguous().view(*original_shape[:-1], original_num_elements, elem_bits)
 
     powers = 2 ** torch.arange(elem_bits - 1, -1, -1, device=bits_needed.device)
     return (bits_needed * powers).sum(dim=-1).long()

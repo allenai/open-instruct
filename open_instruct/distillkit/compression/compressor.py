@@ -16,7 +16,7 @@ class LogprobCompressor:
         self.config = config
         self.vocab_index_bits = int(torch.log2(torch.tensor(self.config.d, dtype=torch.float32)).ceil().item())
 
-    def compress_from_sparse(self, indices: torch.LongTensor, logprobs: torch.Tensor) -> dict[str, torch.Tensor]:
+    def compress_from_sparse(self, indices: torch.Tensor, logprobs: torch.Tensor) -> dict[str, torch.Tensor]:
         _, sorted_indices = torch.sort(logprobs, descending=True, dim=-1)
         sorted_values = logprobs.gather(-1, sorted_indices)
         sorted_indices = indices.gather(-1, sorted_indices)
@@ -25,7 +25,7 @@ class LogprobCompressor:
         index_bytes = pack_to_bytes(sorted_indices, self.vocab_index_bits)
         return {"compressed_logprobs": logprob_bytes, "bytepacked_indices": index_bytes}
 
-    def decompress_to_sparse(self, row: dict[str, torch.Tensor]) -> tuple[torch.LongTensor, torch.Tensor]:
+    def decompress_to_sparse(self, row: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         logprobs = decompress_monotonic_logprobs(row["compressed_logprobs"].to(torch.uint8), self.config)
         indices = unpack_from_bytes(
             row["bytepacked_indices"].to(torch.uint8), self.vocab_index_bits, original_num_elements=logprobs.shape[-1]

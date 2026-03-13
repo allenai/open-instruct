@@ -7,7 +7,9 @@ from open_instruct.distillkit.compression.config import (
     DistributionQuantizationConfig,
     QuantizationBin,
     SpecialTerm,
-    TermDtype,
+    parse_torch_dtype,
+    torch_dtype_bit_width,
+    torch_dtype_to_name,
 )
 
 __all__ = [
@@ -17,5 +19,7 @@ __all__ = [
     "DistributionQuantizationConfig",
     "QuantizationBin",
     "SpecialTerm",
-    "TermDtype",
+    "parse_torch_dtype",
+    "torch_dtype_to_name",
+    "torch_dtype_bit_width",
 ]
