@@ -319,6 +319,9 @@ def _forward_packed_sequences_separately(
             with torch.no_grad():
                 full_entropy[0, seq_start : seq_end - 1] = model_utils.entropy_from_logits(logits)[0]
 
+        del output, logits, labels, seq_logprobs
+        torch.cuda.empty_cache()
+
     return full_logprobs, full_entropy
 
 
