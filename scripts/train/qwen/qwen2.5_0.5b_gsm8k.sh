@@ -1,29 +1,24 @@
 #!/bin/bash
 
-EXP_NAME="qwen25_05b_it_gsm8k"
-MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
-DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 
-LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
-LOCAL_EVAL_SPLITS="test"
+DATASETS="${DATASETS:-ai2-adapt-dev/rlvr_gsm8k_zs 1.0}"
+DATASET_SPLITS="${DATASET_SPLITS:-train}"
 
-# EVALS="aime:2024::justrl,aime:2025::justrl"
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct 1.0}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
-# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/saturn
 
-# Check if the first argument starts with the value of $BEAKER_NAME
-# if [[ "$1" == "$BEAKER_USER"* ]]; then
-#     BEAKER_IMAGE="$1"
-#     shift
-# fi
+CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
+PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ${cluster} \
+    --cluster ${CLUSTER} \
     --workspace ai2/oe-adapt-code \
-    --priority high \
+    --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
@@ -48,7 +43,7 @@ uv run mason.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits train \
+    --dataset_mixer_list_splits $DATASET_SPLITS \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 512 \
