@@ -18,7 +18,6 @@ LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-train}"
 
 CLUSTER="${CLUSTER:-ai2/saturn ai2/jupiter ai2/neptune}"
 PRIORITY="${PRIORITY:-high}"
-VLLM_NUM_ENGINES="${VLLM_NUM_ENGINES:-6}"
 JUDGE_SERVER_MAX_MODEL_LEN="${JUDGE_SERVER_MAX_MODEL_LEN:-32768}"
 JUDGE_SERVER_PORT="${JUDGE_SERVER_PORT:-8001}"
 JUDGE_EXPERIMENT_ID="${JUDGE_EXPERIMENT_ID:-}"
@@ -102,8 +101,8 @@ uv run open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 128000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines "${VLLM_NUM_ENGINES}" \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
