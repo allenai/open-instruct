@@ -56,6 +56,8 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
+EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+
 
 def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     beaker_config = None
@@ -210,7 +212,12 @@ def main(
     pprint([args, model_config])
 
     ray.init(
-        address="auto", dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)}
+        address="auto",
+        dashboard_host="0.0.0.0",
+        runtime_env={
+            "excludes": [".git/"],
+            "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
+        },
     )
 
     tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
@@ -222,7 +229,7 @@ def main(
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
     train_dataset, eval_dataset = grpo_fast.setup_datasets(
-        args,  # type: ignore[arg-type]
+        args,
         tc,
         tokenizer,
         streaming_config,
@@ -300,27 +307,12 @@ def main(
         pg=pg,
         num_gpus_per_node=args.num_learners_per_node,
         single_gpu_mode=args.single_gpu_mode,
-        model_name_or_path=model_config.model_name_or_path,
-        grpo_config=args,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        max_grad_norm=args.max_grad_norm,
-        lr_scheduler_type=args.lr_scheduler_type,
-        warm_up_steps=args.warm_up_steps,
-        warmup_ratio=args.warmup_ratio,
-        num_training_steps=args.num_training_steps,
-        num_epochs=args.num_epochs,
-        num_mini_batches=args.num_mini_batches,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
-        load_ref_policy=args.load_ref_policy,
-        beta=args.beta,
-        seed=args.seed,
-        output_dir=args.output_dir,
+        args=args,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
         data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
+        model_name_or_path=model_config.model_name_or_path,
     )
     logger.info("======== Policy group created =========")
 
