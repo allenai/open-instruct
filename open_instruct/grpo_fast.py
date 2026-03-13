@@ -2051,6 +2051,7 @@ def maybe_evaluate(
         eval_metrics.update(dataset_sequence_length_metrics)
         if model_step_mean is not None:
             eval_metrics["eval/model_step_mean"] = float(model_step_mean)
+            eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
         if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
             prompt_index_to_solve_rates: dict[int, list[float]] = {}
             for prompt_index, prompt_solve_rate in zip(
