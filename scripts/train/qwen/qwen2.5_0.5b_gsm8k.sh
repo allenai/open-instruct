@@ -1,5 +1,6 @@
 #!/bin/bash
 
+EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 
@@ -13,6 +14,7 @@ BEAKER_IMAGE="michaeln/open_instruct"
 
 CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
+NUM_GPUS-"${NUM_GPUS:-4}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -25,13 +27,16 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 1 \
+    --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
     --beta 0.0 \
+    --eval_pass_at_k 4 \
+    --eval_top_p 0.95 \
+    --vllm_top_p 1.0 \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
@@ -47,10 +52,10 @@ uv run mason.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 512 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --response_length 4096 \
+    --pack_length 4608 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name qwen_instruct_gsm8k \
+    --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \
@@ -62,19 +67,11 @@ uv run mason.py \
     --save_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
-    --single_gpu_mode \
-    --vllm_enforce_eager \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
-    --num_learners_per_node 1 \
-    --vllm_tensor_parallel_size 1 \
-    --num_learners_per_node 1 \
-    --vllm_tensor_parallel_size 1 \
+    --num_learners_per_node 2 \
+    --vllm_tensor_parallel_size 2 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
-    --eval_on_step_0 True \
-    --eval_pass_at_k 32 \
     --with_tracking \
     --push_to_hub False $@
 
