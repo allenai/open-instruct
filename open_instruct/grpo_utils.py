@@ -270,6 +270,58 @@ def compute_grpo_loss(
     return pg_losses, pg_losses2, pg_loss_max, kl
 
 
+def _forward_packed_sequences_separately(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor,
+    pad_token_id: int,
+    temperature: float,
+    return_entropy: bool,
+) -> tuple[torch.Tensor, torch.Tensor | None] | None:
+    """Process each packed sequence independently to avoid recurrent state leak.
+
+    Returns None if there is only one sequence (no packing leak possible).
+    """
+    seq_ids = attention_mask[0].unique()
+    seq_ids = seq_ids[seq_ids > 0]
+
+    if len(seq_ids) <= 1:
+        return None
+
+    full_logprobs = torch.full(
+        (1, query_responses.size(1) - 1), INVALID_LOGPROB, dtype=query_responses.dtype, device=query_responses.device
+    )
+    full_entropy = None
+    if return_entropy:
+        full_entropy = torch.zeros_like(full_logprobs)
+
+    for seq_id in seq_ids:
+        mask = attention_mask[0] == seq_id
+        indices = mask.nonzero(as_tuple=True)[0]
+        seq_start = indices[0].item()
+        seq_end = indices[-1].item() + 1
+        seq_len = seq_end - seq_start
+
+        seq_tokens = query_responses[:, seq_start:seq_end]
+        seq_pos_ids = torch.arange(seq_len, device=query_responses.device).unsqueeze(0)
+        seq_attn = torch.ones(1, seq_len, device=query_responses.device, dtype=attention_mask.dtype)
+
+        output = model(input_ids=seq_tokens, attention_mask=seq_attn, position_ids=seq_pos_ids)
+        logits = getattr(output, "logits", output) / temperature
+        logits = logits[:, :-1]
+        labels = seq_tokens[:, 1:].clone()
+        labels[labels == pad_token_id] = 0
+        seq_logprobs = model_utils.log_softmax_and_gather(logits, labels)
+
+        full_logprobs[0, seq_start : seq_end - 1] = seq_logprobs[0]
+
+        if return_entropy and full_entropy is not None:
+            with torch.no_grad():
+                full_entropy[0, seq_start : seq_end - 1] = model_utils.entropy_from_logits(logits)[0]
+
+    return full_logprobs, full_entropy
+
+
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
@@ -278,8 +330,16 @@ def forward_for_logprobs(
     pad_token_id: int,
     temperature: float,
     return_entropy: bool = False,
+    reset_recurrent_state: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
+    if reset_recurrent_state:
+        result = _forward_packed_sequences_separately(
+            model, query_responses, attention_mask, pad_token_id, temperature, return_entropy
+        )
+        if result is not None:
+            return result
+
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
@@ -306,6 +366,7 @@ def compute_logprobs(
     temperature: float,
     use_grad: bool = False,
     batch_size: int | None = None,
+    reset_recurrent_state: bool = False,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch."""
     logprobs_BT: list[torch.Tensor] = []
@@ -332,6 +393,7 @@ def compute_logprobs(
                 pad_token_id,
                 temperature,
                 False,
+                reset_recurrent_state=reset_recurrent_state,
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]

@@ -253,6 +253,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # on non-owning ranks). Monkey-patch until fixed upstream:
         # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
         _model_config = AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
+        self.is_recurrent_model = _model_config.model_type == "olmo_hybrid"
         if _model_config.model_type == "olmo_hybrid":
             _original_init_weights = modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights
 
@@ -556,7 +557,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    self.ref_policy,
+                    data_BT,
+                    self.pad_token_id,
+                    self.streaming_config.temperature,
+                    use_grad=False,
+                    reset_recurrent_state=self.is_recurrent_model,
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -568,7 +574,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                        self.model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        use_grad=False,
+                        reset_recurrent_state=self.is_recurrent_model,
                     )
 
                 with torch.no_grad():
@@ -629,6 +640,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.pad_token_id,
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
+                        reset_recurrent_state=self.is_recurrent_model,
                     )
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]

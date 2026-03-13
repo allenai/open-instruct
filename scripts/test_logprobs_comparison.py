@@ -222,5 +222,159 @@ def _hf_score(
     return result
 
 
+class TestPackingStateLeak(unittest.TestCase):
+    """Test that packed sequences produce the same logprobs as individual sequences.
+
+    For hybrid (recurrent) models, packing multiple sequences into one forward pass
+    can leak recurrent state across sequence boundaries. The fix in
+    _forward_packed_sequences_separately should make packed logprobs match individual.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
+    def test_packed_vs_individual_logprobs(self):
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            HYBRID_MODEL, trust_remote_code=True,
+        )
+        prompts = _load_prompts(tokenizer, n=2)
+
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            HYBRID_MODEL,
+            torch_dtype=getattr(torch, DTYPE),
+            device_map="cuda",
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+            trust_remote_code=True,
+        )
+
+        max_tokens = 256
+        vllm_engine = vllm.LLM(
+            model=HYBRID_MODEL,
+            seed=SEED,
+            enforce_eager=True,
+            max_model_len=max(len(p) for p in prompts) + max_tokens + 128,
+            dtype=DTYPE,
+            disable_cascade_attn=True,
+            trust_remote_code=True,
+            gpu_memory_utilization=0.30,
+        )
+        sampling_params = vllm.SamplingParams(
+            max_tokens=max_tokens, logprobs=0, seed=SEED,
+            temperature=1.0, ignore_eos=True,
+        )
+        outputs = vllm_engine.generate(
+            [{"prompt_token_ids": p} for p in prompts],
+            sampling_params=sampling_params,
+        )
+        responses = []
+        vllm_lps = []
+        for out in outputs:
+            resp, lps = [], []
+            for token_info in out.outputs[0].logprobs:
+                token_id = list(token_info.keys())[0]
+                resp.append(token_id)
+                lps.append(token_info[token_id].logprob)
+            responses.append(resp)
+            vllm_lps.append(lps)
+        del vllm_engine
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        pack_length = sum(len(p) + len(r) for p, r in zip(prompts, responses)) + 32
+        packed = rl_utils.pack_sequences(
+            queries=prompts,
+            responses=responses,
+            masks=[[1] * len(r) for r in responses],
+            pack_length=pack_length,
+            pad_token_id=tokenizer.pad_token_id,
+            vllm_logprobs=vllm_lps,
+        )
+        self.assertEqual(len(packed.query_responses), 1, "Expected both sequences in one pack")
+        attn_mask = packed.attention_masks[0]
+        seq_ids = attn_mask.unique()
+        seq_ids = seq_ids[seq_ids > 0]
+        self.assertEqual(len(seq_ids), 2, "Expected 2 sequences packed together")
+
+        from open_instruct import grpo_utils
+
+        input_ids = packed.query_responses[0].unsqueeze(0).to("cuda")
+        attn = packed.attention_masks[0].unsqueeze(0).to("cuda")
+        pos_ids = packed.position_ids[0].unsqueeze(0).to("cuda")
+        pad_id = tokenizer.pad_token_id
+
+        with torch.no_grad():
+            packed_logprobs, _ = grpo_utils.forward_for_logprobs(
+                model, input_ids, attn, pos_ids, pad_id, temperature=1.0,
+                reset_recurrent_state=True,
+            )
+
+            naive_logprobs, _ = grpo_utils.forward_for_logprobs(
+                model, input_ids, attn, pos_ids, pad_id, temperature=1.0,
+                reset_recurrent_state=False,
+            )
+
+        for seq_id in seq_ids:
+            mask = attn[0] == seq_id
+            indices = mask.nonzero(as_tuple=True)[0]
+            seq_start = indices[0].item()
+            seq_end = indices[-1].item() + 1
+
+            packed_seq = packed_logprobs[0, seq_start:seq_end - 1]
+            naive_seq = naive_logprobs[0, seq_start:seq_end - 1]
+
+            diff = (packed_seq - naive_seq).abs()
+            logger.info(
+                "seq_id=%d start=%d end=%d mean_diff=%.6f max_diff=%.6f",
+                seq_id.item(), seq_start, seq_end, diff.mean().item(), diff.max().item(),
+            )
+
+        second_id = seq_ids[1]
+        mask2 = attn[0] == second_id
+        indices2 = mask2.nonzero(as_tuple=True)[0]
+        s2_start = indices2[0].item()
+        s2_end = indices2[-1].item() + 1
+
+        individual_logprobs = _hf_score_raw(
+            model, input_ids[0, s2_start:s2_end], pad_id,
+        )
+        packed_second = packed_logprobs[0, s2_start:s2_end - 1]
+        naive_second = naive_logprobs[0, s2_start:s2_end - 1]
+
+        reset_diff = (packed_second - individual_logprobs).abs().mean().item()
+        naive_diff = (naive_second - individual_logprobs).abs().mean().item()
+        logger.info(
+            "Second sequence: reset_vs_individual=%.6f naive_vs_individual=%.6f",
+            reset_diff, naive_diff,
+        )
+        self.assertLess(
+            reset_diff, naive_diff + 1e-6,
+            "State-reset logprobs should be closer to individual than naive packed",
+        )
+        self.assertLess(reset_diff, 0.01, "State-reset logprobs should nearly match individual")
+
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+def _hf_score_raw(
+    model: torch.nn.Module,
+    tokens: torch.Tensor,
+    pad_token_id: int,
+) -> torch.Tensor:
+    """Score a single sequence with fresh state."""
+    tokens = tokens.unsqueeze(0).to("cuda")
+    seq_len = tokens.size(1)
+    attn = torch.ones(1, seq_len, device="cuda", dtype=torch.long)
+    pos_ids = torch.arange(seq_len, device="cuda").unsqueeze(0)
+    with torch.no_grad():
+        output = model(input_ids=tokens, attention_mask=attn, position_ids=pos_ids)
+        logits = getattr(output, "logits", output)
+        logits = logits[:, :-1]
+        labels = tokens[:, 1:].clone()
+        labels[labels == pad_token_id] = 0
+        logprobs = model_utils.log_softmax_and_gather(logits, labels)
+    return logprobs[0]
+
+
 if __name__ == "__main__":
     unittest.main()
