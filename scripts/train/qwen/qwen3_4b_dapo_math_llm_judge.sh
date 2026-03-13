@@ -7,6 +7,7 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B-Base}"
 LLM_JUDGE_MODEL="${LLM_JUDGE_MODEL:-hosted_vllm/opencompass/CompassVerifier-3B}"
+LLM_JUDGE_FALLBACK_VERIFIER="${LLM_JUDGE_FALLBACK_VERIFIER:-math}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 DATASETS="${DATASETS:-mnoukhov/dapo_math_14k_en_openinstruct 1.0}"
@@ -90,7 +91,7 @@ uv run mason.py \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
-    --remap_verifier math=general-compass_verifier \
+    --llm_judge_fallback_verifier "${LLM_JUDGE_FALLBACK_VERIFIER}" \
     --llm_judge_model "${LLM_JUDGE_MODEL}" \
     --llm_judge_max_tokens 32 \
     --llm_judge_temperature 0.0 \

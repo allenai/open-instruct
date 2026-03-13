@@ -14,9 +14,11 @@ from parameterized import parameterized
 from open_instruct.data_types import RequestInfo
 from open_instruct.ground_truth_utils import (
     F1Verifier,
+    LLMJudgeFallbackVerifier,
     LMJudgeVerifier,
     PuzzleMatcherVerifier,
     RewardConfig,
+    VerificationResult,
     apply_verifiable_reward,
     build_all_verifiers,
 )
@@ -247,7 +249,7 @@ class TestApplyVerifiableRewardDatasetAliases(unittest.TestCase):
 
     def test_math_prefixed_dataset_uses_math_verifier(self):
         verifier = self._DummyVerifier(name="math", score=1.0)
-        scores, per_func_scores = asyncio.run(
+        scores, per_func_scores, extra_metrics = asyncio.run(
             apply_verifiable_reward(
                 reward_fn_mapping={"math": verifier},
                 responses=[[1, 2, 3]],
@@ -260,6 +262,42 @@ class TestApplyVerifiableRewardDatasetAliases(unittest.TestCase):
         )
         self.assertEqual(scores, [10.0])
         self.assertEqual(per_func_scores, [{"math": 10.0}])
+        self.assertEqual(extra_metrics, {})
+
+    class _StaticVerifier:
+        def __init__(self, name: str, score: float):
+            self.name = name
+            self.weight = 1.0
+            self._score = score
+
+        def __call__(self, tokenized_prediction, prediction, label, query=None):
+            return VerificationResult(score=self._score)
+
+        async def async_call(self, tokenized_prediction, prediction, label, query=None):
+            return VerificationResult(score=self._score)
+
+    def test_llm_judge_fallback_logs_when_llm_overrides_primary_failure(self):
+        primary = self._StaticVerifier(name="math", score=0.0)
+        fallback = self._StaticVerifier(name="general-compass_verifier", score=1.0)
+        fallback_wrapper = LLMJudgeFallbackVerifier(primary, fallback)
+
+        scores, per_func_scores, extra_metrics = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"math": fallback_wrapper},
+                responses=[[1, 2, 3]],
+                decoded_responses=["dummy"],
+                ground_truths=["42"],
+                datasets=["math"],
+                reward_mult=10,
+                queries=["q"],
+            )
+        )
+
+        self.assertEqual(scores, [10.0])
+        self.assertEqual(per_func_scores, [{"math": 10.0}])
+        self.assertEqual(extra_metrics["objective/llm_judge_fallback_used_count"], 1.0)
+        self.assertEqual(extra_metrics["objective/llm_judge_correct_when_primary_wrong_count"], 1.0)
+        self.assertEqual(extra_metrics["objective/math_llm_judge_correct_when_primary_wrong_count"], 1.0)
 
 
 class TestBuildAllVerifiers(unittest.TestCase):
@@ -292,6 +330,36 @@ class TestBuildAllVerifiers(unittest.TestCase):
         self.assertIsInstance(verifiers["gsm8k"], LMJudgeVerifier)
         self.assertEqual(verifiers["gsm8k"].verifier_config.llm_judge_model, "opencompass/CompassVerifier-3B")
         self.assertEqual(verifiers["gsm8k"].judge_type, "compass_verifier")
+
+    def test_llm_judge_fallback_verifier_wraps_math_with_compass_verifier(self):
+        args = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            code_api_url="http://localhost:1234/test_program",
+            code_max_execution_time=1.0,
+            code_pass_rate_reward_threshold=0.0,
+            code_apply_perf_penalty=False,
+            max_length_verifier_max_length=32768,
+        )
+        streaming_config = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_override_verifier=None,
+            llm_judge_fallback_verifier="math",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            remap_verifier=None,
+        )
+
+        verifiers = build_all_verifiers(args, streaming_config)
+        self.assertIsInstance(verifiers["math"], LLMJudgeFallbackVerifier)
+        self.assertEqual(verifiers["math"].fallback_verifier.judge_type, "compass_verifier")
 
 
 class TestCompassVerifierExtractor(unittest.TestCase):
