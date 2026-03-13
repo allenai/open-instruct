@@ -1023,7 +1023,9 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
 
-    fallback_verifier_name = getattr(streaming_config, "llm_judge_fallback_verifier", None) if streaming_config else None
+    fallback_verifier_name = (
+        getattr(streaming_config, "llm_judge_fallback_verifier", None) if streaming_config else None
+    )
 
     if streaming_config and streaming_config.llm_judge_override_verifier:
         override_verifier = streaming_config.llm_judge_override_verifier.lower()
