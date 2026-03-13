@@ -17,8 +17,8 @@ uv run python mason.py \
        --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout 30m \
+       --timeout 60m \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \
-       -- uv run pytest scripts/test_logprobs_comparison.py -v
+       -- uv run pytest scripts/test_logprobs_comparison.py -v -s --log-cli-level=INFO

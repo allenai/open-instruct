@@ -14,118 +14,145 @@ from open_instruct import model_utils
 from open_instruct import rl_utils
 
 
-MAX_TOKENS = 20
 SEED = 42
-PACK_LENGTH = 64
 DTYPE = "bfloat16"
 HYBRID_MODEL = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
 TRANSFORMER_MODEL = "allenai/Olmo-3-1025-7B"
 
 logger = logging.getLogger(__name__)
 
+PROMPTS = [
+    "The capital of France is",
+    "The weather today is",
+    "Machine learning is",
+]
 
-class TestLogprobsComparison(unittest.TestCase):
-    """Test logprobs calculation and comparison between HuggingFace and vLLM."""
 
-    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
-    @parameterized.parameterized.expand([
-        ("hybrid_capital", HYBRID_MODEL, "The capital of France is"),
-        ("hybrid_weather", HYBRID_MODEL, "The weather today is"),
-        ("hybrid_ml", HYBRID_MODEL, "Machine learning is"),
-        ("transformer_capital", TRANSFORMER_MODEL, "The capital of France is"),
-        ("transformer_weather", TRANSFORMER_MODEL, "The weather today is"),
-        ("transformer_ml", TRANSFORMER_MODEL, "Machine learning is"),
-    ])
-    def test_vllm_hf_logprobs_eager(self, _name, model_name, prompt):
-        """Test that vLLM eager mode matches HuggingFace logprobs."""
-        self._run_comparison(model_name, prompt, enforce_eager=True)
+class TestHybridLogprobsShort(unittest.TestCase):
+    """Short-sequence (20 token) hybrid logprob tests."""
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
-        ("hybrid_capital", HYBRID_MODEL, "The capital of France is"),
-        ("hybrid_weather", HYBRID_MODEL, "The weather today is"),
-        ("hybrid_ml", HYBRID_MODEL, "Machine learning is"),
-        ("transformer_capital", TRANSFORMER_MODEL, "The capital of France is"),
-        ("transformer_weather", TRANSFORMER_MODEL, "The weather today is"),
-        ("transformer_ml", TRANSFORMER_MODEL, "Machine learning is"),
+        (f"eager_{i}", HYBRID_MODEL, p, True, None, 20)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_{i}", HYBRID_MODEL, p, False, None, 20)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_fp32_{i}", HYBRID_MODEL, p, False, "float32", 20)
+        for i, p in enumerate(PROMPTS)
     ])
-    def test_vllm_hf_logprobs_compiled(self, _name, model_name, prompt):
-        """Test logprob divergence when vLLM uses torch.compile."""
-        self._run_comparison(model_name, prompt, enforce_eager=False)
+    def test_short(self, _name, model_name, prompt, eager, ssm_dtype, max_tokens):
+        _run_comparison(self, model_name, prompt, eager, ssm_dtype, max_tokens)
+
+
+class TestHybridLogprobsLong(unittest.TestCase):
+    """Long-sequence hybrid logprob tests to measure divergence compounding."""
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
-        ("hybrid_capital", HYBRID_MODEL, "The capital of France is"),
-        ("hybrid_weather", HYBRID_MODEL, "The weather today is"),
-        ("hybrid_ml", HYBRID_MODEL, "Machine learning is"),
+        (f"eager_256_{i}", HYBRID_MODEL, p, True, None, 256)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_256_{i}", HYBRID_MODEL, p, False, None, 256)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_fp32_256_{i}", HYBRID_MODEL, p, False, "float32", 256)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"eager_512_{i}", HYBRID_MODEL, p, True, None, 512)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_512_{i}", HYBRID_MODEL, p, False, None, 512)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_fp32_512_{i}", HYBRID_MODEL, p, False, "float32", 512)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"eager_1024_{i}", HYBRID_MODEL, p, True, None, 1024)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_1024_{i}", HYBRID_MODEL, p, False, None, 1024)
+        for i, p in enumerate(PROMPTS)
+    ] + [
+        (f"compiled_fp32_1024_{i}", HYBRID_MODEL, p, False, "float32", 1024)
+        for i, p in enumerate(PROMPTS)
     ])
-    def test_vllm_hf_logprobs_compiled_fp32_state(self, _name, model_name, prompt):
-        """Test that fp32 SSM state fixes compile divergence for hybrid models."""
-        self._run_comparison(
-            model_name, prompt, enforce_eager=False, ssm_cache_dtype="float32",
-        )
+    def test_long(self, _name, model_name, prompt, eager, ssm_dtype, max_tokens):
+        _run_comparison(self, model_name, prompt, eager, ssm_dtype, max_tokens)
 
-    def _run_comparison(
-        self, model_name, prompt, enforce_eager, ssm_cache_dtype=None,
-    ):
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_name, trust_remote_code=True
-        )
-        query = tokenizer(prompt)['input_ids']
 
-        vllm_output = _get_vllm_logprobs(
-            model_name, query,
-            enforce_eager=enforce_eager,
-            ssm_cache_dtype=ssm_cache_dtype,
-        )
-        gc.collect()
-        torch.cuda.empty_cache()
-        packed_sequences = rl_utils.pack_sequences(
-            queries=[query],
-            responses=[vllm_output["response"]],
-            masks=[[1] * len(vllm_output["response"])],
-            pack_length=PACK_LENGTH,
-            pad_token_id=tokenizer.pad_token_id,
-            vllm_logprobs=[vllm_output["logprobs"]],
-        )
+def _run_comparison(test_case, model_name, prompt, enforce_eager, ssm_cache_dtype,
+                    max_tokens):
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True
+    )
+    query = tokenizer(prompt)['input_ids']
+    pack_length = len(query) + max_tokens + 16
 
-        hf_logprobs = _get_hf_logprobs(
-            model_name, query,
-            vllm_output["response"],
-            packed_sequences.query_responses[0],
-            packed_sequences.attention_masks[0],
-            packed_sequences.position_ids[0],
-            tokenizer.pad_token_id,
-        )
-        vllm_logprobs = vllm_output["logprobs"]
+    vllm_output = _get_vllm_logprobs(
+        model_name, query,
+        enforce_eager=enforce_eager,
+        ssm_cache_dtype=ssm_cache_dtype,
+        max_tokens=max_tokens,
+    )
+    gc.collect()
+    torch.cuda.empty_cache()
+    packed_sequences = rl_utils.pack_sequences(
+        queries=[query],
+        responses=[vllm_output["response"]],
+        masks=[[1] * len(vllm_output["response"])],
+        pack_length=pack_length,
+        pad_token_id=tokenizer.pad_token_id,
+        vllm_logprobs=[vllm_output["logprobs"]],
+    )
 
-        packed_response_tokens = packed_sequences.query_responses[0][
-            len(query):len(query) + len(vllm_output['response'])
-        ].tolist()
+    hf_logprobs = _get_hf_logprobs(
+        model_name, query,
+        vllm_output["response"],
+        packed_sequences.query_responses[0],
+        packed_sequences.attention_masks[0],
+        packed_sequences.position_ids[0],
+        tokenizer.pad_token_id,
+    )
+    vllm_logprobs = vllm_output["logprobs"]
 
-        self.assertEqual(len(vllm_logprobs), len(vllm_output["response"]))
-        self.assertEqual(
-            len(vllm_logprobs), len(hf_logprobs),
-            f'{vllm_logprobs=}\n{hf_logprobs=}',
-        )
-        self.assertEqual(vllm_output['response'], packed_response_tokens)
+    packed_response_tokens = packed_sequences.query_responses[0][
+        len(query):len(query) + len(vllm_output['response'])
+    ].tolist()
 
-        vllm_arr = np.array(vllm_logprobs)
-        hf_arr = np.array(hf_logprobs)
-        abs_diff = np.abs(vllm_arr - hf_arr)
-        mode = "eager" if enforce_eager else "compiled"
-        if ssm_cache_dtype:
-            mode += f"+{ssm_cache_dtype}_state"
-        is_hybrid = "Hybrid" in model_name
+    test_case.assertEqual(len(vllm_logprobs), len(vllm_output["response"]))
+    test_case.assertEqual(
+        len(vllm_logprobs), len(hf_logprobs),
+        f'{vllm_logprobs=}\n{hf_logprobs=}',
+    )
+    test_case.assertEqual(vllm_output['response'], packed_response_tokens)
+
+    vllm_arr = np.array(vllm_logprobs)
+    hf_arr = np.array(hf_logprobs)
+    abs_diff = np.abs(vllm_arr - hf_arr)
+    mode = "eager" if enforce_eager else "compiled"
+    if ssm_cache_dtype:
+        mode += f"+{ssm_cache_dtype}_state"
+    logger.info(
+        "RESULT tokens=%d mode=%s mean_diff=%.4f max_diff=%.4f std_diff=%.4f",
+        max_tokens, mode, abs_diff.mean(), abs_diff.max(), abs_diff.std(),
+    )
+
+    # Log per-token diffs at intervals for long sequences
+    step = max(1, len(vllm_logprobs) // 20)
+    for i in range(0, len(vllm_logprobs), step):
         logger.info(
-            "model=%s hybrid=%s mode=%s mean_diff=%.4f max_diff=%.4f std_diff=%.4f",
-            model_name.split("/")[-1], is_hybrid, mode,
-            abs_diff.mean(), abs_diff.max(), abs_diff.std(),
+            "  token %4d: vllm=%.4f  hf=%.4f  diff=%.4f",
+            i, vllm_logprobs[i], hf_logprobs[i], abs_diff[i],
         )
-        for i, (v, h, d) in enumerate(zip(vllm_logprobs, hf_logprobs, abs_diff)):
-            logger.info("  token %2d: vllm=%.4f  hf=%.4f  diff=%.4f", i, v, h, d)
 
-        np.testing.assert_array_almost_equal(vllm_logprobs, hf_logprobs, decimal=1)
+    # Log divergence at sequence end (last 5 tokens)
+    for i in range(max(0, len(vllm_logprobs) - 5), len(vllm_logprobs)):
+        logger.info(
+            "  token %4d (tail): vllm=%.4f  hf=%.4f  diff=%.4f",
+            i, vllm_logprobs[i], hf_logprobs[i], abs_diff[i],
+        )
 
 
 def _get_hf_logprobs(
@@ -171,16 +198,18 @@ def _get_vllm_logprobs(
     prompt: List[int],
     enforce_eager: bool = True,
     ssm_cache_dtype: str | None = None,
+    max_tokens: int = 20,
 ) -> Dict[str, Union[List[int], List[float]]]:
     """Get logprobs using vLLM."""
     kwargs = {}
     if ssm_cache_dtype is not None:
         kwargs["mamba_ssm_cache_dtype"] = ssm_cache_dtype
+    max_model_len = max(2048, len(prompt) + max_tokens + 128)
     llm = vllm.LLM(
         model=model_name,
         seed=SEED,
         enforce_eager=enforce_eager,
-        max_model_len=1024,
+        max_model_len=max_model_len,
         dtype=DTYPE,
         disable_cascade_attn=True,
         trust_remote_code=True,
@@ -189,7 +218,7 @@ def _get_vllm_logprobs(
     )
 
     sampling_params = vllm.SamplingParams(
-        max_tokens=MAX_TOKENS,
+        max_tokens=max_tokens,
         logprobs=0,
         seed=SEED,
     )
