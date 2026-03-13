@@ -56,14 +56,14 @@ uv run open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
-    --pack_length 10240 \
+    --pack_length 16384 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \

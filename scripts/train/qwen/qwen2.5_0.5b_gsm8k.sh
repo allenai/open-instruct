@@ -14,7 +14,7 @@ BEAKER_IMAGE="michaeln/open_instruct"
 
 CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
-NUM_GPUS-"${NUM_GPUS:-4}"
+NUM_GPUS="${NUM_GPUS:-4}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
