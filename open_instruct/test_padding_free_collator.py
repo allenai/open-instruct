@@ -17,7 +17,14 @@ from transformers import (
 
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
+from open_instruct.olmo_core_train_modules import DPOLMHead
+from open_instruct.padding_free_collator import (
+    TensorDataCollatorWithFlattening,
+    TensorDataCollatorWithFlatteningDPO,
+    calculate_per_token_logps,
+    concatenated_inputs,
+    get_batch_logps,
+)
 
 try:
     import mamba_ssm  # noqa
@@ -168,3 +175,219 @@ class TestPaddingFree(unittest.TestCase):
         pf_grads = {n: p.grad for n, p in pf_model.named_parameters()}
         for k, g in grads.items():
             torch.testing.assert_close(g, pf_grads[k])
+
+
+def _make_dpo_features(
+    num_samples: int, chosen_lengths: list[int], rejected_lengths: list[int], start_index: int = 0
+) -> list[dict]:
+    features = []
+    for i in range(num_samples):
+        chosen_len = chosen_lengths[i % len(chosen_lengths)]
+        rejected_len = rejected_lengths[i % len(rejected_lengths)]
+        features.append(
+            {
+                "chosen_input_ids": torch.ones(chosen_len, dtype=torch.long),
+                "chosen_labels": torch.ones(chosen_len, dtype=torch.long),
+                "rejected_input_ids": torch.ones(rejected_len, dtype=torch.long),
+                "rejected_labels": torch.ones(rejected_len, dtype=torch.long),
+                "index": start_index + i,
+            }
+        )
+    return features
+
+
+class TestDPOPackingIndices(unittest.TestCase):
+    def _collate(self, max_seq_length, num_samples, chosen_lengths, rejected_lengths, start_index=0):
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+        features = _make_dpo_features(num_samples, chosen_lengths, rejected_lengths, start_index)
+        return collator(features)
+
+    def _collate_and_get_logps(
+        self,
+        max_seq_length,
+        num_samples,
+        chosen_lengths,
+        rejected_lengths,
+        start_index=0,
+        vocab_size=100,
+        average_log_prob=False,
+    ):
+        batch = self._collate(max_seq_length, num_samples, chosen_lengths, rejected_lengths, start_index)
+        concat_batch, bs = concatenated_inputs(batch)
+        logits = torch.randn(1, concat_batch["concatenated_input_ids"].shape[1], vocab_size)
+        per_token_logps = calculate_per_token_logps(logits, concat_batch["concatenated_labels"])
+        logps = get_batch_logps(
+            per_token_logps,
+            concat_batch["concatenated_labels"],
+            concat_batch["concatenated_cu_seq_lens_k"],
+            average_log_prob=average_log_prob,
+        )
+        return batch, concat_batch, bs, logps
+
+    @parameterized.expand([("no_truncation", 1000, 10, [10, 11, 12, 13]), ("with_padding", 500, 0, [0, 1, 2, 3])])
+    def test_indices_preserved(self, name, max_seq_length, start_index, expected_indices):
+        batch = self._collate(
+            max_seq_length, num_samples=4, chosen_lengths=[50], rejected_lengths=[50], start_index=start_index
+        )
+
+        self.assertIn("index", batch)
+        self.assertEqual(len(batch["index"]), 4)
+        torch.testing.assert_close(batch["index"], torch.tensor(expected_indices))
+
+    @parameterized.expand(
+        [("no_truncation", 1000, 50, 50), ("after_truncation", 200, 100, 100), ("asymmetric", 250, 100, 50)]
+    )
+    def test_cu_seq_lens_matches_index_count(self, name, max_seq_length, chosen_len, rejected_len):
+        batch = self._collate(
+            max_seq_length, num_samples=4, chosen_lengths=[chosen_len], rejected_lengths=[rejected_len]
+        )
+
+        num_indices = len(batch["index"])
+        self.assertEqual(len(batch["chosen_cu_seq_lens_k"]), num_indices + 1)
+        self.assertEqual(len(batch["rejected_cu_seq_lens_k"]), num_indices + 1)
+
+    def test_concatenated_inputs_returns_correct_bs(self):
+        batch, concat_batch, bs, _ = self._collate_and_get_logps(
+            max_seq_length=1000, num_samples=4, chosen_lengths=[50], rejected_lengths=[50]
+        )
+
+        self.assertEqual(bs, len(batch["index"]))
+        self.assertIn("concatenated_cu_seq_lens_k", concat_batch)
+        self.assertEqual(len(concat_batch["concatenated_cu_seq_lens_k"]), 2 * bs + 1)
+
+    @parameterized.expand(
+        [
+            ("no_truncation", 1000, [100], [100], 4),
+            ("slight_truncation", 300, [100], [100], 3),
+            ("heavy_truncation", 150, [100], [100], 1),
+            ("asymmetric", 250, [100], [50], 2),
+        ]
+    )
+    def test_logps_count_matches_indices(
+        self, name, max_seq_length, chosen_lengths, rejected_lengths, expected_min_indices
+    ):
+        batch, _, bs, logps = self._collate_and_get_logps(
+            max_seq_length=max_seq_length,
+            num_samples=4,
+            chosen_lengths=chosen_lengths,
+            rejected_lengths=rejected_lengths,
+        )
+
+        num_indices = len(batch["index"])
+        self.assertGreaterEqual(num_indices, expected_min_indices)
+        self.assertEqual(len(logps), 2 * bs)
+
+        chosen_logps = logps[:bs]
+        rejected_logps = logps[bs:]
+        self.assertEqual(len(chosen_logps), num_indices)
+        self.assertEqual(len(rejected_logps), num_indices)
+
+    @parameterized.expand([("no_truncation", 1000, []), ("with_truncation", 300, [3, 7, 11, 15])])
+    def test_simulate_reference_cache(self, name, max_seq_length, expected_missing):
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+        num_total_samples = 16
+        all_features = _make_dpo_features(
+            num_samples=num_total_samples, chosen_lengths=[100], rejected_lengths=[100], start_index=0
+        )
+
+        chosen_tensor = torch.full((num_total_samples,), float("-inf"))
+        rejected_tensor = torch.full((num_total_samples,), float("-inf"))
+
+        batch_size = 4
+        for batch_start in range(0, num_total_samples, batch_size):
+            batch_features = all_features[batch_start : batch_start + batch_size]
+            batch = collator(batch_features)
+
+            concat_batch, bs = concatenated_inputs(batch)
+            logits = torch.randn(1, concat_batch["concatenated_input_ids"].shape[1], 100)
+            per_token_logps = calculate_per_token_logps(logits, concat_batch["concatenated_labels"])
+            logps = get_batch_logps(
+                per_token_logps, concat_batch["concatenated_labels"], concat_batch["concatenated_cu_seq_lens_k"]
+            )
+            chosen_logps = logps[:bs]
+            rejected_logps = logps[bs:]
+
+            self.assertEqual(len(chosen_logps), len(batch["index"]))
+
+            chosen_tensor[batch["index"]] = chosen_logps
+            rejected_tensor[batch["index"]] = rejected_logps
+
+        missing_chosen = torch.where(chosen_tensor == float("-inf"))[0].tolist()
+        missing_rejected = torch.where(rejected_tensor == float("-inf"))[0].tolist()
+
+        self.assertEqual(missing_chosen, expected_missing)
+        self.assertEqual(missing_rejected, expected_missing)
+
+    def test_prefilter_keeps_complete_sequences(self):
+        batch = self._collate(max_seq_length=150, num_samples=4, chosen_lengths=[100], rejected_lengths=[100])
+
+        self.assertEqual(len(batch["index"]), 1)
+        self.assertEqual(batch["chosen_cu_seq_lens_k"][-1].item(), 100)
+        self.assertEqual(batch["rejected_cu_seq_lens_k"][-1].item(), 100)
+
+    def test_average_log_prob_all_masked_segment(self):
+        vocab_size = 100
+        seq_len = 20
+        logits = torch.randn(1, seq_len, vocab_size)
+        labels = torch.ones(1, seq_len, dtype=torch.long)
+        labels[0, 5:10] = -100
+        cu_seq_lens = torch.tensor([0, 5, 10, 20])
+
+        per_token_logps = calculate_per_token_logps(logits, labels)
+        result = get_batch_logps(per_token_logps, labels, cu_seq_lens, average_log_prob=True)
+
+        self.assertEqual(result.shape[0], 3)
+        self.assertFalse(torch.isnan(result).any(), f"Got NaN in result: {result}")
+
+    def test_concatenated_cu_seq_lens_with_padding(self):
+        batch, concat_batch, bs, _ = self._collate_and_get_logps(
+            max_seq_length=500, num_samples=2, chosen_lengths=[50], rejected_lengths=[50]
+        )
+
+        self.assertEqual(bs, 2)
+        self.assertEqual(batch["chosen_input_ids"].shape[-1], 500)
+        self.assertEqual(batch["rejected_input_ids"].shape[-1], 500)
+        self.assertEqual(concat_batch["concatenated_input_ids"].shape[-1], 1000)
+
+        cu_seq_lens = concat_batch["concatenated_cu_seq_lens_k"]
+        self.assertEqual(len(cu_seq_lens), 5)
+        self.assertEqual(cu_seq_lens[0].item(), 0)
+        self.assertEqual(cu_seq_lens[2].item(), 100)
+        self.assertEqual(cu_seq_lens[3].item(), 550)
+        self.assertEqual(cu_seq_lens[4].item(), 600)
+
+
+class TestDPOLMHead(unittest.TestCase):
+    def test_forward_matches_calculate_per_token_logps(self):
+        torch.manual_seed(42)
+        d_model = 16
+        vocab_size = 32
+        seq_len = 10
+        batch_size = 2
+
+        head = DPOLMHead(d_model=d_model, vocab_size=vocab_size, bias=False)
+        x = torch.randn(batch_size, seq_len, d_model)
+        labels = torch.randint(0, vocab_size, (batch_size, seq_len))
+        labels[0, -2:] = -100
+
+        output = head(x, labels=labels)
+
+        with torch.no_grad():
+            h = head.norm(x) if head.norm is not None else x
+            raw_logits = head.w_out(h)
+            expected = calculate_per_token_logps(raw_logits, labels)
+
+        torch.testing.assert_close(output.loss, expected)
+
+    def test_forward_without_labels_returns_logits(self):
+        torch.manual_seed(42)
+        d_model = 16
+        vocab_size = 32
+        seq_len = 10
+
+        head = DPOLMHead(d_model=d_model, vocab_size=vocab_size, bias=False)
+        x = torch.randn(1, seq_len, d_model)
+
+        output = head(x, labels=None)
+        self.assertIsInstance(output, torch.Tensor)
+        self.assertEqual(output.shape, (1, seq_len, vocab_size))

@@ -13,11 +13,11 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
-    "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
+    "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
-    "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
+    "multiprocess<0.70.18", # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
-    "numpy<2",
+    "numpy>=2",
     "ai2-olmo-core==2.3.0",
     "nvitop>=1.4.2",
     "packaging>=24.2",
@@ -27,8 +27,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.12.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    "vllm==0.13.0; platform_system != 'Darwin' and platform_machine == 'aarch64'",
+    "vllm==0.16.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -36,6 +35,9 @@ dependencies = [
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
+    "mcp>=1.9.0",
+    "openenv-core>=0.2.1",
+    "docker>=7.0.0",
 ]
 
 [build-system]
@@ -56,12 +58,6 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
-]
-# vLLM aarch64 (DGX Spark): PyPI lacks aarch64+cu130 wheels, so we pin to vLLM's nightly wheel server.
-# This can be removed once vLLM publishes official aarch64+cu130 wheels to PyPI.
-# See docs/DGX_SPARK.md for details.
-vllm = [
-  { url = "https://wheels.vllm.ai/72506c98349d6bcd32b4e33eec7b5513453c1502/vllm-0.13.0%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
 
 [[tool.uv.index]]
@@ -86,6 +82,8 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+    "authlib",
+    "scipy",
 ]
 
 [tool.uv]
@@ -188,14 +186,23 @@ include = [
     "open_instruct/grpo.py",
     "open_instruct/grpo_callbacks.py",
     "open_instruct/grpo_olmo_core_actor.py",
+    "open_instruct/grpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
     "open_instruct/olmo_core_train_modules.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
-    "open_instruct/tools/massive_ds.py",
-    "open_instruct/tools/tools.py",
     "open_instruct/rl_utils.py",
+    "open_instruct/rubrics/metrics.py",
+    "open_instruct/rubrics/prompts.py",
+    "open_instruct/rubrics/rubric_utils.py",
+    "open_instruct/rubrics/run_utils.py",
+    "open_instruct/environments/base.py",
+    "open_instruct/environments/examples.py",
+    "open_instruct/environments/tools/generic_mcp.py",
+    "open_instruct/environments/tools/parsers.py",
+    "open_instruct/environments/tools/tools.py",
+    "open_instruct/environments/tools/utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
