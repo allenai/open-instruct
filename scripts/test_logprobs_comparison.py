@@ -51,12 +51,18 @@ class TestGRPOLogprobsMatch(unittest.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
+        ("eager_1024", True, None, 1024),
+        ("eager_2048", True, None, 2048),
+        ("eager_4096", True, None, 4096),
         ("eager_8192", True, None, 8192),
-        ("eager_16384", True, None, 16384),
+        ("compiled_1024", False, None, 1024),
+        ("compiled_2048", False, None, 2048),
+        ("compiled_4096", False, None, 4096),
         ("compiled_8192", False, None, 8192),
-        ("compiled_16384", False, None, 16384),
+        ("compiled_fp32_1024", False, "float32", 1024),
+        ("compiled_fp32_2048", False, "float32", 2048),
+        ("compiled_fp32_4096", False, "float32", 4096),
         ("compiled_fp32_8192", False, "float32", 8192),
-        ("compiled_fp32_16384", False, "float32", 16384),
     ])
     def test_grpo_logprobs(self, _name, enforce_eager, ssm_cache_dtype, max_tokens):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -152,6 +158,7 @@ def _vllm_generate(
         logprobs=0,
         seed=SEED,
         temperature=1.0,
+        ignore_eos=True,
     )
     outputs = llm.generate(
         [{"prompt_token_ids": prompt}], sampling_params=sampling_params,
