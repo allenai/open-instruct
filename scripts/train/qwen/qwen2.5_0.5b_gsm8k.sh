@@ -18,6 +18,7 @@ NUM_GPUS="${NUM_GPUS:-4}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
+    --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
     --workspace ai2/oe-adapt-code \
     --priority ${PRIORITY} \

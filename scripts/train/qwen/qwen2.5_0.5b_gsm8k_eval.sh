@@ -15,6 +15,7 @@ LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
+    --description "${RUN_NAME}" \
     --cluster ai2/prometheus \
     --workspace ai2/oe-adapt-code \
     --priority low \

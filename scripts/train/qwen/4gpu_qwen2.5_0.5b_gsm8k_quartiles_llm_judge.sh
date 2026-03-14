@@ -26,6 +26,7 @@ VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.55}"
 
 uv run mason.py \
     --task_name "${EXP_NAME}" \
+    --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
     --workspace ai2/oe-adapt-code \
     --priority "${PRIORITY}" \
