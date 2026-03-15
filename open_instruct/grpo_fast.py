@@ -1334,13 +1334,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             )
                             vf_losses1 = (current_values - target_returns) ** 2
                             vf_losses2 = (values_clipped - target_returns) ** 2
-                            vf_loss_BT = 0.5 * torch.max(vf_losses1, vf_losses2)
+                            vf_loss_BT = torch.max(vf_losses1, vf_losses2)
                             vf_clipfrac_BT = (vf_losses2 > vf_losses1).float()
                         else:
-                            vf_loss_BT = 0.5 * (current_values - target_returns) ** 2
+                            vf_loss_BT = (current_values - target_returns) ** 2
                             vf_clipfrac_BT = torch.zeros_like(current_values)
 
-                        value_loss = 0.5 * masked_mean(vf_loss_BT, response_mask_BT)
+                        value_loss = self.args.value_loss_coef * masked_mean(vf_loss_BT, response_mask_BT)
                         value_loss = value_loss / value_accumulation_steps
 
                         is_value_accum_boundary = (local_value_step + 1) % value_accumulation_steps == 0
