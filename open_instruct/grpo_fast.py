@@ -1360,6 +1360,21 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics["loss/value_avg"] = value_loss_stats.mean().item()
                 self.local_metrics["value/clipfrac_avg"] = vf_clipfrac_stats.mean().item()
 
+                # Explained variance: how well the value model predicts returns
+                all_values = torch.cat([old_values_BT[i].flatten() for i in range(num_samples)])
+                all_returns = torch.cat([returns_BT[i].flatten() for i in range(num_samples)])
+                all_masks = torch.cat([data_BT.response_masks[i][:, 1:].flatten().float() for i in range(num_samples)])
+                masked_values = all_values[all_masks > 0]
+                masked_returns = all_returns[all_masks > 0]
+                if len(masked_returns) > 1:
+                    var_returns = masked_returns.var()
+                    explained_var = 1.0 - (masked_returns - masked_values).var() / (var_returns + 1e-8)
+                    self.local_metrics["value/explained_variance"] = explained_var.item()
+                    self.local_metrics["value/returns_mean"] = masked_returns.mean().item()
+                    self.local_metrics["value/returns_std"] = masked_returns.std().item()
+                    self.local_metrics["value/predictions_mean"] = masked_values.mean().item()
+                    self.local_metrics["value/predictions_std"] = masked_values.std().item()
+
             torch.cuda.empty_cache()
 
         # ========================================================================
