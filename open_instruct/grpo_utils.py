@@ -147,6 +147,13 @@ class ExperimentConfig:
     reset_optimizer_after_value_warmup: bool = False
     """If True, reset the policy optimizer state after value warmup completes.
     This can help prevent stale momentum/variance estimates from the warmup phase."""
+    value_rewarmup_start: int = 0
+    """Step at which to re-enter value warmup (freeze policy, train value only).
+    Set to 0 to disable. Useful for letting the policy train briefly, then freezing
+    it again to give the value model more time to catch up."""
+    value_rewarmup_steps: int = 0
+    """Number of steps to run the re-warmup phase. The policy will be frozen from
+    step value_rewarmup_start to value_rewarmup_start + value_rewarmup_steps."""
     value_num_mini_batches: int | None = None
     """Number of minibatches for value model training. If None, defaults to num_mini_batches."""
     whiten_advantages: bool = False

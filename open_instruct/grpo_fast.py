@@ -413,11 +413,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return optimization_steps_done
 
-    def _init_value_model(
-        self,
-        args: grpo_utils.ExperimentConfig,
-        model_config: ModelConfig,
-    ) -> None:
+    def _init_value_model(self, args: grpo_utils.ExperimentConfig, model_config: ModelConfig) -> None:
         """Initialize a separate value model for PPO training.
 
         Uses the same training DS config as the policy model (matching ppo_fast.py).
@@ -430,6 +426,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Temporarily disable HfDeepSpeedConfig so the model loads with full weights
         # (not ZeRO-3 sharded/meta). We need full weights to replace the LM head.
         import transformers.integrations.deepspeed as _hf_ds_integration
+
         saved_ds_config = _hf_ds_integration._hf_deepspeed_config_weak_ref
         _hf_ds_integration._hf_deepspeed_config_weak_ref = None
 
@@ -557,10 +554,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
             else:
                 output = self.value_model(
-                    input_ids=shifted_ids,
-                    attention_mask=shifted_attn,
-                    position_ids=shifted_pos,
-                    return_dict=True,
+                    input_ids=shifted_ids, attention_mask=shifted_attn, position_ids=shifted_pos, return_dict=True
                 )
                 values = output.logits.squeeze(-1)
 
@@ -663,10 +657,7 @@ class PolicyTrainerRayProcess(RayProcess):
             padded_pos[b, :L] = expanded_pos_list[b]
 
         output = self.value_model(
-            input_ids=padded_ids,
-            attention_mask=padded_attn,
-            position_ids=padded_pos,
-            return_dict=True,
+            input_ids=padded_ids, attention_mask=padded_attn, position_ids=padded_pos, return_dict=True
         )
         all_values = output.logits.squeeze(-1)  # (batch, max_len)
 
@@ -698,8 +689,12 @@ class PolicyTrainerRayProcess(RayProcess):
         """
         if ground_truths is None or len(ground_truths) == 0:
             return grpo_utils.forward_for_logprobs(
-                self.model, query_response, attention_mask, position_ids,
-                self.pad_token_id, self.streaming_config.temperature,
+                self.model,
+                query_response,
+                attention_mask,
+                position_ids,
+                self.pad_token_id,
+                self.streaming_config.temperature,
             )[0]
 
         batch_size, orig_len = query_response.shape
@@ -763,8 +758,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Position IDs: query positions, then prefix positions, then response positions
                     query_max_pos = query_pos[-1].item() + 1 if len(query_pos) > 0 else 0
-                    prefix_pos = torch.arange(query_max_pos, query_max_pos + prefix_len, device=device, dtype=seq_pos.dtype)
-                    resp_pos = torch.arange(query_max_pos + prefix_len, query_max_pos + prefix_len + len(resp_ids), device=device, dtype=seq_pos.dtype)
+                    prefix_pos = torch.arange(
+                        query_max_pos, query_max_pos + prefix_len, device=device, dtype=seq_pos.dtype
+                    )
+                    resp_pos = torch.arange(
+                        query_max_pos + prefix_len,
+                        query_max_pos + prefix_len + len(resp_ids),
+                        device=device,
+                        dtype=seq_pos.dtype,
+                    )
 
                     new_ids_parts.extend([query_ids, prefix_ids, resp_ids])
                     new_attn_parts.extend([query_attn, prefix_attn, resp_attn])
@@ -798,10 +800,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Forward pass through policy model
         with torch.no_grad():
             output = self.model(
-                input_ids=padded_ids,
-                attention_mask=padded_attn.clamp(0, 1),
-                position_ids=padded_pos,
-                return_dict=True,
+                input_ids=padded_ids, attention_mask=padded_attn.clamp(0, 1), position_ids=padded_pos, return_dict=True
             )
             logits = getattr(output, "logits", output)
             logits = logits / (self.streaming_config.temperature + 1e-7)
@@ -829,13 +828,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return result_logprobs
 
-
     def _gather_for_gae(
-        self,
-        values: torch.Tensor,
-        rewards: torch.Tensor,
-        dones: torch.Tensor,
-        response_masks: torch.Tensor,
+        self, values: torch.Tensor, rewards: torch.Tensor, dones: torch.Tensor, response_masks: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
         """Gather tensors across SP ranks to reconstruct full sequences for GAE computation.
 
@@ -1049,22 +1043,32 @@ class PolicyTrainerRayProcess(RayProcess):
             and self.args.value_warmup_steps > 0
             and training_step <= self.args.value_warmup_steps
         )
-        # Policy warmup: skip policy updates for fair comparison with PPO value warmup
-        is_policy_warmup = (
-            self.args.policy_warmup_steps > 0
-            and training_step <= self.args.policy_warmup_steps
+        # Value re-warmup: freeze policy again at a later point to let value model catch up
+        is_value_rewarmup = (
+            self.args.use_value_model
+            and self.args.value_rewarmup_start > 0
+            and self.args.value_rewarmup_steps > 0
+            and self.args.value_rewarmup_start
+            <= training_step
+            < self.args.value_rewarmup_start + self.args.value_rewarmup_steps
         )
-        skip_policy_update = is_value_warmup or is_policy_warmup
+        # Policy warmup: skip policy updates for fair comparison with PPO value warmup
+        is_policy_warmup = self.args.policy_warmup_steps > 0 and training_step <= self.args.policy_warmup_steps
+        skip_policy_update = is_value_warmup or is_value_rewarmup or is_policy_warmup
         if skip_policy_update and self.rank == 0:
             if is_value_warmup:
                 logger.info(
                     f"[Value Warmup] Step {training_step}/{self.args.value_warmup_steps} - "
                     "Training value model only, policy frozen"
                 )
+            elif is_value_rewarmup:
+                rewarmup_end = self.args.value_rewarmup_start + self.args.value_rewarmup_steps
+                logger.info(
+                    f"[Value Re-warmup] Step {training_step}/{rewarmup_end} - Training value model only, policy frozen"
+                )
             else:
                 logger.info(
-                    f"[Policy Warmup] Step {training_step}/{self.args.policy_warmup_steps} - "
-                    "Skipping policy update"
+                    f"[Policy Warmup] Step {training_step}/{self.args.policy_warmup_steps} - Skipping policy update"
                 )
 
         # Reset optimizer after value warmup ends (first step after warmup)
@@ -1114,8 +1118,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     num_gt_batches = len(data_BT.ground_truths) if has_gts else 0
                     sample_gt = data_BT.ground_truths[0] if has_gts and num_gt_batches > 0 else "NONE"
                     attn_shape = data_BT.attention_masks[0].shape if len(data_BT.attention_masks) > 0 else "N/A"
-                    logger.info(f"[OPSD] ground_truths available: {has_gts}, num_batches: {num_gt_batches}, sample: {sample_gt}")
-                    logger.info(f"[OPSD] attention_mask shape: {attn_shape}, query_response shape: {data_BT.query_responses[0].shape}")
+                    logger.info(
+                        f"[OPSD] ground_truths available: {has_gts}, num_batches: {num_gt_batches}, sample: {sample_gt}"
+                    )
+                    logger.info(
+                        f"[OPSD] attention_mask shape: {attn_shape}, query_response shape: {data_BT.query_responses[0].shape}"
+                    )
                 with torch.no_grad():
                     for i in range(num_samples):
                         gt_for_teacher = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
@@ -1127,23 +1135,30 @@ class PolicyTrainerRayProcess(RayProcess):
                             gt_for_teacher,
                         )
                         response_mask_shifted = data_BT.response_masks[i][:, 1:]
-                        teacher_logprobs = torch.masked_fill(teacher_logprobs, ~response_mask_shifted.bool(), INVALID_LOGPROB)
+                        teacher_logprobs = torch.masked_fill(
+                            teacher_logprobs, ~response_mask_shifted.bool(), INVALID_LOGPROB
+                        )
                         ref_logprobs_BT.append(teacher_logprobs)
                         if self.rank == 0 and i == 0:
                             # Log sample KL between student and teacher
                             student_lp = grpo_utils.forward_for_logprobs(
-                                self.model, data_BT.query_responses[0],
-                                data_BT.attention_masks[0], data_BT.position_ids[0],
-                                self.pad_token_id, self.streaming_config.temperature,
+                                self.model,
+                                data_BT.query_responses[0],
+                                data_BT.attention_masks[0],
+                                data_BT.position_ids[0],
+                                self.pad_token_id,
+                                self.streaming_config.temperature,
                             )[0]
                             mask = response_mask_shifted.bool()
                             valid_teacher = teacher_logprobs[mask]
                             valid_student = student_lp[mask]
                             kl_sample = (valid_student - valid_teacher).mean().item()
-                            logger.info(f"[OPSD] sample KL (student - teacher): {kl_sample:.6f}, "
-                                       f"teacher mean lp: {valid_teacher.mean().item():.4f}, "
-                                       f"student mean lp: {valid_student.mean().item():.4f}, "
-                                       f"num valid tokens: {mask.sum().item()}")
+                            logger.info(
+                                f"[OPSD] sample KL (student - teacher): {kl_sample:.6f}, "
+                                f"teacher mean lp: {valid_teacher.mean().item():.4f}, "
+                                f"student mean lp: {valid_student.mean().item():.4f}, "
+                                f"num valid tokens: {mask.sum().item()}"
+                            )
                         torch.cuda.empty_cache()
         elif self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
@@ -1196,9 +1211,9 @@ class PolicyTrainerRayProcess(RayProcess):
         policy_lambda_used: float = self.args.gae_lambda  # For logging
         if self.args.use_value_model:
             from open_instruct.rl_utils import calculate_advantages_packed, calculate_advantages_packed_vapo
-            
+
             use_vapo_gae = self.args.decoupled_gae or self.args.length_adaptive_gae
-            
+
             with Timer("Value Model Computation", noop=self.rank != 0):
                 for i in range(num_samples):
                     # forward_value returns L-1 values (input-shifted convention)
@@ -1224,10 +1239,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     if self.splitter is not None:
                         full_values, full_rewards, full_dones, full_response_masks, chunk_len = self._gather_for_gae(
-                            values_BT[i],
-                            shifted_rewards,
-                            shifted_dones,
-                            shifted_response_masks,
+                            values_BT[i], shifted_rewards, shifted_dones, shifted_response_masks
                         )
                         values_np = full_values.cpu().numpy()
                         rewards_np = full_rewards.cpu().numpy()
@@ -1254,12 +1266,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     else:
                         advantages_np, returns_np = calculate_advantages_packed(
-                            values_np,
-                            rewards_np,
-                            self.args.gamma,
-                            self.args.gae_lambda,
-                            dones_np,
-                            response_masks_np,
+                            values_np, rewards_np, self.args.gamma, self.args.gae_lambda, dones_np, response_masks_np
                         )
 
                     advantages = torch.tensor(advantages_np, device=device, dtype=torch.float32)
@@ -1271,26 +1278,26 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     gae_advantages_BT.append(advantages)
                     returns_BT.append(returns)
-                
+
                 if use_vapo_gae:
                     self.local_metrics["value/policy_lambda"] = policy_lambda_used
 
         # Log value warmup status
         if self.args.use_value_model and self.args.value_warmup_steps > 0:
-            self.local_metrics["value/warmup"] = 1.0 if is_value_warmup else 0.0
+            self.local_metrics["value/warmup"] = 1.0 if (is_value_warmup or is_value_rewarmup) else 0.0
 
         # Global advantage whitening across all workers (matching ppo_fast.py)
         if self.args.use_value_model and self.args.whiten_advantages and len(gae_advantages_BT) > 0:
             all_advs = torch.cat([a.flatten() for a in gae_advantages_BT])
             all_masks = torch.cat([data_BT.response_masks[i][:, 1:].flatten().float() for i in range(num_samples)])
             adv_sum = (all_advs * all_masks).sum()
-            adv_sq_sum = ((all_advs ** 2) * all_masks).sum()
+            adv_sq_sum = ((all_advs**2) * all_masks).sum()
             mask_sum = all_masks.sum()
             dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
             dist.all_reduce(adv_sq_sum, op=dist.ReduceOp.SUM)
             dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
             adv_mean = adv_sum / mask_sum
-            adv_var = adv_sq_sum / mask_sum - adv_mean ** 2
+            adv_var = adv_sq_sum / mask_sum - adv_mean**2
             adv_std = torch.clamp(adv_var, min=0).sqrt()
             for i in range(len(gae_advantages_BT)):
                 gae_advantages_BT[i] = (gae_advantages_BT[i] - adv_mean) / (adv_std + 1e-8)
@@ -1328,9 +1335,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         if self.args.vf_clip_range > 0:
                             values_clipped = old_values + torch.clamp(
-                                current_values - old_values,
-                                -self.args.vf_clip_range,
-                                self.args.vf_clip_range,
+                                current_values - old_values, -self.args.vf_clip_range, self.args.vf_clip_range
                             )
                             vf_losses1 = (current_values - target_returns) ** 2
                             vf_losses2 = (values_clipped - target_returns) ** 2
@@ -1515,7 +1520,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=advantages_for_loss,
-                        ref_logprobs=ref_logprobs_BT[i] if (self.args.load_ref_policy or self.args.reference_distribution == "opsd_teacher") else None,
+                        ref_logprobs=ref_logprobs_BT[i]
+                        if (self.args.load_ref_policy or self.args.reference_distribution == "opsd_teacher")
+                        else None,
                         config=self.args,
                         tis_weights=tis_imp_ratio_BT,
                     )
