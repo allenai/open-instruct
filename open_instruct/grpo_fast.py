@@ -60,6 +60,7 @@ from typing import Any
 
 import backoff
 import datasets
+import huggingface_hub
 import numpy as np
 import pandas as pd
 import ray
@@ -2129,6 +2130,12 @@ def main(
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
+
+    # Pre-download model to shared HF cache so Ray actors don't all hit HF API.
+    huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+        huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
+    logger.info("Model and tokenizer cached in shared HF cache.")
 
     if args.cache_dataset_only:
         return
