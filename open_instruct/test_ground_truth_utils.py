@@ -14,6 +14,7 @@ from parameterized import parameterized
 from open_instruct.data_types import RequestInfo
 from open_instruct.ground_truth_utils import (
     F1Verifier,
+    GSM8KVerifier,
     LLMJudgeFallbackVerifier,
     LMJudgeVerifier,
     PuzzleMatcherVerifier,
@@ -156,6 +157,25 @@ class TestF1Verifier(unittest.TestCase):
             places=5,
             msg=f"Failed for {name}: prediction='{prediction}', labels={labels}",
         )
+
+
+class TestGSM8KVerifier(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.verifier = GSM8KVerifier()
+
+    @parameterized.expand(
+        [
+            ("negative_integer", "Therefore the answer is -3", "-3", 1.0),
+            ("positive_integer", "Therefore the answer is +7", "+7", 1.0),
+            ("negative_decimal", "Final answer: -3.5", "-3.5", 1.0),
+            ("boxed_negative_integer", r"The result is \boxed{-3}", "-3", 1.0),
+            ("wrong_sign", "Therefore the answer is 3", "-3", 0.0),
+        ]
+    )
+    def test_signed_number_extraction(self, _name, prediction, label, expected_score):
+        result = self.verifier([], prediction, label)
+        self.assertEqual(result.score, expected_score)
 
 
 class TestRewardConfig(unittest.TestCase):
