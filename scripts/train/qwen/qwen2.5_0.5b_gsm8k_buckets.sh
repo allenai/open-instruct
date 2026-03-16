@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k}"
+EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k_buckets}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 
