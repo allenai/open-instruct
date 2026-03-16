@@ -64,7 +64,7 @@ from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_K
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.tools.utils import ToolOutput
-from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
+from open_instruct.utils import ModelDims, configure_hf_hub_retry, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -606,6 +606,7 @@ class LLMRayActor:
         eval_dataset=None,
         **kwargs,
     ):
+        configure_hf_hub_retry()
         assert_threaded_actor(self)
         self._init_config(
             tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
