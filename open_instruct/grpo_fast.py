@@ -70,6 +70,8 @@ import torch.utils
 import torch.utils.data
 import wandb
 from datasets import Dataset
+from einops import rearrange
+from fla.layers import utils as fla_layer_utils
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -138,6 +140,117 @@ WEIGHT_SYNC_TIMEOUT_S = 1200.0
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
+
+
+def _patch_gated_deltanet_cu_seqlens():
+    """Monkey-patch OlmoHybridGatedDeltaNet.forward to pass cu_seqlens to recurrent kernels.
+
+    The transformers implementation doesn't pass cu_seqlens, so recurrent state leaks
+    across packed sequence boundaries. The FLA kernels (chunk_gated_delta_rule and
+    ShortConvolution) already support cu_seqlens — we just need to derive it from
+    the attention mask and pass it through, matching what olmo-core does.
+    """
+    _original_forward = modeling_olmo_hybrid.OlmoHybridGatedDeltaNet.forward
+
+    def _cu_seqlens_from_packed_mask(attention_mask: torch.Tensor) -> torch.Tensor:
+        """Derive cu_seqlens from a packed attention mask with unique sequence IDs.
+
+        For a mask like [1,1,1,2,2,0,0], returns cu_seqlens [0, 3, 5] (ignoring padding).
+        For a standard 0/1 mask, returns cu_seqlens [0, num_ones].
+        """
+        flat = attention_mask.flatten()
+        non_pad = flat > 0
+        non_pad_ids = flat[non_pad]
+        if len(non_pad_ids) == 0:
+            return torch.tensor([0], dtype=torch.int32, device=attention_mask.device)
+        boundaries = torch.where(non_pad_ids[1:] != non_pad_ids[:-1])[0] + 1
+        cu_seqlens = torch.zeros(len(boundaries) + 2, dtype=torch.int32, device=attention_mask.device)
+        cu_seqlens[1:-1] = boundaries
+        cu_seqlens[-1] = len(non_pad_ids)
+        return cu_seqlens
+
+    def _forward_with_cu_seqlens(
+        self, hidden_states: torch.Tensor, cache_params=None, cache_position=None, attention_mask=None, **kwargs
+    ) -> torch.Tensor:
+        batch_size, seq_len, _ = hidden_states.shape
+
+        use_cache = cache_params is not None
+        use_precomputed = use_cache and getattr(cache_params, "has_previous_state", False) and seq_len == 1
+
+        # For single-token decoding or no attention mask, fall back to original.
+        if use_precomputed or attention_mask is None:
+            return _original_forward(self, hidden_states, cache_params, cache_position, attention_mask, **kwargs)
+
+        # Derive cu_seqlens and unpad hidden_states (matching olmo-core approach).
+        cu_seqlens = _cu_seqlens_from_packed_mask(attention_mask)
+        indices = torch.nonzero(attention_mask.flatten() > 0, as_tuple=False).flatten()
+        hidden_states = fla_layer_utils.index_first_axis(
+            rearrange(hidden_states, "b s ... -> (b s) ..."), indices
+        ).unsqueeze(0)
+
+        conv_state_q = cache_params.conv_states_q[self.layer_idx] if cache_params else None
+        conv_state_k = cache_params.conv_states_k[self.layer_idx] if cache_params else None
+        conv_state_v = cache_params.conv_states_v[self.layer_idx] if cache_params else None
+        recurrent_state = cache_params.recurrent_states[self.layer_idx] if cache_params else None
+
+        q = self.q_proj(hidden_states)
+        k = self.k_proj(hidden_states)
+        v = self.v_proj(hidden_states)
+
+        q, new_conv_state_q = self.q_conv1d(q, cache=conv_state_q, output_final_state=use_cache, cu_seqlens=cu_seqlens)
+        k, new_conv_state_k = self.k_conv1d(k, cache=conv_state_k, output_final_state=use_cache, cu_seqlens=cu_seqlens)
+        v, new_conv_state_v = self.v_conv1d(v, cache=conv_state_v, output_final_state=use_cache, cu_seqlens=cu_seqlens)
+
+        if cache_params is not None:
+            cache_params.conv_states_q[self.layer_idx] = new_conv_state_q
+            cache_params.conv_states_k[self.layer_idx] = new_conv_state_k
+            cache_params.conv_states_v[self.layer_idx] = new_conv_state_v
+
+        unpadded_len = hidden_states.shape[1]
+        q = q.view(1, unpadded_len, -1, self.head_k_dim)
+        k = k.view(1, unpadded_len, -1, self.head_k_dim)
+        v = v.view(1, unpadded_len, -1, self.head_v_dim)
+
+        if self.num_v_heads > self.num_k_heads:
+            expand_ratio = self.num_v_heads // self.num_k_heads
+            q = q.repeat_interleave(expand_ratio, dim=2)
+            k = k.repeat_interleave(expand_ratio, dim=2)
+
+        beta = self.b_proj(hidden_states).sigmoid()
+        if self.allow_neg_eigval:
+            beta = beta * 2.0
+
+        g = -self.A_log.float().exp() * torch.nn.functional.softplus(self.a_proj(hidden_states).float() + self.dt_bias)
+
+        output, new_recurrent_state = self.chunk_gated_delta_rule(
+            q,
+            k,
+            v,
+            g=g,
+            beta=beta,
+            initial_state=recurrent_state,
+            output_final_state=use_cache,
+            cu_seqlens=cu_seqlens,
+            use_qk_l2norm_in_kernel=True,
+        )
+
+        if cache_params is not None:
+            cache_params.recurrent_states[self.layer_idx] = new_recurrent_state
+
+        gate = self.g_proj(hidden_states)
+        output = output.reshape(-1, self.head_v_dim)
+        gate = gate.reshape(-1, self.head_v_dim)
+        output = self.o_norm(output, gate)
+        output = output.reshape(1, unpadded_len, -1)
+        output = self.o_proj(output)
+
+        # Re-pad output to original shape.
+        output = fla_layer_utils.pad_input(output.squeeze(0), indices, batch_size, seq_len)
+
+        return output
+
+    modeling_olmo_hybrid.OlmoHybridGatedDeltaNet.forward = _forward_with_cu_seqlens
+    logger.info("Patched OlmoHybridGatedDeltaNet.forward to pass cu_seqlens for packed sequences")
 
 
 @ray.remote(num_gpus=1)
@@ -254,7 +367,6 @@ class PolicyTrainerRayProcess(RayProcess):
         # on non-owning ranks). Monkey-patch until fixed upstream:
         # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
         _model_config = AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
-        self.is_recurrent_model = _model_config.model_type == "olmo_hybrid"
         if _model_config.model_type == "olmo_hybrid":
             _original_init_weights = modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights
 
@@ -269,6 +381,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 _original_init_weights(self, module)
 
             modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights = _init_weights_zero3_safe
+
+            _patch_gated_deltanet_cu_seqlens()
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -558,12 +672,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy,
-                    data_BT,
-                    self.pad_token_id,
-                    self.streaming_config.temperature,
-                    use_grad=False,
-                    reset_recurrent_state=self.is_recurrent_model,
+                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -575,12 +684,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model,
-                        data_BT,
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        use_grad=False,
-                        reset_recurrent_state=self.is_recurrent_model,
+                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                     )
 
                 with torch.no_grad():
@@ -641,7 +745,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.pad_token_id,
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
-                        reset_recurrent_state=self.is_recurrent_model,
                     )
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]

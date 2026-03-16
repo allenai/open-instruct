@@ -223,15 +223,21 @@ def _hf_score(
 
 
 class TestPackingStateLeak(unittest.TestCase):
-    """Test that packed sequences produce the same logprobs as individual sequences.
+    """Test that cu_seqlens monkey-patch resets recurrent state at sequence boundaries.
 
     For hybrid (recurrent) models, packing multiple sequences into one forward pass
-    can leak recurrent state across sequence boundaries. The fix in
-    _forward_packed_sequences_separately should make packed logprobs match individual.
+    can leak recurrent state across sequence boundaries. The monkey-patch in
+    grpo_fast._patch_gated_deltanet_cu_seqlens passes cu_seqlens to FLA kernels
+    so state resets happen natively inside a single forward pass.
     """
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     def test_packed_vs_individual_logprobs(self):
+        from open_instruct import grpo_fast
+        from open_instruct import grpo_utils
+
+        grpo_fast._patch_gated_deltanet_cu_seqlens()
+
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             HYBRID_MODEL, trust_remote_code=True,
         )
@@ -294,8 +300,6 @@ class TestPackingStateLeak(unittest.TestCase):
         seq_ids = seq_ids[seq_ids > 0]
         self.assertEqual(len(seq_ids), 2, "Expected 2 sequences packed together")
 
-        from open_instruct import grpo_utils
-
         input_ids = packed.query_responses[0].unsqueeze(0).to("cuda")
         attn = packed.attention_masks[0].unsqueeze(0).to("cuda")
         pos_ids = packed.position_ids[0].unsqueeze(0).to("cuda")
@@ -304,27 +308,6 @@ class TestPackingStateLeak(unittest.TestCase):
         with torch.no_grad():
             packed_logprobs, _ = grpo_utils.forward_for_logprobs(
                 model, input_ids, attn, pos_ids, pad_id, temperature=1.0,
-                reset_recurrent_state=True,
-            )
-
-            naive_logprobs, _ = grpo_utils.forward_for_logprobs(
-                model, input_ids, attn, pos_ids, pad_id, temperature=1.0,
-                reset_recurrent_state=False,
-            )
-
-        for seq_id in seq_ids:
-            mask = attn[0] == seq_id
-            indices = mask.nonzero(as_tuple=True)[0]
-            seq_start = indices[0].item()
-            seq_end = indices[-1].item() + 1
-
-            packed_seq = packed_logprobs[0, seq_start:seq_end - 1]
-            naive_seq = naive_logprobs[0, seq_start:seq_end - 1]
-
-            diff = (packed_seq - naive_seq).abs()
-            logger.info(
-                "seq_id=%d start=%d end=%d mean_diff=%.6f max_diff=%.6f",
-                seq_id.item(), seq_start, seq_end, diff.mean().item(), diff.max().item(),
             )
 
         second_id = seq_ids[1]
@@ -337,19 +320,10 @@ class TestPackingStateLeak(unittest.TestCase):
             model, input_ids[0, s2_start:s2_end], pad_id,
         )
         packed_second = packed_logprobs[0, s2_start:s2_end - 1]
-        naive_second = naive_logprobs[0, s2_start:s2_end - 1]
 
         reset_diff = (packed_second - individual_logprobs).abs().mean().item()
-        naive_diff = (naive_second - individual_logprobs).abs().mean().item()
-        logger.info(
-            "Second sequence: reset_vs_individual=%.6f naive_vs_individual=%.6f",
-            reset_diff, naive_diff,
-        )
-        self.assertLess(
-            reset_diff, naive_diff + 1e-6,
-            "State-reset logprobs should be closer to individual than naive packed",
-        )
-        self.assertLess(reset_diff, 0.5, "State-reset logprobs should nearly match individual")
+        logger.info("Second sequence: patched_vs_individual=%.6f", reset_diff)
+        self.assertLess(reset_diff, 0.5, "cu_seqlens-patched logprobs should nearly match individual")
 
         del model
         gc.collect()
