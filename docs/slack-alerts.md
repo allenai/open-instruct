@@ -1,19 +1,18 @@
 # Slack Alerts
 
-Open Instruct can send Slack notifications during training. GRPO and DPO each have their own integration.
+Open Instruct can send Slack notifications during training. Both GRPO and DPO use the `SLACK_WEBHOOK_URL` environment variable.
+
+Set `SLACK_WEBHOOK_URL` to a webhook URL for the appropriate channel. We have a bunch of [existing webhooks](https://api.slack.com/apps?new_app=1), and you can also [create a new one](https://api.slack.com/messaging/webhooks) if none of the existing ones suit you.
+
+When running on Beaker, `mason.py` auto-injects the `SLACK_WEBHOOK_URL` Beaker secret as an environment variable (just like `HF_TOKEN` or `WANDB_API_KEY`). Create a Beaker secret named `SLACK_WEBHOOK_URL` (or `{username}_SLACK_WEBHOOK_URL`) and it will be available automatically.
 
 ## GRPO
 
 GRPO sends alerts on training failures and low disk space during checkpointing.
 
-### Setup
-
-1. Create a [Slack incoming webhook](https://api.slack.com/messaging/webhooks) for your channel.
-2. Set the `SLACK_WEBHOOK` environment variable to the webhook URL.
-3. Pass `--send_slack_alerts` to the training script.
+Pass `--send_slack_alerts` to enable alerts:
 
 ```bash
-export SLACK_WEBHOOK="https://hooks.slack.com/services/T.../B.../xxx"
 python open_instruct/grpo_fast.py \
     --send_slack_alerts \
     ...
@@ -28,16 +27,10 @@ If the `BEAKER_WORKLOAD_ID` environment variable is set, the Beaker experiment U
 
 ## DPO
 
-DPO uses OLMo-core's `SlackNotifierCallback`.
-
-### Setup
-
-Set the `SLACK_WEBHOOK_URL` environment variable (note: this is a different env var than GRPO's `SLACK_WEBHOOK`).
+DPO uses OLMo-core's `SlackNotifierCallback`. Pass `--send_slack_alerts` to enable it:
 
 ```bash
-export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/T.../B.../xxx"
 python open_instruct/dpo.py \
+    --send_slack_alerts \
     ...
 ```
-
-No additional flags are needed — the callback is automatically registered when `SLACK_WEBHOOK_URL` is present.

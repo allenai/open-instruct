@@ -323,6 +323,8 @@ class ExperimentConfig(
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
