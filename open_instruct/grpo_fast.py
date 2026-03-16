@@ -1424,6 +1424,48 @@ class PolicyTrainerRayProcess(RayProcess):
                             [v for v in variance_by_position if v > 0]
                         )) if any(v > 0 for v in variance_by_position) else 0.0
 
+                # (2) Mean value for correct vs incorrect rollouts
+                if num_samples > 0 and data_BT.rewards is not None and data_BT.dones is not None:
+                    correct_values = []
+                    incorrect_values = []
+                    for i in range(num_samples):
+                        mask = data_BT.response_masks[i][:, 1:].cpu().float()
+                        vals = old_values_BT[i].cpu().float()
+                        rewards = data_BT.rewards[i][:, 1:].cpu().float()
+                        dones = data_BT.dones[i][:, 1:].cpu()
+                        for b in range(vals.shape[0]):
+                            eos_positions = (dones[b] > 0).nonzero(as_tuple=True)[0]
+                            start = 0
+                            for eos_pos in eos_positions:
+                                end = eos_pos.item() + 1
+                                seg_reward = rewards[b, eos_pos].item()
+                                seg_mask = mask[b, start:end]
+                                seg_vals = vals[b, start:end]
+                                valid = seg_vals[seg_mask > 0]
+                                if len(valid) > 0:
+                                    mean_val = valid.mean().item()
+                                    if seg_reward > 0:
+                                        correct_values.append(mean_val)
+                                    else:
+                                        incorrect_values.append(mean_val)
+                                start = end
+                    if correct_values:
+                        self.local_metrics["value/correct_rollout_mean"] = float(np.mean(correct_values))
+                    if incorrect_values:
+                        self.local_metrics["value/incorrect_rollout_mean"] = float(np.mean(incorrect_values))
+                    if correct_values and incorrect_values:
+                        self.local_metrics["value/correct_vs_incorrect_gap"] = (
+                            float(np.mean(correct_values)) - float(np.mean(incorrect_values))
+                        )
+
+                # (8) Value model gradient norm
+                if hasattr(self, "value_model"):
+                    total_norm = 0.0
+                    for p in self.value_model.parameters():
+                        if p.grad is not None:
+                            total_norm += p.grad.data.float().norm(2).item() ** 2
+                    self.local_metrics["value/gradient_norm"] = float(total_norm ** 0.5)
+
             torch.cuda.empty_cache()
 
         # ========================================================================
