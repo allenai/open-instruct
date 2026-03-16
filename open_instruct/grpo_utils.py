@@ -15,6 +15,7 @@ from open_instruct.utils import (
 )
 
 logger = logger_utils.setup_logger(__name__)
+TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
 
 class GRPOLossType(enum.StrEnum):
@@ -67,6 +68,8 @@ class ExperimentConfig:
     """How many train steps to save the model"""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
+    model_dtype: str = "bfloat16"
+    """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
     num_epochs: int = 1
