@@ -2193,6 +2193,15 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: ToolsConfig,
 ):
+    # Pre-download model to shared HF cache so parallel processes don't all hit HF API.
+    # After download, set offline mode so transformers doesn't make API calls (e.g.
+    # model_info() inside AutoTokenizer which triggers 429 rate limits).
+    huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+        huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    logger.info("Model and tokenizer cached in shared HF cache; switching to offline mode.")
+
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
@@ -2233,12 +2242,6 @@ def main(
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
-
-    # Pre-download model to shared HF cache so Ray actors don't all hit HF API.
-    huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
-    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
-        huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
-    logger.info("Model and tokenizer cached in shared HF cache.")
 
     if args.cache_dataset_only:
         return
