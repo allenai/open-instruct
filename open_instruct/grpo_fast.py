@@ -1458,13 +1458,19 @@ class PolicyTrainerRayProcess(RayProcess):
                             float(np.mean(correct_values)) - float(np.mean(incorrect_values))
                         )
 
-                # (8) Value model gradient norm
+                # (8) Value model gradient norm (use DeepSpeed's built-in if available)
                 if hasattr(self, "value_model"):
-                    total_norm = 0.0
-                    for p in self.value_model.parameters():
-                        if p.grad is not None:
-                            total_norm += p.grad.data.float().norm(2).item() ** 2
-                    self.local_metrics["value/gradient_norm"] = float(total_norm ** 0.5)
+                    try:
+                        if hasattr(self.value_model, "get_global_grad_norm"):
+                            self.local_metrics["value/gradient_norm"] = float(self.value_model.get_global_grad_norm())
+                        else:
+                            total_norm = 0.0
+                            for p in self.value_model.parameters():
+                                if p.grad is not None and hasattr(p.grad, "data"):
+                                    total_norm += p.grad.data.float().norm(2).item() ** 2
+                            self.local_metrics["value/gradient_norm"] = float(total_norm ** 0.5)
+                    except Exception:
+                        pass
 
             torch.cuda.empty_cache()
 
@@ -1812,18 +1818,22 @@ class PolicyTrainerRayProcess(RayProcess):
             value_model_dir = output_path / "value_model"
             if self.rank == 0:
                 value_model_dir.mkdir(parents=True, exist_ok=True)
-            vm = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
-            for param in self.value_model.parameters():
-                if hasattr(param, "ds_active_sub_modules"):
-                    param.ds_active_sub_modules.clear()
-            vm_state_dict = {}
-            with deepspeed.zero.GatheredParameters(list(vm.parameters()), enabled=self.args.deepspeed_stage == 3):
+            try:
+                vm = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+                for param in self.value_model.parameters():
+                    if hasattr(param, "ds_active_sub_modules"):
+                        param.ds_active_sub_modules.clear()
+                vm_state_dict = {}
                 for k, v in vm.named_parameters():
-                    if self.rank == 0:
-                        vm_state_dict[k] = v.data.cpu()
-            if self.rank == 0:
-                torch.save(vm_state_dict, value_model_dir / "value_model.bin")
-                logger.info(f"Saved value model to {value_model_dir}")
+                    params_to_fetch = _z3_params_to_fetch([v])
+                    with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                        if self.rank == 0:
+                            vm_state_dict[k] = v.data.cpu()
+                if self.rank == 0:
+                    torch.save(vm_state_dict, value_model_dir / "value_model.bin")
+                    logger.info(f"Saved value model to {value_model_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to save value model: {e}")
 
         if self.rank == 0:
             marker_path.touch()
