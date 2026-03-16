@@ -2262,6 +2262,9 @@ def main(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
 
+    if args.cache_dataset_only:
+        return
+
     if not os.path.exists(model_config.model_name_or_path):
         huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
     if (
@@ -2271,9 +2274,6 @@ def main(
     ):
         huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
     logger.info("Model and tokenizer cached in shared HF cache.")
-
-    if args.cache_dataset_only:
-        return
 
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
