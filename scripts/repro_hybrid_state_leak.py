@@ -9,10 +9,11 @@ pass against individual forward passes. The second sequence in a packed batch
 should have identical logprobs whether or not the first sequence precedes it,
 but due to the state leak, the logprobs differ significantly.
 
-Dependencies: torch, transformers (no open-instruct internals).
+Requires: torch, transformers>=5.3.0 (no open-instruct internals).
 
 Usage:
-    HF_TOKEN=<token> uv run python scripts/repro_hybrid_state_leak.py
+    pip install transformers>=5.3.0
+    HF_TOKEN=<token> python scripts/repro_hybrid_state_leak.py
 """
 
 import os
@@ -20,7 +21,7 @@ import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-MODEL_NAME = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
+MODEL_NAME = "allenai/Olmo-Hybrid-7B"
 
 PROMPTS = [
     [{"role": "user", "content": "What is the capital of France?"}],
@@ -72,7 +73,6 @@ def main():
         torch_dtype=torch.bfloat16,
         use_cache=False,
         attn_implementation="flash_attention_2",
-        trust_remote_code=True,
     ).to(device)
     model.eval()
 
