@@ -36,24 +36,24 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 30720 \
-    --pack_length 32768 \
+    --response_length 32768 \
+    --pack_length 35840 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 64 \
+    --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 8 \
-    --inflight_updates true \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --temperature 1.0 \
-    --learning_rate 3e-7 \
-    --total_episodes 512000 \
+    --learning_rate 1e-6 \
+    --total_episodes 100000000 \
+    --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
     --num_epochs 1 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 24 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.01 \
+    --beta 0.0 \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
@@ -62,11 +62,16 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --pool_size 256 \
     --max_steps 100 \
     --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
+    --backend_timeout 1200 \
+    --checkpoint_state_freq 50 \
+    --inflight_updates true \
+    --advantage_normalization_type centered \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
