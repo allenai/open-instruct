@@ -40,6 +40,7 @@ import os
 import random
 import re
 import shutil
+import smtplib
 import socket
 import subprocess
 import sys
@@ -50,6 +51,7 @@ from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
+from email.message import EmailMessage
 from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
@@ -2512,20 +2514,38 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
 
 
 def send_slack_message(message: str) -> None:
-    """Sends a message to a Slack webhook if configured.
+    """Sends a Slack alert using email or a webhook if configured.
 
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
-    if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
-        return
-
     beaker_url = get_beaker_experiment_url()
     beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+    full_message = f"{message}{beaker_suffix}"
 
-    payload = {"text": f"{message}{beaker_suffix}"}
+    slack_email_address = os.environ.get("SLACK_EMAIL_ADDRESS")
+    if slack_email_address:
+        email_message = EmailMessage()
+        email_message["To"] = slack_email_address
+        email_message["Subject"] = "open-instruct alert"
+        email_message["From"] = os.environ.get("ALERT_EMAIL_SENDER", "open-instruct@localhost")
+        email_message.set_content(full_message)
+
+        smtp_host = os.environ.get("SMTP_HOST", "localhost")
+        smtp_port = int(os.environ.get("SMTP_PORT", "25"))
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port) as smtp:
+                smtp.send_message(email_message)
+            return
+        except OSError as exc:
+            logger.warning("Failed to send Slack alert email due to SMTP error: %s", exc)
+
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    if not slack_webhook_url:
+        logger.warning("SLACK_EMAIL_ADDRESS and SLACK_WEBHOOK environment variables not set. Skipping Slack alert.")
+        return
+
+    payload = {"text": full_message}
     try:
         response = requests.post(slack_webhook_url, json=payload)
         if not response.ok:

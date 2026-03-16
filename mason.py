@@ -104,6 +104,8 @@ DEFAULT_ENV_VARS = {
     "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
 }
 
+PASSTHROUGH_ENV_VARS = ["SLACK_EMAIL_ADDRESS"]
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -299,6 +301,14 @@ def get_env_vars(
     # use the user's PATH; including the conda / python PATH
     if not pure_docker_mode:
         env_vars.extend([beaker.BeakerEnvVar(name="PATH", value=os.getenv("PATH"))])
+
+    env_vars.extend(
+        [
+            beaker.BeakerEnvVar(name=env_var, value=os.environ[env_var])
+            for env_var in PASSTHROUGH_ENV_VARS
+            if env_var in os.environ and env_var not in additional_env_var_names
+        ]
+    )
 
     # if all cluster is in weka, we mount the weka
     if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):

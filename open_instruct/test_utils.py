@@ -293,12 +293,38 @@ class TestBeakerDescription(unittest.TestCase):
 
 
 class TestSlackMessage(unittest.TestCase):
-    @responses.activate
+    @mock.patch.dict(
+        os.environ,
+        {
+            "SLACK_EMAIL_ADDRESS": "alerts@example.com",
+            "ALERT_EMAIL_SENDER": "sender@example.com",
+            "SMTP_HOST": "smtp.example.com",
+            "SMTP_PORT": "2525",
+        },
+        clear=True,
+    )
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
-    @mock.patch("os.environ.get")
-    def test_send_slack_message_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
-        webhook_url = "https://hooks.slack.com/services/test"
-        mock_environ_get.return_value = webhook_url
+    @mock.patch("smtplib.SMTP")
+    def test_send_slack_message_with_email_address(self, mock_smtp, mock_get_beaker_url):
+        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
+
+        utils.send_slack_message("<!here> Disk is nearly full.")
+
+        mock_smtp.assert_called_once_with("smtp.example.com", 2525)
+        smtp_instance = mock_smtp.return_value.__enter__.return_value
+        smtp_instance.send_message.assert_called_once()
+        email_message = smtp_instance.send_message.call_args.args[0]
+        self.assertEqual(email_message["To"], "alerts@example.com")
+        self.assertEqual(email_message["From"], "sender@example.com")
+        self.assertEqual(email_message["Subject"], "open-instruct alert")
+        self.assertIn("Disk is nearly full", email_message.get_content())
+        self.assertIn("https://beaker.org/ex/test-456", email_message.get_content())
+
+    @responses.activate
+    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK": "https://hooks.slack.com/services/test"}, clear=True)
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
+    def test_send_slack_message_with_beaker_url(self, mock_get_beaker_url):
+        webhook_url = os.environ["SLACK_WEBHOOK"]
         mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
 
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
