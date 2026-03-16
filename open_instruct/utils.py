@@ -951,6 +951,13 @@ def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
     huggingface_hub.configure_http_backend(backend_factory=backend_factory)
 
 
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> bool:
+    if os.path.exists(repo_id):
+        return False
+    huggingface_hub.snapshot_download(repo_id, revision=revision)
+    return True
+
+
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)

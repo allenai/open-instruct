@@ -61,7 +61,6 @@ from typing import Any
 
 import backoff
 import datasets
-import huggingface_hub
 import numpy as np
 import pandas as pd
 import ray
@@ -2266,15 +2265,11 @@ def main(
     if args.cache_dataset_only:
         return
 
-    if not os.path.exists(model_config.model_name_or_path):
-        huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
-    if (
-        tc.tokenizer_name_or_path
-        and tc.tokenizer_name_or_path != model_config.model_name_or_path
-        and not os.path.exists(tc.tokenizer_name_or_path)
-    ):
-        huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
-    logger.info("Model and tokenizer cached in shared HF cache.")
+    downloaded = utils.ensure_hf_repo_cached(model_config.model_name_or_path, revision=model_config.model_revision)
+    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+        downloaded |= utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
+    if downloaded:
+        logger.info("Model and tokenizer cached in shared HF cache.")
 
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
