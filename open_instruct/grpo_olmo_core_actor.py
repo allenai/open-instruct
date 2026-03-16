@@ -6,7 +6,6 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 """
 
 import os
-import socket
 from datetime import timedelta
 from typing import Any
 
@@ -35,15 +34,6 @@ from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 
-def _get_local_world_size(num_learners_per_node: list[int], rank: int) -> int:
-    remaining = rank
-    for gpus in num_learners_per_node:
-        if remaining < gpus:
-            return gpus
-        remaining -= gpus
-    raise ValueError(f"rank {rank} exceeds total world size")
-
-
 @ray.remote(num_gpus=1)
 class PolicyTrainerOLMoCoreProcess(RayProcess):
     """Ray actor for OLMo-core based GRPO training.
@@ -59,26 +49,28 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
-        args: grpo_utils.ExperimentConfig,
+        local_world_size: int,
+        model_name_or_path: str,
+        grpo_config: grpo_utils.ExperimentConfig,
+        max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        model_name_or_path: str,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
-        self._args = args
+        self.local_world_size = local_world_size
+        self.tokenizer = tokenizer
         self.model_name_or_path = model_name_or_path
+        self.grpo_config = grpo_config
+        self.max_sequence_length = max_sequence_length
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self.tokenizer = tokenizer
-        self.pad_token_id = tokenizer.pad_token_id
         self.data_prep_actor_name = data_prep_actor_name
 
         self.ref_policy = None
         self.vllm_engines = None
         self.model_update_group = None
-        self.local_metrics = {}
         self.actor_manager = None
         self.with_tracking = False
         self.wandb_project = None
@@ -93,14 +85,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Returns:
             The training step to resume from (1 if starting fresh).
         """
-        assert self._args.num_training_steps is not None
-        num_nodes = len(self._args.num_learners_per_node)
-        local_world_size = _get_local_world_size(self._args.num_learners_per_node, self.rank)
-        max_sequence_length = self.streaming_config.max_prompt_token_length + self.streaming_config.response_length
+        os.environ["NUM_NODES"] = str(self.grpo_config.num_nodes)
+        os.environ["LOCAL_WORLD_SIZE"] = str(self.local_world_size)
+        os.environ["FS_LOCAL_RANK"] = str(self.rank)
 
-        os.environ["NUM_NODES"] = str(num_nodes)
-        os.environ["LOCAL_WORLD_SIZE"] = str(local_world_size)
-
+        # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
         torch.cuda.set_device(0)
         logger.info(
             f"[Rank {self.rank}] Set CUDA device to 0, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}"
@@ -108,14 +97,16 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if not torch.distributed.is_initialized():
             logger.info(f"[Rank {self.rank}] Calling init_process_group with NCCL backend...")
-            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=120))
+            torch.distributed.init_process_group(
+                backend="nccl", timeout=timedelta(minutes=self.grpo_config.backend_timeout)
+            )
             logger.info(f"[Rank {self.rank}] init_process_group completed successfully")
         else:
             logger.info(f"[Rank {self.rank}] Process group already initialized")
 
         backend = "cpu:gloo,cuda:nccl"
         logger.info(f"[Rank {self.rank}] Calling train.prepare_training_environment...")
-        train.prepare_training_environment(seed=self._args.seed, backend=backend)
+        train.prepare_training_environment(seed=self.grpo_config.seed, backend=backend)
         logger.info(f"[Rank {self.rank}] train.prepare_training_environment completed")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -123,70 +114,79 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
         vocab_size = hf_config.vocab_size
 
-        logger.info(f"[Rank {self.rank}] Building OLMo-core model for {self.model_name_or_path}")
-        model_config_olmo = olmo_core_utils.get_transformer_config(self.model_name_or_path, vocab_size)
-        self.model = model_config_olmo.build(init_device="cpu")
+        torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
+        olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        logger.info(f"[Rank {self.rank}] Loading HuggingFace weights from {self.model_name_or_path}")
-        load_hf_model(self.model_name_or_path, self.model.state_dict(), work_dir=self._args.output_dir)
+        self.model_config = olmo_core_utils.get_transformer_config(self.model_name_or_path, vocab_size)
+        logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
+        self.model = self.model_config.build(init_device="cpu")
 
-        if self._args.single_gpu_mode:
-            logger.info(f"[Rank {self.rank}] Converting model to bfloat16 for single_gpu_mode")
-            self.model = self.model.to(dtype=torch.bfloat16)
-
-        if self._args.load_ref_policy and self._args.beta > 0:
+        if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
-            self.ref_policy = model_config_olmo.build(init_device="cpu")
-            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self._args.output_dir)
-            self.ref_policy = self.ref_policy.to(device=device, dtype=torch.bfloat16).eval()
+            self.ref_policy = self.model_config.build(init_device="cpu")
+            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir)
+            self.ref_policy = self.ref_policy.to(device=device, dtype=torch_dtype).eval()
 
+        assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
             data_prep_actor_name=self.data_prep_actor_name,
             tokenizer=self.tokenizer,
             dp_rank=self.rank,
             fs_local_rank=self.rank,
-            num_training_steps=self._args.num_training_steps,
-            work_dir=self._args.output_dir,
+            num_training_steps=self.grpo_config.num_training_steps,
+            work_dir=self.grpo_config.output_dir,
             dp_world_size=self.world_size,
         )
-        self.dataloader_iter = iter(self.dataloader)
 
-        num_scheduler_steps = self._args.num_training_steps * self._args.num_epochs * self._args.num_mini_batches
-        warmup_steps = self._args.warm_up_steps
-        if self._args.warmup_ratio > 0.0:
-            warmup_steps = int(num_scheduler_steps * self._args.warmup_ratio)
+        num_scheduler_steps = (
+            self.grpo_config.num_training_steps * self.grpo_config.num_epochs * self.grpo_config.num_mini_batches
+        )
+        warmup_steps = self.grpo_config.warm_up_steps
+        if self.grpo_config.warmup_ratio > 0.0:
+            warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
 
-        if self._args.lr_scheduler_type == "cosine":
+        if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
         else:
             scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
 
-        optim_config = AdamWConfig(lr=self._args.learning_rate, weight_decay=self._args.weight_decay)
+        optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
 
         dp_config = None
-        if not self._args.single_gpu_mode and self.world_size > 1:
+        if not self.grpo_config.single_gpu_mode and self.world_size > 1:
             dp_config = TransformerDataParallelConfig(
                 name=DataParallelType.hsdp,
-                param_dtype=DType.bfloat16,
+                param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
 
-        self._args.temperature = self.streaming_config.temperature
+        self.grpo_config.temperature = self.streaming_config.temperature
 
         self.train_module = GRPOTrainModule(
             model=self.model,
             optim=optim_config,
-            rank_microbatch_size=self._args.per_device_train_batch_size,
-            max_sequence_length=max_sequence_length,
-            grpo_config=self._args,
+            rank_microbatch_size=self.grpo_config.per_device_train_batch_size,
+            max_sequence_length=self.max_sequence_length,
+            grpo_config=self.grpo_config,
             tokenizer=self.tokenizer,
             ref_policy=self.ref_policy,
             dp_config=dp_config,
-            max_grad_norm=self._args.max_grad_norm,
+            max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
         )
+
+        # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
+        # We must reload HF weights after parallelization (FSDP-first loading pattern).
+        logger.info(f"[Rank {self.rank}] Reloading HuggingFace weights after parallelization...")
+        sd = self.train_module.model.state_dict()
+        load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
+        self.train_module.model.load_state_dict(sd)
+
+        if self.grpo_config.single_gpu_mode:
+            logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
+            self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
@@ -198,10 +198,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if not vllm_engines or self.rank != 0:
             return
 
-        master_address = ray._private.services.get_node_ip_address()
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            master_port = sock.getsockname()[1]
+        master_address = self.get_current_node_ip()
+        master_port = self.get_free_port()
 
         vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
         backend = self.vllm_config.vllm_sync_backend
@@ -214,11 +212,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 vllm_world_size,
                 "openrlhf",
                 backend=backend,
-                timeout_minutes=120,
+                timeout_minutes=self.grpo_config.backend_timeout,
             )
             for i, engine in enumerate(vllm_engines)
         ]
 
+        # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
         torch.cuda.set_device(0)
         self.model_update_group = vllm_utils.init_process_group(
             backend=backend,
@@ -226,7 +225,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             world_size=vllm_world_size,
             rank=0,
             group_name="openrlhf",
-            timeout=timedelta(minutes=120),
+            timeout=timedelta(minutes=self.grpo_config.backend_timeout),
         )
 
         ray.get(refs)
@@ -267,12 +266,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 name_mapper=olmo_core_to_hf_name,
             )
 
-        if self.ref_policy is not None and self._args.beta > 0 and self.ref_policy_update_freq is not None:
+        if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
             trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(
-                ref_policy=self.ref_policy, alpha=self._args.alpha, update_interval=self.ref_policy_update_freq
+                ref_policy=self.ref_policy, alpha=self.grpo_config.alpha, update_interval=self.ref_policy_update_freq
             )
 
-        if is_beaker_job() and self.json_config:
+        if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
 
         if self.with_tracking:
@@ -280,11 +279,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
             )
 
-        assert self._args.num_training_steps is not None
-        os.environ["FS_LOCAL_RANK"] = str(self.rank)
+        assert self.grpo_config.num_training_steps is not None
         self.trainer = train.TrainerConfig(
-            save_folder=self._args.output_dir,
-            max_duration=train.Duration.steps(self._args.num_training_steps),
+            save_folder=self.grpo_config.output_dir,
+            max_duration=train.Duration.steps(self.grpo_config.num_training_steps),
             metrics_collect_interval=10,
             callbacks=trainer_callbacks,
         ).build(self.train_module, self.dataloader)
@@ -298,20 +296,23 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
     def save_model(
         self, output_dir: str, chat_template_name: str, tokenizer: transformers.PreTrainedTokenizer
     ) -> None:
-        """Save model checkpoint."""
+        """Save model checkpoint.
+
+        All ranks must call this method because state_dict() and full_tensor()
+        are collective operations when FSDP is enabled.
+        """
+        state_dict = self.train_module.model.state_dict()
+        state_dict = {
+            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
+        }
+
         if self.rank != 0:
             return
 
         os.makedirs(output_dir, exist_ok=True)
-
-        state_dict = {}
-        model = self.train_module.model
-        for name, param in model.named_parameters():
-            hf_name = olmo_core_to_hf_name(name)
-            state_dict[hf_name] = param.data.cpu()
-
-        torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-        tokenizer.save_pretrained(output_dir)
+        olmo_core_utils.save_state_dict_as_hf(
+            self.model_config, state_dict, output_dir, self.model_name_or_path, tokenizer
+        )
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 
@@ -325,37 +326,54 @@ class OLMoCoreModelGroup:
         self,
         pg,
         num_gpus_per_node: list[int],
-        single_gpu_mode: bool,
-        args: grpo_utils.ExperimentConfig,
+        model_name_or_path: str,
+        grpo_config: grpo_utils.ExperimentConfig,
+        max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        model_name_or_path: str,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
-        self.num_gpus_per_actor = 0.48 if single_gpu_mode else 1
+        self.num_gpus_per_actor = 0.5 if grpo_config.single_gpu_mode else 1
         self.num_cpus_per_actor = 4
         self.models = []
         world_size = sum(num_gpus_per_node)
+
+        def get_node_info(rank, num_gpus_per_node):
+            """Returns (node_index, local_rank, local_world_size) for a given global rank."""
+            node_idx = 0
+            remaining_rank = rank
+            while remaining_rank >= num_gpus_per_node[node_idx]:
+                remaining_rank -= num_gpus_per_node[node_idx]
+                node_idx += 1
+            return node_idx, remaining_rank, num_gpus_per_node[node_idx]
+
+        common_kwargs = {
+            "world_size": world_size,
+            "model_name_or_path": model_name_or_path,
+            "grpo_config": grpo_config,
+            "max_sequence_length": max_sequence_length,
+            "streaming_config": streaming_config,
+            "vllm_config": vllm_config,
+            "data_prep_actor_name": data_prep_actor_name,
+            "tokenizer": tokenizer,
+        }
+
+        node_idx, local_rank, local_world_size = get_node_info(0, num_gpus_per_node)
 
         master_policy = PolicyTrainerOLMoCoreProcess.options(  # ty: ignore[unresolved-attribute]
             num_cpus=self.num_cpus_per_actor,
             num_gpus=self.num_gpus_per_actor,
             scheduling_strategy=PlacementGroupSchedulingStrategy(placement_group=pg, placement_group_bundle_index=0),
         ).remote(
-            world_size,
-            0,
-            0,
-            None,
-            None,
-            args,
-            streaming_config,
-            vllm_config,
-            data_prep_actor_name,
-            tokenizer,
-            model_name_or_path,
+            rank=0,
+            local_rank=local_rank,
+            master_addr=None,
+            master_port=None,
+            local_world_size=local_world_size,
+            **common_kwargs,
         )
 
         self.models.append(master_policy)
@@ -364,32 +382,21 @@ class OLMoCoreModelGroup:
         )
         (master_addr, master_port) = results[0]
 
-        def get_bundle_index(rank, num_gpus_per_node):
-            bundle_idx = 0
-            while rank >= num_gpus_per_node[bundle_idx]:
-                rank -= num_gpus_per_node[bundle_idx]
-                bundle_idx += 1
-            return bundle_idx
-
         for rank in range(1, world_size):
+            node_idx, local_rank, local_world_size = get_node_info(rank, num_gpus_per_node)
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=pg, placement_group_bundle_index=get_bundle_index(rank, num_gpus_per_node)
+                placement_group=pg, placement_group_bundle_index=node_idx
             )
             worker_policy = PolicyTrainerOLMoCoreProcess.options(  # ty: ignore[unresolved-attribute]
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
             ).remote(
-                world_size,
-                rank,
-                0,
-                master_addr,
-                master_port,
-                args,
-                streaming_config,
-                vllm_config,
-                data_prep_actor_name,
-                tokenizer,
-                model_name_or_path,
+                rank=rank,
+                local_rank=local_rank,
+                master_addr=master_addr,
+                master_port=master_port,
+                local_world_size=local_world_size,
+                **common_kwargs,
             )
             self.models.append(worker_policy)

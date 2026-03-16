@@ -25,7 +25,6 @@ import logging
 import os
 import shutil
 import time
-from dataclasses import asdict
 
 import ray
 from huggingface_hub import HfApi
@@ -38,12 +37,10 @@ from open_instruct import grpo_fast, grpo_utils, logger_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig
+from open_instruct.environments.tools.utils import EnvsConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 from open_instruct.grpo_olmo_core_actor import OLMoCoreModelGroup
 from open_instruct.model_utils import ModelConfig, push_folder_to_hub
-from open_instruct.tools.parsers import create_tool_parser
-from open_instruct.tools.tools import TOOL_REGISTRY
-from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     ArgumentParserPlus,
     is_beaker_job,
@@ -98,36 +95,6 @@ def create_generation_config(
     )
 
 
-def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
-    tool_actors = []
-    for parsed_tool in parsed_tools:
-        if parsed_tool.name not in TOOL_REGISTRY:
-            available_tools = ", ".join(TOOL_REGISTRY.keys())
-            raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
-
-        tool_config_class = TOOL_REGISTRY[parsed_tool.name]
-        config = tool_config_class(**parsed_tool.config)
-        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
-        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
-
-    return tool_actors
-
-
-def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
-    tool_actors = create_tools(tools_config._parsed_tools)
-    tool_definitions = (
-        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
-    )
-
-    stop_sequences = []
-    if tool_actors:
-        stop_sequences = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
-        ).stop_sequences
-
-    return tool_actors, tool_definitions, stop_sequences
-
-
 def wait_for_gpus(expected_gpus: int, max_attempts: int = 60, poll_interval: int = 5) -> None:
     logger.info(f"Waiting for {expected_gpus} GPUs to be available in Ray cluster...")
     for i in range(max_attempts):
@@ -174,7 +141,6 @@ def save_and_cleanup(
             oe_eval_max_length=args.oe_eval_max_length,
             wandb_url=None,
             oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
@@ -187,7 +153,7 @@ def main(
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
-    tools_config: ToolsConfig,
+    tools_config: EnvsConfig,
 ) -> None:
     """Main entry point for GRPO training with OLMo-core Trainer using Ray actors.
 
@@ -220,12 +186,17 @@ def main(
         },
     )
 
-    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
-    logger.info(
-        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    pool_size = tools_config.pool_size
+    if pool_size is None:
+        pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    pools, tool_definitions, tool_stop_sequences = grpo_fast.initialize_tools_and_envs(
+        tools_config,
+        tokenizer,
+        pool_size=pool_size,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
     )
     if tool_stop_sequences:
-        logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
     train_dataset, eval_dataset = grpo_fast.setup_datasets(
@@ -306,13 +277,13 @@ def main(
     policy_group = OLMoCoreModelGroup(
         pg=pg,
         num_gpus_per_node=args.num_learners_per_node,
-        single_gpu_mode=args.single_gpu_mode,
-        args=args,
+        model_name_or_path=model_config.model_name_or_path,
+        grpo_config=args,
+        max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
         data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
-        model_name_or_path=model_config.model_name_or_path,
     )
     logger.info("======== Policy group created =========")
 
@@ -334,10 +305,13 @@ def main(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tool_actors=tool_actors,
         tool_parser_type=tools_config.tool_parser_type,
-        max_tool_calls=tools_config.max_tool_calls,
+        tool_definitions=tool_definitions,
+        tool_stop_sequences=tool_stop_sequences,
+        max_steps=tools_config.max_steps,
+        per_turn_max_tokens=tools_config.per_turn_max_tokens,
         mask_tool_use=streaming_config.mask_tool_use,
+        pools=pools,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -394,7 +368,7 @@ if __name__ == "__main__":
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
-            ToolsConfig,
+            EnvsConfig,
         ]
     )
     args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
