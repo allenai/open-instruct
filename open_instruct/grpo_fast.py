@@ -2660,6 +2660,9 @@ def main(
             "prefill async steps without reuse. Continuing with prompt reuse across epochs."
         )
 
+    if args.cache_dataset_only:
+        return
+
     if not os.path.exists(model_config.model_name_or_path):
         huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
     if (
@@ -2669,9 +2672,6 @@ def main(
     ):
         huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
     logger.info("Model and tokenizer cached in shared HF cache.")
-
-    if args.cache_dataset_only:
-        return
 
     pprint([args, tc, model_config, streaming_config, vllm_config, tools_config])
 
