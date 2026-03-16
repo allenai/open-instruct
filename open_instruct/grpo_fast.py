@@ -1111,6 +1111,7 @@ def setup_experiment_tracking(
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
 ):
     """Setup experiment tracking and seeds."""
     all_configs = {}
@@ -1119,6 +1120,7 @@ def setup_experiment_tracking(
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
+    all_configs.update(**asdict(vllm_config))
 
     wandb_url = None
     if args.with_tracking:
@@ -2581,7 +2583,7 @@ def main(
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, streaming_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, streaming_config, vllm_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
