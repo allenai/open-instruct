@@ -201,8 +201,8 @@ class ExperimentConfig:
     """Optional eval-only top_k override. If None, uses training top_k."""
     eval_response_length: int | None = None
     """Optional eval-only max response length override. If None, uses training response_length."""
-    eval_timeout_minutes: int | None = None
-    """Optional timeout in minutes for final local eval result collection. If None, uses legacy behavior."""
+    eval_timeout_minutes: int | None = 120
+    """Timeout in minutes for final local eval result collection. Defaults to 2 hours."""
 
     def __post_init__(self):
         # Backwards-compatible alias handling:
