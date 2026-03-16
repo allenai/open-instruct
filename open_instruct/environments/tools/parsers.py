@@ -243,6 +243,15 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
         },
         output_postfix="<|im_start|>assistant\n",
     ),
+    # Qwen3 Coder-style tool calling (sentinel tokens: <tool_call>, <function=>, <parameter=>)
+    "vllm_qwen3_coder": VllmParserConfig(
+        import_path="vllm.tool_parsers.qwen3coder_tool_parser:Qwen3CoderToolParser",
+        role_templates={
+            "tool": "<|im_start|>tool\n{output}<|im_end|>\n",
+            "user": "<|im_start|>user\n{output}<|im_end|>\n",
+        },
+        output_postfix="<|im_start|>assistant\n",
+    ),
     # Qwen3.5 XML-style tool calling
     "vllm_qwen3_xml": VllmParserConfig(
         import_path="vllm.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
