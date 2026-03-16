@@ -31,7 +31,7 @@ uv run mason.py \
     --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
     -- \
-\&\& uv run --active open_instruct/grpo_fast.py \
+uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
     --beta 0.0 \
