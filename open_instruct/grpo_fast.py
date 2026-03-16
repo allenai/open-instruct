@@ -1380,17 +1380,17 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.local_metrics["value/predictions_mean"] = masked_values.mean().item()
                     self.local_metrics["value/predictions_std"] = masked_values.std().item()
 
-                # Log per-sequence mean values (histogram) and per-token value distribution
+                # Log value stats: per-position variance across rollouts, per-token histogram
                 if num_samples > 0:
                     all_response_values = []
-                    per_seq_mean_values = []
+                    from collections import defaultdict
+                    position_values = defaultdict(list)
                     for i in range(num_samples):
                         mask = data_BT.response_masks[i][:, 1:].cpu().float()
                         vals = old_values_BT[i].cpu().float()
                         dones = data_BT.dones[i][:, 1:].cpu() if data_BT.dones is not None else None
                         masked_vals = vals[mask > 0]
                         all_response_values.extend(masked_vals.tolist())
-                        # Compute per-sub-sequence mean values using dones boundaries
                         if dones is not None:
                             for b in range(vals.shape[0]):
                                 seq_mask = mask[b]
@@ -1402,14 +1402,27 @@ class PolicyTrainerRayProcess(RayProcess):
                                     end = eos_pos.item() + 1
                                     seg_mask = seq_mask[start:end]
                                     seg_vals = seq_vals[start:end]
-                                    valid = seg_vals[seg_mask > 0]
-                                    if len(valid) > 0:
-                                        per_seq_mean_values.append(valid.mean().item())
+                                    resp_vals = seg_vals[seg_mask > 0]
+                                    for pos, v in enumerate(resp_vals.tolist()):
+                                        position_values[pos].append(v)
                                     start = end
                     self._value_per_token_array = np.array(all_response_values) if all_response_values else np.array([])
-                    self._value_per_seq_means = np.array(per_seq_mean_values) if per_seq_mean_values else np.array([])
-                    if len(per_seq_mean_values) > 1:
-                        self.local_metrics["value/per_seq_mean_variance"] = float(np.var(per_seq_mean_values))
+                    if position_values:
+                        max_pos = max(position_values.keys()) + 1
+                        variance_by_position = np.zeros(max_pos)
+                        count_by_position = np.zeros(max_pos)
+                        mean_by_position = np.zeros(max_pos)
+                        for pos in range(max_pos):
+                            vals_at_pos = position_values[pos]
+                            if len(vals_at_pos) > 1:
+                                variance_by_position[pos] = float(np.var(vals_at_pos))
+                                mean_by_position[pos] = float(np.mean(vals_at_pos))
+                                count_by_position[pos] = len(vals_at_pos)
+                        self._value_variance_by_position = variance_by_position
+                        self._value_mean_by_position = mean_by_position
+                        self.local_metrics["value/mean_position_variance"] = float(np.mean(
+                            [v for v in variance_by_position if v > 0]
+                        )) if any(v > 0 for v in variance_by_position) else 0.0
 
             torch.cuda.empty_cache()
 
@@ -1596,9 +1609,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "_value_per_token_array") and len(self._value_per_token_array) > 0:
                     array_metrics["value/per_token_values"] = self._value_per_token_array
                     del self._value_per_token_array
-                if hasattr(self, "_value_per_seq_means") and len(self._value_per_seq_means) > 0:
-                    array_metrics["value/per_seq_mean_values"] = self._value_per_seq_means
-                    del self._value_per_seq_means
+                if hasattr(self, "_value_variance_by_position") and len(self._value_variance_by_position) > 0:
+                    array_metrics["value/variance_by_position"] = self._value_variance_by_position
+                    del self._value_variance_by_position
+                if hasattr(self, "_value_mean_by_position") and len(self._value_mean_by_position) > 0:
+                    array_metrics["value/mean_by_position"] = self._value_mean_by_position
+                    del self._value_mean_by_position
                 for key, value in batch_metrics.items():
                     if value is None:
                         continue
