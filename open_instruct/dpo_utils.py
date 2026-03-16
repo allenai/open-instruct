@@ -433,6 +433,10 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
 
