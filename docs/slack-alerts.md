@@ -2,7 +2,7 @@
 
 GRPO and DPO can send messages to Slack channels during training. To do so, set `SLACK_WEBHOOK_URL` to a webhook URL for the appropriate channel. 
 
-If you're at Ai2, we have a bunch of [existing webhooks](https://api.slack.com/apps?new_app=1), and you can also [create a new one](https://api.slack.com/messaging/webhooks) if none of the existing ones suit you.
+If you're at Ai2, we have a bunch of [existing webhooks](https://api.slack.com/apps), and you can also [create a new one](https://api.slack.com/messaging/webhooks) if none of the existing ones suit you.
 
 Once you've set the `SLACK_WEBHOOK_URL` env variable, set the `--send_slack_alerts` flag on your experiment and it'll start alerting you on Slack. 
 
