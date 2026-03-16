@@ -30,7 +30,7 @@ uv run mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
-    -- source configs/beaker_configs/ray_node_setup.sh \
+    -- \
 \&\& uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
