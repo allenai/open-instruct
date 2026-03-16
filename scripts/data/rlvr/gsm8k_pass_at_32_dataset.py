@@ -15,7 +15,10 @@ import argparse
 import os
 from datetime import datetime, timezone
 
+import ray
 from datasets import Dataset, load_dataset
+from ray.util.placement_group import placement_group
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
@@ -38,6 +41,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling")
     parser.add_argument("--max-tokens", type=int, default=2048, help="Max new tokens per completion")
     parser.add_argument("--tensor-parallel-size", type=int, default=2, help="vLLM tensor parallel size")
+    parser.add_argument(
+        "--num-engines",
+        "--num_engines",
+        dest="num_engines",
+        type=int,
+        default=1,
+        help="Number of independent vLLM engines to run in parallel",
+    )
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="vLLM GPU memory utilization")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--limit", type=int, default=None, help="Optional number of rows to process")
@@ -68,8 +79,128 @@ def build_prompts(ds: Dataset, model_name: str, chat_template_name: str) -> list
     return prompts
 
 
+def _generate_completions_single_engine(
+    prompts: list[str],
+    model: str,
+    tensor_parallel_size: int,
+    gpu_memory_utilization: float,
+    sampling_params: SamplingParams,
+) -> list[list[str]]:
+    llm = LLM(
+        model=model,
+        tensor_parallel_size=tensor_parallel_size,
+        dtype="bfloat16",
+        gpu_memory_utilization=gpu_memory_utilization,
+        enable_prefix_caching=True,
+    )
+    outputs = llm.generate(prompts, sampling_params)
+    return [[completion.text for completion in request_output.outputs] for request_output in outputs]
+
+
+def _split_evenly(items: list[str], num_chunks: int) -> list[tuple[int, list[str]]]:
+    base, extra = divmod(len(items), num_chunks)
+    chunks = []
+    start = 0
+    for chunk_idx in range(num_chunks):
+        chunk_size = base + (1 if chunk_idx < extra else 0)
+        end = start + chunk_size
+        chunks.append((start, items[start:end]))
+        start = end
+    return chunks
+
+
+@ray.remote
+def _generate_completions_chunk(
+    prompt_offset: int,
+    prompts: list[str],
+    model: str,
+    tensor_parallel_size: int,
+    gpu_memory_utilization: float,
+    sampling_params_kwargs: dict,
+) -> tuple[int, list[list[str]]]:
+    os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+    llm = LLM(
+        model=model,
+        tensor_parallel_size=tensor_parallel_size,
+        distributed_executor_backend="uni" if tensor_parallel_size == 1 else "mp",
+        dtype="bfloat16",
+        gpu_memory_utilization=gpu_memory_utilization,
+        enable_prefix_caching=True,
+    )
+    outputs = llm.generate(prompts, SamplingParams(**sampling_params_kwargs))
+    completions = [[completion.text for completion in request_output.outputs] for request_output in outputs]
+    return prompt_offset, completions
+
+
+def _generate_completions_multi_engine(
+    prompts: list[str],
+    model: str,
+    num_engines: int,
+    tensor_parallel_size: int,
+    gpu_memory_utilization: float,
+    sampling_params: SamplingParams,
+) -> list[list[str]]:
+    started_ray = not ray.is_initialized()
+    if started_ray:
+        ray.init(ignore_reinit_error=True, runtime_env={"env_vars": dict(os.environ)})
+
+    pg = placement_group(
+        [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)], strategy="PACK"
+    )
+    ray.get(pg.ready())
+
+    try:
+        chunks = [(offset, chunk) for offset, chunk in _split_evenly(prompts, num_engines) if chunk]
+        sampling_params_kwargs = dict(
+            n=sampling_params.n,
+            temperature=sampling_params.temperature,
+            top_p=sampling_params.top_p,
+            max_tokens=sampling_params.max_tokens,
+            seed=sampling_params.seed,
+        )
+
+        futures = []
+        for bundle_index, (offset, chunk) in enumerate(chunks):
+            scheduling_strategy = PlacementGroupSchedulingStrategy(
+                placement_group=pg,
+                placement_group_capture_child_tasks=True,
+                placement_group_bundle_index=bundle_index,
+            )
+            futures.append(
+                _generate_completions_chunk.options(
+                    num_cpus=tensor_parallel_size,
+                    num_gpus=tensor_parallel_size,
+                    scheduling_strategy=scheduling_strategy,
+                ).remote(
+                    prompt_offset=offset,
+                    prompts=chunk,
+                    model=model,
+                    tensor_parallel_size=tensor_parallel_size,
+                    gpu_memory_utilization=gpu_memory_utilization,
+                    sampling_params_kwargs=sampling_params_kwargs,
+                )
+            )
+
+        completions_by_prompt: list[list[str] | None] = [None] * len(prompts)
+        for offset, chunk_completions in ray.get(futures):
+            for idx, completion_list in enumerate(chunk_completions):
+                completions_by_prompt[offset + idx] = completion_list
+
+        if any(completions is None for completions in completions_by_prompt):
+            raise RuntimeError("Some prompt completions were not returned by the multi-engine generation path.")
+
+        return completions_by_prompt
+    finally:
+        ray.util.remove_placement_group(pg)
+        if started_ray:
+            ray.shutdown()
+
+
 def main() -> None:
     args = parse_args()
+    if args.num_engines < 1:
+        raise ValueError(f"--num-engines must be >= 1, got {args.num_engines}")
+
     logger.info("Loading dataset %s[%s]", args.dataset, args.split)
     ds = load_dataset(args.dataset, split=args.split, num_proc=max_num_processes())
     if args.limit is not None:
@@ -78,32 +209,41 @@ def main() -> None:
     prompts = build_prompts(ds, args.model, args.chat_template)
 
     logger.info(
-        "Initializing vLLM model=%s tp=%d rows=%d samples=%d",
+        "Initializing vLLM model=%s engines=%d tp=%d rows=%d samples=%d",
         args.model,
+        args.num_engines,
         args.tensor_parallel_size,
         len(ds),
         args.num_samples,
-    )
-    llm = LLM(
-        model=args.model,
-        tensor_parallel_size=args.tensor_parallel_size,
-        dtype="bfloat16",
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        enable_prefix_caching=True,
     )
     sampling_params = SamplingParams(
         n=args.num_samples, temperature=args.temperature, top_p=args.top_p, max_tokens=args.max_tokens, seed=args.seed
     )
 
     logger.info("Generating completions")
-    outputs = llm.generate(prompts, sampling_params)
+    if args.num_engines == 1:
+        completions_by_prompt = _generate_completions_single_engine(
+            prompts=prompts,
+            model=args.model,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            sampling_params=sampling_params,
+        )
+    else:
+        completions_by_prompt = _generate_completions_multi_engine(
+            prompts=prompts,
+            model=args.model,
+            num_engines=args.num_engines,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            sampling_params=sampling_params,
+        )
 
     verifier = GSM8KVerifier()
     rows: list[dict] = []
 
     logger.info("Scoring completions and building output rows")
-    for sample, request_output in zip(ds, outputs):
-        completions = [completion.text for completion in request_output.outputs]
+    for sample, completions in zip(ds, completions_by_prompt):
         pass_count = 0
         for completion in completions:
             score = verifier(tokenized_prediction=[], prediction=completion, label=str(sample["ground_truth"])).score
