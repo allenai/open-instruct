@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `SLACK_EMAIL_ADDRESS` support for Slack alerts by emailing Slack, and pass the variable through `mason.py` into Beaker jobs (https://github.com/allenai/open-instruct/pull/1527).
 - Add `flash-attn-3` dependency for Flash Attention 3 support on H100/H800 GPUs. DPO training via olmo-core auto-detects FA3 at runtime (https://github.com/allenai/open-instruct/pull/1525).
 - Tensor parallelism (TP) support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1467).
 - Pulls out weight sync code from GRPO into a more generic function (https://github.com/allenai/open-instruct/pull/1411#pullrequestreview-3694117967)
