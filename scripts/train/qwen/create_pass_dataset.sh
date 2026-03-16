@@ -22,14 +22,14 @@ uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
   --dataset mnoukhov/gsm8k-platinum-openinstruct \
   --split test \
   --model Qwen/Qwen2.5-0.5B-Instruct \
-  --chat-template qwen_instruct_boxed_math \
+  --chat-template qwen_instruct_user_boxed_math \
   --num-samples 1024 \
   --max-tokens 4096 \
   --tensor-parallel-size 2 \
-  --push-to-hub mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples \
+  --push-to-hub mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-userprompt \
   --save-local-dir /weka/oe-adapt-default/allennlp/deletable_rollouts/michaeln/ \
 \&\& uv run scripts/data/rlvr/create_gsm8k_pass_rate_buckets.py \
-  --input-dataset mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples \
+  --input-dataset mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-userprompt \
   --split test \
   --num-per-bucket 8 \
   --k 16 \

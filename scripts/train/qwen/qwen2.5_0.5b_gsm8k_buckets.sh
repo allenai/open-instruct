@@ -75,6 +75,7 @@ uv run --active open_instruct/grpo_fast.py \
     --load_ref_policy False \
     --with_tracking \
     --send_slack_alerts \
+    --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \
