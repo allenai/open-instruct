@@ -1731,10 +1731,12 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.rank == 0:
                 value_model_dir.mkdir(parents=True, exist_ok=True)
             vm = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+            for param in self.value_model.parameters():
+                if hasattr(param, "ds_active_sub_modules"):
+                    param.ds_active_sub_modules.clear()
             vm_state_dict = {}
-            for k, v in vm.named_parameters():
-                params_to_fetch = _z3_params_to_fetch([v])
-                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+            with deepspeed.zero.GatheredParameters(list(vm.parameters()), enabled=self.args.deepspeed_stage == 3):
+                for k, v in vm.named_parameters():
                     if self.rank == 0:
                         vm_state_dict[k] = v.data.cpu()
             if self.rank == 0:
