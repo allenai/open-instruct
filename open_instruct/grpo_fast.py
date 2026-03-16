@@ -1380,6 +1380,27 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.local_metrics["value/predictions_mean"] = masked_values.mean().item()
                     self.local_metrics["value/predictions_std"] = masked_values.std().item()
 
+                # Log per-token values for first sample as a wandb table (for heatmap visualization)
+                if self.rank == 0 and num_samples > 0:
+                    try:
+                        sample_values = old_values_BT[0][0].cpu().float()  # first batch element, shape (L-1,)
+                        sample_returns = returns_BT[0][0].cpu().float()
+                        sample_mask = data_BT.response_masks[0][0, 1:].cpu().float()
+                        sample_ids = data_BT.query_responses[0][0, 1:].cpu()  # shifted to align with values
+                        tokens = [self.tokenizer.decode([tid.item()]) for tid in sample_ids[:len(sample_values)]]
+                        rows = []
+                        for t in range(min(len(sample_values), 500)):
+                            if sample_mask[t] > 0:
+                                rows.append([t, tokens[t], sample_values[t].item(), sample_returns[t].item()])
+                        if rows:
+                            import wandb
+                            self._value_token_table = wandb.Table(
+                                columns=["position", "token", "value", "return"],
+                                data=rows,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to log per-token values: {e}")
+
             torch.cuda.empty_cache()
 
         # ========================================================================
@@ -1562,6 +1583,9 @@ class PolicyTrainerRayProcess(RayProcess):
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
                 array_metrics = {}
+                if hasattr(self, "_value_token_table"):
+                    array_metrics["value/per_token_values"] = self._value_token_table
+                    del self._value_token_table
                 for key, value in batch_metrics.items():
                     if value is None:
                         continue
