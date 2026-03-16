@@ -607,6 +607,7 @@ def accumulate_inference_batches(
     requeue_on_timeout: bool = True,
     progress_bar_desc: str | None = None,
     show_progress_bar: bool = True,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -713,6 +714,8 @@ def accumulate_inference_batches(
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
+                if progress_callback is not None:
+                    progress_callback(num_prompts_sampled, num_prompts)
 
             total_filtered_prompts += 1
             if result.reward_scores[0] == 0:
@@ -728,6 +731,8 @@ def accumulate_inference_batches(
         else:
             num_prompts_sampled += 1
             progress_bar.update(1)
+            if progress_callback is not None:
+                progress_callback(num_prompts_sampled, num_prompts)
 
         results.append(result)
         all_queries.extend(k_queries)

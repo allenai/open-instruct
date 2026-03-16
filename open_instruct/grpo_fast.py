@@ -1889,6 +1889,8 @@ def maybe_evaluate(
     max_possible_score: float,
     local_eval_start_time: float | None = None,
     actor_manager=None,
+    beaker_progress_label: str | None = None,
+    beaker_wandb_url: str | None = None,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1922,6 +1924,17 @@ def maybe_evaluate(
             timeout = max(300, args.backend_timeout * 5)
 
         eval_dataset_index_map = {eval_dataset[i]["index"]: i for i in range(num_eval_prompts)}
+        progress_callback = None
+        if beaker_progress_label is not None and local_eval_start_time is not None:
+
+            def progress_callback(completed: int, total: int) -> None:
+                maybe_update_beaker_description(
+                    current_step=completed,
+                    total_steps=total,
+                    start_time=local_eval_start_time,
+                    wandb_url=beaker_wandb_url,
+                    progress_label=beaker_progress_label,
+                )
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
@@ -1940,6 +1953,7 @@ def maybe_evaluate(
             max_possible_score=max_possible_score,
             progress_bar_desc=f"Eval responses step {training_step}",
             show_progress_bar=True,
+            progress_callback=progress_callback,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2262,10 +2276,11 @@ def run_eval_only_round(
     logger.info("Eval-only mode enabled: scheduling one local evaluation round and exiting.")
 
     maybe_update_beaker_description(
-        current_step=eval_step,
-        total_steps=args.num_training_steps,
-        start_time=training_start_time,
+        current_step=0,
+        total_steps=len(eval_dataset),
+        start_time=local_eval_start_time,
         wandb_url=wandb_url,
+        progress_label="eval",
     )
 
     for idx in range(len(eval_dataset)):
@@ -2284,15 +2299,18 @@ def run_eval_only_round(
         max_possible_score,
         local_eval_start_time,
         actor_manager,
+        beaker_progress_label="eval",
+        beaker_wandb_url=wandb_url,
     )
     if not eval_collected:
         raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
 
     maybe_update_beaker_description(
-        current_step=eval_step,
-        total_steps=args.num_training_steps,
-        start_time=training_start_time,
+        current_step=len(eval_dataset),
+        total_steps=len(eval_dataset),
+        start_time=local_eval_start_time,
         wandb_url=wandb_url,
+        progress_label="eval",
     )
     return episode
 

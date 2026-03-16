@@ -290,6 +290,30 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertEqual(wandb_count, 1, f"wandb URL should appear once, but appears {wandb_count} times in: {desc}")
         self.assertIn("Single GPU on Beaker with tool use test script.", desc)
 
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_supports_custom_progress_label(
+        self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get
+    ):
+        """Test that progress descriptions can use non-training labels."""
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        _, _, description_history = setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, "Eval-only job.")
+
+        utils.maybe_update_beaker_description(
+            current_step=3,
+            total_steps=8,
+            start_time=time.time(),
+            wandb_url="https://wandb.ai/team/project/runs/eval123",
+            progress_label="eval",
+            original_descriptions={},
+        )
+
+        self.assertEqual(len(description_history), 1)
+        self.assertIn("% complete (eval 3/8)", description_history[0])
+
 
 class TestSlackMessage(unittest.TestCase):
     @mock.patch.dict(

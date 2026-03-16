@@ -59,7 +59,7 @@ uv run --active open_instruct/grpo_fast.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 1024000 \
+    --total_episodes 512000 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
