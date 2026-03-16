@@ -846,10 +846,13 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
-    if all_model_steps:
-        model_steps_array = np.array(all_model_steps, dtype=float)
-        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
-        combined_reward_metrics["model_step_values"] = model_steps_array.tolist()
+    if len(all_model_steps) != len(results):
+        raise ValueError(
+            f"Expected model_step for every accumulated result, got {len(all_model_steps)} model steps for {len(results)} results."
+        )
+    model_steps_array = np.array(all_model_steps, dtype=float)
+    combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    combined_reward_metrics["model_step_values"] = model_steps_array.tolist()
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(

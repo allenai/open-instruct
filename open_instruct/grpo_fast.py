@@ -1776,6 +1776,7 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
+    metrics["model_step_diff"] = float(training_step - metrics["model_step_mean"])
     metrics["time/training"] = pure_training_time
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
@@ -1965,7 +1966,7 @@ def maybe_evaluate(
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
         eval_reward_metrics.pop("eval/model_step_min", None)
         eval_reward_metrics.pop("eval/model_step_max", None)
-        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean", None)
+        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean")
         eval_reward_metrics.pop("eval/model_step_span", None)
         model_step_values = eval_reward_metrics.pop("eval/model_step_values", None)
         eval_k = eval_generation_config.n
@@ -2066,9 +2067,8 @@ def maybe_evaluate(
             for k, pass_rate in pass_rates.items():
                 eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
         eval_metrics.update(dataset_sequence_length_metrics)
-        if model_step_mean is not None:
-            eval_metrics["eval/model_step_mean"] = float(model_step_mean)
-            eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
+        eval_metrics["eval/model_step_mean"] = float(model_step_mean)
+        eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
         if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
             prompt_index_to_solve_rates: dict[int, list[float]] = {}
             for prompt_index, prompt_solve_rate in zip(
