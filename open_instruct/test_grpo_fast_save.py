@@ -3,7 +3,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import torch
+
 from open_instruct import grpo_fast
+
+_POLICY_TRAINER_CLASS = grpo_fast.PolicyTrainerRayProcess.__ray_metadata__.modified_class
 
 
 def _build_mock_model():
@@ -74,3 +78,21 @@ def test_save_final_model_uses_unique_dir_for_save_and_eval():
     model_1_eval_remote.assert_called_once()
     assert model_0_eval_remote.call_args.args[0] == target_dir
     assert model_1_eval_remote.call_args.args[0] == target_dir
+
+
+def test_get_grad_norm_returns_scalar_from_deepspeed_engine():
+    trainer = _POLICY_TRAINER_CLASS.__new__(_POLICY_TRAINER_CLASS)
+    trainer.model = SimpleNamespace(get_global_grad_norm=MagicMock(return_value=torch.tensor(3.5)))
+
+    grad_norm = trainer._get_grad_norm()
+
+    assert grad_norm == 3.5
+
+
+def test_get_grad_norm_returns_none_for_non_finite_values():
+    trainer = _POLICY_TRAINER_CLASS.__new__(_POLICY_TRAINER_CLASS)
+    trainer.model = SimpleNamespace(get_global_grad_norm=MagicMock(return_value=float("nan")))
+
+    grad_norm = trainer._get_grad_norm()
+
+    assert grad_norm is None

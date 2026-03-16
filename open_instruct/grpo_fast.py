@@ -520,6 +520,25 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
         self.local_metrics["_token_count"] = total_valid_tokens
 
+    def _get_grad_norm(self) -> float | None:
+        """Read the cached DeepSpeed global grad norm after an optimizer step."""
+        get_global_grad_norm = getattr(self.model, "get_global_grad_norm", None)
+        if not callable(get_global_grad_norm):
+            return None
+
+        grad_norm = get_global_grad_norm()
+        if grad_norm is None:
+            return None
+        if isinstance(grad_norm, torch.Tensor):
+            if grad_norm.numel() != 1:
+                return None
+            grad_norm = grad_norm.item()
+
+        grad_norm = float(grad_norm)
+        if not math.isfinite(grad_norm):
+            return None
+        return grad_norm
+
     def step(self):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -584,6 +603,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.cuda.empty_cache()
 
         local_step = 0
+        grad_norms: list[float] = []
         num_samples = len(data_BT.query_responses)
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
         # This only needs to be done once since response_masks don't change across epochs
@@ -766,6 +786,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
+                        grad_norm = self._get_grad_norm()
+                        if grad_norm is not None:
+                            grad_norms.append(grad_norm)
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -787,6 +810,8 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                if grad_norms:
+                    self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
