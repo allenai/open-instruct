@@ -335,9 +335,9 @@ class TestMaybeEvaluate(unittest.TestCase):
         np.testing.assert_array_equal(logged["eval/subset_b/sequence_length_solved_hist"], np.array([5.0, 6.0]))
         np.testing.assert_array_equal(logged["eval/subset_b/sequence_length_unsolved_hist"], np.array([7.0, 8.0]))
 
-    def test_final_step_uses_legacy_eval_timeout_by_default(self):
+    def test_final_step_uses_default_eval_timeout_minutes(self):
         args = SimpleNamespace(
-            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
+            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=120
         )
         eval_dataset = self._build_eval_dataset(num_prompts=3)
         eval_queue = _QueueWithSize(size=0)
@@ -356,7 +356,7 @@ class TestMaybeEvaluate(unittest.TestCase):
                 max_possible_score=1.0,
             )
 
-        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 600)
+        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 7200)
 
     def test_final_step_uses_eval_timeout_minutes_override(self):
         args = SimpleNamespace(

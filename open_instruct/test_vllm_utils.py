@@ -250,5 +250,48 @@ class TestModelDimsFromVllmConfig(unittest.TestCase):
         self.assertEqual(vllm_dims, expected_dims)
 
 
+class TestProcessRequest(unittest.IsolatedAsyncioTestCase):
+    async def test_process_request_sends_top_k_via_extra_body(self):
+        actor = mock.Mock()
+        actor.server_port = 8000
+        actor.model_name = "test-model"
+        actor.tool_actor_map = {}
+        actor.tool_actors = {}
+        actor.tool_parser = None
+        actor.mask_tool_use = False
+        actor.active_tasks = {}
+        actor.completion_queue = mock.Mock()
+        actor.request_metadata = {
+            "base-request": {
+                "prompt_token_ids": [11, 22],
+                "active_tools": None,
+                "original_sampling_params": vllm_utils.SamplingConfig(n=2),
+            }
+        }
+
+        actor.llm_engine = mock.Mock()
+        actor.llm_engine.model_config.max_model_len = 1024
+
+        api_response = mock.Mock()
+        api_response.choices = [
+            mock.Mock(token_ids=[101, 102], logprobs=mock.Mock(token_logprobs=[-0.1, -0.2]), finish_reason="stop")
+        ]
+        actor.client.completions.create = mock.AsyncMock(return_value=api_response)
+
+        sampling_params = vllm_utils.SamplingConfig(
+            temperature=0.7, top_p=0.9, top_k=17, max_tokens=32, n=1, stop=["</s>"], seed=123, logprobs=1
+        )
+
+        with mock.patch("open_instruct.vllm_utils._check_health", new=mock.AsyncMock()):
+            await vllm_utils.process_request(actor, "base-request_0", sampling_params)
+
+        actor.client.completions.create.assert_awaited_once()
+        create_kwargs = actor.client.completions.create.await_args_list[0].kwargs
+
+        self.assertNotIn("top_k", create_kwargs)
+        self.assertEqual(create_kwargs["extra_body"]["top_k"], 17)
+        self.assertEqual(create_kwargs["extra_body"]["cache_salt"], "base-request")
+
+
 if __name__ == "__main__":
     unittest.main()

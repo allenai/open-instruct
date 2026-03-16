@@ -948,16 +948,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        request_body = dataclasses.asdict(current_sampling_params)
+        extra_body = {
+            "return_token_ids": True,
+            "cache_salt": base_request_id,
+            "include_stop_str_in_output": True,
+            "skip_special_tokens": False,
+        }
+        top_k = request_body.pop("top_k", None)
+        if top_k is not None:
+            extra_body["top_k"] = top_k
         api_response = await actor.client.completions.create(
-            model=actor.model_name,
-            prompt=current_prompt,
-            extra_body={
-                "return_token_ids": True,
-                "cache_salt": base_request_id,
-                "include_stop_str_in_output": True,
-                "skip_special_tokens": False,
-            },
-            **dataclasses.asdict(current_sampling_params),
+            model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **request_body
         )
 
         output = api_response.choices[0]
