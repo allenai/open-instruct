@@ -31,7 +31,6 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --mount_docker_socket \
        --gpus 8 \
-       --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
