@@ -105,7 +105,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
 class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
-    top_k: int = -1
+    top_k: int = 0
     max_tokens: int = 256
     n: int = 1
     stop: list[str] | None = None
