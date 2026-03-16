@@ -2594,9 +2594,9 @@ def send_slack_message(message: str) -> None:
         except OSError as exc:
             logger.warning("Failed to send Slack alert email due to SMTP error: %s", exc)
 
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_EMAIL_ADDRESS and SLACK_WEBHOOK environment variables not set. Skipping Slack alert.")
+        logger.warning("SLACK_EMAIL_ADDRESS and SLACK_WEBHOOK_URL environment variables not set. Skipping Slack alert.")
         return
 
     payload = {"text": full_message}

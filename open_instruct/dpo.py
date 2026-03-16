@@ -128,7 +128,7 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-    if slack_webhook_url:
+    if args.send_slack_alerts and slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(
             name=args.run_name or args.exp_name, webhook_url=slack_webhook_url
         )

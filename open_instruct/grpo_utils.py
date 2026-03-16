@@ -1,12 +1,13 @@
 import enum
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, model_utils
+from open_instruct import data_types, logger_utils, model_utils
 from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
@@ -14,6 +15,8 @@ from open_instruct.utils import (
     get_beaker_whoami,
 )
 
+logger = logger_utils.setup_logger(__name__)
+TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
@@ -212,6 +215,10 @@ class ExperimentConfig:
         self.colocate_train_inference_mode = self.colocate_train_inference_mode or self.single_gpu_mode
         self.single_gpu_mode = self.colocate_train_inference_mode
 
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
