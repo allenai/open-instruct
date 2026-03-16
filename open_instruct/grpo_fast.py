@@ -2660,8 +2660,13 @@ def main(
             "prefill async steps without reuse. Continuing with prompt reuse across epochs."
         )
 
-    huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
-    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+    if not os.path.exists(model_config.model_name_or_path):
+        huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+    if (
+        tc.tokenizer_name_or_path
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+        and not os.path.exists(tc.tokenizer_name_or_path)
+    ):
         huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
     logger.info("Model and tokenizer cached in shared HF cache.")
 
