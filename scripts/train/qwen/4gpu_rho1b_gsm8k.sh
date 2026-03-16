@@ -63,4 +63,5 @@ uv run mason.py \
     --mask_truncated_completions False \
     --load_ref_policy True \
     --with_tracking \
+    --send_slack_alerts \
     --push_to_hub False $@

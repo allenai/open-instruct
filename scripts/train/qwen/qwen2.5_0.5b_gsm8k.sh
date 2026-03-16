@@ -59,7 +59,7 @@ uv run --active open_instruct/grpo_fast.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 1024000 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -74,6 +74,7 @@ uv run --active open_instruct/grpo_fast.py \
     --mask_truncated_completions False \
     --load_ref_policy False \
     --with_tracking \
+    --send_slack_alerts \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \

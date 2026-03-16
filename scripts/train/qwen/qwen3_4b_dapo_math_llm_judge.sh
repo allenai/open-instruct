@@ -103,6 +103,7 @@ uv run mason.py \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
+    --send_slack_alerts \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \

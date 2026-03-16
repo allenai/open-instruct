@@ -114,6 +114,7 @@ uv run --active open_instruct/grpo_fast.py \
     --eval_on_step_0 True \
     --eval_pass_at_k 4 \
     --with_tracking False \
+    --send_slack_alerts \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \

@@ -100,4 +100,5 @@ uv run mason.py \
     --llm_judge_max_context_length "${JUDGE_SERVER_MAX_MODEL_LEN}" \
     --llm_judge_timeout 240 \
     --with_tracking \
+    --send_slack_alerts \
     --push_to_hub False "$@"
