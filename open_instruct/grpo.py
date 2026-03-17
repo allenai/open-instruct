@@ -23,8 +23,8 @@ Uses Ray for distributed training with Beaker.
 import dataclasses
 import os
 import shutil
-import time
 
+import backoff
 import ray
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
@@ -39,37 +39,33 @@ from open_instruct.environments.tools.utils import EnvsConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 from open_instruct.grpo_olmo_core_actor import OLMoCoreModelGroup
 from open_instruct.model_utils import ModelConfig, push_folder_to_hub
-from open_instruct.utils import (
-    ArgumentParserPlus,
-    is_beaker_job,
-    launch_ai2_evals_on_weka,
-    maybe_get_beaker_config,
-    ray_get_with_progress,
-)
 
 logger = logger_utils.setup_logger(__name__)
 
 
-def wait_for_gpus(expected_gpus: int, max_attempts: int = 60, poll_interval: int = 5) -> None:
-    logger.info(f"Waiting for {expected_gpus} GPUs to be available in Ray cluster...")
-    available_gpus = 0
-    for i in range(max_attempts):
-        cluster_resources = ray.cluster_resources()
-        available_gpus = cluster_resources.get("GPU", 0)
-        logger.info(f"Attempt {i + 1}: Ray cluster resources: {cluster_resources}")
-        if available_gpus >= expected_gpus:
-            logger.info(f"Found {available_gpus} GPUs, proceeding with placement group creation")
-            return
-        logger.info(f"Only {available_gpus} GPUs available, waiting for {expected_gpus}...")
-        time.sleep(poll_interval)
-    raise RuntimeError(f"Timeout waiting for GPUs. Only {available_gpus} available, needed {expected_gpus}")
+@backoff.on_predicate(backoff.constant, interval=5, max_time=300)
+def wait_for_gpus(expected_gpus: int) -> bool:
+    """Poll the Ray cluster until ``expected_gpus`` GPUs are available.
+
+    Returns True (stopping the retry) once enough GPUs are found, or
+    False to keep retrying.
+    """
+    resources = ray.cluster_resources()
+    available = int(resources.get("GPU", 0))
+    logger.info(f"Ray cluster resources: {resources}")
+    if available >= expected_gpus:
+        logger.info(f"Found {available} GPUs, proceeding with placement group creation")
+        return True
+    logger.info(f"Only {available} GPUs available, waiting for {expected_gpus}...")
+    return False
 
 
 def save_and_cleanup(
     args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
 ) -> None:
+    """Save the final model, optionally push to Hub, and launch eval jobs."""
     final_output_dir = args.output_dir
-    ray_get_with_progress(
+    utils.ray_get_with_progress(
         [m.save_model.remote(final_output_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],
         desc="Saving final model",
     )
@@ -79,7 +75,7 @@ def save_and_cleanup(
 
     if (
         args.try_auto_save_to_beaker
-        and is_beaker_job()
+        and utils.is_beaker_job()
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
@@ -87,11 +83,11 @@ def save_and_cleanup(
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
-    if is_beaker_job() and args.try_launch_beaker_eval_jobs_on_weka and args.hf_repo_revision is not None:
+    if utils.is_beaker_job() and args.try_launch_beaker_eval_jobs_on_weka and args.hf_repo_revision is not None:
         eval_path = args.output_dir
         if beaker_config is not None and beaker_config.beaker_dataset_ids:
             eval_path = beaker_config.beaker_dataset_ids[-1]
-        launch_ai2_evals_on_weka(
+        utils.launch_ai2_evals_on_weka(
             path=eval_path,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
@@ -125,7 +121,7 @@ def main(
     if args.verbose:
         logger.setLevel("DEBUG")
 
-    beaker_config = maybe_get_beaker_config()
+    beaker_config = utils.maybe_get_beaker_config()
 
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
@@ -225,7 +221,7 @@ def main(
     bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
     logger.info(f"Requesting bundles: {bundles}")
     pg = placement_group(bundles, strategy="SPREAD")
-    ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+    utils.ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     policy_group = OLMoCoreModelGroup(
         pg=pg,
@@ -241,7 +237,7 @@ def main(
     logger.info("======== Policy group created =========")
 
     model_setup_futures = [m.setup_model.remote() for m in policy_group.models]
-    ray_get_with_progress(model_setup_futures, desc="Setting up OLMo-core models")
+    utils.ray_get_with_progress(model_setup_futures, desc="Setting up OLMo-core models")
     logger.info("======== OLMo-core models initialized =========")
 
     assert tc.tokenizer_name_or_path is not None, "tokenizer_name_or_path must be set after make_tokenizer"
@@ -282,14 +278,14 @@ def main(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    ray_get_with_progress(
+    utils.ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
         desc="Setting up model update group",
     )
     logger.info("======== Model update group setup successfully =========")
 
     json_config = dataclasses.asdict(args)
-    ray_get_with_progress(
+    utils.ray_get_with_progress(
         [
             m.setup_callbacks.remote(
                 actor_manager=actor_manager,
@@ -306,7 +302,7 @@ def main(
     )
 
     logger.info("Starting OLMo-core GRPO training with Ray actors...")
-    ray_get_with_progress([m.fit.remote() for m in policy_group.models], desc="Running OLMo-core GRPO training")
+    utils.ray_get_with_progress([m.fit.remote() for m in policy_group.models], desc="Running OLMo-core GRPO training")
     logger.info("Training complete.")
 
     save_and_cleanup(args, tc, policy_group, tokenizer, beaker_config)
@@ -314,7 +310,7 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus(
+    parser = utils.ArgumentParserPlus(
         [  # ty: ignore[invalid-argument-type]
             grpo_utils.ExperimentConfig,
             TokenizerConfig,
