@@ -17,7 +17,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
        --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout 60m \
+       --timeout 120m \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \

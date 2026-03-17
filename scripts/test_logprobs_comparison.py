@@ -18,6 +18,11 @@ DTYPE = "bfloat16"
 HYBRID_MODEL = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
 TRANSFORMER_MODEL = "allenai/Olmo-3-1025-7B"
 
+# Production config from scripts/train/olmo3/7b_instruct_hybrid_rl.sh
+PROD_RESPONSE_LENGTH = 8192
+PROD_PACK_LENGTH = 11264
+PROD_MAX_PROMPT_LENGTH = 2048
+
 PROD_DATASETS = [
     "hamishivi/rlvr_acecoder_filtered_filtered",
     "hamishivi/omega-combined-no-boxed_filtered",
@@ -186,24 +191,20 @@ def _log_positional_diffs(abs_diff: np.ndarray, response_len: int):
 class TestGRPOLogprobsMatch(unittest.TestCase):
     """Test that mirrors production GRPO: vLLM generates, HF scores the result.
 
-    Parameterized on model (hybrid vs transformer) and max_tokens to isolate
-    whether the logprob gap is model-specific and length-dependent.
+    Uses production sequence length (8192 response tokens) and 1 prompt per
+    dataset from the production mix.
     """
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
-        ("hybrid_1024", HYBRID_MODEL, 1024),
-        ("hybrid_4096", HYBRID_MODEL, 4096),
-        ("hybrid_8192", HYBRID_MODEL, 8192),
-        ("transformer_1024", TRANSFORMER_MODEL, 1024),
-        ("transformer_4096", TRANSFORMER_MODEL, 4096),
-        ("transformer_8192", TRANSFORMER_MODEL, 8192),
+        ("hybrid_8192", HYBRID_MODEL, PROD_RESPONSE_LENGTH),
+        ("transformer_8192", TRANSFORMER_MODEL, PROD_RESPONSE_LENGTH),
     ])
     def test_grpo_logprobs(self, _name, model_name, max_tokens):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name, trust_remote_code=True,
         )
-        prompts = _load_prod_prompts(tokenizer, per_dataset=2)
+        prompts = _load_prod_prompts(tokenizer, per_dataset=1)
 
         all_diffs = []
         for prompt_idx, prompt in enumerate(prompts):
@@ -270,12 +271,8 @@ class TestPatchEffect(unittest.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
-        ("hybrid_1024", HYBRID_MODEL, 1024),
-        ("hybrid_4096", HYBRID_MODEL, 4096),
-        ("hybrid_8192", HYBRID_MODEL, 8192),
-        ("transformer_1024", TRANSFORMER_MODEL, 1024),
-        ("transformer_4096", TRANSFORMER_MODEL, 4096),
-        ("transformer_8192", TRANSFORMER_MODEL, 8192),
+        ("hybrid_8192", HYBRID_MODEL, PROD_RESPONSE_LENGTH),
+        ("transformer_8192", TRANSFORMER_MODEL, PROD_RESPONSE_LENGTH),
     ])
     def test_patch_effect(self, _name, model_name, max_tokens):
         from open_instruct import grpo_fast
@@ -380,7 +377,7 @@ class TestLengthScaling(unittest.TestCase):
         prompts = _load_prod_prompts(tokenizer, per_dataset=1)
         prompt = prompts[0]
 
-        lengths = [128, 512, 1024, 2048, 4096, 8192]
+        lengths = [1024, 4096, 8192]
         results = []
 
         for max_tokens in lengths:
