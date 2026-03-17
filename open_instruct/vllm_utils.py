@@ -433,7 +433,7 @@ def init_process_group(
     return pg
 
 
-@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
+@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError, TimeoutError), max_time=60, interval=0.5)
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
