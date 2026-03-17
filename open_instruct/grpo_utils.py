@@ -1,17 +1,21 @@
 import enum
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, model_utils
+from open_instruct import data_types, logger_utils, model_utils
 from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
 )
+
+logger = logger_utils.setup_logger(__name__)
+TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
 
 class GRPOLossType(enum.StrEnum):
@@ -64,6 +68,8 @@ class ExperimentConfig:
     """How many train steps to save the model"""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
+    model_dtype: str = "bfloat16"
+    """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
     num_epochs: int = 1
@@ -188,6 +194,10 @@ class ExperimentConfig:
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
     def __post_init__(self):
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "

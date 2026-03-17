@@ -323,6 +323,8 @@ class ExperimentConfig(
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -431,6 +433,10 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
 

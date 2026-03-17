@@ -2546,9 +2546,9 @@ def send_slack_message(message: str) -> None:
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
 
     beaker_url = get_beaker_experiment_url()
