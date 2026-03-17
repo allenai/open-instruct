@@ -2975,8 +2975,25 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        # Skip weight sync during warmup phases (policy weights haven't changed,
+        # and concurrent parameter gathering causes ZeRO-3 race conditions)
+        is_in_warmup = (
+            (args.use_value_model and args.value_warmup_steps > 0 and training_step <= args.value_warmup_steps)
+            or (args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps)
+            or (
+                args.use_value_model
+                and getattr(args, "value_rewarmup_start", 0) > 0
+                and getattr(args, "value_rewarmup_steps", 0) > 0
+                and getattr(args, "value_rewarmup_start", 0)
+                <= training_step
+                < getattr(args, "value_rewarmup_start", 0) + getattr(args, "value_rewarmup_steps", 0)
+            )
+        )
+        if not is_in_warmup:
+            logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+            weight_sync_trigger_event.set()
+        else:
+            logger.debug(f"[Main Thread] Skipping weight sync for step {training_step} (warmup)")
 
         last_eval_collected = maybe_evaluate(
             args,
