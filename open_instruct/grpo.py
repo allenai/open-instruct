@@ -21,7 +21,6 @@ Uses Ray for distributed training with Beaker.
 """
 
 import dataclasses
-import logging
 import os
 import shutil
 import time
@@ -97,6 +96,7 @@ def create_generation_config(
 
 def wait_for_gpus(expected_gpus: int, max_attempts: int = 60, poll_interval: int = 5) -> None:
     logger.info(f"Waiting for {expected_gpus} GPUs to be available in Ray cluster...")
+    available_gpus = 0
     for i in range(max_attempts):
         cluster_resources = ray.cluster_resources()
         available_gpus = cluster_resources.get("GPU", 0)
@@ -170,7 +170,7 @@ def main(
     )
 
     if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel("DEBUG")
 
     beaker_config = setup_experiment_tracking(args, tc, model_config)
 
