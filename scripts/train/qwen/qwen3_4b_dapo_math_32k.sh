@@ -33,7 +33,8 @@ uv run mason.py \
     --gpus 8 \
     --budget ai2/oe-adapt \
     -- \
-uv run open_instruct/grpo_fast.py \
+source configs/beaker_configs/ray_node_setup.sh \
+\&\& uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
