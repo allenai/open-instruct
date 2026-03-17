@@ -78,12 +78,3 @@ uv run --active open_instruct/grpo_fast.py \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
 
-    # --checkpoint_state_freq 200 \
-    # --keep_last_n_checkpoints -1 \
-
-    # --eval_priority normal \
-    # --try_launch_beaker_eval_jobs_on_weka True \
-    # --oe_eval_max_length 32768 \
-    # --oe_eval_gpu_multiplier 2  \
-    # --oe_eval_beaker_image michaeln/oe_eval_internal \
-    # --oe_eval_tasks $EVALS \

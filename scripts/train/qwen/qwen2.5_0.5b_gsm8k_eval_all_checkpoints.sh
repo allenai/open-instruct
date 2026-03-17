@@ -9,6 +9,7 @@ STEP_INCREMENT="${STEP_INCREMENT:-100}"
 
 EXP_NAME="${EXP_NAME:-qwen25_05b_it_eval_only_gsm8k_quartiles}"
 RUN_NAME="${RUN_NAME:-qwen25_05b_it_eval_only_gsm8k_quartiles}"
+WANDB_GROUP_NAME="${WANDB_GROUP_NAME:-${EXP_NAME}}"
 
 # Keep uv cache writable in restricted environments.
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache}"
@@ -22,10 +23,12 @@ for step in $(seq "${STEP_START}" "${STEP_INCREMENT}" "${STEP_END}"); do
     fi
 
     echo "Launching eval for ${checkpoint_path}"
-    bash scripts/train/qwen/qwen2.5_0.5b_gsm8k_eval.sh \
+    NUM_GPUS=2 bash scripts/train/qwen/qwen2.5_0.5b_gsm8k_buckets.sh \
         --model_name_or_path "${checkpoint_path}" \
         --exp_name "${EXP_NAME}" \
-        --run_name "${RUN_NAME}" \
+        --run_name "${RUN_NAME}_step_${step}" \
+        --wandb_group_name "${WANDB_GROUP_NAME}" \
+        --eval_only \
         --eval_only_set_checkpoint "${step}" \
         "$@"
 done
