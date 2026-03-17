@@ -113,7 +113,6 @@ def main(
     using Ray actors for both training and inference. The same code path is used for
     single GPU mode and multi-node training.
     """
-    logger_utils.setup_logger(rank=0)
     tokenizer = grpo_fast.make_tokenizer(tc, model_config)
 
     grpo_fast.setup_runtime_variables(args, streaming_config, tools_config)
