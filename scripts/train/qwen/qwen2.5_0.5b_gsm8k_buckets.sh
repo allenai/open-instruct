@@ -7,7 +7,7 @@ MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 DATASETS="${DATASETS:-ai2-adapt-dev/rlvr_gsm8k_zs 1.0}"
 DATASET_SPLITS="${DATASET_SPLITS:-train}"
 
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-buckets 1.0}"
+LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-buckets 1.0}"
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 BEAKER_IMAGE="michaeln/open_instruct"
@@ -33,7 +33,7 @@ uv run mason.py \
     -- \
 uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
-    --run_name $EXP_NAME \
+    --run_name ${RUN_NAME} \
     --beta 0.0 \
     --eval_pass_at_k 32 \
     --eval_top_p 0.95 \

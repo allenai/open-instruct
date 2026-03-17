@@ -33,7 +33,7 @@ uv run mason.py \
     -- \
 uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
-    --run_name $EXP_NAME \
+    --run_name ${RUN_NAME} \
     --beta 0.0 \
     --eval_pass_at_k 4 \
     --eval_top_p 0.95 \
