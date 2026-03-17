@@ -1353,10 +1353,14 @@ def create_model_and_optimizer(
         bundles = [{"GPU": 1, "CPU": 10} for _ in range(world_size)]
         pg = placement_group(bundles, strategy="PACK")
     else:
+        total_requested_gpus = sum(args.num_learners_per_node) + (
+            vllm_config.vllm_num_engines * vllm_config.vllm_tensor_parallel_size
+        )
+        trainer_pg_strategy = "SPREAD" if total_requested_gpus <= 8 else "STRICT_SPREAD"
         bundles = [
             {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node
         ]
-        pg = placement_group(bundles, strategy="SPREAD")
+        pg = placement_group(bundles, strategy=trainer_pg_strategy)
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     queues_to_monitor = {
