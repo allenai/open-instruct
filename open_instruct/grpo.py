@@ -106,7 +106,7 @@ def wait_for_gpus(expected_gpus: int, max_attempts: int = 60, poll_interval: int
             return
         logger.info(f"Only {available_gpus} GPUs available, waiting for {expected_gpus}...")
         time.sleep(poll_interval)
-    logger.error(f"Timeout waiting for GPUs. Only {available_gpus} available, needed {expected_gpus}")
+    raise RuntimeError(f"Timeout waiting for GPUs. Only {available_gpus} available, needed {expected_gpus}")
 
 
 def save_and_cleanup(
@@ -269,7 +269,7 @@ def main(
 
     wait_for_gpus(sum(args.num_learners_per_node))
 
-    bundles = [{"GPU": n, "CPU": n} for n in args.num_learners_per_node]
+    bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
     logger.info(f"Requesting bundles: {bundles}")
     pg = placement_group(bundles, strategy="SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")

@@ -1326,7 +1326,7 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # Create vLLM engines with queues
+    # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,

@@ -1258,7 +1258,7 @@ def create_vllm_engines(
     if not use_hybrid_engine:
         # Create a placement group to ensure that all engines are packed.
         # Each bundle reserves tensor_parallel_size GPUs for one engine.
-        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
+        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size * 10} for _ in range(num_engines)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
