@@ -39,6 +39,9 @@ def _load_prod_prompts(
     tokenizer: transformers.PreTrainedTokenizer, per_dataset: int = 2,
 ) -> list[list[int]]:
     """Load prompts from the full production dataset mix and tokenize."""
+    chat_template_kwargs = {}
+    if isinstance(tokenizer.chat_template, dict):
+        chat_template_kwargs["chat_template"] = "default"
     prompts = []
     for ds_name in PROD_DATASETS:
         ds = datasets.load_dataset(ds_name, split="train")
@@ -48,6 +51,7 @@ def _load_prod_prompts(
                 messages = messages[:-1]
             input_ids = tokenizer.apply_chat_template(
                 messages, add_generation_prompt=True, return_dict=False,
+                **chat_template_kwargs,
             )
             prompts.append(input_ids)
     return prompts
