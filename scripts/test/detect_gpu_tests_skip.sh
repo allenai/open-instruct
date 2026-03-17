@@ -41,7 +41,7 @@ if echo "$PR_BODY" | grep -qE 'GPU_TESTS=bypass'; then
 fi
 
 if echo "$PR_BODY" | grep -qE 'GPU_TESTS=\[[^]]+\]\([^)]+\)'; then
-    EXP_ID=$(echo "$PR_BODY" | grep -oP 'GPU_TESTS=\[\K[^]]+')
+    EXP_ID=$(echo "$PR_BODY" | grep -oP 'GPU_TESTS=\[\K[^]]+(?=\]\([^)]+\))')
     echo "GPU_TESTS_EXP_ID=$EXP_ID" >> "$GITHUB_ENV"
     echo "RUN_GPU_TESTS=false" >> "$GITHUB_ENV"
     echo "SKIP_REASON=override" >> "$GITHUB_ENV"
