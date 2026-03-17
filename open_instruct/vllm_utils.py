@@ -60,7 +60,7 @@ from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
     EnvConfig,
     EnvConfigEntry,
@@ -74,7 +74,6 @@ from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_K
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -85,7 +84,7 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
-def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
+def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
     intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
@@ -97,7 +96,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
         layer_types = getattr(model_config.hf_text_config, "layer_types", None)
         num_sliding_window_layers = layer_types.count("sliding_attention") if layer_types is not None else num_layers
 
-    return ModelDims(
+    return utils.ModelDims(
         num_layers=num_layers,
         hidden_size=hidden_size,
         intermediate_size=intermediate_size,
@@ -107,7 +106,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
         head_dim=model_config.get_head_size(),
         sliding_window=sliding_window,
         num_sliding_window_layers=num_sliding_window_layers,
-        device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+        device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
     )
 
 
@@ -584,6 +583,7 @@ class LLMRayActor:
         eval_dataset=None,
         **kwargs,
     ):
+        utils.configure_hf_hub_retry()
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
@@ -1326,7 +1326,7 @@ def create_vllm_engines(
             )
         )
 
-    ray_get_with_progress(
+    utils.ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
     )
 
