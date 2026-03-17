@@ -1,5 +1,4 @@
 import gc
-import logging
 import unittest
 
 import datasets
@@ -8,9 +7,8 @@ import parameterized
 import torch
 import transformers
 import vllm
-from typing import Dict, List, Union
-from transformers import PreTrainedTokenizer
 
+from open_instruct import logger_utils
 from open_instruct import model_utils
 from open_instruct import rl_utils
 
@@ -18,126 +16,42 @@ from open_instruct import rl_utils
 SEED = 42
 DTYPE = "bfloat16"
 HYBRID_MODEL = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
-DATASET_NAME = "hamishivi/rlvr_acecoder_filtered_filtered"
+TRANSFORMER_MODEL = "allenai/Olmo-3-1025-7B"
 
-logger = logging.getLogger(__name__)
+PROD_DATASETS = [
+    "hamishivi/rlvr_acecoder_filtered_filtered",
+    "hamishivi/omega-combined-no-boxed_filtered",
+    "hamishivi/rlvr_orz_math_57k_collected_filtered",
+    "hamishivi/polaris_53k",
+    "allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered",
+    "allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered",
+]
+
+logger = logger_utils.setup_logger(__name__)
 
 
-def _load_prompts(tokenizer: PreTrainedTokenizer, n: int = 3) -> List[List[int]]:
-    """Load real prompts from the production dataset and tokenize with olmo123 template."""
-    ds = datasets.load_dataset(DATASET_NAME, split="train")
+def _load_prod_prompts(
+    tokenizer: transformers.PreTrainedTokenizer, per_dataset: int = 2,
+) -> list[list[int]]:
+    """Load prompts from the full production dataset mix and tokenize."""
     prompts = []
-    for i in range(n):
-        messages = ds[i]["messages"]
-        if len(messages) > 1 and messages[-1]["role"] == "assistant":
-            messages = messages[:-1]
-        input_ids = tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, return_dict=False,
-        )
-        prompts.append(input_ids)
+    for ds_name in PROD_DATASETS:
+        ds = datasets.load_dataset(ds_name, split="train")
+        for i in range(min(per_dataset, len(ds))):
+            messages = ds[i]["messages"]
+            if len(messages) > 1 and messages[-1]["role"] == "assistant":
+                messages = messages[:-1]
+            input_ids = tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, return_dict=False,
+            )
+            prompts.append(input_ids)
     return prompts
 
 
-class TestGRPOLogprobsMatch(unittest.TestCase):
-    """Test that mirrors production GRPO: vLLM generates, HF scores the result.
-
-    In production GRPO:
-    1. vLLM generates a response autoregressively (decode path) and returns logprobs
-    2. Local HF model scores the full query+response in one forward pass (prefill path)
-    3. The logprobs are compared
-
-    This test does exactly that with real dataset prompts at production-scale lengths.
-    """
-
-    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
-    @parameterized.parameterized.expand([
-        ("eager_1024", True, None, 1024),
-        ("eager_2048", True, None, 2048),
-        ("eager_4096", True, None, 4096),
-        ("eager_8192", True, None, 8192),
-        ("compiled_1024", False, None, 1024),
-        ("compiled_2048", False, None, 2048),
-        ("compiled_4096", False, None, 4096),
-        ("compiled_8192", False, None, 8192),
-        ("compiled_fp32_1024", False, "float32", 1024),
-        ("compiled_fp32_2048", False, "float32", 2048),
-        ("compiled_fp32_4096", False, "float32", 4096),
-        ("compiled_fp32_8192", False, "float32", 8192),
-    ])
-    def test_grpo_logprobs(self, _name, enforce_eager, ssm_cache_dtype, max_tokens):
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            HYBRID_MODEL, trust_remote_code=True,
-        )
-        prompts = _load_prompts(tokenizer, n=1)
-        prompt = prompts[0]
-        logger.info("Prompt length: %d tokens", len(prompt))
-
-        # Step 1: vLLM generates response and returns logprobs (decode path)
-        vllm_result = _vllm_generate(
-            HYBRID_MODEL, prompt, max_tokens=max_tokens,
-            enforce_eager=enforce_eager, ssm_cache_dtype=ssm_cache_dtype,
-        )
-        response = vllm_result["response"]
-        vllm_logprobs = vllm_result["logprobs"]
-        logger.info("Generated %d response tokens", len(response))
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        # Step 2: Pack sequences (same as GRPO)
-        pack_length = len(prompt) + len(response) + 16
-        packed = rl_utils.pack_sequences(
-            queries=[prompt],
-            responses=[response],
-            masks=[[1] * len(response)],
-            pack_length=pack_length,
-            pad_token_id=tokenizer.pad_token_id,
-            vllm_logprobs=[vllm_logprobs],
-        )
-
-        # Step 3: HF scores the full sequence in one forward pass (prefill path)
-        hf_logprobs = _hf_score(
-            HYBRID_MODEL,
-            packed.query_responses[0],
-            packed.attention_masks[0],
-            packed.position_ids[0],
-            tokenizer.pad_token_id,
-            query_len=len(prompt),
-            response_len=len(response),
-        )
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        self.assertEqual(len(vllm_logprobs), len(hf_logprobs))
-
-        vllm_arr = np.array(vllm_logprobs)
-        hf_arr = np.array(hf_logprobs)
-        abs_diff = np.abs(vllm_arr - hf_arr)
-
-        mode = "eager" if enforce_eager else "compiled"
-        if ssm_cache_dtype:
-            mode += f"+{ssm_cache_dtype}_state"
-
-        logger.info(
-            "RESULT resp_len=%d mode=%s mean_diff=%.4f max_diff=%.4f std_diff=%.4f",
-            len(response), mode, abs_diff.mean(), abs_diff.max(), abs_diff.std(),
-        )
-
-        # Log divergence at different positions through the response
-        positions = [0, len(response) // 8, len(response) // 4,
-                     len(response) // 2, 3 * len(response) // 4, len(response) - 1]
-        for pos in positions:
-            if pos < len(abs_diff):
-                window = abs_diff[max(0, pos - 10):pos + 10]
-                logger.info(
-                    "  resp_pos %5d: diff=%.4f window_mean=%.4f",
-                    pos, abs_diff[pos], window.mean(),
-                )
-
-
 def _vllm_generate(
-    model_name: str, prompt: List[int], max_tokens: int,
+    model_name: str, prompt: list[int], max_tokens: int,
     enforce_eager: bool = True, ssm_cache_dtype: str | None = None,
-) -> Dict[str, Union[List[int], List[float]]]:
+) -> dict[str, list[int] | list[float]]:
     """Generate with vLLM and return response tokens + logprobs (decode path)."""
     kwargs = {}
     if ssm_cache_dtype is not None:
@@ -186,8 +100,13 @@ def _hf_score(
     pad_token_id: int,
     query_len: int,
     response_len: int,
-) -> List[float]:
+    apply_patch: bool = False,
+) -> list[float]:
     """Score the full query+response with HF in one forward pass (prefill path)."""
+    if apply_patch:
+        from open_instruct import grpo_fast
+        grpo_fast._patch_gated_deltanet_cu_seqlens()
+
     padding_mask = query_response != pad_token_id
     input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
 
@@ -212,7 +131,6 @@ def _hf_score(
         )
         logits = output.logits.to(torch.float32)
         logprobs = model_utils.log_softmax_and_gather(logits, input_ids[:, 1:])
-        # Extract only response token logprobs (same as GRPO)
         logprobs = logprobs[:, query_len - 1: query_len - 1 + response_len]
 
     result = logprobs.flatten().tolist()
@@ -220,6 +138,298 @@ def _hf_score(
     gc.collect()
     torch.cuda.empty_cache()
     return result
+
+
+def _hf_score_raw(
+    model: torch.nn.Module,
+    tokens: torch.Tensor,
+    pad_token_id: int,
+) -> torch.Tensor:
+    """Score a single sequence with fresh state."""
+    tokens = tokens.unsqueeze(0).to("cuda")
+    seq_len = tokens.size(1)
+    attn = torch.ones(1, seq_len, device="cuda", dtype=torch.long)
+    pos_ids = torch.arange(seq_len, device="cuda").unsqueeze(0)
+    with torch.no_grad():
+        output = model(input_ids=tokens, attention_mask=attn, position_ids=pos_ids)
+        logits = getattr(output, "logits", output)
+        logits = logits[:, :-1]
+        labels = tokens[:, 1:].clone()
+        labels[labels == pad_token_id] = 0
+        logprobs = model_utils.log_softmax_and_gather(logits, labels)
+    return logprobs[0]
+
+
+def _log_diff_stats(label: str, abs_diff: np.ndarray):
+    """Log summary statistics for an absolute-difference array."""
+    logger.info(
+        "%s: mean=%.6f max=%.6f std=%.6f median=%.6f",
+        label, abs_diff.mean(), abs_diff.max(), abs_diff.std(), np.median(abs_diff),
+    )
+
+
+def _log_positional_diffs(abs_diff: np.ndarray, response_len: int):
+    """Log diff at key positions through the response."""
+    positions = [
+        0, response_len // 8, response_len // 4,
+        response_len // 2, 3 * response_len // 4, response_len - 1,
+    ]
+    for pos in positions:
+        if pos < len(abs_diff):
+            window = abs_diff[max(0, pos - 10):pos + 10]
+            logger.info(
+                "  resp_pos %5d: diff=%.4f window_mean=%.4f",
+                pos, abs_diff[pos], window.mean(),
+            )
+
+
+class TestGRPOLogprobsMatch(unittest.TestCase):
+    """Test that mirrors production GRPO: vLLM generates, HF scores the result.
+
+    Parameterized on model (hybrid vs transformer) and max_tokens to isolate
+    whether the logprob gap is model-specific and length-dependent.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
+    @parameterized.parameterized.expand([
+        ("hybrid_1024", HYBRID_MODEL, 1024),
+        ("hybrid_4096", HYBRID_MODEL, 4096),
+        ("hybrid_8192", HYBRID_MODEL, 8192),
+        ("transformer_1024", TRANSFORMER_MODEL, 1024),
+        ("transformer_4096", TRANSFORMER_MODEL, 4096),
+        ("transformer_8192", TRANSFORMER_MODEL, 8192),
+    ])
+    def test_grpo_logprobs(self, _name, model_name, max_tokens):
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=True,
+        )
+        prompts = _load_prod_prompts(tokenizer, per_dataset=2)
+
+        all_diffs = []
+        for prompt_idx, prompt in enumerate(prompts):
+            logger.info(
+                "model=%s max_tokens=%d prompt=%d/%d prompt_len=%d",
+                model_name, max_tokens, prompt_idx + 1, len(prompts), len(prompt),
+            )
+
+            vllm_result = _vllm_generate(
+                model_name, prompt, max_tokens=max_tokens, enforce_eager=True,
+            )
+            response = vllm_result["response"]
+            vllm_logprobs = vllm_result["logprobs"]
+            logger.info("Generated %d response tokens", len(response))
+
+            pack_length = len(prompt) + len(response) + 16
+            packed = rl_utils.pack_sequences(
+                queries=[prompt],
+                responses=[response],
+                masks=[[1] * len(response)],
+                pack_length=pack_length,
+                pad_token_id=tokenizer.pad_token_id,
+                vllm_logprobs=[vllm_logprobs],
+            )
+
+            hf_logprobs = _hf_score(
+                model_name,
+                packed.query_responses[0],
+                packed.attention_masks[0],
+                packed.position_ids[0],
+                tokenizer.pad_token_id,
+                query_len=len(prompt),
+                response_len=len(response),
+            )
+
+            self.assertEqual(len(vllm_logprobs), len(hf_logprobs))
+
+            vllm_arr = np.array(vllm_logprobs)
+            hf_arr = np.array(hf_logprobs)
+            abs_diff = np.abs(vllm_arr - hf_arr)
+            all_diffs.append(abs_diff)
+
+            _log_diff_stats(
+                f"prompt_{prompt_idx} resp_len={len(response)}", abs_diff,
+            )
+            _log_positional_diffs(abs_diff, len(response))
+
+        combined = np.concatenate(all_diffs)
+        _log_diff_stats(
+            f"AGGREGATE model={model_name} max_tokens={max_tokens}", combined,
+        )
+
+
+class TestPatchEffect(unittest.TestCase):
+    """Test whether the cu_seqlens monkey-patch changes logprobs for single sequences.
+
+    For each model, compares:
+    - unpatched HF vs patched HF (patch_vs_unpatched)
+    - vLLM vs unpatched HF (vllm_vs_unpatched)
+    - vLLM vs patched HF (vllm_vs_patched)
+
+    This answers whether the patch helps, hurts, or is neutral for each model.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
+    @parameterized.parameterized.expand([
+        ("hybrid_1024", HYBRID_MODEL, 1024),
+        ("hybrid_4096", HYBRID_MODEL, 4096),
+        ("hybrid_8192", HYBRID_MODEL, 8192),
+        ("transformer_1024", TRANSFORMER_MODEL, 1024),
+        ("transformer_4096", TRANSFORMER_MODEL, 4096),
+        ("transformer_8192", TRANSFORMER_MODEL, 8192),
+    ])
+    def test_patch_effect(self, _name, model_name, max_tokens):
+        from open_instruct import grpo_fast
+
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=True,
+        )
+        prompts = _load_prod_prompts(tokenizer, per_dataset=1)
+        prompt = prompts[0]
+        logger.info(
+            "model=%s max_tokens=%d prompt_len=%d",
+            model_name, max_tokens, len(prompt),
+        )
+
+        vllm_result = _vllm_generate(
+            model_name, prompt, max_tokens=max_tokens, enforce_eager=True,
+        )
+        response = vllm_result["response"]
+        vllm_lps = np.array(vllm_result["logprobs"])
+
+        # Load model for unpatched scoring.
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=getattr(torch, DTYPE),
+            device_map="cuda",
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+            trust_remote_code=True,
+        )
+
+        query_response = torch.tensor(
+            prompt + response, device="cuda",
+        ).unsqueeze(0)
+        seq_len = query_response.size(1)
+        attn_mask = torch.ones(1, seq_len, device="cuda", dtype=torch.long)
+        pos_ids = torch.arange(seq_len, device="cuda").unsqueeze(0)
+        query_len = len(prompt)
+
+        # Score WITHOUT the patch.
+        with torch.no_grad():
+            output = model(
+                input_ids=query_response,
+                attention_mask=attn_mask,
+                position_ids=pos_ids,
+            )
+            logits = output.logits.to(torch.float32)
+            unpatched_lps = model_utils.log_softmax_and_gather(
+                logits[:, :-1], query_response[:, 1:],
+            )
+            unpatched_resp = unpatched_lps[
+                0, query_len - 1: query_len - 1 + len(response)
+            ].cpu().numpy()
+
+        # Apply the patch.
+        grpo_fast._patch_gated_deltanet_cu_seqlens()
+
+        # Score WITH the patch.
+        with torch.no_grad():
+            output = model(
+                input_ids=query_response,
+                attention_mask=attn_mask,
+                position_ids=pos_ids,
+            )
+            logits = output.logits.to(torch.float32)
+            patched_lps = model_utils.log_softmax_and_gather(
+                logits[:, :-1], query_response[:, 1:],
+            )
+            patched_resp = patched_lps[
+                0, query_len - 1: query_len - 1 + len(response)
+            ].cpu().numpy()
+
+        patch_diff = np.abs(patched_resp - unpatched_resp)
+        vllm_vs_unpatched = np.abs(vllm_lps - unpatched_resp)
+        vllm_vs_patched = np.abs(vllm_lps - patched_resp)
+
+        _log_diff_stats(f"patch_vs_unpatched resp_len={len(response)}", patch_diff)
+        _log_diff_stats(f"vllm_vs_unpatched  resp_len={len(response)}", vllm_vs_unpatched)
+        _log_diff_stats(f"vllm_vs_patched    resp_len={len(response)}", vllm_vs_patched)
+
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+class TestLengthScaling(unittest.TestCase):
+    """Test how the vLLM-vs-HF logprob gap scales with sequence length.
+
+    For both models, generates at increasing lengths and reports diff_mean at each.
+    Constant gap implies a kernel offset; growing gap implies accumulating error
+    through recurrent layers.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
+    @parameterized.parameterized.expand([
+        ("hybrid", HYBRID_MODEL),
+        ("transformer", TRANSFORMER_MODEL),
+    ])
+    def test_length_scaling(self, _name, model_name):
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=True,
+        )
+        prompts = _load_prod_prompts(tokenizer, per_dataset=1)
+        prompt = prompts[0]
+
+        lengths = [128, 512, 1024, 2048, 4096, 8192]
+        results = []
+
+        for max_tokens in lengths:
+            logger.info(
+                "LENGTH_SCALING model=%s max_tokens=%d prompt_len=%d",
+                model_name, max_tokens, len(prompt),
+            )
+
+            vllm_result = _vllm_generate(
+                model_name, prompt, max_tokens=max_tokens, enforce_eager=True,
+            )
+            response = vllm_result["response"]
+            vllm_logprobs = vllm_result["logprobs"]
+
+            pack_length = len(prompt) + len(response) + 16
+            packed = rl_utils.pack_sequences(
+                queries=[prompt],
+                responses=[response],
+                masks=[[1] * len(response)],
+                pack_length=pack_length,
+                pad_token_id=tokenizer.pad_token_id,
+                vllm_logprobs=[vllm_logprobs],
+            )
+
+            hf_logprobs = _hf_score(
+                model_name,
+                packed.query_responses[0],
+                packed.attention_masks[0],
+                packed.position_ids[0],
+                tokenizer.pad_token_id,
+                query_len=len(prompt),
+                response_len=len(response),
+            )
+
+            vllm_arr = np.array(vllm_logprobs)
+            hf_arr = np.array(hf_logprobs)
+            abs_diff = np.abs(vllm_arr - hf_arr)
+            diff_mean = abs_diff.mean()
+            results.append((max_tokens, len(response), diff_mean))
+
+            _log_diff_stats(
+                f"LENGTH_SCALING resp_len={len(response)}", abs_diff,
+            )
+
+        logger.info("LENGTH_SCALING SUMMARY model=%s", model_name)
+        for max_tok, resp_len, mean in results:
+            logger.info(
+                "  max_tokens=%5d resp_len=%5d diff_mean=%.6f", max_tok, resp_len, mean,
+            )
 
 
 class TestPackingStateLeak(unittest.TestCase):
@@ -241,7 +451,8 @@ class TestPackingStateLeak(unittest.TestCase):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             HYBRID_MODEL, trust_remote_code=True,
         )
-        prompts = _load_prompts(tokenizer, n=2)
+        prompts = _load_prod_prompts(tokenizer, per_dataset=1)
+        prompts = prompts[:2]
 
         model = transformers.AutoModelForCausalLM.from_pretrained(
             HYBRID_MODEL,
@@ -328,26 +539,6 @@ class TestPackingStateLeak(unittest.TestCase):
         del model
         gc.collect()
         torch.cuda.empty_cache()
-
-
-def _hf_score_raw(
-    model: torch.nn.Module,
-    tokens: torch.Tensor,
-    pad_token_id: int,
-) -> torch.Tensor:
-    """Score a single sequence with fresh state."""
-    tokens = tokens.unsqueeze(0).to("cuda")
-    seq_len = tokens.size(1)
-    attn = torch.ones(1, seq_len, device="cuda", dtype=torch.long)
-    pos_ids = torch.arange(seq_len, device="cuda").unsqueeze(0)
-    with torch.no_grad():
-        output = model(input_ids=tokens, attention_mask=attn, position_ids=pos_ids)
-        logits = getattr(output, "logits", output)
-        logits = logits[:, :-1]
-        labels = tokens[:, 1:].clone()
-        labels[labels == pad_token_id] = 0
-        logprobs = model_utils.log_softmax_and_gather(logits, labels)
-    return logprobs[0]
 
 
 if __name__ == "__main__":

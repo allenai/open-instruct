@@ -771,6 +771,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                         self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
 
+                        # Split metrics by packed vs unpacked sequences.
+                        attn_ids = data_BT.attention_masks[i]
+                        num_seqs = (attn_ids.unique() > 0).sum().item()
+                        is_packed = num_seqs > 1
+                        tag = "packed" if is_packed else "unpacked"
+                        self.local_metrics[f"debug/vllm_diff_mean_{tag}"] = float(mean_diff)
+                        self.local_metrics[f"debug/vllm_reverse_kl_{tag}"] = float(mean_reverse_kl)
+
                     new_logprobs_BT = local_logprobs_BT
 
                     # Cache the old logprobs
