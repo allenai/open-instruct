@@ -7,8 +7,8 @@ STEP_START="${STEP_START:-100}"
 STEP_END="${STEP_END:-1000}"
 STEP_INCREMENT="${STEP_INCREMENT:-100}"
 
-EXP_NAME="${EXP_NAME:-qwen25_05b_it_eval_only_gsm8k_quartiles}"
-RUN_NAME="${RUN_NAME:-qwen25_05b_it_eval_only_gsm8k_quartiles}"
+EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_eval_$(date +%Y%m%d_%H%M%S)}"
 WANDB_GROUP_NAME="${WANDB_GROUP_NAME:-${EXP_NAME}}"
 
 # Keep uv cache writable in restricted environments.
