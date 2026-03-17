@@ -1016,6 +1016,8 @@ def get_beaker_whoami() -> str | None:
 
 
 def maybe_get_beaker_config():
+    if not is_beaker_job():
+        return None
     beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
     # fix condition on basic interactive jobs
     if beaker_dataset_ids is None:
@@ -1320,9 +1322,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
         dist.broadcast_object_list(path_list, src=0)
         args.output_dir = path_list[0]
 
-    beaker_config = None
-    if is_beaker_job() and is_main_process:
-        beaker_config = maybe_get_beaker_config()
+    beaker_config = maybe_get_beaker_config() if is_main_process else None
 
     if getattr(args, "push_to_hub", False) and is_main_process:
         if args.hf_repo_id is None:

@@ -1055,9 +1055,8 @@ def setup_runtime_variables(
 def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     """Setup experiment tracking and seeds."""
     all_configs = {}
-    beaker_config = None
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
+    beaker_config = maybe_get_beaker_config()
+    if beaker_config is not None:
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
 
@@ -1401,7 +1400,9 @@ def create_model_and_optimizer(
 
 
 def create_generation_configs(
-    args: grpo_utils.ExperimentConfig, streaming_config: data_loader_lib.StreamingDataLoaderConfig
+    args: grpo_utils.ExperimentConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
 ):
     """Create generation configs for training and evaluation."""
     generation_config = vllm_utils.SamplingConfig(
@@ -2291,7 +2292,7 @@ def main(
     )
 
     # AFTER potentially adding tool stop sequences, create generation configs
-    generation_configs = create_generation_configs(args, streaming_config)
+    generation_configs = create_generation_configs(args, streaming_config, vllm_config)
 
     checkpoint_state = None
     data_prep_actor_state = None

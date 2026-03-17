@@ -26,7 +26,6 @@ import shutil
 import time
 
 import ray
-from huggingface_hub import HfApi
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from rich.pretty import pprint
@@ -45,53 +44,10 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
-    maybe_use_ai2_hf_entity,
-    maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
 )
 
 logger = logger_utils.setup_logger(__name__)
-
-EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
-
-
-def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
-    beaker_config = None
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
-
-    if args.push_to_hub:
-        if args.hf_repo_id is None:
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:
-            args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.exp_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-
-    if args.wandb_entity is None:
-        args.wandb_entity = maybe_use_ai2_wandb_entity()
-
-    return beaker_config
-
-
-def create_generation_config(
-    args: grpo_utils.ExperimentConfig,
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    vllm_config: data_loader_lib.VLLMConfig,
-):
-    return vllm_utils.SamplingConfig(
-        temperature=streaming_config.temperature,
-        top_p=vllm_config.vllm_top_p,
-        max_tokens=streaming_config.response_length,
-        n=streaming_config.num_samples_per_prompt_rollout,
-        stop=streaming_config.stop_strings,
-        seed=args.seed,
-        logprobs=1,
-    )
 
 
 def wait_for_gpus(expected_gpus: int, max_attempts: int = 60, poll_interval: int = 5) -> None:
@@ -164,15 +120,12 @@ def main(
     logger_utils.setup_logger(rank=0)
     tokenizer = grpo_fast.make_tokenizer(tc, model_config)
 
-    args.world_size = sum(args.num_learners_per_node)
-    args.num_training_steps = args.total_episodes // (
-        streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-    )
+    grpo_fast.setup_runtime_variables(args, streaming_config, tools_config)
 
     if args.verbose:
         logger.setLevel("DEBUG")
 
-    beaker_config = setup_experiment_tracking(args, tc, model_config)
+    beaker_config = maybe_get_beaker_config()
 
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
@@ -182,7 +135,7 @@ def main(
         dashboard_host="0.0.0.0",
         runtime_env={
             "excludes": [".git/"],
-            "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
+            "env_vars": {k: v for k, v in os.environ.items() if k not in grpo_fast.EXCLUDED_ENV_VARS},
         },
     )
 
@@ -234,7 +187,7 @@ def main(
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
-    generation_config = create_generation_config(args, streaming_config, vllm_config)
+    generation_config = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)["train"]
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,

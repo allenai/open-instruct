@@ -215,9 +215,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
     all_configs = {}
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
-        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+    beaker_config = maybe_get_beaker_config()
+    if beaker_config is not None:
         if len(beaker_config.beaker_dataset_id_urls) > 0:
             args.output_dir = "/output"
         all_configs.update(vars(beaker_config))
