@@ -940,6 +940,8 @@ def is_beaker_job() -> bool:
 
 
 def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
+    """Configure HF Hub HTTP retries with exponential backoff on 429/5xx."""
+
     def backend_factory() -> requests.Session:
         session = requests.Session()
         retries = Retry(total=total, backoff_factor=backoff_factor, status_forcelist=[429, 500, 502, 503, 504])
@@ -952,6 +954,7 @@ def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
 
 
 def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> bool:
+    """Download a HF repo snapshot if repo_id is not a local path. Returns True if a download occurred."""
     if os.path.exists(repo_id):
         return False
     huggingface_hub.snapshot_download(repo_id, revision=revision)
