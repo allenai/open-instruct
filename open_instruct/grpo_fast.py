@@ -1153,6 +1153,7 @@ def setup_experiment_tracking(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
+            group=args.wandb_group_name,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
