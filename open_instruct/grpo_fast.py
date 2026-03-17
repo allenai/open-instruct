@@ -1504,15 +1504,17 @@ class PolicyTrainerRayProcess(RayProcess):
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
-                    local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
-                        self.model,
-                        data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
-                        data_BT.position_ids[i],
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        return_entropy=self.args.record_entropy,
-                    )
+                    ctx = torch.no_grad() if skip_policy_update else contextlib.nullcontext()
+                    with ctx:
+                        local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
+                            self.model,
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i],
+                            data_BT.position_ids[i],
+                            self.pad_token_id,
+                            self.streaming_config.temperature,
+                            return_entropy=self.args.record_entropy,
+                        )
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
                     vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
