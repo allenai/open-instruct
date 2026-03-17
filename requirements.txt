@@ -184,6 +184,8 @@ dill==0.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (pl
     #   datasets
     #   depyf
     #   multiprocess
+dion @ git+https://github.com/microsoft/dion.git@7452a5823cf9655b93c3f1d8020b4ebb2535239b ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via open-instruct
 diskcache==5.6.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   dr-agent
@@ -536,6 +538,7 @@ numpy==2.2.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   cupy-cuda12x
     #   datasets
     #   deepspeed
+    #   dion
     #   flashinfer-python
     #   gguf
     #   matplotlib
@@ -1118,6 +1121,7 @@ torch==2.9.1+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   bitsandbytes
     #   compressed-tensors
     #   deepspeed
+    #   dion
     #   flash-attn
     #   flash-attn-3
     #   flashinfer-python
@@ -1135,6 +1139,7 @@ torch==2.9.1+cu130 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     #   bitsandbytes
     #   compressed-tensors
     #   deepspeed
+    #   dion
     #   flashinfer-python
     #   liger-kernel
     #   open-instruct
@@ -1171,6 +1176,7 @@ trimesh==4.11.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     # via alphashape
 triton==3.5.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
+    #   dion
     #   liger-kernel
     #   torch
     #   xgrammar

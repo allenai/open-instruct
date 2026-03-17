@@ -129,7 +129,7 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
     """Number of updates steps to accumulate before performing a backward/update pass."""
     learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
+    """The initial learning rate for the optimizer."""
     warmup_ratio: float = 0.03
     """Linear warmup over warmup_ratio fraction of total steps."""
     weight_decay: float = 0.0
@@ -156,6 +156,18 @@ class TrainingConfig:
     """Use paged optimizer from bitsandbytes."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW or not."""
+    optimizer_type: str = "adamw"
+    """Optimizer type: 'adamw' or 'muon'."""
+    muon_mu: float = 0.95
+    """Momentum coefficient for Muon optimizer."""
+    muon_adjust_lr: str = "spectral_norm"
+    """LR adjustment for Muon: 'spectral_norm', 'rms_norm', or 'none'."""
+    muon_nesterov: bool = False
+    """Whether to use Nesterov momentum in Muon."""
+    muon_adamw_lr: float | None = None
+    """LR for AdamW param groups in Muon (embeddings, norms). Defaults to learning_rate if None."""
+    muon_lm_head_lr_scale: bool = True
+    """If True, scale LM head LR by 1/sqrt(d_model) as recommended by dion."""
     tensor_parallel_degree: int = 1
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1

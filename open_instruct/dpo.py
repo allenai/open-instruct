@@ -348,7 +348,19 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     data_loader.reshuffle(epoch=0)
     num_training_steps = len(data_loader) * args.num_epochs
     effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
-    optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
+    if args.optimizer_type == "muon":
+        optim_config = olmo_core_utils.MuonConfig(
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+            mu=args.muon_mu,
+            adjust_lr=args.muon_adjust_lr,
+            nesterov=args.muon_nesterov,
+            adamw_lr=args.muon_adamw_lr,
+            lm_head_lr_scale=args.muon_lm_head_lr_scale,
+            d_model=model.d_model,
+        )
+    else:
+        optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
     scheduler = _setup_scheduler(args, effective_steps)
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     dp_config = transformer_config.TransformerDataParallelConfig(
