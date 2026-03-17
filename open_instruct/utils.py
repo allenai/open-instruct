@@ -953,12 +953,16 @@ def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
     huggingface_hub.configure_http_backend(backend_factory=backend_factory)
 
 
-def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> bool:
-    """Download a HF repo snapshot if repo_id is not a local path. Returns True if a download occurred."""
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
+    """Download a HF repo if not a local path, then verify it is available locally or in cache."""
     if os.path.exists(repo_id):
-        return False
+        return
     huggingface_hub.snapshot_download(repo_id, revision=revision)
-    return True
+    result = huggingface_hub.try_to_load_from_cache(repo_id, "config.json", revision=revision)
+    if not isinstance(result, str):
+        raise RuntimeError(
+            f"Model repo '{repo_id}' (revision={revision}) is not available locally or in the HF cache."
+        )
 
 
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:

@@ -2265,11 +2265,9 @@ def main(
     if args.cache_dataset_only:
         return
 
-    downloaded = utils.ensure_hf_repo_cached(model_config.model_name_or_path, revision=model_config.model_revision)
+    utils.ensure_hf_repo_cached(model_config.model_name_or_path, revision=model_config.model_revision)
     if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
-        downloaded |= utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
-    if downloaded:
-        logger.info("Model and tokenizer cached in shared HF cache.")
+        utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
 
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
