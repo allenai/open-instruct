@@ -63,17 +63,7 @@ def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, A
     """
     if device is None:
         return batch
-    moved: dict[str, Any] = {}
-    for key, value in batch.items():
-        if not isinstance(value, torch.Tensor):
-            moved[key] = value
-            continue
-        if value.device == device:
-            moved[key] = value
-            continue
-        non_blocking = device.type == "cuda" and value.device.type == "cpu"
-        moved[key] = value.to(device, non_blocking=non_blocking)
-    return moved
+    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
