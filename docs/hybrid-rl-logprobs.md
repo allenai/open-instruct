@@ -130,61 +130,60 @@ in production the hybrid is worse. See "Open questions" below for hypotheses.
 
 #### TestVllmVsPackedHF — production-matching packed vLLM-HF comparison
 
-*Results pending* — run with:
-```bash
-./scripts/train/build_image_and_launch.sh scripts/train/debug/run_logprobs_test.sh
-```
+(Mar 18, experiment `01KM14MJ4P0VQAJ2K2SFX15RF0`)
 
-This test directly replicates the production metric by comparing vLLM logprobs
-against packed-HF logprobs scored with `forward_for_logprobs`. Two variants:
-- **packed**: 2 sequences packed into 11264-token tensor
-- **single**: 1 sequence in its own tensor (control)
+Replicates the exact production metric: vLLM logprobs vs packed-HF logprobs
+scored with `grpo_utils.forward_for_logprobs`. Two variants tested:
+
+| Variant | Sequences | mean | max | std | median |
+|---------|-----------|------|-----|-----|--------|
+| packed | 2 in 11264 | 0.012 | 3.855 | 0.067 | 0.000 |
+| single | 1 in 4681 | 0.030 | 1.542 | 0.070 | 0.007 |
+
+**Packing does not reproduce the production gap.** Both variants show diffs
+in the 0.01–0.03 range, matching the baseline `TestGRPOLogprobsMatch` result.
+The packed variant is actually *lower* than the single variant.
+
+#### TestNaturalResponseLength — natural response lengths + diff
+
+| Model | resp_len range | mean resp_len | diff_mean range | diff_mean avg |
+|-------|---------------|---------------|-----------------|---------------|
+| Hybrid | 267–8192 | 3168 | 0.007–0.015 | 0.011 |
+| Transformer | 27–4571 | 1744 | 0.113–1.690 | 0.581 |
+
+The transformer's natural response lengths (median 1559 tokens) explain why production
+diff (0.06–0.11) is much lower than the forced-8192 test (2.394). The sliding window
+gap scales with length, so shorter responses naturally have lower diffs.
 
 ## Open questions: why do test and production results diverge?
 
-The test and production results show an inverted pattern:
+|                  | Test (single seq) | Test (packed) | Production |
+|------------------|------------------:|--------------:|-----------:|
+| Hybrid           | 0.027             | 0.012         | 0.24–0.58  |
+| Transformer      | 2.394 (forced 8192) | —           | 0.06–0.11  |
 
-|                  | Test (single seq, 8192 forced) | Production (packed, 8192 max) |
-|------------------|-------------------------------:|------------------------------:|
-| Hybrid           | 0.027                          | 0.24–0.58                     |
-| Transformer      | 2.394                          | 0.06–0.11                     |
+### Transformer gap: EXPLAINED
 
-The hybrid gets *worse* going from test → production. The transformer gets *better*.
+The transformer production diff (0.06–0.11) is explained by natural response lengths.
+`TestNaturalResponseLength` shows transformer responses average ~1744 tokens with
+`</answer>` stopping, where the sliding-window vLLM-HF gap is much smaller.
 
-### Key difference: production uses packed scoring
+### Hybrid gap: UNEXPLAINED
 
-Production compares vLLM logprobs against **packed** HF logprobs (via
-`grpo_utils.forward_for_logprobs` with sequence-ID attention masks). Our baseline
-`TestGRPOLogprobsMatch` uses `_hf_score` which `.clamp(0, 1)` on the attention mask,
-losing sequence ID info. This means the baseline test doesn't replicate the exact
-production scoring path.
+Neither packing (0.012) nor the scoring function (0.030) reproduces the production
+hybrid gap of 0.24–0.58. The isolated test environment cannot reproduce this.
 
-Production also splits the metric by packing status:
-- `debug/vllm_diff_mean_packed`: diff for tensors with >1 packed sequence
-- `debug/vllm_diff_mean_unpacked`: diff for tensors with a single sequence
-
-The 0.24–0.58 numbers may be from the packed metric only. If the unpacked metric
-is ~0.03 (matching our test), then packing IS the explanation.
-
-### TestVllmVsPackedHF: reproducing the production comparison
-
-`TestVllmVsPackedHF` directly replicates the production metric:
-1. Generate responses with vLLM (get vLLM logprobs)
-2. Pack into tensors using `rl_utils.pack_sequences`
-3. Score with `grpo_utils.forward_for_logprobs` (matching production exactly)
-4. Compare vLLM logprobs vs packed-HF logprobs per response token
-
-Two variants:
-- **packed** (2 sequences in PROD_PACK_LENGTH=11264): matches production packed case
-- **single** (1 sequence, tight pack): isolates `forward_for_logprobs` effect
-
-If `packed` gives ~0.2–0.5 and `single` gives ~0.03, packing is the cause.
-
-### Hypothesis 2: production responses are shorter than 8192 (transformer only)
-
-Production uses `--stop_strings "</answer>"`, so many responses terminate well before
-the 8192-token maximum. The transformer's sliding window gap scales steeply with length.
-`TestNaturalResponseLength` tests this by generating with natural stopping.
+Possible remaining explanations:
+1. **Training-time model state**: production scores happen after gradient updates,
+   which may put the model in states where vLLM-HF numerical differences are amplified
+2. **Multi-node distributed training**: DeepSpeed ZeRO-3 parameter gathering may
+   introduce numerical differences not present in single-GPU inference
+3. **Batch composition effects**: production batches mix many sequences from diverse
+   datasets; the metric averages over entire batches, not individual sequences
+4. **W&B metric aggregation**: check `debug/vllm_diff_mean_packed` vs
+   `debug/vllm_diff_mean_unpacked` in the production W&B run
+   (https://wandb.ai/ai2-llm/open_instruct_internal/runs/fo8rjg42) to confirm
+   which metric the 0.24–0.58 numbers came from
 
 ## Upstream fix
 
