@@ -4,7 +4,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
-BEAKER_IMAGE="michaeln/open_instruct"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
 DATASET_SPLITS="train"
@@ -13,7 +13,6 @@ LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruc
 LOCAL_EVAL_SPLITS="train"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="michaeln/open_instruct"
 
 CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
