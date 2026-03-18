@@ -69,7 +69,7 @@ uv run python mason.py \
     --lr_scheduler_type constant \
     --save_freq 100 \
     --try_launch_beaker_eval_jobs_on_weka False \
-    --max_tool_calls 5 \
+    --max_steps 5 \
     --vllm_enable_prefix_caching \
     --tools python serper_search jina_browse \
     --tool_call_names code search browse \

@@ -6,6 +6,10 @@ allowed-tools: Bash(gh:*)
 
 # Update GitHub PR Body
 
+## Important
+
+**Do NOT use `gh pr edit --body`** - it fails with a GraphQL error about Projects (classic) deprecation. Always use the REST API approach below instead.
+
 ## Instructions
 
 When updating a GitHub PR body:

@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 for LR in 1e-6
 do
@@ -11,7 +11,7 @@ do
         --no_auto_dataset_cache \
         --priority urgent \
         --preemptible \
-        --image $BEAKER_IMAGE --pure_docker_mode \
+        --image "$BEAKER_IMAGE" --pure_docker_mode \
         --env OLMO_SHARED_FS=1 \
         --env OMP_NUM_THREADS=8 \
         --env TORCH_LOGS=recompiles,graph_breaks \
@@ -32,17 +32,17 @@ do
         --master_port=29400 \
         --nproc_per_node=8 \
         open_instruct/dpo.py \
-        --exp_name $EXP_NAME \
-        --model_name_or_path $MODEL_NAME \
+        --exp_name "$EXP_NAME" \
+        --model_name_or_path "$MODEL_NAME" \
         --config_name olmo3_7B \
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 4 \
-        --shard_degree 32 \
-        --num_replicas 1 \
-        --learning_rate $LR \
+        --fsdp_shard_degree 32 \
+        --fsdp_num_replicas 1 \
+        --learning_rate "$LR" \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
         --weight_decay 0.0 \
@@ -61,12 +61,9 @@ do
         --logging_steps 1 \
         --loss_type dpo_norm \
         --beta 5 \
-        --gradient_checkpointing \
-        --gradient_checkpointing_mode budget \
         --activation_memory_budget 0.1 \
-        --compile_model \
         --with_tracking \
-        --try_launch_beaker_eval_jobs False \
-        --push_to_hub False \
-        --try_auto_save_to_beaker False
+        --try_launch_beaker_eval_jobs false \
+        --push_to_hub false \
+        --try_auto_save_to_beaker false
 done

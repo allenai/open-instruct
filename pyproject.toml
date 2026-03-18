@@ -13,9 +13,9 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
-    "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
+    "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
-    "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
+    "multiprocess<0.70.18", # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy>=2",
     "ai2-olmo-core==2.3.0",
@@ -27,15 +27,18 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.14.1; platform_system != 'Darwin'",
+    "vllm==0.16.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
+    "flash-attn-3>=3.0.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
+    "openenv-core>=0.2.1",
+    "docker>=7.0.0",
 ]
 
 [build-system]
@@ -47,15 +50,20 @@ py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
+flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+flash-attn-3 = [
+  { index = "flash-attn-3-wheels", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
 
 [[tool.uv.index]]
@@ -73,6 +81,12 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[[tool.uv.index]]
+name = "flash-attn-3-wheels"
+url = "https://windreamer.github.io/flash-attention3-wheels/cu129_torch290"
+format = "flat"
+explicit = true
+
 [project.optional-dependencies]
 code = [
     "pydantic>=2.0.0",
@@ -80,6 +94,8 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+    "authlib",
+    "scipy",
 ]
 
 [tool.uv]
@@ -179,14 +195,29 @@ include = [
     "open_instruct/data_types.py",
     "open_instruct/dpo_config.py",
     "open_instruct/dpo_utils.py",
+    "open_instruct/grpo_callbacks.py",
+    "open_instruct/grpo_olmo_core_actor.py",
     "open_instruct/grpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
+    "open_instruct/olmo_core_train_modules.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
     "open_instruct/rl_utils.py",
-    "open_instruct/tools/tools.py",
-    "open_instruct/tools/generic_mcp.py",
+    "open_instruct/distillkit/compression/bitpack.py",
+    "open_instruct/distillkit/compression/compressor.py",
+    "open_instruct/distillkit/compression/config.py",
+    "open_instruct/distillkit/compression/monotonic_logprobs.py",
+    "open_instruct/rubrics/metrics.py",
+    "open_instruct/rubrics/prompts.py",
+    "open_instruct/rubrics/rubric_utils.py",
+    "open_instruct/rubrics/run_utils.py",
+    "open_instruct/environments/base.py",
+    "open_instruct/environments/examples.py",
+    "open_instruct/environments/tools/generic_mcp.py",
+    "open_instruct/environments/tools/parsers.py",
+    "open_instruct/environments/tools/tools.py",
+    "open_instruct/environments/tools/utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]

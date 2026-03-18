@@ -84,6 +84,7 @@ nav:
     - algorithms/grpo.md
     - algorithms/ppo.md
     - algorithms/reward_modeling.md
+    - slack-alerts.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md
 

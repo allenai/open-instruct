@@ -88,7 +88,7 @@ if ! [[ "$BEAKER_WORKSPACE" =~ ^[^/]+/[^/]+$ ]]; then
     exit 1
 fi
 
-# cluster/weka mount logic: default true (to use non-augusta)
+# cluster/weka mount logic
 # if model starts with gs://, set evaluate_on_weka to false.
 # All the logic is now handled internally, the flag is useless but keeping for backwards compatibility since people have scripts with it
 EVALUATE_ON_WEKA="true"
@@ -214,7 +214,7 @@ OLMO_3=(
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning_deepseek"
-    "omega_500:0-shot-chat_deepseek" 
+    "omega_500:0-shot-chat_deepseek"
     # FULL: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
     "aime:zs_cot_r1::pass_at_32_2025_deepseek"
@@ -387,7 +387,7 @@ for TASK in "${TASKS[@]}"; do
         --gantry-args "$GANTRY_ARGS" \
         ${REVISION_ARG} \
         ${WANDB_ARG} \
-        --cluster ai2/augusta \
+        --cluster ai2/jupiter \
         --beaker-retries 2 \
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
