@@ -173,17 +173,31 @@ The transformer production diff (0.06–0.11) is explained by natural response l
 Neither packing (0.012) nor the scoring function (0.030) reproduces the production
 hybrid gap of 0.24–0.58. The isolated test environment cannot reproduce this.
 
-Possible remaining explanations:
-1. **Training-time model state**: production scores happen after gradient updates,
-   which may put the model in states where vLLM-HF numerical differences are amplified
-2. **Multi-node distributed training**: DeepSpeed ZeRO-3 parameter gathering may
-   introduce numerical differences not present in single-GPU inference
-3. **Batch composition effects**: production batches mix many sequences from diverse
-   datasets; the metric averages over entire batches, not individual sequences
-4. **W&B metric aggregation**: check `debug/vllm_diff_mean_packed` vs
-   `debug/vllm_diff_mean_unpacked` in the production W&B run
-   (https://wandb.ai/ai2-llm/open_instruct_internal/runs/fo8rjg42) to confirm
-   which metric the 0.24–0.58 numbers came from
+#### W&B analysis (run `fo8rjg42`, 26 steps)
+
+The production run did **not** have the packed/unpacked split metrics — only the
+combined `debug/vllm_vs_local_logprob_diff_mean`. The 0.24–0.58 values are from
+this combined metric, logged per mini-batch forward pass:
+
+| Steps 1–5 | 0.46, 0.58, 0.24, 0.41, 0.36 |
+|-----------|-------------------------------|
+| Steps 6–10 | 0.24, 0.36, 0.53, 0.32, 0.33 |
+| Min/Max/Mean | 0.20 / 0.58 / 0.35 |
+
+The non-hybrid baseline (`eby9qlts`) shows 0.06–0.11 on the same metric.
+The gap fluctuates per step (not converging), suggesting it depends on which
+sequences are in the batch and the model's current parameter state.
+
+#### Remaining hypotheses
+
+Since the isolated test (pretrained weights, single GPU) gives 0.01–0.03, the
+production gap must emerge from the training environment:
+1. **Training-time model state**: after gradient updates the model may enter
+   parameter regimes where vLLM-HF numerical paths diverge more
+2. **Multi-node DeepSpeed ZeRO-3**: parameter all-gather may introduce numerical
+   differences not present in single-GPU inference
+3. **Per-batch variance**: each logged value is from one mini-batch; the metric
+   is not averaged across the full dataset
 
 ## Upstream fix
 
