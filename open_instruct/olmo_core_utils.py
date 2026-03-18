@@ -7,16 +7,14 @@ including model configuration mappings and helper functions.
 
 import math
 from dataclasses import dataclass
-from typing import Any
 
 import torch
-import torch.nn as nn
 import transformers
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import TransformerConfig
-from olmo_core.optim.config import INITIAL_LR_FIELD, LR_FIELD, OptimConfig
-from olmo_core.utils import move_to_device
+from olmo_core.optim.config import OptimGroupOverride
+from olmo_core.optim.muon import MuonConfig as _NativeMuonConfig
 
 from open_instruct import logger_utils
 
@@ -75,107 +73,17 @@ def get_transformer_config(
 
 
 @dataclass
-class MuonConfig(OptimConfig):
-    lr: float = 0.02
-    mu: float = 0.95
-    weight_decay: float = 0.0
-    epsilon: float = 1e-8
-    adjust_lr: str = "spectral_norm"
-    nesterov: bool = False
-    adamw_lr: float | None = None
-    lm_head_lr_scale: bool = True
-    d_model: int = 0
+class MuonConfig(_NativeMuonConfig):
+    """MuonConfig with lm_head LR scaled by 1/sqrt(d_model), matching dion paper recommendations."""
 
-    @classmethod
-    def optimizer(cls):
-        from dion import Muon  # noqa: PLC0415
-
-        return Muon
-
-    def build(self, model: nn.Module, strict: bool = True) -> torch.optim.Optimizer:
-        adamw_lr = self.adamw_lr if self.adamw_lr is not None else self.lr
-
-        muon_params = []
-        adamw_params = []
-        embedding_params = []
-        lm_head_params = []
-
-        for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
-            if name.startswith("embeddings"):
-                embedding_params.append(param)
-            elif name.startswith("lm_head"):
-                lm_head_params.append(param)
-            elif "blocks" in name and param.ndim == 2:
-                muon_params.append(param)
-            else:
-                adamw_params.append(param)
-
-        lm_head_lr = adamw_lr
-        if self.lm_head_lr_scale and self.d_model > 0:
-            lm_head_lr = adamw_lr / math.sqrt(self.d_model)
-
-        param_groups: list[dict[str, Any]] = []
-        if muon_params:
-            param_groups.append({"params": muon_params})
-        if adamw_params:
-            param_groups.append({"params": adamw_params, "algorithm": "adamw", "lr": adamw_lr})
-        if embedding_params:
-            param_groups.append({"params": embedding_params, "algorithm": "adamw", "lr": adamw_lr})
-        if lm_head_params:
-            param_groups.append({"params": lm_head_params, "algorithm": "adamw", "lr": lm_head_lr})
-
-        distributed_mesh = None
-        for param in model.parameters():
-            if hasattr(param, "device_mesh"):
-                distributed_mesh = param.device_mesh
-                break
-
-        from dion import Muon  # noqa: PLC0415
-
-        optim = Muon(
-            param_groups,
-            distributed_mesh=distributed_mesh,
-            lr=self.lr,
-            mu=self.mu,
-            weight_decay=self.weight_decay,
-            epsilon=self.epsilon,
-            adjust_lr=self.adjust_lr,
-            nesterov=self.nesterov,
-        )
-
-        fixed_fields_per_group: list[dict[str, Any]] = [{} for _ in optim.param_groups]
-        for fixed_fields, group in zip(fixed_fields_per_group, optim.param_groups):
-            lr = group.get(LR_FIELD, self.lr)
-            if self.compile:
-                group[LR_FIELD] = move_to_device(torch.tensor(lr), self.device)
-            else:
-                group[LR_FIELD] = lr
-            group.setdefault(INITIAL_LR_FIELD, lr)
-            for k in self.fixed_fields:
-                if k in group:
-                    fixed_fields[k] = group[k]
-
-        logger.info(f"Building Muon optimizer with {len(optim.param_groups)} param group(s)...")
-        for g_idx, group in enumerate(optim.param_groups):
-            group_fields_list = "\n - ".join([f"{k}: {v}" for k, v in group.items() if k != "params"])
-            if group_fields_list:
-                logger.info(f"Group {g_idx}, {len(group['params'])} parameter(s):\n - {group_fields_list}")
-            else:
-                logger.info(f"Group {g_idx}, {len(group['params'])} parameter(s)")
-
-        if self.compile:
-            logger.info("Compiling optimizer step...")
-            optim.step = torch.compile(optim.step)
-
-        def reset_fixed_fields(opt: torch.optim.Optimizer):
-            for ff, group in zip(fixed_fields_per_group, opt.param_groups):
-                group.update(ff)
-
-        optim.register_load_state_dict_post_hook(reset_fixed_fields)
-
-        return optim
+    def default_group_overrides(self, model: torch.nn.Module) -> list[OptimGroupOverride]:
+        overrides = super().default_group_overrides(model)
+        lm_head_out = model.lm_head.w_out
+        model_dim = lm_head_out.weight.shape[1]
+        for override in overrides:
+            if override.params and all(p.startswith("lm_head") for p in override.params) and "lr" not in override.opts:
+                override.opts["lr"] = self.lr / math.sqrt(model_dim)
+        return overrides
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):

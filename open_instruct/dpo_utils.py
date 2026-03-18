@@ -158,16 +158,8 @@ class TrainingConfig:
     """Whether to use fused AdamW or not."""
     optimizer_type: str = "adamw"
     """Optimizer type: 'adamw' or 'muon'."""
-    muon_mu: float = 0.95
-    """Momentum coefficient for Muon optimizer."""
-    muon_adjust_lr: str = "spectral_norm"
-    """LR adjustment for Muon: 'spectral_norm', 'rms_norm', or 'none'."""
-    muon_nesterov: bool = False
-    """Whether to use Nesterov momentum in Muon."""
-    muon_adamw_lr: float | None = None
-    """LR for AdamW param groups in Muon (embeddings, norms). Defaults to learning_rate if None."""
-    muon_lm_head_lr_scale: bool = True
-    """If True, scale LM head LR by 1/sqrt(d_model) as recommended by dion."""
+    optimizer_kwargs: dict | str = field(default_factory=dict)
+    """Extra kwargs passed to the optimizer config constructor (e.g. '{"mu": 0.95}' for Muon)."""
     tensor_parallel_degree: int = 1
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
@@ -330,7 +322,7 @@ class ExperimentConfig(
     Full arguments class for all fine-tuning jobs.
     """
 
-    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+    _VALID_DICT_FIELDS = ["additional_model_arguments", "optimizer_kwargs"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     do_not_randomize_output_dir: bool = False
