@@ -38,8 +38,9 @@ do
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 1 \
-        --gradient_accumulation_steps 4 \
+        --per_device_train_batch_size 16 \
+        --packing \
+        --gradient_accumulation_steps 1 \
         --fsdp_shard_degree 32 \
         --fsdp_num_replicas 1 \
         --learning_rate "$LR" \
