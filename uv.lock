@@ -1177,20 +1177,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
 
 [[package]]
-name = "flash-attn-3"
-version = "3.0.0+20260216.cu129torch290cxx11abitrue.fec3a6"
-source = { registry = "https://windreamer.github.io/flash-attention3-wheels/cu129_torch290" }
-dependencies = [
-    { name = "einops", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "ninja", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "packaging", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "torch", version = "2.9.1+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-wheels = [
-    { url = "https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.02.17-06dc5e7/flash_attn_3-3.0.0%2B20260216.cu129torch290cxx11abitrue.fec3a6-cp39-abi3-linux_x86_64.whl" },
-]
-
-[[package]]
 name = "flashinfer-python"
 version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2672,7 +2658,6 @@ dependencies = [
     { name = "fastapi", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "flashinfer-python", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "flash-attn-3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "hf-transfer", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "immutabledict", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "langdetect", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -2734,8 +2719,6 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "platform_machine != 'aarch64' and sys_platform != 'darwin'", specifier = ">=2.8.3" },
     { name = "flashinfer-python" },
-    { name = "flash-attn-3", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform != 'darwin' and sys_platform != 'linux')", specifier = ">=3.0.0" },
-    { name = "flash-attn-3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=3.0.0", index = "https://windreamer.github.io/flash-attention3-wheels/cu129_torch290" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
