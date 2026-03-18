@@ -326,7 +326,7 @@ class TestVllmVsPackedHF(unittest.TestCase):
                     model, input_ids, attn, pos_ids, pad_id, temperature=1.0
                 )
 
-            resp_mask_shifted = resp_mask[:, 1:]
+            resp_mask_shifted = resp_mask[:, 1:].bool()
             vllm_lp_shifted = vllm_lp_tensor[:, 1:]
             valid = resp_mask_shifted & ~torch.isnan(vllm_lp_shifted)
 
