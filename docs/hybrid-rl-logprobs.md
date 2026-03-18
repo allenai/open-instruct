@@ -116,30 +116,32 @@ The test replicates this: the hybrid model uses its built-in template; the trans
 model gets the `olmo` template from `CHAT_TEMPLATES` (since `Olmo-3-1025-7B` has no
 built-in chat template).
 
-### Results (Mar 18, experiment `01KM0KKAAAAACZERB01GR7M5YY`)
+### Results (Mar 18, experiment `01KM0QY7F73Y1JG6P7S7Q4PYYA`)
 
 #### TestGRPOLogprobsMatch — vLLM generate, HF score (8192 response tokens, 6 prompts)
 
 | Model | mean | max | std | median |
 |-------|------|-----|-----|--------|
 | Hybrid (Olmo-Hybrid-Instruct-DPO-7B) | 0.027 | 4.175 | 0.085 | 0.002 |
-| Transformer (Olmo-3-1025-7B) | 2.077 | 16.433 | 2.218 | 1.358 |
+| Transformer (Olmo-3-1025-7B) | 2.394 | 17.333 | 2.358 | 1.743 |
 
 The hybrid model's single-sequence gap (0.027) is much smaller than the production
-packed-sequence gap (0.24–0.58), confirming that packing is the main source of the
-production gap.
+packed-sequence gap (0.24–0.58), confirming that **packing is the main source of the
+production gap** for hybrid models.
 
-The transformer model's large gap (2.077) is due to its sliding window attention
+The transformer model's large gap (2.394) is due to its sliding window attention
 (window=4096): at 8192 response tokens, half the sequence is outside the window,
 and vLLM's decode-path KV cache eviction differs numerically from HF's prefill-path
-flash_attention_2 sliding window mask.
+flash_attention_2 sliding window mask. The production number (0.06–0.11) is lower
+because production metrics average over packed batches where many individual sequences
+are shorter.
 
 #### TestPatchEffect — does the cu_seqlens patch affect single sequences?
 
 | Model | patch_vs_unpatched | vllm_vs_unpatched | vllm_vs_patched |
 |-------|--------------------|-------------------|-----------------|
 | Hybrid | 0.000 | 0.037 | 0.037 |
-| Transformer | 0.000 | 2.180 | 2.180 |
+| Transformer | 0.000 | 2.384 | 2.384 |
 
 The patch has zero effect on single (unpacked) sequences, as expected — it only
 matters for packed multi-sequence batches.
@@ -149,10 +151,12 @@ matters for packed multi-sequence batches.
 | Model | 1024 tokens | 4096 tokens | 8192 tokens |
 |-------|-------------|-------------|-------------|
 | Hybrid | 0.008 | 0.031 | 0.037 |
-| Transformer | 0.177 | 1.667 | 2.180 |
+| Transformer | 0.328 | 1.852 | 2.384 |
 
 The hybrid gap grows slowly (~4.5x from 1024→8192). The transformer gap grows
-dramatically (~12x), consistent with accumulating sliding-window boundary differences.
+dramatically (~7x), consistent with accumulating sliding-window boundary differences.
+At 1024 tokens (within the 4096 sliding window), the transformer gap is already 0.328,
+suggesting a baseline numerical difference even before the window boundary matters.
 
 #### TestPackingStateLeak — does cu_seqlens reset recurrent state correctly?
 
