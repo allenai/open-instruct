@@ -43,7 +43,7 @@ from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 
@@ -162,10 +162,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
@@ -217,7 +213,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if args.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
         if accelerator.is_main_process:
-            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None
 
@@ -230,7 +226,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Make one log on every process with the configuration for debugging.
     logger_utils.setup_logger()
-    logger.info(accelerator.state)
+    if accelerator.is_main_process:
+        logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -363,7 +360,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     if args.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=args.activation_memory_budget < 1
+            )
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -376,7 +375,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    elif args.gradient_checkpointing:
+    elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
     model_dims = ModelDims(
@@ -408,8 +407,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     else:
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
+    train_sampler = RandomSampler(train_dataset, generator=torch.Generator().manual_seed(args.seed))
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset, sampler=train_sampler, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
@@ -575,6 +575,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     average_log_prob=args.loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
@@ -686,7 +687,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,
                             start_time=start_time,
-                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.get_url(),
+                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.url,
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()
@@ -700,7 +701,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                     with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                         f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                    if accelerator.is_local_main_process:
+                    if accelerator.is_main_process:
                         clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                     accelerator.wait_for_everyone()
 
@@ -715,7 +716,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-            if accelerator.is_local_main_process:
+            if accelerator.is_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
@@ -724,9 +725,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
-    # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
-        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+    if accelerator.is_main_process:
+        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     if (
         args.try_auto_save_to_beaker
@@ -742,9 +742,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+            wandb_url=wandb_tracker.run.url if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,

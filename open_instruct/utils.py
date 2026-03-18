@@ -54,6 +54,7 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
 import beaker
+import huggingface_hub
 import numpy as np
 import ray
 import requests
@@ -66,13 +67,15 @@ from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
+from requests.adapters import HTTPAdapter
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
+from urllib3.util.retry import Retry
 
 from open_instruct import data_types, logger_utils
-from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
+from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -826,7 +829,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             logger.info(f"Removing checkpoint {checkpoint}")
-            shutil.rmtree(os.path.join(output_dir, checkpoint))
+            shutil.rmtree(os.path.join(output_dir, checkpoint), ignore_errors=True)
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
@@ -847,7 +850,7 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
             print(f"Removing checkpoint {checkpoint}")
             checkpoint_path = os.path.join(output_dir, checkpoint)
             if os.path.isdir(checkpoint_path):
-                shutil.rmtree(checkpoint_path)
+                shutil.rmtree(checkpoint_path, ignore_errors=True)
             elif os.path.isfile(checkpoint_path):
                 os.remove(checkpoint_path)
 
@@ -934,6 +937,32 @@ class BeakerRuntimeConfig:
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
+
+
+def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
+    """Configure HF Hub HTTP retries with exponential backoff on 429/5xx."""
+
+    def backend_factory() -> requests.Session:
+        session = requests.Session()
+        retries = Retry(total=total, backoff_factor=backoff_factor, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
+
+
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
+    """Download a HF repo if not a local path, then verify it is available locally or in cache."""
+    if os.path.exists(repo_id):
+        return
+    huggingface_hub.snapshot_download(repo_id, revision=revision)
+    result = huggingface_hub.try_to_load_from_cache(repo_id, "config.json", revision=revision)
+    if not isinstance(result, str):
+        raise RuntimeError(
+            f"Model repo '{repo_id}' (revision={revision}) is not available locally or in the HF cache."
+        )
 
 
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
@@ -1170,48 +1199,23 @@ def launch_ai2_evals_on_weka(
     training_step: int | None = None,
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
-    gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    beaker_users = get_beaker_whoami()
-
-    if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
-        if beaker_users is not None:
-            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
-        else:
-            gs_saved_path = f"{gs_bucket_path}/{path}"
-        # save the model to the gs bucket first
-        # TODO: use upload_to_gs_bucket instead
-        gs_command = f"""gsutil \\
-            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
-            cp -r {path} \\
-            {gs_saved_path}"""
-        print(f"Copying model to GS bucket with command: {gs_command}")
-        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(f"GS bucket copy stdout:\n{stdout.decode()}")
-        print(f"GS bucket copy stderr:\n{stderr.decode()}")
-        print(f"GS bucket copy process return code: {process.returncode}")
-
-        # Update path to use the GS bucket path for evaluation
-        path = gs_saved_path
-    else:
-        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} {cluster_str} \
+--location {path} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
---skip_oi_evals"""
+--skip_oi_evals \
+--evaluate_on_weka"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
         wandb_run_path = wandb_url_to_run_path(wandb_url)
@@ -1220,8 +1224,6 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if gs_bucket_path is None:
-        command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
@@ -1341,8 +1343,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
 
     Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
     """
-    if getattr(args, "add_seed_and_date_to_exp_name", False):
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.exp_name = f"{args.exp_name}__{args.seed}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
     if dist.is_initialized():
@@ -1783,6 +1784,7 @@ GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "h200": {"flops": 989e12, "memory_size": 141e9, "memory_bandwidth": 4.8e12},  # 4.8 TB/s HBM3e
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
@@ -1942,8 +1944,8 @@ class ModelDims:
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
 
-            # Always include a single LM head after prefill (next-token logits)
-            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+            # LM head is applied to each token position during training
+            total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
 
         return total
 
@@ -2546,9 +2548,9 @@ def send_slack_message(message: str) -> None:
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
 
     beaker_url = get_beaker_experiment_url()

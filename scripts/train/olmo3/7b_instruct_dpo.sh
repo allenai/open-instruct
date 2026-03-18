@@ -5,7 +5,7 @@ for LR in 1e-6
 do
     EXP_NAME=olmo3-7b-DPO-1115-newb-tpc-d5-lbc100-${LR}-hpz1
     uv run python mason.py \
-       --cluster ai2/augusta \
+       --cluster ai2/jupiter \
        --gs_model_name olmo3-7b-instruct-SFT-1115 \
         --workspace ai2/olmo-instruct \
         --priority urgent \
