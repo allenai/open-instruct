@@ -39,7 +39,6 @@ uv run --active open_instruct/grpo_fast.py \
     --eval_top_p 0.95 \
     --vllm_top_p 1.0 \
     --async_steps 4 \
-    --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
@@ -65,7 +64,7 @@ uv run --active open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --local_eval_every 100 \
-    --save_freq 200 \
+    --save_freq 100 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
