@@ -35,26 +35,18 @@ PROD_DATASETS = [
 logger = logger_utils.setup_logger(__name__)
 
 
-def _get_chat_tokenizer() -> transformers.PreTrainedTokenizer:
-    """Return the hybrid model's tokenizer, which has a chat template."""
-    return transformers.AutoTokenizer.from_pretrained(
-        HYBRID_MODEL, trust_remote_code=True,
-    )
-
-
 def _load_prod_prompts(
     tokenizer: transformers.PreTrainedTokenizer, per_dataset: int = 2,
 ) -> list[list[int]]:
     """Load prompts from the full production dataset mix and tokenize.
 
-    If the tokenizer has no chat template (e.g. base models), falls back to
-    the hybrid model's tokenizer for formatting since they share the same vocab.
+    Matches production chat template setup:
+    - Hybrid model uses olmo123 (falls through to tokenizer's built-in template)
+    - Transformer model uses olmo (from CHAT_TEMPLATES in dataset_transformation.py)
     """
-    fmt_tokenizer = tokenizer
-    if not tokenizer.chat_template:
-        fmt_tokenizer = _get_chat_tokenizer()
-    elif isinstance(tokenizer.chat_template, dict):
-        fmt_tokenizer = _get_chat_tokenizer()
+    from open_instruct import dataset_transformation
+    if not tokenizer.chat_template or isinstance(tokenizer.chat_template, dict):
+        tokenizer.chat_template = dataset_transformation.CHAT_TEMPLATES["olmo"]
     prompts = []
     for ds_name in PROD_DATASETS:
         ds = datasets.load_dataset(ds_name, split="train")
@@ -62,7 +54,7 @@ def _load_prod_prompts(
             messages = ds[i]["messages"]
             if len(messages) > 1 and messages[-1]["role"] == "assistant":
                 messages = messages[:-1]
-            input_ids = fmt_tokenizer.apply_chat_template(
+            input_ids = tokenizer.apply_chat_template(
                 messages, add_generation_prompt=True, return_dict=False,
             )
             prompts.append(input_ids)

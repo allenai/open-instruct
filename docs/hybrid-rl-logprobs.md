@@ -95,6 +95,70 @@ which ran a separate `model()` forward pass for each packed sequence. This was c
 NCCL all-gather of all model parameters. With N packed sequences, this multiplied the
 communication overhead by N, causing training to hang indefinitely on multi-node setups.
 
+## Isolated logprobs comparison tests
+
+The test in `scripts/test_logprobs_comparison.py` isolates the vLLM-vs-HF logprob gap
+outside of training, using single (unpacked) sequences with the same datasets and
+response lengths as production (8192 tokens, 6 datasets from the production mix).
+
+Run on Beaker:
+```bash
+./scripts/train/build_image_and_launch.sh scripts/train/debug/run_logprobs_test.sh
+```
+
+### Production experiment config notes
+
+The production experiments used different chat templates:
+- **Hybrid** (`01KKVTQQZ86A5PB1MV1C2337DQ`): `--chat_template_name olmo123` (falls through to tokenizer's built-in `chat_template.jinja`)
+- **Non-hybrid** (`01KK201Y3C2Z6VNJVKRPASEGHA`): `--chat_template_name olmo` (from `CHAT_TEMPLATES` dict in `dataset_transformation.py`)
+
+The test replicates this: the hybrid model uses its built-in template; the transformer
+model gets the `olmo` template from `CHAT_TEMPLATES` (since `Olmo-3-1025-7B` has no
+built-in chat template).
+
+### Results (Mar 18, experiment `01KM0KKAAAAACZERB01GR7M5YY`)
+
+#### TestGRPOLogprobsMatch — vLLM generate, HF score (8192 response tokens, 6 prompts)
+
+| Model | mean | max | std | median |
+|-------|------|-----|-----|--------|
+| Hybrid (Olmo-Hybrid-Instruct-DPO-7B) | 0.027 | 4.175 | 0.085 | 0.002 |
+| Transformer (Olmo-3-1025-7B) | 2.077 | 16.433 | 2.218 | 1.358 |
+
+The hybrid model's single-sequence gap (0.027) is much smaller than the production
+packed-sequence gap (0.24–0.58), confirming that packing is the main source of the
+production gap.
+
+The transformer model's large gap (2.077) is due to its sliding window attention
+(window=4096): at 8192 response tokens, half the sequence is outside the window,
+and vLLM's decode-path KV cache eviction differs numerically from HF's prefill-path
+flash_attention_2 sliding window mask.
+
+#### TestPatchEffect — does the cu_seqlens patch affect single sequences?
+
+| Model | patch_vs_unpatched | vllm_vs_unpatched | vllm_vs_patched |
+|-------|--------------------|-------------------|-----------------|
+| Hybrid | 0.000 | 0.037 | 0.037 |
+| Transformer | 0.000 | 2.180 | 2.180 |
+
+The patch has zero effect on single (unpacked) sequences, as expected — it only
+matters for packed multi-sequence batches.
+
+#### TestLengthScaling — how does the gap grow with response length?
+
+| Model | 1024 tokens | 4096 tokens | 8192 tokens |
+|-------|-------------|-------------|-------------|
+| Hybrid | 0.008 | 0.031 | 0.037 |
+| Transformer | 0.177 | 1.667 | 2.180 |
+
+The hybrid gap grows slowly (~4.5x from 1024→8192). The transformer gap grows
+dramatically (~12x), consistent with accumulating sliding-window boundary differences.
+
+#### TestPackingStateLeak — does cu_seqlens reset recurrent state correctly?
+
+Packed vs individual scoring of the second sequence: **0.012** mean diff.
+The cu_seqlens patch correctly resets recurrent state at sequence boundaries.
+
 ## Upstream fix
 
 The proper fix is for HuggingFace transformers to pass `cu_seqlens` in `OlmoHybridGatedDeltaNet.forward()`,
