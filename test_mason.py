@@ -78,6 +78,21 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
+class TestValidateWandbTagLengths(unittest.TestCase):
+    def test_accepts_valid_exp_name_and_run_name(self):
+        mason.validate_wandb_tag_lengths(
+            [["python", "open_instruct/grpo_fast.py", "--exp_name", "short-exp", "--run_name", "x" * 100]]
+        )
+
+    def test_rejects_long_exp_name(self):
+        with self.assertRaisesRegex(ValueError, "--exp_name value exceeds wandb's 64-character tag limit"):
+            mason.validate_wandb_tag_lengths([["python", "open_instruct/grpo_fast.py", "--exp_name", "x" * 65]])
+
+    def test_rejects_long_wandb_tags_env_entry(self):
+        with self.assertRaisesRegex(ValueError, "WANDB_TAGS entry exceeds wandb's 64-character tag limit"):
+            mason.validate_wandb_tag_lengths([["WANDB_TAGS=ok," + ("x" * 65), "python", "train.py"]])
+
+
 class TestExperimentSpec(unittest.TestCase):
     @parameterized.parameterized.expand(
         [
