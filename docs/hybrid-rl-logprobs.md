@@ -128,32 +128,17 @@ built-in chat template).
 These results are inverted compared to production: in the test the hybrid is better,
 in production the hybrid is worse. See "Open questions" below for hypotheses.
 
-#### TestPatchEffect — does the cu_seqlens patch affect single sequences?
+#### TestVllmVsPackedHF — production-matching packed vLLM-HF comparison
 
-| Model | patch_vs_unpatched | vllm_vs_unpatched | vllm_vs_patched |
-|-------|--------------------|-------------------|-----------------|
-| Hybrid | 0.000 | 0.037 | 0.037 |
-| Transformer | 0.000 | 2.384 | 2.384 |
+*Results pending* — run with:
+```bash
+./scripts/train/build_image_and_launch.sh scripts/train/debug/run_logprobs_test.sh
+```
 
-The patch has zero effect on single (unpacked) sequences, as expected — it only
-matters for packed multi-sequence batches.
-
-#### TestLengthScaling — how does the gap grow with response length?
-
-| Model | 1024 tokens | 4096 tokens | 8192 tokens |
-|-------|-------------|-------------|-------------|
-| Hybrid | 0.008 | 0.031 | 0.037 |
-| Transformer | 0.328 | 1.852 | 2.384 |
-
-The hybrid gap grows slowly (~4.5x from 1024→8192). The transformer gap grows
-dramatically (~7x), consistent with accumulating sliding-window boundary differences.
-At 1024 tokens (within the 4096 sliding window), the transformer gap is already 0.328,
-suggesting a baseline numerical difference even before the window boundary matters.
-
-#### TestPackingStateLeak — does cu_seqlens reset recurrent state correctly?
-
-Packed vs individual scoring of the second sequence: **0.012** mean diff.
-The cu_seqlens patch correctly resets recurrent state at sequence boundaries.
+This test directly replicates the production metric by comparing vLLM logprobs
+against packed-HF logprobs scored with `forward_for_logprobs`. Two variants:
+- **packed**: 2 sequences packed into 11264-token tensor
+- **single**: 1 sequence in its own tensor (control)
 
 ## Open questions: why do test and production results diverge?
 
@@ -165,46 +150,41 @@ The test and production results show an inverted pattern:
 | Transformer      | 2.394                          | 0.06–0.11                     |
 
 The hybrid gets *worse* going from test → production. The transformer gets *better*.
-Two hypotheses, each explaining one direction:
 
-### Hypothesis 1: cu_seqlens packing error at production lengths (hybrid only)
+### Key difference: production uses packed scoring
 
-The cu_seqlens patch resets recurrent state at sequence boundaries within packed
-tensors. `TestPackingStateLeak` confirms this works at 256-token responses (0.012 diff).
-But at production lengths (8192-token responses packed into 11264-token tensors), the
-FLA kernels may accumulate more numerical error through the chunked recurrent
-computation with cu_seqlens boundaries. This would only affect the hybrid model
-(recurrent layers), not the transformer.
+Production compares vLLM logprobs against **packed** HF logprobs (via
+`grpo_utils.forward_for_logprobs` with sequence-ID attention masks). Our baseline
+`TestGRPOLogprobsMatch` uses `_hf_score` which `.clamp(0, 1)` on the attention mask,
+losing sequence ID info. This means the baseline test doesn't replicate the exact
+production scoring path.
 
-**Test plan**: Add `TestPackingStateLeak` variants at production lengths. Pack two
-sequences with ~4000–5000 token responses into an 11264-token tensor. Compare
-packed-with-patch vs individual scoring. If the diff is ~0.2–0.5 (matching production),
-this hypothesis is confirmed.
+Production also splits the metric by packing status:
+- `debug/vllm_diff_mean_packed`: diff for tensors with >1 packed sequence
+- `debug/vllm_diff_mean_unpacked`: diff for tensors with a single sequence
+
+The 0.24–0.58 numbers may be from the packed metric only. If the unpacked metric
+is ~0.03 (matching our test), then packing IS the explanation.
+
+### TestVllmVsPackedHF: reproducing the production comparison
+
+`TestVllmVsPackedHF` directly replicates the production metric:
+1. Generate responses with vLLM (get vLLM logprobs)
+2. Pack into tensors using `rl_utils.pack_sequences`
+3. Score with `grpo_utils.forward_for_logprobs` (matching production exactly)
+4. Compare vLLM logprobs vs packed-HF logprobs per response token
+
+Two variants:
+- **packed** (2 sequences in PROD_PACK_LENGTH=11264): matches production packed case
+- **single** (1 sequence, tight pack): isolates `forward_for_logprobs` effect
+
+If `packed` gives ~0.2–0.5 and `single` gives ~0.03, packing is the cause.
 
 ### Hypothesis 2: production responses are shorter than 8192 (transformer only)
 
 Production uses `--stop_strings "</answer>"`, so many responses terminate well before
-the 8192-token maximum. Our test uses `ignore_eos=True`, forcing exactly 8192 tokens.
-The transformer's sliding window attention (window=4096) causes the vLLM-HF gap to
-scale dramatically with length:
-
-| Response length | Transformer diff_mean |
-|-----------------|-----------------------|
-| 1024            | 0.328                 |
-| 4096            | 1.852                 |
-| 8192            | 2.384                 |
-
-If production responses average ~1000 tokens, the per-sequence diff would be ~0.3,
-and averaging over a packed batch with some shorter sequences would bring it to
-0.06–0.11. This does not affect the hybrid model because its gap is nearly flat
-across lengths (0.008 → 0.037).
-
-**Test plan**: Measure the actual response length distribution in a production run.
-Either:
-- Pull response lengths from W&B logs for experiment `01KK201Y3C2Z6VNJVKRPASEGHA`
-- Or run `TestLengthScaling` on the transformer without `ignore_eos=True` to see
-  what natural response lengths the model produces, and whether the diff at those
-  lengths matches production.
+the 8192-token maximum. The transformer's sliding window gap scales steeply with length.
+`TestNaturalResponseLength` tests this by generating with natural stopping.
 
 ## Upstream fix
 
