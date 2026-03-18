@@ -43,12 +43,10 @@ def export_to_hf(
     """
     logger.info("Gathering FSDP state dict...")
     state_dict = model.state_dict()
-    state_dict = {
-        k: v.full_tensor().to("cpu", non_blocking=True)
-        if hasattr(v, "full_tensor")
-        else v.to("cpu", non_blocking=True)
-        for k, v in state_dict.items()
-    }
+    # Don't use non_blocking=True here: transfers are enqueued back-to-back in a dict
+    # comprehension with no interleaving CPU work, so it buys nothing. And the state_dict
+    # is read immediately by save_state_dict_as_hf, so we need the transfers to complete.
+    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
 
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
@@ -293,7 +291,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
         )
     else:
-        max_length = args.max_seq_length if args.compile_model else None
+        max_length = args.max_seq_length if args.compile_model else 0
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(
             tokenizer=tokenizer, model=None, padding="longest", max_length=max_length
         )
