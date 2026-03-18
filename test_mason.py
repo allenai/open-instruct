@@ -1,7 +1,5 @@
-import os
 import unittest
 from argparse import Namespace
-from unittest import mock
 
 import beaker
 import parameterized
@@ -179,23 +177,6 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
-
-
-class TestGetEnvVars(unittest.TestCase):
-    @mock.patch.dict(os.environ, {"SLACK_EMAIL_ADDRESS": "alerts@example.com"}, clear=True)
-    def test_slack_email_address_is_passed_through(self):
-        env_vars = mason.get_env_vars(
-            pure_docker_mode=True,
-            cluster=["ai2/jupiter"],
-            beaker_secrets=[],
-            whoami="test-user",
-            resumable=False,
-            num_nodes=1,
-            additional_env_vars=[],
-            additional_secrets=[],
-        )
-
-        self.assertIn(beaker.BeakerEnvVar(name="SLACK_EMAIL_ADDRESS", value="alerts@example.com"), env_vars)
 
 
 if __name__ == "__main__":

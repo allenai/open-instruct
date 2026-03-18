@@ -104,8 +104,6 @@ DEFAULT_ENV_VARS = {
     "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
 }
 
-PASSTHROUGH_ENV_VARS = ["SLACK_EMAIL_ADDRESS"]
-
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -284,10 +282,6 @@ def get_env_vars(
     env_vars.extend(
         [beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets]
     )
-
-    for env_var_name in PASSTHROUGH_ENV_VARS:
-        if env_var_name in os.environ and env_var_name not in additional_env_var_names:
-            env_vars.append(beaker.BeakerEnvVar(name=env_var_name, value=os.environ[env_var_name]))
 
     useful_secrets = [
         "HF_TOKEN",

@@ -316,38 +316,11 @@ class TestBeakerDescription(unittest.TestCase):
 
 
 class TestSlackMessage(unittest.TestCase):
-    @mock.patch.dict(
-        os.environ,
-        {
-            "SLACK_EMAIL_ADDRESS": "alerts@example.com",
-            "ALERT_EMAIL_SENDER": "sender@example.com",
-            "SMTP_HOST": "smtp.example.com",
-            "SMTP_PORT": "2525",
-        },
-        clear=True,
-    )
-    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
-    @mock.patch("smtplib.SMTP")
-    def test_send_slack_message_with_email_address(self, mock_smtp, mock_get_beaker_url):
-        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
-
-        utils.send_slack_message("<!here> Disk is nearly full.")
-
-        mock_smtp.assert_called_once_with("smtp.example.com", 2525)
-        smtp_instance = mock_smtp.return_value.__enter__.return_value
-        smtp_instance.send_message.assert_called_once()
-        email_message = smtp_instance.send_message.call_args.args[0]
-        self.assertEqual(email_message["To"], "alerts@example.com")
-        self.assertEqual(email_message["From"], "sender@example.com")
-        self.assertEqual(email_message["Subject"], "open-instruct alert")
-        self.assertIn("Disk is nearly full", email_message.get_content())
-        self.assertIn("https://beaker.org/ex/test-456", email_message.get_content())
-
     @responses.activate
-    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK": "https://hooks.slack.com/services/test"}, clear=True)
+    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/test"}, clear=True)
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
     def test_send_slack_message_with_beaker_url(self, mock_get_beaker_url):
-        webhook_url = os.environ["SLACK_WEBHOOK"]
+        webhook_url = os.environ["SLACK_WEBHOOK_URL"]
         mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
 
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
@@ -393,9 +366,9 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
     @responses.activate
     @mock.patch("shutil.disk_usage")
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
-    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK": "https://hooks.slack.com/services/test"}, clear=True)
+    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/test"}, clear=True)
     def test_slack_alert_sent_when_enabled(self, mock_get_beaker_url, mock_disk_usage):
-        webhook_url = os.environ["SLACK_WEBHOOK"]
+        webhook_url = os.environ["SLACK_WEBHOOK_URL"]
         mock_get_beaker_url.return_value = None
         mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)

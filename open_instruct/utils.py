@@ -40,7 +40,6 @@ import os
 import random
 import re
 import shutil
-import smtplib
 import socket
 import subprocess
 import sys
@@ -51,7 +50,6 @@ from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
-from email.message import EmailMessage
 from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
@@ -2577,26 +2575,9 @@ def send_slack_message(message: str) -> None:
     beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
     full_message = f"{message}{beaker_suffix}"
 
-    slack_email_address = os.environ.get("SLACK_EMAIL_ADDRESS")
-    if slack_email_address:
-        email_message = EmailMessage()
-        email_message["To"] = slack_email_address
-        email_message["Subject"] = "open-instruct alert"
-        email_message["From"] = os.environ.get("ALERT_EMAIL_SENDER", "open-instruct@localhost")
-        email_message.set_content(full_message)
-
-        smtp_host = os.environ.get("SMTP_HOST", "localhost")
-        smtp_port = int(os.environ.get("SMTP_PORT", "25"))
-        try:
-            with smtplib.SMTP(smtp_host, smtp_port) as smtp:
-                smtp.send_message(email_message)
-            return
-        except OSError as exc:
-            logger.warning("Failed to send Slack alert email due to SMTP error: %s", exc)
-
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_EMAIL_ADDRESS and SLACK_WEBHOOK_URL environment variables not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variables not set. Skipping Slack alert.")
         return
 
     payload = {"text": full_message}

@@ -18,6 +18,7 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
+
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
