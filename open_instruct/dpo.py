@@ -13,14 +13,13 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import transformers
+from olmo_core import optim as olmo_optim
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
-from olmo_core.optim.muon import MuonConfig
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
@@ -111,11 +110,11 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
     if args.lr_scheduler_type == "cosine":
-        scheduler = CosWithWarmup(warmup_steps=warmup_steps)
+        scheduler = olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
     elif args.lr_scheduler_type == "linear":
-        scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+        scheduler = olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
     else:
-        scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
+        scheduler = olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
     return scheduler
 
 
@@ -350,11 +349,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     num_training_steps = len(data_loader) * args.num_epochs
     effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
     if args.optimizer_type == "muon":
-        optim_config = MuonConfig(
+        optim_config = olmo_optim.MuonConfig(
             lr=args.learning_rate, weight_decay=args.weight_decay, **(args.optimizer_kwargs or {})
         )
     elif args.optimizer_type == "adamw":
-        optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
+        optim_config = olmo_optim.AdamWConfig(
+            lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer
+        )
     else:
         raise ValueError(f"Unknown optimizer_type: {args.optimizer_type!r}. Must be 'adamw' or 'muon'.")
     scheduler = _setup_scheduler(args, effective_steps)
