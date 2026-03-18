@@ -829,18 +829,14 @@ class LLMRayActor:
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
+    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...]) -> None:
         self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape)))
 
-    def update_weight_cuda_ipc(
-        self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
-    ) -> None:
+    def update_weight_cuda_ipc(self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any]) -> None:
         self._prepare_weight_update(name, dtype)
         return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
+            self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles))
         )
 
     def reset_prefix_cache(self) -> None:
@@ -1337,15 +1333,11 @@ def _send_to_vllm(
     name: str,
     param: torch.nn.Parameter,
     shape: torch.Size,
-    is_last: bool,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
 ) -> list[ray.ObjectRef]:
     """Send a parameter to vLLM engines via broadcast."""
-    refs = [
-        engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
-        for engine in vllm_engines
-    ]
+    refs = [engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape) for engine in vllm_engines]
     torch.distributed.broadcast(param.data, 0, group=model_update_group)
     return refs
 
@@ -1365,7 +1357,6 @@ def _broadcast_fsdp2_block_params(
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
     name_mapper: Callable[[str], str] | None,
-    is_last_block: bool,
     is_rank_0: bool,
 ) -> list[ray.ObjectRef]:
     """Broadcast parameters from one FSDP2 block to vLLM engines.
@@ -1377,13 +1368,10 @@ def _broadcast_fsdp2_block_params(
     try:
         refs: list[ray.ObjectRef] = []
         if is_rank_0:
-            params = list(block.named_parameters())
-            num_params = len(params)
-            for i, (name, param) in enumerate(params):
+            for name, param in block.named_parameters():
                 full_name = f"{block_name}.{name}" if block_name else name
                 mapped_name = name_mapper(full_name) if name_mapper else full_name
-                is_last = is_last_block and (i == num_params - 1)
-                refs.extend(_send_to_vllm(mapped_name, param, param.shape, is_last, vllm_engines, model_update_group))
+                refs.extend(_send_to_vllm(mapped_name, param, param.shape, vllm_engines, model_update_group))
         return refs
     finally:
         block.reshard()
@@ -1397,11 +1385,10 @@ def _broadcast_params_to_vllm(
 ) -> list[ray.ObjectRef]:
     """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
     refs: list[ray.ObjectRef] = []
-    num_params = len(params)
-    for i, (name, param) in enumerate(params):
+    for name, param in params:
         mapped_name = name_mapper(name) if name_mapper else name
         shape = getattr(param, "ds_shape", param.shape)
-        refs.extend(_send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group))
+        refs.extend(_send_to_vllm(mapped_name, param, shape, vllm_engines, model_update_group))
     return refs
 
 
@@ -1439,10 +1426,9 @@ def broadcast_weights_to_vllm(
         if not fsdp_submodules:
             raise ValueError("FSDP2 model has no FSDP submodules.")
         all_refs: list[ray.ObjectRef] = []
-        num_blocks = len(fsdp_submodules)
-        for i, (block_name, block) in enumerate(fsdp_submodules):
+        for block_name, block in fsdp_submodules:
             refs = _broadcast_fsdp2_block_params(
-                block_name, block, vllm_engines, model_update_group, name_mapper, i == num_blocks - 1, is_rank_0
+                block_name, block, vllm_engines, model_update_group, name_mapper, is_rank_0
             )
             all_refs.extend(refs)
         return all_refs
@@ -1461,13 +1447,10 @@ def broadcast_weights_to_vllm(
             return []
     else:
         all_refs: list[ray.ObjectRef] = []
-        num_params = len(params)
-        for i, (name, param) in enumerate(params):
+        for name, param in params:
             with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
                 if is_rank_0:
                     mapped_name = name_mapper(name) if name_mapper else name
                     shape = getattr(param, "ds_shape", param.shape)
-                    all_refs.extend(
-                        _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
-                    )
+                    all_refs.extend(_send_to_vllm(mapped_name, param, shape, vllm_engines, model_update_group))
         return all_refs
