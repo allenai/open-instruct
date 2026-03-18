@@ -38,11 +38,12 @@ do
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 16 \
+        --per_device_train_batch_size 32 \
         --packing \
         --gradient_accumulation_steps 1 \
-        --fsdp_shard_degree 32 \
-        --fsdp_num_replicas 1 \
+        --fsdp_shard_degree 16 \
+        --fsdp_num_replicas 2 \
+        --tensor_parallel_degree 2 \
         --learning_rate "$LR" \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
@@ -62,7 +63,7 @@ do
         --logging_steps 1 \
         --loss_type dpo_norm \
         --beta 5 \
-        --activation_memory_budget 0.1 \
+        --activation_memory_budget 0.3 \
         --with_tracking \
         --try_launch_beaker_eval_jobs false \
         --push_to_hub false \
