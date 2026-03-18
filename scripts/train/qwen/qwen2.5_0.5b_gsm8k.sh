@@ -12,7 +12,7 @@ LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
+CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-high}"
 NUM_GPUS="${NUM_GPUS:-4}"
 
@@ -35,8 +35,8 @@ uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name ${RUN_NAME} \
     --beta 0.0 \
-    --eval_pass_at_k 4 \
-    --eval_top_p 0.95 \
+    --eval_pass_at_k 1 \
+    --eval_top_p 1.0 \
     --vllm_top_p 1.0 \
     --async_steps 4 \
     --inflight_updates \
