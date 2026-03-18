@@ -42,7 +42,7 @@ do
         --packing \
         --gradient_accumulation_steps 1 \
         --fsdp_shard_degree 16 \
-        --fsdp_num_replicas 2 \
+        --fsdp_num_replicas 1 \
         --tensor_parallel_degree 2 \
         --learning_rate "$LR" \
         --lr_scheduler_type linear \
