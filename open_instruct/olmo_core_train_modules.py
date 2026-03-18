@@ -163,6 +163,9 @@ class DPOTrainModule(TransformerTrainModule):
     def pre_train(self):
         pass
 
+    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int | None:
+        return None
+
     def _compute_microbatch_loss(self, micro_batch: dict[str, Any]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model,

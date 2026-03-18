@@ -5,16 +5,10 @@ This module provides common utilities for working with OLMo-core models,
 including model configuration mappings and helper functions.
 """
 
-import math
-from dataclasses import dataclass
-
-import torch
 import transformers
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import TransformerConfig
-from olmo_core.optim.config import OptimGroupOverride
-from olmo_core.optim.muon import MuonConfig as _NativeMuonConfig
 
 from open_instruct import logger_utils
 
@@ -70,20 +64,6 @@ def get_transformer_config(
     if attn_backend is not None:
         kwargs["attn_backend"] = AttentionBackendName(attn_backend)
     return getattr(TransformerConfig, config_name)(**kwargs)
-
-
-@dataclass
-class MuonConfig(_NativeMuonConfig):
-    """MuonConfig with lm_head LR scaled by 1/sqrt(d_model), matching dion paper recommendations."""
-
-    def default_group_overrides(self, model: torch.nn.Module) -> list[OptimGroupOverride]:
-        overrides = super().default_group_overrides(model)
-        lm_head_out = model.lm_head.w_out
-        model_dim = lm_head_out.weight.shape[1]
-        for override in overrides:
-            if override.params and all(p.startswith("lm_head") for p in override.params) and "lr" not in override.opts:
-                override.opts["lr"] = self.lr / math.sqrt(model_dim)
-        return overrides
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):

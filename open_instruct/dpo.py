@@ -20,6 +20,7 @@ from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
+from olmo_core.optim.muon import MuonConfig
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
@@ -349,7 +350,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     num_training_steps = len(data_loader) * args.num_epochs
     effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
     if args.optimizer_type == "muon":
-        optim_config = olmo_core_utils.MuonConfig(
+        optim_config = MuonConfig(
             lr=args.learning_rate, weight_decay=args.weight_decay, **(args.optimizer_kwargs or {})
         )
     elif args.optimizer_type == "adamw":
