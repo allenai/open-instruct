@@ -68,7 +68,7 @@ uv run --active open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
-    --vllm_tensor_parallel_size 2 \
+    --vllm_num_engines 2 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
