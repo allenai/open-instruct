@@ -41,7 +41,6 @@ uv run python mason.py \
     --response_length 8192 \
     --pack_length 10240 \
     --model_name_or_path Qwen/Qwen3-4B-Base \
-    --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
