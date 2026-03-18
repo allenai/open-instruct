@@ -39,7 +39,7 @@ dependencies = [
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
-    "dion; platform_system != 'Darwin'",
+
 ]
 
 [build-system]
@@ -60,7 +60,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "002958a8f15a" }
-dion = { git = "https://github.com/microsoft/dion.git" }
+
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
