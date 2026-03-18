@@ -125,16 +125,8 @@ built-in chat template).
 | Hybrid (Olmo-Hybrid-Instruct-DPO-7B) | 0.027 | 4.175 | 0.085 | 0.002 |
 | Transformer (Olmo-3-1025-7B) | 2.394 | 17.333 | 2.358 | 1.743 |
 
-The hybrid model's single-sequence gap (0.027) is much smaller than the production
-packed-sequence gap (0.24–0.58), confirming that **packing is the main source of the
-production gap** for hybrid models.
-
-The transformer model's large gap (2.394) is due to its sliding window attention
-(window=4096): at 8192 response tokens, half the sequence is outside the window,
-and vLLM's decode-path KV cache eviction differs numerically from HF's prefill-path
-flash_attention_2 sliding window mask. The production number (0.06–0.11) is lower
-because production metrics average over packed batches where many individual sequences
-are shorter.
+These results are inverted compared to production: in the test the hybrid is better,
+in production the hybrid is worse. See "Open questions" below for hypotheses.
 
 #### TestPatchEffect — does the cu_seqlens patch affect single sequences?
 
@@ -162,6 +154,57 @@ suggesting a baseline numerical difference even before the window boundary matte
 
 Packed vs individual scoring of the second sequence: **0.012** mean diff.
 The cu_seqlens patch correctly resets recurrent state at sequence boundaries.
+
+## Open questions: why do test and production results diverge?
+
+The test and production results show an inverted pattern:
+
+|                  | Test (single seq, 8192 forced) | Production (packed, 8192 max) |
+|------------------|-------------------------------:|------------------------------:|
+| Hybrid           | 0.027                          | 0.24–0.58                     |
+| Transformer      | 2.394                          | 0.06–0.11                     |
+
+The hybrid gets *worse* going from test → production. The transformer gets *better*.
+Two hypotheses, each explaining one direction:
+
+### Hypothesis 1: cu_seqlens packing error at production lengths (hybrid only)
+
+The cu_seqlens patch resets recurrent state at sequence boundaries within packed
+tensors. `TestPackingStateLeak` confirms this works at 256-token responses (0.012 diff).
+But at production lengths (8192-token responses packed into 11264-token tensors), the
+FLA kernels may accumulate more numerical error through the chunked recurrent
+computation with cu_seqlens boundaries. This would only affect the hybrid model
+(recurrent layers), not the transformer.
+
+**Test plan**: Add `TestPackingStateLeak` variants at production lengths. Pack two
+sequences with ~4000–5000 token responses into an 11264-token tensor. Compare
+packed-with-patch vs individual scoring. If the diff is ~0.2–0.5 (matching production),
+this hypothesis is confirmed.
+
+### Hypothesis 2: production responses are shorter than 8192 (transformer only)
+
+Production uses `--stop_strings "</answer>"`, so many responses terminate well before
+the 8192-token maximum. Our test uses `ignore_eos=True`, forcing exactly 8192 tokens.
+The transformer's sliding window attention (window=4096) causes the vLLM-HF gap to
+scale dramatically with length:
+
+| Response length | Transformer diff_mean |
+|-----------------|-----------------------|
+| 1024            | 0.328                 |
+| 4096            | 1.852                 |
+| 8192            | 2.384                 |
+
+If production responses average ~1000 tokens, the per-sequence diff would be ~0.3,
+and averaging over a packed batch with some shorter sequences would bring it to
+0.06–0.11. This does not affect the hybrid model because its gap is nearly flat
+across lengths (0.008 → 0.037).
+
+**Test plan**: Measure the actual response length distribution in a production run.
+Either:
+- Pull response lengths from W&B logs for experiment `01KK201Y3C2Z6VNJVKRPASEGHA`
+- Or run `TestLengthScaling` on the transformer without `ignore_eos=True` to see
+  what natural response lengths the model produces, and whether the diff at those
+  lengths matches production.
 
 ## Upstream fix
 
