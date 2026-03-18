@@ -6,7 +6,7 @@ do
     EXP_NAME=olmo3-7b-DPO-olmocore-${LR}
     uv run python mason.py \
         --cluster ai2/jupiter \
-        --description "OLMo3-7B DPO with OLMo-core, 4 nodes, 16k seq len" \
+        --description "OLMo3-7B DPO olmocore no-TP FSDP32 bs32 budget0.3" \
         --workspace ai2/olmo-instruct \
         --no_auto_dataset_cache \
         --priority urgent \
@@ -38,12 +38,12 @@ do
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 64 \
+        --per_device_train_batch_size 32 \
         --packing \
         --gradient_accumulation_steps 1 \
-        --fsdp_shard_degree 16 \
+        --fsdp_shard_degree 32 \
         --fsdp_num_replicas 1 \
-        --tensor_parallel_degree 2 \
+        --tensor_parallel_degree 1 \
         --learning_rate "$LR" \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
