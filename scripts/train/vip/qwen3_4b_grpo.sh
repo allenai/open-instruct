@@ -39,7 +39,7 @@ uv run python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
-    --model_name_or_path Qwen/Qwen3-4B-Base \
+    --model_name_or_path Qwen/Qwen3-4B \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \

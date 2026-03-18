@@ -80,5 +80,5 @@ uv run python mason.py \
     --vf_clip_range 0.2 \
     --decoupled_gae \
     --length_adaptive_gae \
-    --value_model_name_or_path Qwen/Qwen3-4B-Base \
+    --value_model_name_or_path Qwen/Qwen3-4B \
     --value_model_ground_truth_conditioning
