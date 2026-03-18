@@ -64,6 +64,8 @@ def _load_prod_prompts(
 def _vllm_generate(
     model_name: str, prompt: list[int], max_tokens: int,
     enforce_eager: bool = True, ssm_cache_dtype: str | None = None,
+    ignore_eos: bool = True, stop_strings: list[str] | None = None,
+    gpu_memory_utilization: float = 0.45,
 ) -> dict[str, list[int] | list[float]]:
     """Generate with vLLM and return response tokens + logprobs (decode path)."""
     kwargs = {}
@@ -77,7 +79,7 @@ def _vllm_generate(
         dtype=DTYPE,
         disable_cascade_attn=True,
         trust_remote_code=True,
-        gpu_memory_utilization=0.45,
+        gpu_memory_utilization=gpu_memory_utilization,
         **kwargs,
     )
     sampling_params = vllm.SamplingParams(
@@ -85,7 +87,8 @@ def _vllm_generate(
         logprobs=0,
         seed=SEED,
         temperature=1.0,
-        ignore_eos=True,
+        ignore_eos=ignore_eos,
+        stop=stop_strings or [],
     )
     outputs = llm.generate(
         [{"prompt_token_ids": prompt}], sampling_params=sampling_params,
@@ -544,6 +547,221 @@ class TestPackingStateLeak(unittest.TestCase):
         del model
         gc.collect()
         torch.cuda.empty_cache()
+
+
+class TestPackingAtProdLength(unittest.TestCase):
+    """Hypothesis 1: cu_seqlens packing error grows at production lengths.
+
+    TestPackingStateLeak uses 256-token responses (diff=0.012). Production uses
+    8192-token responses packed into 11264-token tensors. If packing error
+    accumulates through recurrent layers at longer sequences, the diff should
+    grow to ~0.2-0.5, matching the production gap.
+
+    Packs two sequences with ~4000-5000 token responses into a single tensor,
+    then compares patched-packed scoring vs individual scoring.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
+    def test_packing_at_prod_length(self):
+        from open_instruct import grpo_fast
+        from open_instruct import grpo_utils
+
+        grpo_fast._patch_gated_deltanet_cu_seqlens()
+
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            HYBRID_MODEL, trust_remote_code=True,
+        )
+        prompts = _load_prod_prompts(tokenizer, per_dataset=1)
+        prompts = prompts[:2]
+
+        max_tokens = 4500
+        vllm_engine = vllm.LLM(
+            model=HYBRID_MODEL,
+            seed=SEED,
+            enforce_eager=True,
+            max_model_len=max(len(p) for p in prompts) + max_tokens + 128,
+            dtype=DTYPE,
+            disable_cascade_attn=True,
+            trust_remote_code=True,
+            gpu_memory_utilization=0.40,
+        )
+        sampling_params = vllm.SamplingParams(
+            max_tokens=max_tokens, logprobs=0, seed=SEED,
+            temperature=1.0, ignore_eos=True,
+        )
+        outputs = vllm_engine.generate(
+            [{"prompt_token_ids": p} for p in prompts],
+            sampling_params=sampling_params,
+        )
+        responses = []
+        vllm_lps = []
+        for out in outputs:
+            resp, lps = [], []
+            for token_info in out.outputs[0].logprobs:
+                token_id = list(token_info.keys())[0]
+                resp.append(token_id)
+                lps.append(token_info[token_id].logprob)
+            responses.append(resp)
+            vllm_lps.append(lps)
+        del vllm_engine
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for i, (p, r) in enumerate(zip(prompts, responses)):
+            logger.info(
+                "PACKING_PROD seq=%d prompt_len=%d resp_len=%d total=%d",
+                i, len(p), len(r), len(p) + len(r),
+            )
+
+        pack_length = PROD_PACK_LENGTH
+        packed = rl_utils.pack_sequences(
+            queries=prompts,
+            responses=responses,
+            masks=[[1] * len(r) for r in responses],
+            pack_length=pack_length,
+            pad_token_id=tokenizer.pad_token_id,
+            vllm_logprobs=vllm_lps,
+        )
+        n_packs = len(packed.query_responses)
+        logger.info("PACKING_PROD packed into %d tensor(s) of length %d", n_packs, pack_length)
+
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            HYBRID_MODEL,
+            torch_dtype=getattr(torch, DTYPE),
+            device_map="cuda",
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+            trust_remote_code=True,
+        )
+
+        for pack_idx in range(n_packs):
+            input_ids = packed.query_responses[pack_idx].unsqueeze(0).to("cuda")
+            attn = packed.attention_masks[pack_idx].unsqueeze(0).to("cuda")
+            pos_ids = packed.position_ids[pack_idx].unsqueeze(0).to("cuda")
+            pad_id = tokenizer.pad_token_id
+
+            with torch.no_grad():
+                packed_logprobs, _ = grpo_utils.forward_for_logprobs(
+                    model, input_ids, attn, pos_ids, pad_id, temperature=1.0,
+                )
+
+            seq_ids = attn[0].unique()
+            seq_ids = seq_ids[seq_ids > 0]
+            logger.info("PACKING_PROD pack=%d has %d sequences", pack_idx, len(seq_ids))
+
+            for seq_id in seq_ids:
+                mask = attn[0] == seq_id
+                indices = mask.nonzero(as_tuple=True)[0]
+                s_start = indices[0].item()
+                s_end = indices[-1].item() + 1
+
+                individual_lps = _hf_score_raw(
+                    model, input_ids[0, s_start:s_end], pad_id,
+                )
+                packed_lps = packed_logprobs[0, s_start:s_end - 1]
+
+                diff = (packed_lps - individual_lps).abs()
+                diff_mean = diff.mean().item()
+                diff_max = diff.max().item()
+                seq_len = s_end - s_start
+                logger.info(
+                    "PACKING_PROD pack=%d seq=%d len=%d "
+                    "patched_packed_vs_individual: mean=%.6f max=%.6f",
+                    pack_idx, seq_id.item(), seq_len, diff_mean, diff_max,
+                )
+
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+class TestNaturalResponseLength(unittest.TestCase):
+    """Hypothesis 2: production responses are shorter than 8192 tokens.
+
+    Production uses --stop_strings "</answer>", so many responses terminate
+    early. The transformer's sliding-window gap scales steeply with length,
+    so shorter responses would explain the low production diff (0.06-0.11)
+    vs our forced-8192 test diff (2.394).
+
+    Generates with natural stopping (no ignore_eos) and measures actual
+    response lengths + vLLM-HF diff at those lengths.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
+    @parameterized.parameterized.expand([
+        ("hybrid", HYBRID_MODEL),
+        ("transformer", TRANSFORMER_MODEL),
+    ])
+    def test_natural_length(self, _name, model_name):
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=True,
+        )
+        prompts = _load_prod_prompts(tokenizer, per_dataset=1)
+
+        results = []
+        for prompt_idx, prompt in enumerate(prompts):
+            vllm_result = _vllm_generate(
+                model_name, prompt, max_tokens=PROD_RESPONSE_LENGTH,
+                enforce_eager=True, ignore_eos=False,
+                stop_strings=["</answer>"],
+            )
+            response = vllm_result["response"]
+            vllm_logprobs = vllm_result["logprobs"]
+            resp_len = len(response)
+
+            logger.info(
+                "NATURAL_LENGTH model=%s prompt=%d/%d prompt_len=%d resp_len=%d",
+                model_name, prompt_idx + 1, len(prompts), len(prompt), resp_len,
+            )
+
+            if resp_len == 0:
+                logger.info("NATURAL_LENGTH skipping empty response")
+                continue
+
+            pack_length = len(prompt) + resp_len + 16
+            packed = rl_utils.pack_sequences(
+                queries=[prompt],
+                responses=[response],
+                masks=[[1] * resp_len],
+                pack_length=pack_length,
+                pad_token_id=tokenizer.pad_token_id,
+                vllm_logprobs=[vllm_logprobs],
+            )
+
+            hf_logprobs = _hf_score(
+                model_name,
+                packed.query_responses[0],
+                packed.attention_masks[0],
+                packed.position_ids[0],
+                tokenizer.pad_token_id,
+                query_len=len(prompt),
+                response_len=resp_len,
+            )
+
+            vllm_arr = np.array(vllm_logprobs)
+            hf_arr = np.array(hf_logprobs)
+            abs_diff = np.abs(vllm_arr - hf_arr)
+            diff_mean = abs_diff.mean()
+            results.append((prompt_idx, resp_len, diff_mean))
+
+            _log_diff_stats(
+                f"NATURAL_LENGTH prompt={prompt_idx} resp_len={resp_len}", abs_diff,
+            )
+
+        logger.info("NATURAL_LENGTH SUMMARY model=%s", model_name)
+        resp_lens = [r[1] for r in results]
+        diff_means = [r[2] for r in results]
+        if resp_lens:
+            logger.info(
+                "  resp_len: min=%d max=%d mean=%.0f median=%.0f",
+                min(resp_lens), max(resp_lens),
+                np.mean(resp_lens), np.median(resp_lens),
+            )
+            logger.info(
+                "  diff_mean: min=%.6f max=%.6f mean=%.6f median=%.6f",
+                min(diff_means), max(diff_means),
+                np.mean(diff_means), np.median(diff_means),
+            )
 
 
 if __name__ == "__main__":
