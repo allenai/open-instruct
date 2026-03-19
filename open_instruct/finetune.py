@@ -420,6 +420,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
         if accelerator.is_main_process and is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
