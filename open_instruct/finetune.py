@@ -434,7 +434,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
+        if accelerator.is_main_process:
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -886,7 +887,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         current_step=completed_steps,
                         total_steps=args.max_train_steps,
                         start_time=start_time,
-                        wandb_url=wandb_tracker.run.url if wandb_tracker is not None else None,
+                        wandb_url=wandb_tracker.run.url if wandb_tracker is not None and accelerator.is_main_process else None,
                     )
                     total_loss = 0
                     total_aux_loss = 0
