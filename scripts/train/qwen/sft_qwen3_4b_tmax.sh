@@ -15,7 +15,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 4 \
     --budget ai2/oe-adapt \
     --gpus 8 \
     -- \
@@ -23,7 +23,8 @@ uv run python mason.py \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
+    --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name sft_qwen3_4b_tmax \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
