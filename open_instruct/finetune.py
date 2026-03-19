@@ -371,9 +371,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     parallelism_config = None
     if args.sequence_parallel_size > 1 and not args.cache_dataset_only:
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        dp_shard_size = world_size // args.sequence_parallel_size
         parallelism_config = ParallelismConfig(
             sp_backend="deepspeed",
             sp_size=args.sequence_parallel_size,
+            dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
                 sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_2"
             ),
