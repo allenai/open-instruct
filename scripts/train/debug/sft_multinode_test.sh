@@ -11,7 +11,7 @@ echo "Sequence parallel size: $SP_SIZE"
 uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/open-instruct-dev \
-    --priority normal \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --description "Two-node SFT+SP integration test (sp=$SP_SIZE)." \
     --pure_docker_mode \
