@@ -327,7 +327,10 @@ class FlatArguments:
     sequence_parallel_size: int = field(
         default=1,
         metadata={
-            "help": "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3 and flash attention."
+            "help": (
+                "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3. "
+                "Flash attention is recommended; SDPA works but does not correctly handle packed/concatenated samples."
+            )
         },
     )
 
