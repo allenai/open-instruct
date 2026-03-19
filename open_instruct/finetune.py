@@ -628,7 +628,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             # Filter out any non-2D tensors to avoid IndexError in the adapter's refill().
             def collate_fn(features):
                 batch = base_collate_fn(features)
-                return {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
+                filtered = {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
+                dropped = set(batch.keys()) - set(filtered.keys())
+                if dropped:
+                    shapes = {k: tuple(batch[k].shape) for k in dropped}
+                    logger.warning_once(f"SP collator dropped non-2D keys: {dropped} (shapes: {shapes})")
+                return filtered
         else:
             collate_fn = base_collate_fn
 
