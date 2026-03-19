@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Added a GRPO implementation that uses OLMo-core with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1389).
 - Add the Qwen 3 4B DAPO math 32k training launch script under `scripts/train/qwen/` (https://github.com/allenai/open-instruct/pull/1536).
 - Add Muon optimizer support to DPO training via OLMo-core's native MuonConfig (https://github.com/allenai/open-instruct/pull/1533).
 - Add documentation for Slack alert integrations in GRPO and DPO training (https://github.com/allenai/open-instruct/pull/1529).

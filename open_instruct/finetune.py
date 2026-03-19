@@ -405,8 +405,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
+        beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
