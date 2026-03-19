@@ -11,7 +11,7 @@ DATASET=hamishivi/tmax-sft-full-20260317
 uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/open-instruct-dev \
-    --priority normal \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
