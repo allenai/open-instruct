@@ -115,7 +115,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             max_prompt_token_length=64,
             response_length=32,
             async_steps=1,
-            num_samples_per_prompt_rollout=2,
+            num_samples_per_prompt=2,
             filter_zero_std_samples=False,
             pack_length=128,
         )
@@ -227,7 +227,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             max_prompt_token_length=128,
             response_length=128,
             async_steps=1,
-            num_samples_per_prompt_rollout=2,
+            num_samples_per_prompt=2,
             filter_zero_std_samples=False,
             pack_length=512,
             mask_tool_use=True,

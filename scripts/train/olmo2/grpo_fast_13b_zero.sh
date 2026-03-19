@@ -10,8 +10,8 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name olmo2_13b_grpo_fast_zero \
     --beta 0.0 \
-    --num_unique_prompts_rollout 48 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts 48 \
+    --num_samples_per_prompt 16 \
     --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \

@@ -73,8 +73,8 @@ for model_name_or_path in "$@"; do
 	          --verbose False \
             --response_length "$response_length" \
             --vllm_top_p 0.9 \
-            --num_unique_prompts_rollout 2 \
-            --num_samples_per_prompt_rollout 4 \
+            --num_unique_prompts 2 \
+            --num_samples_per_prompt 4 \
             --vllm_num_engines 1 \
 	    --inflight_updates True \
             --vllm_tensor_parallel_size 1 \

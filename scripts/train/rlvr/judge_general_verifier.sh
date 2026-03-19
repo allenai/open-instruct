@@ -32,8 +32,8 @@ python mason.py \
             --response_length 8192 \
             --pack_length 16384 \
             --per_device_train_batch_size 1 \
-            --num_unique_prompts_rollout 64 \
-            --num_samples_per_prompt_rollout 16 \
+            --num_unique_prompts 64 \
+            --num_samples_per_prompt 16 \
             --model_name_or_path Qwen/Qwen2.5-7B \
             --stop_strings "</answer>" \
             --apply_verifiable_reward true \

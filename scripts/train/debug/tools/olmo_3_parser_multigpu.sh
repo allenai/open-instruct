@@ -40,8 +40,8 @@ uv run python mason.py \
     --pack_length 16384 \
     --inflight_updates True \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 32 \
-    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts 32 \
+    --num_samples_per_prompt 8 \
     --model_name_or_path allenai/Olmo-3-7B-Instruct-SFT \
     --apply_verifiable_reward true \
     --temperature 1.0 \
