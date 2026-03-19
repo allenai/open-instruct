@@ -675,26 +675,21 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
 
-    # Placeholder scheduler for accelerator.prepare(); we recreate it after prepare
-    # once the true dataloader length is known (SP can change it).
-    lr_scheduler = get_scheduler(
-        name=args.lr_scheduler_type, optimizer=optimizer, num_training_steps=1, num_warmup_steps=0
+    # Create the learning rate scheduler.
+    # Note: the current accelerator.step() calls the .step() of the real scheduler
+    # for the `num_processes` times. This is because they assume
+    # the user initialize the scheduler with the entire training set.
+    # In the case of data parallel training, each process only
+    # sees a subset (1/num_processes) of the training set.
+    # So each time the process needs to update the lr multiple times so that the total
+    # number of updates in the end matches the num_training_steps here.
+    # Here we need to set the num_training_steps to either using the
+    # entire training set (when epochs is specified) or we need to multiply the
+    # num_training_steps by num_processes so that the total number of
+    # updates matches the num_training_steps.
+    num_training_steps_for_scheduler = (
+        args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )
-    # Prepare everything with `accelerator`.
-    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, lr_scheduler
-    )
-
-    # Recalculate total training steps now that the dataloader length may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
-    if overrode_max_train_steps:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
-
-    # Recreate the scheduler with the correct total steps.
-    # accelerator.step() calls the underlying scheduler num_processes times,
-    # so we multiply accordingly.
-    num_training_steps_for_scheduler = args.max_train_steps * accelerator.num_processes
     num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
     if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
         num_training_steps_for_scheduler = (
@@ -706,6 +701,34 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         num_training_steps=num_training_steps_for_scheduler,
         num_warmup_steps=num_warmup_steps,
     )
+
+    # Prepare everything with `accelerator`.
+    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler
+    )
+
+    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    if overrode_max_train_steps:
+        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+
+    if args.sequence_parallel_size > 1:
+        # SP changes the dataloader length post-prepare. Recreate the scheduler with
+        # the correct steps and re-wrap it so AcceleratedScheduler gates on sync_gradients.
+        num_training_steps_for_scheduler = args.max_train_steps * accelerator.num_processes
+        num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
+        if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
+            num_training_steps_for_scheduler = (
+                num_training_steps_for_scheduler - args.final_lr_ratio * num_warmup_steps
+            ) / (1 - args.final_lr_ratio)
+        lr_scheduler = get_scheduler(
+            name=args.lr_scheduler_type,
+            optimizer=optimizer,
+            num_training_steps=num_training_steps_for_scheduler,
+            num_warmup_steps=num_warmup_steps,
+        )
+        lr_scheduler = accelerator.prepare(lr_scheduler)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
