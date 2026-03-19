@@ -714,9 +714,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     if args.sequence_parallel_size > 1:
-        # SP changes the dataloader length post-prepare. Recreate the scheduler with
-        # the correct steps and re-wrap it so AcceleratedScheduler gates on sync_gradients.
-        num_training_steps_for_scheduler = args.max_train_steps * accelerator.num_processes
+        # SP changes the dataloader length post-prepare. Recreate the scheduler using
+        # the post-prepare max_train_steps (AcceleratedScheduler steps once per optimizer step).
+        num_training_steps_for_scheduler = args.max_train_steps
         num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
         if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
             num_training_steps_for_scheduler = (
