@@ -129,7 +129,7 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
     """Number of updates steps to accumulate before performing a backward/update pass."""
     learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
+    """The initial learning rate for the optimizer."""
     warmup_ratio: float = 0.03
     """Linear warmup over warmup_ratio fraction of total steps."""
     weight_decay: float = 0.0
@@ -156,6 +156,10 @@ class TrainingConfig:
     """Use paged optimizer from bitsandbytes."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW or not."""
+    optimizer_type: str = "adamw"
+    """Optimizer type: 'adamw' or 'muon'."""
+    optimizer_kwargs: dict | str = field(default_factory=dict)
+    """Extra kwargs passed to the optimizer config constructor (e.g. '{"mu": 0.95}' for Muon)."""
     tensor_parallel_degree: int = 1
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
@@ -318,11 +322,13 @@ class ExperimentConfig(
     Full arguments class for all fine-tuning jobs.
     """
 
-    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+    _VALID_DICT_FIELDS = ["additional_model_arguments", "optimizer_kwargs"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -431,6 +437,10 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
 

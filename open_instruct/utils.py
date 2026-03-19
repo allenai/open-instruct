@@ -54,6 +54,7 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
 import beaker
+import huggingface_hub
 import numpy as np
 import ray
 import requests
@@ -66,10 +67,12 @@ from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
+from requests.adapters import HTTPAdapter
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
+from urllib3.util.retry import Retry
 
 from open_instruct import data_types, logger_utils
 from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
@@ -934,6 +937,32 @@ class BeakerRuntimeConfig:
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
+
+
+def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
+    """Configure HF Hub HTTP retries with exponential backoff on 429/5xx."""
+
+    def backend_factory() -> requests.Session:
+        session = requests.Session()
+        retries = Retry(total=total, backoff_factor=backoff_factor, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
+
+
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
+    """Download a HF repo if not a local path, then verify it is available locally or in cache."""
+    if os.path.exists(repo_id):
+        return
+    huggingface_hub.snapshot_download(repo_id, revision=revision)
+    result = huggingface_hub.try_to_load_from_cache(repo_id, "config.json", revision=revision)
+    if not isinstance(result, str):
+        raise RuntimeError(
+            f"Model repo '{repo_id}' (revision={revision}) is not available locally or in the HF cache."
+        )
 
 
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
@@ -2517,9 +2546,9 @@ def send_slack_message(message: str) -> None:
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
 
     beaker_url = get_beaker_experiment_url()
