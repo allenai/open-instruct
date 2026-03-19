@@ -351,17 +351,6 @@ class FlatArguments:
             if not (1.0 >= self.final_lr_ratio >= 0.0):
                 raise ValueError(f"final_lr_ratio must be between 0 and 1, not {self.final_lr_ratio=}")
 
-        if self.sequence_parallel_size > 1:
-            try:
-                import deepspeed  # noqa: F401
-            except ImportError:
-                raise ImportError("sequence_parallel_size > 1 requires DeepSpeed to be installed.")
-            if ParallelismConfig is None:
-                raise ImportError(
-                    "sequence_parallel_size > 1 requires accelerate.utils.ParallelismConfig. "
-                    "Upgrade accelerate for sequence parallelism support."
-                )
-
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
@@ -389,6 +378,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     parallelism_config = None
     if args.sequence_parallel_size > 1:
+        if ParallelismConfig is None:
+            raise ImportError(
+                "accelerate.utils.ParallelismConfig not available. "
+                "Upgrade accelerate for sequence parallelism support."
+            )
         attn_impl = "flash_attention_2" if args.use_flash_attn else "sdpa"
         parallelism_config = ParallelismConfig(
             sp_backend="deepspeed",
