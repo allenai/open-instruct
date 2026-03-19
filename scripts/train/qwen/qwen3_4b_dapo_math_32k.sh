@@ -29,6 +29,7 @@ uv run mason.py \
     --num_nodes 2 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --no_auto_dataset_cache \
     --gpus 8 \
     --budget ai2/oe-adapt \
     -- \
@@ -79,4 +80,4 @@ source configs/beaker_configs/ray_node_setup.sh \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy True \
     --keep_last_n_checkpoints -1 \
-    --push_to_hub False $@
+    --push_to_hub False "$@"
