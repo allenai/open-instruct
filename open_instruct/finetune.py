@@ -36,9 +36,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import InitProcessGroupKwargs, set_seed
-
-from accelerate.utils import DeepSpeedSequenceParallelConfig, ParallelismConfig
+from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKwargs, ParallelismConfig, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
