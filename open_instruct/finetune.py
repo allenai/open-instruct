@@ -969,7 +969,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         args.try_auto_save_to_beaker
         and accelerator.is_main_process
         and is_beaker_job()
-        and len(beaker_config.beaker_dataset_id_urls) > 0
+        and len(maybe_get_beaker_config().beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
