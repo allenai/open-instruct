@@ -61,7 +61,8 @@ class ActorManager:
         self._total_prefill_tokens = 0
         self._total_decode_tokens = 0
         self._training_step_history = collections.deque(maxlen=self._sample_window)
-        self._generation_batch_history = collections.deque(maxlen=self._sample_window)
+        self._vllm_generation_batch_history = collections.deque(maxlen=self._sample_window)
+        self._thread_generation_batch_history = collections.deque(maxlen=self._sample_window)
         self._kv_cache_max_concurrency = 0
         self._args = args
         self._streaming_config = streaming_config
@@ -173,8 +174,9 @@ class ActorManager:
                 "generation_tokens": token_stats.num_response_tokens,
             }
         )
-
-        self._generation_batch_history.append(token_stats.generation_time)
+        if token_stats.vllm_sum_generation_time is not None:
+            self._vllm_generation_batch_history.append(token_stats.vllm_sum_generation_time)
+        self._thread_generation_batch_history.append(token_stats.thread_generation_time)
 
     def report_training_step_time(self, duration: float):
         """Report the time taken for a training step."""
@@ -182,7 +184,7 @@ class ActorManager:
 
     def report_batch_generation_time(self, duration: float):
         """Report the time taken to generate a batch of data."""
-        self._generation_batch_history.append(duration)
+        self._thread_generation_batch_history.append(duration)
 
     def set_kv_cache_max_concurrency(self, max_concurrency: int):
         """Set the KV cache max concurrency value."""
@@ -228,17 +230,24 @@ class ActorManager:
             sum(self._training_step_history) / len(self._training_step_history) if self._training_step_history else 0
         )
 
-        avg_batch_generation_time = (
-            sum(self._generation_batch_history) / len(self._generation_batch_history)
-            if self._generation_batch_history
+        avg_vllm_batch_generation_time = (
+            sum(self._vllm_generation_batch_history) / len(self._vllm_generation_batch_history)
+            if self._vllm_generation_batch_history
+            else 0
+        )
+        avg_thread_batch_generation_time = (
+            sum(self._thread_generation_batch_history) / len(self._thread_generation_batch_history)
+            if self._thread_generation_batch_history
             else 0
         )
 
         return {
             "avg_training_step_time": avg_training_step_time,
-            "avg_batch_generation_time": avg_batch_generation_time,
+            "avg_vllm_batch_generation_time": avg_vllm_batch_generation_time,
+            "avg_thread_batch_generation_time": avg_thread_batch_generation_time,
             "training_step_count": len(self._training_step_history),
-            "batch_generation_count": len(self._generation_batch_history),
+            "vllm_batch_generation_count": len(self._vllm_generation_batch_history),
+            "thread_batch_generation_count": len(self._thread_generation_batch_history),
         }
 
     def get_dashboard_port(self):

@@ -210,6 +210,49 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_calleds, [False, False])
         self.assertEqual(result.request_info.excess_tool_calls, [{}, {}])
 
+    def test_process_completed_request_tolerates_missing_vllm_metric_fields(self):
+        idx = 201
+        epoch = 0
+        prompt_id = f"{epoch}_{idx}"
+
+        mock_request = PromptRequest(
+            prompt=[1, 2, 3], generation_config=None, is_eval=False, index=idx, prompt_id=prompt_id
+        )
+        request_id = vllm_utils.make_request_id(mock_request)
+
+        mock_output = MagicMock(spec=vllm.CompletionOutput)
+        mock_output.token_ids = [7, 8]
+        mock_output.logprobs = [-0.7, -0.8]
+        mock_output.finish_reason = "stop"
+
+        mock_request_output = MagicMock(spec=vllm.RequestOutput)
+        mock_request_output.request_id = f"{request_id}_0"
+        mock_request_output.outputs = [mock_output]
+        mock_request_output.prompt_token_ids = [1, 2, 3]
+        mock_request_output.metrics = object()
+
+        request_metadata = {
+            request_id: {
+                "is_eval": False,
+                "index": idx,
+                "prompt_id": prompt_id,
+                "prompt_token_ids": [1, 2, 3],
+                "start_time": 100.0,
+            }
+        }
+
+        result, is_eval = vllm_utils.process_completed_request(
+            request_id=request_id,
+            outs=[mock_request_output],
+            current_time=101.5,
+            use_tools=False,
+            request_metadata=request_metadata,
+        )
+
+        self.assertFalse(is_eval)
+        self.assertEqual(result.responses, [[7, 8]])
+        self.assertEqual(result.token_statistics.vllm_sum_generation_time, 1.5)
+
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):
     def test_model_dims_from_vllm_config(self):

@@ -28,6 +28,7 @@ from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import aiohttp
@@ -334,8 +335,11 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
     vllm_sum_generation_time = 0.0
     found_per_response_metrics = False
     for out in outs:
-        if out.metrics is not None and out.metrics.last_token_ts > 0 and out.metrics.scheduled_ts > 0:
-            vllm_sum_generation_time += out.metrics.last_token_ts - out.metrics.scheduled_ts
+        metrics = getattr(out, "metrics", None)
+        last_token_ts = getattr(metrics, "last_token_ts", None)
+        scheduled_ts = getattr(metrics, "scheduled_ts", None)
+        if last_token_ts is not None and scheduled_ts is not None and last_token_ts > 0 and scheduled_ts > 0:
+            vllm_sum_generation_time += last_token_ts - scheduled_ts
             found_per_response_metrics = True
     if not found_per_response_metrics:
         vllm_sum_generation_time = thread_generation_time * len(response_ids)
@@ -552,25 +556,29 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
-    outputs = actor.request_outputs[base_request_id]["outputs"]
-    ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
+    try:
+        outputs = actor.request_outputs[base_request_id]["outputs"]
+        ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
-    current_time = time.perf_counter()
-    result, is_eval = process_completed_request(
-        base_request_id,
-        ordered_outs,
-        current_time,
-        actor.request_outputs[base_request_id]["use_tools"],
-        actor.request_metadata,
-    )
+        current_time = time.perf_counter()
+        result, is_eval = process_completed_request(
+            base_request_id,
+            ordered_outs,
+            current_time,
+            actor.request_outputs[base_request_id]["use_tools"],
+            actor.request_metadata,
+        )
 
-    actor.request_outputs.pop(base_request_id)
-    actor.request_metadata.pop(base_request_id, None)
-
-    dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
-    results_queue = actor.eval_results_queue if is_eval else actor.results_queue
-    results_queue.put(result)
+        dataset = actor.eval_dataset if is_eval else actor.train_dataset
+        result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+        results_queue = actor.eval_results_queue if is_eval else actor.results_queue
+        results_queue.put(result)
+    except Exception:
+        logger.exception("Failed to finalize completed request %s", base_request_id)
+        raise
+    finally:
+        actor.request_outputs.pop(base_request_id, None)
+        actor.request_metadata.pop(base_request_id, None)
 
 
 async def compute_rewards(
@@ -956,110 +964,117 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
+    output = None
 
     configured_tools = set(actor.tool_actor_map.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
-    while True:
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        request_body = dataclasses.asdict(current_sampling_params)
-        extra_body = {
-            "return_token_ids": True,
-            "cache_salt": base_request_id,
-            "include_stop_str_in_output": True,
-            "skip_special_tokens": False,
-        }
-        top_k = request_body.pop("top_k", None)
-        if top_k is not None:
-            extra_body["top_k"] = top_k
-        api_response = await actor.client.completions.create(
-            model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **request_body
-        )
-
-        output = api_response.choices[0]
-        model_tokens = list(output.token_ids)
-
-        response_tokens.extend(model_tokens)
-        current_prompt.extend(model_tokens)
-
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for logprob in output.logprobs.token_logprobs:
-            response_logprobs.append(logprob)
-            cumulative_logprob += logprob
-
-        response_masks.extend([1] * len(model_tokens))
-
-        # check if we have tools to check for
-        # allowed_tools is empty if active_tools=[] for this sample (no tools active)
-        if not actor.tool_actors or actor.tool_parser is None or not allowed_tools:
-            break
-
-        tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # Sometimes the model will make a tool call that *looks* valid,
-        # but actually that tool doesn't exist for it! So we filter these out.
-        # In future, we could instead add an error message to the model output to indicate that the tool call is invalid.
-        tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
-        if not tool_calls:
-            break
-
-        # Execute tool calls
-        outputs: list[str] = []
-        for tool_call in tool_calls:
-            tool_called = True
-            num_calls += 1
-
-            # Check if we've exceeded max tool calls
-            if num_calls > actor.max_tool_calls:
-                exceeded_message = "Max tool calls exceeded"
-                tool_error += exceeded_message
-                outputs.append(exceeded_message)
-                excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
-                continue
-
-            try:
-                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
-                    **tool_call.args
-                )
-            except TypeError as e:
-                # This can happen if the model generated a tool call with missing/wrong arguments
-                error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
-                logger.warning(error_msg)
-                tool_result = ToolOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
-
-            timeout = timeout or tool_result.timeout
-            tool_error += tool_result.error or ""
-            tool_output += tool_result.output
-            tool_runtime += tool_result.runtime
-            outputs.append(tool_result.output)
-
-            tool_call_stats.append(
-                ToolCallStats(
-                    tool_name=tool_call.name,
-                    success=not tool_result.error and not tool_result.timeout,
-                    runtime=tool_result.runtime,
-                )
+    try:
+        while True:
+            current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            request_body = dataclasses.asdict(current_sampling_params)
+            extra_body = {
+                "return_token_ids": True,
+                "cache_salt": base_request_id,
+                "include_stop_str_in_output": True,
+                "skip_special_tokens": False,
+            }
+            top_k = request_body.pop("top_k", None)
+            if top_k is not None:
+                extra_body["top_k"] = top_k
+            api_response = await actor.client.completions.create(
+                model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **request_body
             )
 
-        tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
-            tool_outputs=outputs,
-            tool_parser=actor.tool_parser,
-            tokenizer=actor.llm_engine.tokenizer,
-            current_prompt_len=len(current_prompt),
-            current_response_len=len(response_masks),
-            max_model_len=max_model_len,
-            max_tokens=sampling_params.max_tokens,
-            mask_tool_use=actor.mask_tool_use,
-        )
+            output = api_response.choices[0]
+            model_tokens = list(output.token_ids)
 
-        response_tokens.extend(tool_tokens)
-        response_logprobs.extend(tool_logprobs)
-        response_masks.extend(tool_masks)
-        current_prompt.extend(tool_tokens)
+            response_tokens.extend(model_tokens)
+            current_prompt.extend(model_tokens)
 
-        current_max_tokens = sampling_params.max_tokens - len(response_masks)
-        if excess > 0 or current_max_tokens <= 0:
-            break
+            assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+            for logprob in output.logprobs.token_logprobs:
+                response_logprobs.append(logprob)
+                cumulative_logprob += logprob
 
+            response_masks.extend([1] * len(model_tokens))
+
+            if not actor.tool_actors or actor.tool_parser is None or not allowed_tools:
+                break
+
+            tool_calls = actor.tool_parser.get_tool_calls(output.text)
+            tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
+            if not tool_calls:
+                break
+
+            outputs: list[str] = []
+            for tool_call in tool_calls:
+                tool_called = True
+                num_calls += 1
+
+                if num_calls > actor.max_tool_calls:
+                    exceeded_message = "Max tool calls exceeded"
+                    tool_error += exceeded_message
+                    outputs.append(exceeded_message)
+                    excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
+                    continue
+
+                try:
+                    tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
+                        **tool_call.args
+                    )
+                except TypeError as e:
+                    error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
+                    logger.warning(error_msg)
+                    tool_result = ToolOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
+
+                timeout = timeout or tool_result.timeout
+                tool_error += tool_result.error or ""
+                tool_output += tool_result.output
+                tool_runtime += tool_result.runtime
+                outputs.append(tool_result.output)
+
+                tool_call_stats.append(
+                    ToolCallStats(
+                        tool_name=tool_call.name,
+                        success=not tool_result.error and not tool_result.timeout,
+                        runtime=tool_result.runtime,
+                    )
+                )
+
+            tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
+                tool_outputs=outputs,
+                tool_parser=actor.tool_parser,
+                tokenizer=actor.llm_engine.tokenizer,
+                current_prompt_len=len(current_prompt),
+                current_response_len=len(response_masks),
+                max_model_len=max_model_len,
+                max_tokens=sampling_params.max_tokens,
+                mask_tool_use=actor.mask_tool_use,
+            )
+
+            response_tokens.extend(tool_tokens)
+            response_logprobs.extend(tool_logprobs)
+            response_masks.extend(tool_masks)
+            current_prompt.extend(tool_tokens)
+
+            current_max_tokens = sampling_params.max_tokens - len(response_masks)
+            if excess > 0 or current_max_tokens <= 0:
+                break
+    except Exception as e:
+        logger.exception("process_request failed for %s", sub_request_id)
+        if not response_tokens:
+            eos_token_id = actor.llm_engine.tokenizer.eos_token_id
+            response_tokens = [eos_token_id]
+            response_masks = [1]
+            response_logprobs = [float("nan")]
+        output = SimpleNamespace(finish_reason="error", metrics=None)
+        tool_error = f"{tool_error}; {e}".strip("; ")
+        timeout = True
+    finally:
+        actor.active_tasks.pop(sub_request_id, None)
+
+    assert output is not None
     if output.finish_reason == "stop" and len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
         response_tokens.append(eos_token_id)
@@ -1084,8 +1099,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_call_stats = tool_call_stats
         complete_output.excess_tool_calls = excess_tool_calls
 
-    actor.active_tasks.pop(sub_request_id, None)
-
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -1094,7 +1107,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 request_id=sub_request_id,
                 prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
                 outputs=[complete_output],
-                metrics=output.metrics,
+                metrics=getattr(output, "metrics", None),
             ),
             "use_tools": bool(actor.tool_actors),
         }
