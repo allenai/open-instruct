@@ -1,16 +1,19 @@
 #!/bin/bash
-# Two-node SFT integration test to verify multi-node training works.
+# Two-node SFT integration test with Ulysses sequence parallelism.
+# Tests multi-node training + SP loss aggregation.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+SP_SIZE="${2:-4}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
+echo "Sequence parallel size: $SP_SIZE"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/open-instruct-dev \
     --priority normal \
     --image "$BEAKER_IMAGE" \
-    --description "Two-node SFT integration test." \
+    --description "Two-node SFT+SP integration test (sp=$SP_SIZE)." \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
@@ -27,7 +30,7 @@ uv run python mason.py \
     open_instruct/finetune.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
-    --max_seq_length 1024 \
+    --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 5e-06 \
@@ -40,6 +43,7 @@ uv run python mason.py \
     --add_bos \
     --seed 123 \
     --chat_template_name tulu \
+    --sequence_parallel_size $SP_SIZE \
     --report_to wandb \
     --with_tracking \
     --push_to_hub false \

@@ -38,11 +38,7 @@ from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 
-try:
-    from accelerate.utils import DeepSpeedSequenceParallelConfig, ParallelismConfig
-except ImportError:
-    ParallelismConfig = None
-    DeepSpeedSequenceParallelConfig = None
+from accelerate.utils import DeepSpeedSequenceParallelConfig, ParallelismConfig
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -327,7 +323,10 @@ class FlatArguments:
     sequence_parallel_size: int = field(
         default=1,
         metadata={
-            "help": "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3 and flash attention."
+            "help": (
+                "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3. "
+                "Flash attention is recommended; SDPA works but does not correctly handle packed/concatenated samples."
+            )
         },
     )
 
@@ -375,11 +374,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     parallelism_config = None
     if args.sequence_parallel_size > 1:
-        if ParallelismConfig is None:
-            raise ImportError(
-                "accelerate.utils.ParallelismConfig not available. "
-                "Upgrade accelerate for sequence parallelism support."
-            )
         attn_impl = "flash_attention_2" if args.use_flash_attn else "sdpa"
         parallelism_config = ParallelismConfig(
             sp_backend="deepspeed",
