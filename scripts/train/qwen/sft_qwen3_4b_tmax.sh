@@ -38,11 +38,11 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
     --dataset_mixer_list \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
+        $DATASET 0.405 \
+        $DATASET 0.405 \
+        $DATASET 0.405 \
+        $DATASET 0.405 \
+        $DATASET 0.405 \
     --dataset_mixer_list_splits \
         nvidia__Nemotron_Terminal_Corpus__dataset_adapters _ \
         nvidia__Nemotron_Terminal_Corpus__skill_based_easy _ \
