@@ -370,7 +370,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
 
     parallelism_config = None
-    if args.sequence_parallel_size > 1:
+    if args.sequence_parallel_size > 1 and not args.cache_dataset_only:
         parallelism_config = ParallelismConfig(
             sp_backend="deepspeed",
             sp_size=args.sequence_parallel_size,
