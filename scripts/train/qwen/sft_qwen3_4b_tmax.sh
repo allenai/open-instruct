@@ -23,7 +23,7 @@ uv run python mason.py \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name sft_qwen3_4b_tmax \
