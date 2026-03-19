@@ -719,6 +719,18 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
+    if args.sequence_parallel_size > 1:
+        # With SP, accelerator.num_processes includes SP ranks but the dataloader length
+        # changed post-prepare. Recreate the scheduler with the correct total steps.
+        num_training_steps_for_scheduler = args.max_train_steps * accelerator.num_processes
+        num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
+        lr_scheduler = get_scheduler(
+            name=args.lr_scheduler_type,
+            optimizer=optimizer,
+            num_training_steps=num_training_steps_for_scheduler,
+            num_warmup_steps=num_warmup_steps,
+        )
+
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
     if checkpointing_steps is not None and str(checkpointing_steps).lower() != "epoch":
