@@ -4,10 +4,11 @@ Test script for verifier functionality in Python
 """
 
 import unittest
+from unittest.mock import Mock, patch
 
 from parameterized import parameterized
 
-from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier
+from open_instruct.ground_truth_utils import BallsimVerifier, BallsimVerifierConfig, F1Verifier, PuzzleMatcherVerifier
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -141,6 +142,46 @@ class TestF1Verifier(unittest.TestCase):
             places=5,
             msg=f"Failed for {name}: prediction='{prediction}', labels={labels}",
         )
+
+
+class TestBallsimVerifier(unittest.IsolatedAsyncioTestCase):
+    async def test_pass_rate_scoring(self):
+        verifier = BallsimVerifier(
+            BallsimVerifierConfig(
+                ballsim_api_url="http://localhost:2345/test_program",
+                ballsim_max_execution_time=1.0,
+                ballsim_scoring_mode="pass_rate",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": [1, 0, 1], "runtimes": [0.1, 0.2, 0.1]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(BallsimVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```python\npass\n```", ["assert True"], None)
+
+        self.assertAlmostEqual(result.score, 2 / 3)
+
+    async def test_all_pass_scoring(self):
+        verifier = BallsimVerifier(
+            BallsimVerifierConfig(
+                ballsim_api_url="http://localhost:2345/test_program",
+                ballsim_max_execution_time=1.0,
+                ballsim_scoring_mode="all_pass",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": [1, 0, 1], "runtimes": [0.1, 0.2, 0.1]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(BallsimVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```python\npass\n```", ["assert True"], None)
+
+        self.assertEqual(result.score, 0.0)
 
 
 if __name__ == "__main__":

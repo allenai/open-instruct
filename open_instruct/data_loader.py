@@ -466,6 +466,11 @@ class StreamingDataLoaderConfig:
     code_max_execution_time: float = 1.0
     code_pass_rate_reward_threshold: float = 0.0
     code_apply_perf_penalty: bool = False
+    ballsim_api_url: str = field(
+        default_factory=lambda: os.environ.get("BALLSIM_API_URL", "http://localhost:2345") + "/test_program"
+    )
+    ballsim_max_execution_time: float = 1.0
+    ballsim_scoring_mode: Literal["all_pass", "pass_rate"] = "all_pass"
 
     # Max length verifier
     max_length_verifier_max_length: int = 32768
