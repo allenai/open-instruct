@@ -788,10 +788,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         for batch in active_dataloader:
-            # UlyssesSPDataLoaderAdapter moves tensors to CPU after sharding;
-            # move them back to the accelerator device for the forward pass.
-            if args.sequence_parallel_size > 1:
-                batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
+            # Move batch to device. With SP, the UlyssesSPDataLoaderAdapter returns
+            # CPU tensors after sharding; without SP, accelerator.prepare() handles this
+            # but an explicit move is harmless (no-op if already on device).
+            batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
             # UlyssesSPDataLoaderAdapter replaces "labels" with "shift_labels"
             labels_key = "shift_labels" if "shift_labels" in batch else "labels"
             pred_tokens_in_batch = (batch[labels_key] != -100).sum()
