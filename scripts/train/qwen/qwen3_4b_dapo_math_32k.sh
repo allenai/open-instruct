@@ -14,13 +14,12 @@ LOCAL_EVAL_SPLITS="train"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
-    --cluster ${CLUSTER} \
+    --cluster "ai2/jupiter" \
     --workspace ai2/oe-adapt-code \
     --priority ${PRIORITY} \
     --pure_docker_mode \
