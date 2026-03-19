@@ -43,3 +43,4 @@ All notable changes to this project will be documented in this file.
 - Avoided synchronous CUDA transfers when moving batches to device (https://github.com/allenai/open-instruct/pull/1443).
 
 ### Removed
+- Deletes some commented out code (https://github.com/allenai/open-instruct/pull/1537).
