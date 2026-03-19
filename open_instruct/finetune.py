@@ -374,12 +374,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     parallelism_config = None
     if args.sequence_parallel_size > 1:
-        attn_impl = "flash_attention_2" if args.use_flash_attn else "sdpa"
         parallelism_config = ParallelismConfig(
             sp_backend="deepspeed",
             sp_size=args.sequence_parallel_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation=attn_impl
+                sp_seq_length_is_variable=True,
+                sp_attn_implementation="flash_attention_2" if args.use_flash_attn else "sdpa",
             ),
         )
 
