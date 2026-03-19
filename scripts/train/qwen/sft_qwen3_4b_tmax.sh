@@ -1,12 +1,12 @@
 #!/bin/bash
-# SFT on Qwen3-4B-Instruct-2507 using osieosie/tmax-sft-full-20260317
+# SFT on Qwen3-4B-Instruct-2507 using hamishivi/tmax-sft-full-20260317
 # 32k seq len, 2e-5 LR, 1 node x 8 GPUs
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-DATASET=osieosie/tmax-sft-full-20260317
+DATASET=hamishivi/tmax-sft-full-20260317
 
 uv run python mason.py \
     --cluster ai2/jupiter \
