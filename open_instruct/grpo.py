@@ -42,8 +42,10 @@ from open_instruct.model_utils import ModelConfig, push_folder_to_hub
 
 logger = logger_utils.setup_logger(__name__)
 
+CLUSTER_STARTUP_TIMEOUT_S = 1200
 
-@backoff.on_predicate(backoff.constant, interval=5, max_time=300)
+
+@backoff.on_predicate(backoff.constant, interval=5, max_time=CLUSTER_STARTUP_TIMEOUT_S)
 def wait_for_gpus(expected_gpus: int) -> bool:
     """Poll the Ray cluster until ``expected_gpus`` GPUs are available.
 
