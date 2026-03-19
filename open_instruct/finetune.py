@@ -37,6 +37,12 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
+
+try:
+    from accelerate.utils import DeepSpeedSequenceParallelConfig, ParallelismConfig
+except ImportError:
+    ParallelismConfig = None
+    DeepSpeedSequenceParallelConfig = None
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -318,6 +324,12 @@ class FlatArguments:
     verbose: bool = field(
         default=False, metadata={"help": "Optionally print additional statistics at each reporting period"}
     )
+    sequence_parallel_size: int = field(
+        default=1,
+        metadata={
+            "help": "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3 and flash attention."
+        },
+    )
 
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
@@ -361,8 +373,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
 
+    parallelism_config = None
+    if args.sequence_parallel_size > 1:
+        if ParallelismConfig is None:
+            raise ImportError(
+                "accelerate.utils.ParallelismConfig not available. "
+                "Upgrade accelerate for sequence parallelism support."
+            )
+        attn_impl = "flash_attention_2" if args.use_flash_attn else "sdpa"
+        parallelism_config = ParallelismConfig(
+            sp_backend="deepspeed",
+            sp_size=args.sequence_parallel_size,
+            sp_handler=DeepSpeedSequenceParallelConfig(
+                sp_seq_length_is_variable=True,
+                sp_attn_implementation=attn_impl,
+            ),
+        )
+
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
+        parallelism_config=parallelism_config,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
@@ -420,6 +450,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
         if accelerator.is_main_process and is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
@@ -770,6 +801,24 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 loss = outputs.loss
                 del outputs
+
+                if args.sequence_parallel_size > 1:
+                    sp_group = accelerator.torch_device_mesh["sp"].get_group()
+                    losses_per_rank = torch.distributed.nn.functional.all_gather(
+                        loss.unsqueeze(0), group=sp_group
+                    )
+                    labels_for_counting = batch.get("shift_labels", batch.get("labels"))
+                    good_tokens = (labels_for_counting != -100).view(-1).sum().float()
+                    good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                        good_tokens.unsqueeze(0), group=sp_group
+                    )
+                    total_loss_sp = sum(
+                        losses_per_rank[rank] * good_tokens_per_rank[rank]
+                        for rank in range(args.sequence_parallel_size)
+                        if good_tokens_per_rank[rank] > 0
+                    )
+                    total_good_tokens = sum(good_tokens_per_rank)
+                    loss = total_loss_sp / torch.clamp(total_good_tokens, min=1)
 
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
