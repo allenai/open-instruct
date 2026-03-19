@@ -776,9 +776,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = train_dataloader
         for batch in active_dataloader:
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
-            # UlyssesSPDataLoaderAdapter replaces "labels" with "shift_labels"
-            labels_key = "shift_labels" if "shift_labels" in batch else "labels"
-            pred_tokens_in_batch = (batch[labels_key] != -100).sum()
+            if "shift_labels" in batch and "labels" not in batch:
+                batch["labels"] = batch.pop("shift_labels")
+            pred_tokens_in_batch = (batch["labels"] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
                 total_token_including_padding += batch["attention_mask"].numel()
@@ -796,9 +796,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
             with accelerator.accumulate(model):
-                # SP adapter renames labels→shift_labels; restore for the model forward pass
-                if "shift_labels" in batch and "labels" not in batch:
-                    batch["labels"] = batch.pop("shift_labels")
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
                     total_aux_loss += outputs.aux_loss.detach().float()
