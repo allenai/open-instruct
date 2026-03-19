@@ -321,10 +321,7 @@ class FlatArguments:
     sequence_parallel_size: int = field(
         default=1,
         metadata={
-            "help": (
-                "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3. "
-                "Flash attention is recommended; SDPA works but does not correctly handle packed/concatenated samples."
-            )
+            "help": "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3 and flash attention."
         },
     )
 
@@ -337,6 +334,8 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
+        if self.sequence_parallel_size > 1 and not self.use_flash_attn:
+            raise ValueError("Sequence parallelism requires flash attention (--use_flash_attn).")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
         if self.final_lr_ratio is not None:
@@ -376,8 +375,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_backend="deepspeed",
             sp_size=args.sequence_parallel_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True,
-                sp_attn_implementation="flash_attention_2" if args.use_flash_attn else "sdpa",
+                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_2"
             ),
         )
 
