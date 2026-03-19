@@ -628,10 +628,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
             def collate_fn(features):
                 batch = base_collate_fn(features)
-                # The dataset caching layer adds a 1D `index` column that the
-                # UlyssesSPDataLoaderAdapter can't handle (it assumes all values
-                # are 2D [batch, seq]). Filter to only 2D tensors.
-                batch = {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
+                batch.pop("index", None)
                 # Pad seq dim to be divisible by SP size so the adapter can split evenly.
                 seq_len = next(iter(batch.values())).shape[1]
                 remainder = seq_len % sp
