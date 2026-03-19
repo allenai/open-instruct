@@ -57,6 +57,7 @@ from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
+from vllm.v1.metrics.stats import RequestStateStats
 
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
@@ -138,6 +139,7 @@ class RequestOutput:
     prompt_token_ids: list[int]
     outputs: list[CompletionOutput]
     finished: bool = True
+    metrics: RequestStateStats | None = None
 
 
 def process_tool_tokens(
@@ -328,6 +330,16 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_call_stats = [[] for _ in response_ids]
         excess_tool_calls = [{} for _ in response_ids]
 
+    thread_generation_time = current_time - metadata["start_time"]
+    vllm_sum_generation_time = 0.0
+    found_per_response_metrics = False
+    for out in outs:
+        if out.metrics is not None and out.metrics.last_token_ts > 0 and out.metrics.scheduled_ts > 0:
+            vllm_sum_generation_time += out.metrics.last_token_ts - out.metrics.scheduled_ts
+            found_per_response_metrics = True
+    if not found_per_response_metrics:
+        vllm_sum_generation_time = thread_generation_time * len(response_ids)
+
     result = GenerationResult(
         responses=response_ids,
         finish_reasons=finish_reasons,
@@ -347,7 +359,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
             num_response_tokens=total_generation_tokens,
-            generation_time=current_time - metadata["start_time"],
+            thread_generation_time=thread_generation_time,
+            vllm_sum_generation_time=vllm_sum_generation_time,
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
@@ -1081,6 +1094,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 request_id=sub_request_id,
                 prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
                 outputs=[complete_output],
+                metrics=output.metrics,
             ),
             "use_tools": bool(actor.tool_actors),
         }

@@ -777,6 +777,7 @@ def accumulate_inference_batches(
     total_prompt_tokens = 0
     total_response_tokens = 0
     max_generation_time = 0
+    summed_generation_time = 0.0
 
     for i, result in enumerate(results):
         combined_responses.extend(result.responses)
@@ -801,12 +802,18 @@ def accumulate_inference_batches(
 
         total_prompt_tokens += result.token_statistics.num_prompt_tokens
         total_response_tokens += result.token_statistics.num_response_tokens
-        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+        max_generation_time = max(max_generation_time, result.token_statistics.thread_generation_time)
+        summed_generation_time += (
+            result.token_statistics.vllm_sum_generation_time
+            if result.token_statistics.vllm_sum_generation_time is not None
+            else result.token_statistics.thread_generation_time * len(result.responses)
+        )
 
     accumulated_stats = data_types.TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
-        generation_time=max_generation_time,
+        thread_generation_time=max_generation_time,
+        vllm_sum_generation_time=summed_generation_time,
         earliest_start_time=earliest_start_time,
     )
 
@@ -1292,8 +1299,15 @@ class DataPreparationActor:
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
-                step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-                step_metrics["time/getting_response"] = result.token_statistics.generation_time
+                step_metrics["val/actor_tokens_per_second"] = (
+                    total_tokens / result.token_statistics.thread_generation_time
+                )
+                step_metrics["time/getting_response"] = result.token_statistics.thread_generation_time
+                step_metrics["_sum_generation_time"] = (
+                    result.token_statistics.vllm_sum_generation_time
+                    if result.token_statistics.vllm_sum_generation_time is not None
+                    else result.token_statistics.thread_generation_time * len(result.responses)
+                )
 
             with self.lock:
                 self.prepared_data[step] = collated_data

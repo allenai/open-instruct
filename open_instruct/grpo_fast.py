@@ -1771,6 +1771,7 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
+    summed_generation_time = average_metrics.pop("_sum_generation_time")
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
@@ -1802,6 +1803,7 @@ def one_training_step(
         "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
         "time/saving": save_time,
+        "time/generation_avg": summed_generation_time / max(vllm_config.vllm_num_engines, 1),
         **data_thread_metrics,
         **average_metrics,
         **utilization_metrics,
@@ -2125,7 +2127,9 @@ def maybe_evaluate(
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
         )
-        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+        eval_metrics["eval/actor_tokens_per_second"] = (
+            total_tokens / eval_result.token_statistics.thread_generation_time
+        )
         if local_eval_start_time is not None:
             eval_metrics["time/local_eval"] = time.perf_counter() - local_eval_start_time
 
