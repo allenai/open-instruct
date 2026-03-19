@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Changed
+- Rename `num_unique_prompts_rollout` → `num_unique_prompts` and `num_samples_per_prompt_rollout` → `num_samples_per_prompt` (https://github.com/allenai/open-instruct/pull/1538).
+
 ### Added
 - Add Muon optimizer support to DPO training via OLMo-core's native MuonConfig (https://github.com/allenai/open-instruct/pull/1533).
 - Add documentation for Slack alert integrations in GRPO and DPO training (https://github.com/allenai/open-instruct/pull/1529).
