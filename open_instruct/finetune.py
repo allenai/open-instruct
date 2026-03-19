@@ -372,6 +372,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     parallelism_config = None
     if args.sequence_parallel_size > 1 and not args.cache_dataset_only:
         world_size = int(os.environ.get("WORLD_SIZE", 1))
+        if world_size % args.sequence_parallel_size != 0:
+            raise ValueError(
+                f"WORLD_SIZE ({world_size}) must be divisible by sequence_parallel_size ({args.sequence_parallel_size})"
+            )
         dp_shard_size = world_size // args.sequence_parallel_size
         parallelism_config = ParallelismConfig(
             sp_backend="deepspeed",
