@@ -3,7 +3,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 for LR in 1e-6
 do
-    EXP_NAME=olmo3-7b-DPO-olmocore-${LR}
+    EXP_NAME=olmo3-7b-DPO-olmocore-noTP-bs32-budget03-${LR}
     uv run python mason.py \
         --cluster ai2/jupiter \
         --description "OLMo3-7B DPO olmocore no-TP FSDP32 bs32 budget0.3" \
