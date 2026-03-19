@@ -356,6 +356,18 @@ class FlatArguments:
                 setattr(self, dict_feld, loaded_dict)
 
 
+def _create_scheduler(args: FlatArguments, optimizer, num_training_steps: int):
+    num_warmup_steps = int(num_training_steps * args.warmup_ratio)
+    if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
+        num_training_steps = (num_training_steps - args.final_lr_ratio * num_warmup_steps) / (1 - args.final_lr_ratio)
+    return get_scheduler(
+        name=args.lr_scheduler_type,
+        optimizer=optimizer,
+        num_training_steps=num_training_steps,
+        num_warmup_steps=num_warmup_steps,
+    )
+
+
 def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -693,17 +705,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     num_training_steps_for_scheduler = (
         args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )
-    num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
-    if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
-        num_training_steps_for_scheduler = (
-            num_training_steps_for_scheduler - args.final_lr_ratio * num_warmup_steps
-        ) / (1 - args.final_lr_ratio)
-    lr_scheduler = get_scheduler(
-        name=args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_training_steps=num_training_steps_for_scheduler,
-        num_warmup_steps=num_warmup_steps,
-    )
+    lr_scheduler = _create_scheduler(args, optimizer, num_training_steps_for_scheduler)
 
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -720,18 +722,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         # SP changes the dataloader length post-prepare. Recreate the scheduler using
         # the post-prepare max_train_steps. Multiply by gradient_accumulation_steps because
         # the scheduler is called every micro-batch (not just on optimizer steps).
-        num_training_steps_for_scheduler = args.max_train_steps * args.gradient_accumulation_steps
-        num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
-        if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
-            num_training_steps_for_scheduler = (
-                num_training_steps_for_scheduler - args.final_lr_ratio * num_warmup_steps
-            ) / (1 - args.final_lr_ratio)
-        lr_scheduler = get_scheduler(
-            name=args.lr_scheduler_type,
-            optimizer=optimizer,
-            num_training_steps=num_training_steps_for_scheduler,
-            num_warmup_steps=num_warmup_steps,
-        )
+        lr_scheduler = _create_scheduler(args, optimizer, args.max_train_steps * args.gradient_accumulation_steps)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
