@@ -756,7 +756,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         # UlyssesSPDataLoaderAdapter wraps the real dataloader but doesn't proxy set_epoch
-        dl = train_dataloader.dataloader if args.sequence_parallel_size > 1 else train_dataloader
+        dl = train_dataloader.dl if args.sequence_parallel_size > 1 else train_dataloader
         dl.set_epoch(epoch)
         total_loss = 0
         total_aux_loss = 0
