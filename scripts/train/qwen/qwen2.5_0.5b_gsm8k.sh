@@ -2,7 +2,6 @@
 
 EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
-MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B-Instruct}"
 
 DATASETS="${DATASETS:-ai2-adapt-dev/rlvr_gsm8k_zs 1.0}"
 DATASET_SPLITS="${DATASET_SPLITS:-train}"
@@ -38,7 +37,7 @@ uv run --active open_instruct/grpo_fast.py \
     --eval_pass_at_k 1 \
     --eval_top_p 1.0 \
     --vllm_top_p 1.0 \
-    --async_steps 4 \
+    --async_steps 2 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
@@ -53,8 +52,8 @@ uv run --active open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 512 \
     --response_length 4096 \
-    --pack_length 4608 \
-    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --pack_length 8192 \
+    --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
@@ -65,7 +64,6 @@ uv run --active open_instruct/grpo_fast.py \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 100 \
-    --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
     --vllm_num_engines 1 \
@@ -76,4 +74,3 @@ uv run --active open_instruct/grpo_fast.py \
     --send_slack_alerts \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
-
