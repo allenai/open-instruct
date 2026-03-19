@@ -28,7 +28,7 @@ import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, launch_utils, utils
+from open_instruct import data_types, grpo_utils, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -515,6 +515,11 @@ class TestUtilityFunctions(unittest.TestCase):
 
 
 class TestFlatArguments(unittest.TestCase):
+    def test_grpo_warn_if_low_disk_space_defaults_to_false(self) -> None:
+        parser = utils.ArgumentParserPlus(grpo_utils.ExperimentConfig)
+        (args,) = parser.parse_args_into_dataclasses([])
+        self.assertFalse(args.warn_if_low_disk_space)
+
     def test_additional_model_args(self) -> None:
         parser = utils.ArgumentParserPlus(FlatArguments)
         (args,) = parser.parse_args_into_dataclasses(
@@ -531,6 +536,11 @@ class TestFlatArguments(unittest.TestCase):
         (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
         self.assertIsInstance(args.additional_model_arguments, dict)
         self.assertFalse(args.additional_model_arguments)
+
+    def test_grpo_warn_if_low_disk_space_can_be_disabled(self) -> None:
+        parser = utils.ArgumentParserPlus(grpo_utils.ExperimentConfig)
+        (args,) = parser.parse_args_into_dataclasses(["--warn_if_low_disk_space", "False"])
+        self.assertFalse(args.warn_if_low_disk_space)
 
 
 class TestModelDims(unittest.TestCase):
