@@ -3,10 +3,10 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 for LR in 1e-6
 do
-    EXP_NAME=olmo3-7b-DPO-olmocore-noTP-bs32-budget03-${LR}
+    EXP_NAME=olmo3-7b-DPO-olmocore-noTP-bs16-budget03-${LR}
     uv run python mason.py \
         --cluster ai2/jupiter \
-        --description "OLMo3-7B DPO olmocore no-TP FSDP32 bs32 budget0.3" \
+        --description "OLMo3-7B DPO olmocore no-TP FSDP32 bs16 budget0.3" \
         --workspace ai2/olmo-instruct \
         --no_auto_dataset_cache \
         --priority urgent \
@@ -38,7 +38,7 @@ do
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 32 \
+        --per_device_train_batch_size 16 \
         --packing \
         --gradient_accumulation_steps 1 \
         --fsdp_shard_degree 32 \
