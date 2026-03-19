@@ -715,8 +715,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     if args.sequence_parallel_size > 1:
         # SP changes the dataloader length post-prepare. Recreate the scheduler using
-        # the post-prepare max_train_steps (AcceleratedScheduler steps once per optimizer step).
-        num_training_steps_for_scheduler = args.max_train_steps
+        # the post-prepare max_train_steps. Multiply by gradient_accumulation_steps because
+        # the scheduler is called every micro-batch (not just on optimizer steps).
+        num_training_steps_for_scheduler = args.max_train_steps * args.gradient_accumulation_steps
         num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
         if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
             num_training_steps_for_scheduler = (
@@ -728,7 +729,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             num_training_steps=num_training_steps_for_scheduler,
             num_warmup_steps=num_warmup_steps,
         )
-        lr_scheduler = accelerator.prepare(lr_scheduler)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
