@@ -388,8 +388,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_backend="deepspeed",
             sp_size=args.sequence_parallel_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True,
-                sp_attn_implementation=attn_impl,
+                sp_seq_length_is_variable=True, sp_attn_implementation=attn_impl
             ),
         )
 
@@ -807,9 +806,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 if args.sequence_parallel_size > 1:
                     sp_group = accelerator.torch_device_mesh["sp"].get_group()
-                    losses_per_rank = torch.distributed.nn.functional.all_gather(
-                        loss.unsqueeze(0), group=sp_group
-                    )
+                    losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
                     labels_for_counting = batch.get("shift_labels", batch.get("labels"))
                     good_tokens = (labels_for_counting != -100).view(-1).sum().float()
                     good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
@@ -939,7 +936,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         current_step=completed_steps,
                         total_steps=args.max_train_steps,
                         start_time=start_time,
-                        wandb_url=wandb_tracker.run.url if wandb_tracker is not None and accelerator.is_main_process else None,
+                        wandb_url=wandb_tracker.run.url
+                        if wandb_tracker is not None and accelerator.is_main_process
+                        else None,
                     )
                     total_loss = 0
                     total_aux_loss = 0
