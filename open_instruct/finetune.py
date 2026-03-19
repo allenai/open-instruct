@@ -624,14 +624,23 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     else:
         base_collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
         if args.sequence_parallel_size > 1:
-            # UlyssesSPDataLoaderAdapter assumes all batch values are 2D [batch, seq].
-            # Filter out any non-2D tensors to avoid IndexError in the adapter's refill().
+            sp = args.sequence_parallel_size
+
             def collate_fn(features):
                 batch = base_collate_fn(features)
                 # The dataset caching layer adds a 1D `index` column that the
                 # UlyssesSPDataLoaderAdapter can't handle (it assumes all values
                 # are 2D [batch, seq]). Filter to only 2D tensors.
-                return {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
+                batch = {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
+                # Pad seq dim to be divisible by SP size so the adapter can split evenly.
+                seq_len = next(iter(batch.values())).shape[1]
+                remainder = seq_len % sp
+                if remainder != 0:
+                    pad_len = sp - remainder
+                    for k in batch:
+                        pad_value = -100 if k == "labels" else 0
+                        batch[k] = torch.nn.functional.pad(batch[k], (0, pad_len), value=pad_value)
+                return batch
         else:
             collate_fn = base_collate_fn
 
