@@ -575,6 +575,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
+        grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
@@ -725,6 +726,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
+                        grad_norm = self.model.get_global_grad_norm()
+                        if grad_norm is not None:
+                            grad_norms.append(float(grad_norm))
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -745,6 +749,8 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                if grad_norms:
+                    self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
