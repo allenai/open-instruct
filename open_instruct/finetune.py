@@ -788,7 +788,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         for batch in active_dataloader:
-            pred_tokens_in_batch = (batch["labels"] != -100).sum()
+            # UlyssesSPDataLoaderAdapter replaces "labels" with "shift_labels"
+            labels_key = "shift_labels" if "shift_labels" in batch else "labels"
+            pred_tokens_in_batch = (batch[labels_key] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
                 total_token_including_padding += batch["attention_mask"].numel()
