@@ -434,7 +434,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
+        if accelerator.is_main_process and hasattr(wandb_tracker, "run"):
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None  # for later eval launching
 
