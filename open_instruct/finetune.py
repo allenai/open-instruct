@@ -622,7 +622,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
     else:
-        collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
+        base_collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
+        if args.sequence_parallel_size > 1:
+            # UlyssesSPDataLoaderAdapter assumes all batch values are 2D [batch, seq].
+            # Filter out any non-2D tensors to avoid IndexError in the adapter's refill().
+            def collate_fn(features):
+                batch = base_collate_fn(features)
+                return {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
+        else:
+            collate_fn = base_collate_fn
 
     accelerator.print("Creating dataloader")
     train_dataloader = DataLoader(
