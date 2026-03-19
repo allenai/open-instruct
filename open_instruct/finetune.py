@@ -755,7 +755,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
-        train_dataloader.set_epoch(epoch)
+        if hasattr(train_dataloader, "set_epoch"):
+            train_dataloader.set_epoch(epoch)
+        elif hasattr(train_dataloader, "dataloader") and hasattr(train_dataloader.dataloader, "set_epoch"):
+            train_dataloader.dataloader.set_epoch(epoch)
         total_loss = 0
         total_aux_loss = 0
         if last_checkpoint_path and resume_batch_idx and not skipped_batches:
