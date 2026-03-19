@@ -755,6 +755,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
+        # UlyssesSPDataLoaderAdapter wraps the real dataloader but doesn't proxy set_epoch
         dl = train_dataloader.dataloader if args.sequence_parallel_size > 1 else train_dataloader
         dl.set_epoch(epoch)
         total_loss = 0
