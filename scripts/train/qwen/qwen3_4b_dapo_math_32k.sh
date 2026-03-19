@@ -81,6 +81,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
+    --remap_verifier math_dapo=math \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy True \
     --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME} \
