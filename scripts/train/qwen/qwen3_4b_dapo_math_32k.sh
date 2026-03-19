@@ -4,7 +4,12 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
-BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+if [ -n "$1" ]; then
+    BEAKER_IMAGE="$1"
+    shift
+else
+    BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+fi
 
 DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
 DATASET_SPLITS="train"
