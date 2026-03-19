@@ -1,6 +1,6 @@
 #!/bin/bash
 # SFT on Qwen3-4B-Instruct-2507 using hamishivi/tmax-sft-full-20260317
-# 32k seq len, 2e-5 LR, 4 nodes x 8 GPUs
+# 32k seq len, 2e-5 LR, 8 nodes x 8 GPUs
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
@@ -15,7 +15,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 8 \
     --budget ai2/oe-adapt \
     --gpus 8 \
     -- \
