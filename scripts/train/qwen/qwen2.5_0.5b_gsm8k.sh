@@ -14,7 +14,7 @@ BEAKER_IMAGE="michaeln/open_instruct"
 
 CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-high}"
-NUM_GPUS="${NUM_GPUS:-4}"
+NUM_GPUS="${NUM_GPUS:-3}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -68,7 +68,7 @@ uv run --active open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
-    --vllm_num_engines 2 \
+    --vllm_num_engines 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
