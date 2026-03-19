@@ -809,11 +809,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
             with accelerator.accumulate(model):
+                # SP adapter renames labels→shift_labels; restore for the model forward pass
+                if "shift_labels" in batch and "labels" not in batch:
+                    batch["labels"] = batch.pop("shift_labels")
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
                     total_aux_loss += outputs.aux_loss.detach().float()
                 else:
-                    # Standard forward pass
                     outputs = model(**batch, use_cache=False)
 
                 loss = outputs.loss
@@ -822,7 +824,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 if args.sequence_parallel_size > 1:
                     sp_group = accelerator.torch_device_mesh["sp"].get_group()
                     losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
-                    labels_for_counting = batch.get("shift_labels", batch.get("labels"))
+                    labels_for_counting = batch["labels"]
                     good_tokens = (labels_for_counting != -100).view(-1).sum().float()
                     good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
                         good_tokens.unsqueeze(0), group=sp_group
