@@ -335,14 +335,7 @@ class GRPOTrainModule(TransformerTrainModule):
             self.ref_policy.load_state_dict(state_dict["ref_policy"])
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        """Execute one training step with GRPO loss.
-
-        This method implements the GRPO training algorithm with:
-        - Multi-epoch PPO-style training
-        - DAPO/CISPO loss variants
-        - KL penalty computation
-        - Importance sampling with clipping
-        """
+        """Execute one training step with GRPO loss."""
         self.model.train()
         data_BT: data_types.CollatedBatchData = batch["batch"]
 
@@ -359,18 +352,37 @@ class GRPOTrainModule(TransformerTrainModule):
             else:
                 ref_logprobs_BT = None
 
-        with torch.no_grad():
-            old_logprobs_BT = grpo_utils.compute_logprobs(
-                self.model,
-                data_BT,
-                self.pad_token_id,
-                self.grpo_config.temperature,
-                use_grad=False,
-                batch_size=3 * self.rank_microbatch_size,
-            )
-
         num_samples = len(data_BT.query_responses)
-        accumulation_steps = max(math.ceil(num_samples / self.grpo_config.num_mini_batches), 1)
+        num_mini_batches = self.grpo_config.num_mini_batches
+        accumulation_steps = max(math.ceil(num_samples / num_mini_batches), 1)
+
+        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(num_samples)]
+        if num_mini_batches > 1:
+            with torch.no_grad():
+                local_old_logprobs_BT = None
+                if not self.grpo_config.use_vllm_logprobs:
+                    local_old_logprobs_BT = grpo_utils.compute_logprobs(
+                        self.model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.grpo_config.temperature,
+                        use_grad=False,
+                        batch_size=3 * self.rank_microbatch_size,
+                    )
+
+                for i in range(num_samples):
+                    vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                    response_mask_i = data_BT.response_masks[i][:, 1:].bool().to(vllm_old_logprob_BT.device)
+                    vllm_old_logprob_BT = torch.masked_fill(
+                        vllm_old_logprob_BT, ~response_mask_i, utils.INVALID_LOGPROB
+                    )
+                    vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=utils.INVALID_LOGPROB)
+
+                    if self.grpo_config.use_vllm_logprobs:
+                        old_logprobs_BT[i] = vllm_old_logprob_BT
+                    else:
+                        assert local_old_logprobs_BT is not None
+                        old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
         if self.grpo_config.loss_denominator == "token" or self.grpo_config.loss_denominator is None:
             accumulation_token_counts = grpo_utils.calculate_token_counts(
@@ -384,20 +396,26 @@ class GRPOTrainModule(TransformerTrainModule):
 
         dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
 
-        loss_stats_B = {
+        token_counts_per_sample = torch.tensor(
+            [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
+        )
+        total_valid_tokens = token_counts_per_sample.sum().item()
+
+        loss_stats_B: dict[str, torch.Tensor] = {
+            "kl": torch.zeros(4, num_samples, device=self.device),
+            "kl_loss": torch.zeros(num_samples, device=self.device),
+            "pg_clipfrac": torch.zeros(num_samples, device=self.device),
             "pg_loss": torch.zeros(num_samples, device=self.device),
-            "kl": torch.zeros(num_samples, device=self.device),
-            "clip_frac": torch.zeros(num_samples, device=self.device),
+            "loss": torch.zeros(num_samples, device=self.device),
+            "ratio": torch.zeros(num_samples, device=self.device),
             "entropy": torch.zeros(num_samples, device=self.device),
-            "token_count": torch.tensor(
-                [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
-            ),
+            "token_count": token_counts_per_sample,
         }
 
         num_steps = 0
         local_step = 0
 
-        for _epoch_idx in range(self.grpo_config.num_epochs):
+        for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
@@ -412,11 +430,40 @@ class GRPOTrainModule(TransformerTrainModule):
                 response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
                 new_logprobs = torch.masked_fill(new_logprobs, ~response_mask, utils.INVALID_LOGPROB)
 
-                old_logprobs = old_logprobs_BT[sample_idx]
+                vllm_logprobs = data_BT.vllm_logprobs[sample_idx][:, 1:]
+                vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, utils.INVALID_LOGPROB)
+                vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=utils.INVALID_LOGPROB)
+
+                if num_mini_batches > 1:
+                    old_logprob = old_logprobs_BT[sample_idx]
+                else:
+                    with torch.no_grad():
+                        if epoch_idx == 0:
+                            if self.grpo_config.use_vllm_logprobs:
+                                old_logprobs_BT[sample_idx] = vllm_logprobs
+                            else:
+                                old_logprobs_BT[sample_idx] = new_logprobs.detach()
+                        old_logprob = old_logprobs_BT[sample_idx]
+                assert old_logprob is not None
+
                 advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
 
-                log_ratio = new_logprobs - old_logprobs
+                log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
+
+                tis_weights = None
+                if self.grpo_config.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs is not None:
+                    valid_mask = response_mask
+                    tis_weights = torch.ones_like(old_logprob)
+                    if valid_mask.any():
+                        logprob_diff_is = old_logprob - vllm_logprobs
+                        logprob_diff_is = torch.where(
+                            valid_mask, logprob_diff_is.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff_is)
+                        )
+                        tis_weights = torch.where(valid_mask, torch.exp(logprob_diff_is), tis_weights)
+                        tis_weights = torch.clamp(
+                            tis_weights, max=self.grpo_config.truncated_importance_sampling_ratio_cap
+                        )
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -424,6 +471,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
+                    tis_weights=tis_weights,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
@@ -434,11 +482,21 @@ class GRPOTrainModule(TransformerTrainModule):
                 loss.backward()
 
                 with torch.no_grad():
+                    if self.grpo_config.load_ref_policy and ref_logprobs_BT is not None:
+                        ref_logprobs_diff = (new_logprobs - ref_logprobs_BT[sample_idx]).clamp(-40.0, 40.0)
+                        kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
+                        loss_stats_B["kl"][:, sample_idx] = masked_mean(kl_4BT, response_mask).float()
+                        loss_stats_B["kl_loss"][sample_idx] = (
+                            loss_stats_B["kl"][self.grpo_config.kl_estimator, sample_idx] * self.grpo_config.beta
+                        )
+                    loss_stats_B["pg_clipfrac"][sample_idx] = masked_mean(
+                        (pg_losses2 > pg_losses).float(), response_mask
+                    )
                     loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
-                    loss_stats_B["kl"][sample_idx] = masked_mean(kl, response_mask)
-                    loss_stats_B["clip_frac"][sample_idx] = (pg_losses2 > pg_losses).float().mean()
+                    loss_stats_B["loss"][sample_idx] = loss
+                    loss_stats_B["ratio"][sample_idx] = masked_mean(ratio, response_mask)
                     if entropy is not None:
-                        loss_stats_B["entropy"][sample_idx] = entropy[response_mask].mean()
+                        loss_stats_B["entropy"][sample_idx] = masked_mean(entropy, response_mask).float()
 
                 num_steps += 1
                 local_step += 1
@@ -454,30 +512,37 @@ class GRPOTrainModule(TransformerTrainModule):
             self.zero_grads()
 
         if not dry_run and num_steps > 0:
-            local_token_counts = loss_stats_B["token_count"]
+            token_counts = loss_stats_B["token_count"]
+            total_tokens = token_counts.sum()
+            weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
-            local_pg_loss_sum = (loss_stats_B["pg_loss"] * local_token_counts).sum()
-            local_kl_sum = (loss_stats_B["kl"] * local_token_counts).sum()
-            local_clip_frac_sum = (loss_stats_B["clip_frac"] * local_token_counts).sum()
-            local_total_tokens = local_token_counts.sum()
-
-            local_sums_list = [local_total_tokens, local_pg_loss_sum, local_kl_sum, local_clip_frac_sum]
-            if self.grpo_config.record_entropy:
-                local_entropy_sum = (loss_stats_B["entropy"] * local_token_counts).sum()
-                local_sums_list.append(local_entropy_sum)
-
-            local_sums = torch.stack(local_sums_list)
-            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
-
-            global_total_tokens, global_pg_loss_sum, global_kl_sum, global_clip_frac_sum = local_sums[:4]
-
-            self.record_metric("train/pg_loss", (global_pg_loss_sum / global_total_tokens).item(), reduce_type=None)
-            self.record_metric("train/kl", (global_kl_sum / global_total_tokens).item(), reduce_type=None)
+            if self.grpo_config.load_ref_policy and ref_logprobs_BT is not None:
+                for j in range(4):
+                    self.record_metric(
+                        f"objective/kl{j}_avg", (loss_stats_B["kl"][j] * weights).sum().item(), reduce_type=None
+                    )
+                self.record_metric("loss/kl_avg", (loss_stats_B["kl_loss"] * weights).sum().item(), reduce_type=None)
+            self.record_metric("loss/policy_avg", (loss_stats_B["pg_loss"] * weights).sum().item(), reduce_type=None)
+            self.record_metric("loss/total_avg", (loss_stats_B["loss"] * weights).sum().item(), reduce_type=None)
             self.record_metric(
-                "train/clip_frac", (global_clip_frac_sum / global_total_tokens).item(), reduce_type=None
+                "policy/clipfrac_avg", (loss_stats_B["pg_clipfrac"] * weights).sum().item(), reduce_type=None
+            )
+            weighted_mean_ratio = (loss_stats_B["ratio"] * weights).sum()
+            self.record_metric("val/ratio", weighted_mean_ratio.item(), reduce_type=None)
+            self.record_metric(
+                "val/ratio_var",
+                (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum().item(),
+                reduce_type=None,
             )
             if self.grpo_config.record_entropy:
-                global_entropy_sum = local_sums[4]
                 self.record_metric(
-                    "train/entropy", (global_entropy_sum / global_total_tokens).item(), reduce_type=None
+                    "policy/entropy_avg", (loss_stats_B["entropy"] * weights).sum().item(), reduce_type=None
                 )
+            if self.scheduler is not None and self.trainer.max_steps is not None:
+                lr = self.scheduler.get_lr(
+                    self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
+                    self.trainer.global_step,
+                    self.trainer.max_steps,
+                )
+                self.record_metric("lr", float(lr), reduce_type=None)
+            self.record_metric("_token_count", total_valid_tokens, reduce_type=None)
