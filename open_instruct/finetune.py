@@ -628,12 +628,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             # Filter out any non-2D tensors to avoid IndexError in the adapter's refill().
             def collate_fn(features):
                 batch = base_collate_fn(features)
-                filtered = {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
-                dropped = set(batch.keys()) - set(filtered.keys())
-                if dropped:
-                    shapes = {k: tuple(batch[k].shape) for k in dropped}
-                    logger.warning_once(f"SP collator dropped non-2D keys: {dropped} (shapes: {shapes})")
-                return filtered
+                # The dataset caching layer adds a 1D `index` column that the
+                # UlyssesSPDataLoaderAdapter can't handle (it assumes all values
+                # are 2D [batch, seq]). Filter to only 2D tensors.
+                return {k: v for k, v in batch.items() if hasattr(v, "dim") and v.dim() == 2}
         else:
             collate_fn = base_collate_fn
 
