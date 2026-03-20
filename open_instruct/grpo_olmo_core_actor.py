@@ -97,7 +97,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         backend = "cpu:gloo,cuda:nccl"
         logger.info(f"[Rank {self.rank}] Calling train.prepare_training_environment...")
-        train.prepare_training_environment(seed=self.grpo_config.seed, backend=backend)
+        train.prepare_training_environment(
+            seed=self.grpo_config.seed, backend=backend, timeout=timedelta(minutes=self.grpo_config.backend_timeout)
+        )
         logger.info(f"[Rank {self.rank}] train.prepare_training_environment completed")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
