@@ -5,7 +5,7 @@
 #   ./scripts/train/olmo2/finetune_32b.sh
 #
 # Note: This script requires pre-tokenized numpy data.
-# To prepare data, see: python open_instruct/finetune.py cache_dataset_only --help
+# To prepare data, see: python open_instruct/olmo_core_finetune.py cache_dataset_only --help
 #
 # TODO: Add model_size parameter to finetune.py to support 32B model config
 
@@ -22,7 +22,7 @@ NUM_EPOCHS=2
 LEARNING_RATE=4e-6
 WARMUP_RATIO=0.03
 
-python open_instruct/finetune.py launch \
+python open_instruct/olmo_core_finetune.py launch \
     "$RUN_NAME" \
     "$CHECKPOINT" \
     "$CLUSTER" \

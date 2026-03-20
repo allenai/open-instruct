@@ -5,7 +5,7 @@
 #   ./scripts/train/olmo2/finetune_7b.sh
 #
 # Note: This script requires pre-tokenized numpy data.
-# To prepare data, see: python open_instruct/finetune.py cache_dataset_only --help
+# To prepare data, see: python open_instruct/olmo_core_finetune.py cache_dataset_only --help
 
 RUN_NAME="olmo2-7b-sft"
 CHECKPOINT="s3://ai2-llm/checkpoints/OLMo-2/Olmo-2-1124-7B/step556000-unsharded"
@@ -20,7 +20,7 @@ NUM_EPOCHS=2
 LEARNING_RATE=2e-5
 WARMUP_RATIO=0.03
 
-python open_instruct/finetune.py launch \
+python open_instruct/olmo_core_finetune.py launch \
     "$RUN_NAME" \
     "$CHECKPOINT" \
     "$CLUSTER" \

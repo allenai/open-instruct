@@ -42,14 +42,14 @@ set -e
 OUTPUT_DIR="/weka/oe-adapt-default/allennlp/deletable_checkpoint/$(whoami)/debug-sft-data"
 
 echo "Step 1: Caching dataset to numpy format..."
-python open_instruct/finetune.py cache_dataset_only \
+python open_instruct/olmo_core_finetune.py cache_dataset_only \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 0.01 \
     --output_dir "$OUTPUT_DIR" \
     --max_seq_length '"$SEQ_LEN"' \
     --tokenizer_name_or_path allenai/OLMo-2-1124-7B
 
 echo "Step 2: Running training..."
-torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/finetune.py train \
+torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/olmo_core_finetune.py train \
     '"$RUN_NAME"' \
     '"$CHECKPOINT"' \
     '"$CLUSTER"' \
@@ -71,14 +71,14 @@ else
     OUTPUT_DIR="output/debug-sft-data"
 
     echo "Step 1: Caching dataset to numpy format..."
-    uv run python open_instruct/finetune.py cache_dataset_only \
+    uv run python open_instruct/olmo_core_finetune.py cache_dataset_only \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 0.01 \
         --output_dir "$OUTPUT_DIR" \
         --max_seq_length "$SEQ_LEN" \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B
 
     echo "Step 2: Running training..."
-    uv run torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/finetune.py train \
+    uv run torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/olmo_core_finetune.py train \
         "$RUN_NAME" \
         "$CHECKPOINT" \
         "$CLUSTER" \
