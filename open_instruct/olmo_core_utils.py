@@ -70,9 +70,9 @@ def get_transformer_config(
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
-    unwrapped_model = model_config.build(init_device="cpu")
-    unwrapped_model.load_state_dict(state_dict)
     try:
+        unwrapped_model = model_config.build(init_device="cpu")
+        unwrapped_model.load_state_dict(state_dict)
         save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
     except NotImplementedError as exc:
         logger.warning(

@@ -390,15 +390,7 @@ class GRPOTrainModule(TransformerTrainModule):
             "clip_frac": torch.zeros(num_samples, device=self.device),
             "entropy": torch.zeros(num_samples, device=self.device),
             "token_count": torch.tensor(
-                [
-                    (
-                        data_BT.response_masks[i].unsqueeze(0)
-                        if data_BT.response_masks[i].ndim == 1
-                        else data_BT.response_masks[i]
-                    )[:, 1:].sum().float()
-                    for i in range(num_samples)
-                ],
-                device=self.device,
+                [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
             ),
         }
 
@@ -410,10 +402,6 @@ class GRPOTrainModule(TransformerTrainModule):
                 query_responses = data_BT.query_responses[sample_idx]
                 attention_mask = data_BT.attention_masks[sample_idx]
                 position_ids = data_BT.position_ids[sample_idx]
-                if query_responses.ndim == 1:
-                    query_responses = query_responses.unsqueeze(0)
-                    attention_mask = attention_mask.unsqueeze(0)
-                    position_ids = position_ids.unsqueeze(0)
 
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
@@ -425,17 +413,11 @@ class GRPOTrainModule(TransformerTrainModule):
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx]
-                if response_mask.ndim == 1:
-                    response_mask = response_mask.unsqueeze(0)
-                response_mask = response_mask[:, 1:].bool().to(new_logprobs.device)
+                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
                 new_logprobs = torch.masked_fill(new_logprobs, ~response_mask, utils.INVALID_LOGPROB)
 
                 old_logprobs = old_logprobs_BT[sample_idx]
-                advantages = data_BT.advantages[sample_idx]
-                if advantages.ndim == 1:
-                    advantages = advantages.unsqueeze(0)
-                advantages = advantages.to(new_logprobs.device)
+                advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
 
                 log_ratio = new_logprobs - old_logprobs
                 ratio = torch.exp(log_ratio)

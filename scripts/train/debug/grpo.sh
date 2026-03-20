@@ -32,5 +32,4 @@ python open_instruct/grpo.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
-    --push_to_hub false $@
-    # --system_prompt_override_file 
+    --push_to_hub false "$@"
