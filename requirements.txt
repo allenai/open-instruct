@@ -221,6 +221,7 @@ dr-agent==0.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
 einops==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   deepspeed
+    #   flash-attn
     #   flash-attn-3
     #   flashinfer-python
     #   vllm
@@ -266,6 +267,8 @@ filelock==3.20.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   transformers
     #   virtualenv
     #   vllm
+flash-attn==2.8.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via open-instruct
 flash-attn-3==3.0.0+20260316.cu129torch2100cxx11abitrue.71bf77 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
 flashinfer-python==0.6.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -1171,6 +1174,7 @@ torch==2.10.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   bitsandbytes
     #   compressed-tensors
     #   deepspeed
+    #   flash-attn
     #   flash-attn-3
     #   flashinfer-python
     #   liger-kernel
