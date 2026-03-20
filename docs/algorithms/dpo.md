@@ -31,33 +31,31 @@ bash scripts/train/debug/dpo/multi_node.sh
 
 ### Key Flags
 
-???+ note "Key flags for `dpo.py`"
-
-    | Group | Flag | Description | Default |
-    |-------|------|-------------|---------|
-    | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
-    | | `--attn_backend` | Attention backend: `flash_2`, `flash_3`, `auto` | `auto` |
-    | **DPO Algorithm** | `--beta` | Beta parameter for DPO loss | `0.1` |
-    | | `--loss_type` | Loss type: `dpo`, `dpo_norm`, `simpo`, `wpo` | `dpo` |
-    | | `--packing` | Use packing/padding-free collation | `False` |
-    | | `--label_smoothing` | Label smoothing for DPO/SimPO loss | `0.0` |
-    | **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
-    | | `--num_epochs` | Total number of training epochs | `2` |
-    | | `--per_device_train_batch_size` | Batch size per GPU | `8` |
-    | | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
-    | | `--max_seq_length` | Maximum sequence length after tokenization | `2048` |
-    | | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
-    | | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
-    | | `--compile_model` | Apply `torch.compile` to model blocks | `True` |
-    | | `--activation_memory_budget` | Activation checkpointing budget (0.0–1.0) | `1.0` |
-    | **Parallelism** | `--tensor_parallel_degree` | Tensor parallelism degree | `1` |
-    | | `--fsdp_shard_degree` | FSDP shard degree (None = auto) | `None` |
-    | **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | — |
-    | | `--chat_template_name` | Chat template to use | `None` |
-    | **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
-    | | `--checkpointing_steps` | Save every N steps or `epoch` | `500` |
-    | | `--resume_from_checkpoint` | Resume from checkpoint folder | `None` |
-    | **Logging** | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+| Group | Flag | Description | Default |
+|-------|------|-------------|---------|
+| **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+| | `--attn_backend` | Attention backend: `flash_2`, `flash_3`, `auto` | `auto` |
+| **DPO Algorithm** | `--beta` | Beta parameter for DPO loss | `0.1` |
+| | `--loss_type` | Loss type: `dpo`, `dpo_norm`, `simpo`, `wpo` | `dpo` |
+| | `--packing` | Use packing/padding-free collation | `False` |
+| | `--label_smoothing` | Label smoothing for DPO/SimPO loss | `0.0` |
+| **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
+| | `--num_epochs` | Total number of training epochs | `2` |
+| | `--per_device_train_batch_size` | Batch size per GPU | `8` |
+| | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
+| | `--max_seq_length` | Maximum sequence length after tokenization | `2048` |
+| | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
+| | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
+| | `--compile_model` | Apply `torch.compile` to model blocks | `True` |
+| | `--activation_memory_budget` | Activation checkpointing budget (0.0–1.0) | `1.0` |
+| **Parallelism** | `--tensor_parallel_degree` | Tensor parallelism degree | `1` |
+| | `--fsdp_shard_degree` | FSDP shard degree (None = auto) | `None` |
+| **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | — |
+| | `--chat_template_name` | Chat template to use | `None` |
+| **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
+| | `--checkpointing_steps` | Save every N steps or `epoch` | `500` |
+| | `--resume_from_checkpoint` | Resume from checkpoint folder | `None` |
+| **Logging** | `--with_tracking` | Track experiment with Weights and Biases | `False` |
 
 ### Olmo 3 7B DPO
 
@@ -100,35 +98,33 @@ bash scripts/train/debug/dpo_integration_test.sh
 
 ### Key Flags
 
-???+ note "Key flags for `dpo_tune_cache.py`"
-
-    | Group | Flag | Description | Default |
-    |-------|------|-------------|---------|
-    | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
-    | | `--use_flash_attn` | Use flash attention | `True` |
-    | **DPO Algorithm** | `--beta` | Beta parameter for DPO loss | `0.1` |
-    | | `--loss_type` | Loss type: `dpo`, `dpo_norm`, `simpo`, `wpo` | `dpo` |
-    | | `--packing` | Use packing/padding-free collation | `False` |
-    | | `--label_smoothing` | Label smoothing for DPO/SimPO loss | `0.0` |
-    | **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
-    | | `--num_epochs` | Total number of training epochs | `2` |
-    | | `--per_device_train_batch_size` | Batch size per GPU | `8` |
-    | | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
-    | | `--max_seq_length` | Maximum sequence length after tokenization | `2048` |
-    | | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
-    | | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
-    | **DeepSpeed** | `--zero_stage` | DeepSpeed ZeRO stage (0, 1, 2, or 3) | — |
-    | | `--offload_optimizer` | Offload optimizer states to CPU | `False` |
-    | | `--offload_param` | Offload parameters to CPU | `False` |
-    | **Optimization** | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
-    | **LoRA** | `--use_lora` | Use LoRA for parameter-efficient training | `False` |
-    | | `--lora_rank` | Rank of LoRA | `64` |
-    | **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | — |
-    | | `--chat_template_name` | Chat template to use | `None` |
-    | **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
-    | | `--checkpointing_steps` | Save every N steps or `epoch` | `500` |
-    | | `--resume_from_checkpoint` | Resume from checkpoint folder | `None` |
-    | **Logging** | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+| Group | Flag | Description | Default |
+|-------|------|-------------|---------|
+| **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+| | `--use_flash_attn` | Use flash attention | `True` |
+| **DPO Algorithm** | `--beta` | Beta parameter for DPO loss | `0.1` |
+| | `--loss_type` | Loss type: `dpo`, `dpo_norm`, `simpo`, `wpo` | `dpo` |
+| | `--packing` | Use packing/padding-free collation | `False` |
+| | `--label_smoothing` | Label smoothing for DPO/SimPO loss | `0.0` |
+| **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
+| | `--num_epochs` | Total number of training epochs | `2` |
+| | `--per_device_train_batch_size` | Batch size per GPU | `8` |
+| | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
+| | `--max_seq_length` | Maximum sequence length after tokenization | `2048` |
+| | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
+| | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
+| **DeepSpeed** | `--zero_stage` | DeepSpeed ZeRO stage (0, 1, 2, or 3) | — |
+| | `--offload_optimizer` | Offload optimizer states to CPU | `False` |
+| | `--offload_param` | Offload parameters to CPU | `False` |
+| **Optimization** | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
+| **LoRA** | `--use_lora` | Use LoRA for parameter-efficient training | `False` |
+| | `--lora_rank` | Rank of LoRA | `64` |
+| **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | — |
+| | `--chat_template_name` | Chat template to use | `None` |
+| **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
+| | `--checkpointing_steps` | Save every N steps or `epoch` | `500` |
+| | `--resume_from_checkpoint` | Resume from checkpoint folder | `None` |
+| **Logging** | `--with_tracking` | Track experiment with Weights and Biases | `False` |
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3-8B-DPO` (4 Nodes)
 
