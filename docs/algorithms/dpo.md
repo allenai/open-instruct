@@ -11,23 +11,11 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 
 ### Debug Scripts
 
-**Local (single GPU, no Beaker):**
-
-```bash
-bash scripts/train/debug/dpo/local.sh
-```
-
-**Single GPU on Beaker:**
-
-```bash
-bash scripts/train/debug/dpo/single_gpu.sh
-```
-
-**Multi-node (2 nodes, 16 GPUs) on Beaker:**
-
-```bash
-bash scripts/train/debug/dpo/multi_node.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/dpo/local.sh` | 1 GPU, local | `bash scripts/train/debug/dpo/local.sh` |
+| `scripts/train/debug/dpo/single_gpu.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh` |
+| `scripts/train/debug/dpo/multi_node.sh` | 2 nodes (16 GPUs), Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh` |
 
 ### Key Flags
 
@@ -59,15 +47,10 @@ bash scripts/train/debug/dpo/multi_node.sh
 
 ### Olmo 3 7B DPO
 
-The Olmo 3 7B DPO training scripts are available in `scripts/train/olmo3/`:
-
-```bash
-# Debug (2 nodes, 16 GPUs)
-bash scripts/train/debug/dpo/7b_instruct_dpo_olmo_core.sh
-
-# Full training (4 nodes, 32 GPUs)
-bash scripts/train/olmo3/7b_instruct_dpo_olmocore.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/dpo/7b_instruct_dpo_olmo_core.sh` | 2 nodes (16 GPUs), Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/7b_instruct_dpo_olmo_core.sh` |
+| `scripts/train/olmo3/7b_instruct_dpo_olmocore.sh` | 4 nodes (32 GPUs), Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_dpo_olmocore.sh` |
 
 ---
 
@@ -88,13 +71,11 @@ There are several relevant implementation details:
 
 
 
-### Debug (Single GPU)
+### Debug Scripts
 
-You can run the script in a single GPU mode to debug the training process.
-
-```bash
-bash scripts/train/debug/dpo_integration_test.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/dpo_integration_test.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo_integration_test.sh` |
 
 ### Key Flags
 

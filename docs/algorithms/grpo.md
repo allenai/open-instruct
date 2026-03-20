@@ -8,30 +8,17 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 - `grpo.py` is the recommended GRPO implementation, built on OLMo-core's native training infrastructure (FSDP). It uses Ray for distributed training with vLLM inference.
 - `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing) with DeepSpeed.
-- `grpo_vllm_thread_ray_gtrl.py` is a more vanilla GRPO implementation, using vLLM and Ray.
 
 
 ## `grpo.py` (OLMo-core)
 
 ### Debug Scripts
 
-**Single GPU on Beaker:**
-
-```bash
-bash scripts/train/debug/single_gpu_grpo.sh
-```
-
-**Multi-node (2 nodes, 16 GPUs) on Beaker:**
-
-```bash
-bash scripts/train/debug/multi_node_grpo.sh
-```
-
-**Multi-node with tool use (2 nodes):**
-
-```bash
-bash scripts/train/debug/tools/olmo_3_parser_multigpu.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/single_gpu_grpo.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_grpo.sh` |
+| `scripts/train/debug/multi_node_grpo.sh` | 2 nodes (16 GPUs), Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/multi_node_grpo.sh` |
+| `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` | 2 nodes, tools, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh` |
 
 ### Key Flags
 
@@ -104,16 +91,13 @@ Now imagine there are cases where the model generates a really long response (8k
 
 ![](grpo/additive_format_reward.png)
 
-### Debug (Single GPU)
+### Debug Scripts
 
-You can run the script in a single GPU mode to debug the training process.
-
-```bash
-# single GPU
-bash scripts/train/debug/grpo_fast.sh
-# 3 GPU: 2 for training, 1 for inference (a more realistic setting for async training)
-bash scripts/train/debug/grpo_fast_3_gpu.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/grpo_fast.sh` | 1 GPU, local | `bash scripts/train/debug/grpo_fast.sh` |
+| `scripts/train/debug/grpo_fast_3_gpu.sh` | 3 GPUs (2 train, 1 inference), local | `bash scripts/train/debug/grpo_fast_3_gpu.sh` |
+| `scripts/train/debug/grpo_integration_test.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/grpo_integration_test.sh` |
 
 `grpo_fast.py` accepts the same flags as `grpo.py`. See the [Key Flags table above](#key-flags).
 
@@ -251,25 +235,6 @@ See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general me
 
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
 * `other/packed_ratio`: The ratio of the packed sequences vs the total number of sequences. The lower the ratio, the more efficiently we have packed the sequences. E.g., if we have 100 sequences and the ratio is 0.1, it means we only have to do 10% of the forward passes than if we didn't pack.
-
-
-## `grpo_vllm_thread_ray_gtrl.py`
-
-
-This implementation has the following features:
-
-- Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
-- Uses vLLM and Ray to parallelize the training process, based on how [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF) does it
-
-
-### Debug (Single GPU)
-
-You can run the script in a single GPU mode to debug the training process.
-
-```bash
-bash scripts/train/debug/grpo_integration_test.sh
-```
-
 
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (2 Nodes)

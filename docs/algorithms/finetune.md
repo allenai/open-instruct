@@ -13,21 +13,14 @@ The recommended SFT implementation uses [OLMo-core's SFT training script](https:
 
 ### Olmo 3 SFT Scripts
 
-Production SFT scripts for Olmo 3 models are available in `scripts/train/olmo3/`:
+These scripts are run from the OLMo-core checkout, not via `build_image_and_launch.sh`.
 
-```bash
-# Olmo 3 7B Instruct SFT (4 nodes)
-bash scripts/train/olmo3/7b_instruct_sft.sh
-
-# Olmo 3 7B Think SFT (4 nodes)
-bash scripts/train/olmo3/7b_think_sft.sh
-
-# Olmo 3 32B Instruct SFT
-bash scripts/train/olmo3/32b_instruct_sft.sh
-
-# Olmo 3 32B Think SFT
-bash scripts/train/olmo3/32b_think_sft.sh
-```
+| Script | Description |
+|--------|-------------|
+| `scripts/train/olmo3/7b_instruct_sft.sh` | Olmo 3 7B Instruct SFT (4 nodes) |
+| `scripts/train/olmo3/7b_think_sft.sh` | Olmo 3 7B Think SFT (4 nodes) |
+| `scripts/train/olmo3/32b_instruct_sft.sh` | Olmo 3 32B Instruct SFT |
+| `scripts/train/olmo3/32b_think_sft.sh` | Olmo 3 32B Think SFT |
 
 ### Key Flags
 
@@ -47,23 +40,11 @@ This implementation has the following key features:
 
 ### Debug Scripts
 
-**Single GPU integration test (runs locally or on Beaker):**
-
-```bash
-bash scripts/train/debug/sft_integration_test.sh
-```
-
-**Multi-node integration test (2 nodes) with sequence parallelism on Beaker:**
-
-```bash
-bash scripts/train/debug/sft_multinode_test.sh
-```
-
-**Quick local smoke test (single GPU, no Beaker):**
-
-```bash
-bash scripts/train/debug/finetune.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/finetune.sh` | 1 GPU, local | `bash scripts/train/debug/finetune.sh` |
+| `scripts/train/debug/sft_integration_test.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/sft_integration_test.sh` |
+| `scripts/train/debug/sft_multinode_test.sh` | 2 nodes, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/sft_multinode_test.sh` |
 
 ![finetune](finetune/finetune_debug.png)
 
