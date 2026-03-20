@@ -59,9 +59,12 @@ class WorkerWrap:
             collective.broadcast(weight, 0, group_name=self._model_update_group)
         else:
             torch.distributed.broadcast(weight, 0, group=self._model_update_group)
-
         self.model_runner.model.load_weights(weights=[(name, weight)])
         del weight
+
+    def update_weights_batch(self, param_metadata):
+        for name, dtype, shape in param_metadata:
+            self.update_weight(name, dtype, shape)
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None):
         import torch
