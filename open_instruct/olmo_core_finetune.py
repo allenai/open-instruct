@@ -208,12 +208,12 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     collator = SFTCollator(max_seq_length=args.max_seq_length)
 
-    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
-    global_batch_size = rank_batch_size * dp_world_size
+    rank_batch_size_seqs = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size_seqs = rank_batch_size_seqs * dp_world_size
 
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
-        batch_size=global_batch_size,
+        batch_size=global_batch_size_seqs,
         seed=args.seed,
         dp_rank=global_rank,
         dp_world_size=dp_world_size,
@@ -223,6 +223,9 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         drop_last=True,
         fs_local_rank=global_rank,
     )
+    # The trainer validates global_batch_size against rank_microbatch_size (both in tokens),
+    # but HFDataLoader internally uses it as example count. Override for trainer validation.
+    data_loader._global_batch_size = global_batch_size_seqs * args.max_seq_length
 
     data_loader.reshuffle(epoch=0)
     num_training_steps = len(data_loader) * args.num_train_epochs
@@ -280,7 +283,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         "learning_rate": args.learning_rate,
         "num_train_epochs": args.num_train_epochs,
         "per_device_train_batch_size": args.per_device_train_batch_size,
-        "global_batch_size_sequences": global_batch_size,
+        "global_batch_size_sequences": global_batch_size_seqs,
         "world_size": world_size,
         "seed": args.seed,
     }
