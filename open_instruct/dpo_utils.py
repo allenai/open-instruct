@@ -100,9 +100,9 @@ class TrackingConfig:
 class DPOConfig:
     """Configuration for DPO-specific hyperparameters."""
 
-    beta: float = 0.1
+    beta: float = 5.0
     """Beta parameter for DPO loss."""
-    loss_type: DPOLossType = DPOLossType.dpo
+    loss_type: DPOLossType = DPOLossType.dpo_norm
     """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
     gamma_beta_ratio: float = 0.3
     """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
@@ -122,7 +122,7 @@ class DPOConfig:
 class TrainingConfig:
     """Configuration for training hyperparameters."""
 
-    num_epochs: int = 2
+    num_epochs: int = 1
     """Total number of training epochs to perform."""
     per_device_train_batch_size: int = 8
     """Batch size per GPU/TPU core/CPU for training."""
@@ -130,7 +130,7 @@ class TrainingConfig:
     """Number of updates steps to accumulate before performing a backward/update pass."""
     learning_rate: float = 2e-5
     """The initial learning rate for the optimizer."""
-    warmup_ratio: float = 0.03
+    warmup_ratio: float = 0.1
     """Linear warmup over warmup_ratio fraction of total steps."""
     weight_decay: float = 0.0
     """Weight decay for AdamW if we apply some."""
