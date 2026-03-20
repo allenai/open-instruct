@@ -631,8 +631,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
-    if padded_tensor.ndim == 1:
-        padded_tensor = padded_tensor.unsqueeze(0)
+    padded_tensor = torch.atleast_2d(padded_tensor)
     if pin_memory and torch.cuda.is_available():
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor
