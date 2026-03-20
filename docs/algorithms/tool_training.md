@@ -1,246 +1,198 @@
-# Tool Use and RL Environments
+# Training Tool-Using Models and RL Environments
 
-Open-Instruct supports multi-turn GRPO rollouts where the model can interact with external tools and stateful RL environments during generation.
+This page is for people who want to train models in Open-Instruct that do more than produce a single final answer. You can use it to:
 
-In the current codebase, both are implemented through the same `RLEnvironment` interface:
+- train a model to call tools such as Python, web search, browsing, or MCP servers
+- train against stateful RL environments such as guessing games or Wordle
+- combine intermediate environment rewards with a final verifier-based reward
 
-- Stateless tools like Python execution, search, and browsing are exposed as environment-like workers.
-- Stateful tasks like guessing games, sandboxes, and text environments run through the same rollout loop.
-- Rewards can come from the environment itself, from verifiers on the final answer, or both.
+The recommended workflow is user-facing and script-first: start from an existing debug or training script, choose the tool or environment setup you want, then adjust the configuration for your dataset and infrastructure. You should not need to build a new training loop just to add tool use.
 
-This page replaces the older "tool training" view with the current setup in the repository.
+Right now, Open-Instruct supports a simple interaction model where environment outputs are appended back into the conversation during multi-turn GRPO rollouts.
 
-## Overview
+## Example Scripts
 
-A tool- or environment-enabled rollout in `open_instruct/grpo_fast.py` works like this:
+Start from one of these scripts. They are the fastest way to see the expected config shape and get a working run before customizing anything.
 
-1. The dataloader builds a prompt and optionally attaches per-sample `tools` and `env_config`.
-2. Open-Instruct creates Ray-backed pools for each configured tool or environment.
-3. The model generates one turn of text.
-4. A tool parser extracts structured calls from that text, or forwards the whole text to a text environment.
-5. The selected tool or environment returns an observation, optional reward, and optional done signal.
-6. The observation is appended back into the conversation and generation continues until `max_steps` is reached or the rollout ends.
-7. Final rewards are aggregated with verifiers such as exact-match, code, rubric, or other ground-truth-based checks.
-
-This makes it possible to train:
-
-- Tool-using models that call Python, search, browse, or MCP tools.
-- Stateful RL agents that solve tasks such as counter, guess-number, sandbox, or Wordle.
-- Hybrid setups where the environment provides intermediate rewards and a verifier checks the final answer.
-
-## What Is Supported
-
-### Built-in tools
-
-| Tool | Purpose | Notes |
-| --- | --- | --- |
-| `python` | Execute Python through a code API | Requires an `api_endpoint` in `tool_configs` |
-| `jina_browse` | Fetch webpage content through Jina Reader | Requires `JINA_API_KEY` |
-| `s2_search` | Retrieve Semantic Scholar snippets | Requires `S2_API_KEY` |
-| `serper_search` | Google-style web search through Serper | Requires `SERPER_API_KEY` |
-| `crawl4ai_browse` | Richer browsing via Crawl4AI | Uses AI2-specific deployment assumptions |
-| `generic_mcp` | Connect to any MCP server | Can auto-discover tools at startup |
-| `dr_agent_mcp` | DR-Tulu style MCP tool wrapper | Requires `uv sync --extra dr-tulu` |
-
-### Built-in RL environments
-
-| Environment | Type | Notes |
-| --- | --- | --- |
-| `counter` | Tool-style env | Increment/decrement/submit toy task |
-| `guess_number` | Tool-style env | Guess a hidden integer with feedback |
-| `generic_sandbox` | Tool-style env | Sandbox for command/editor style tasks |
-| `wordle` | Text env | Model emits `<guess>...</guess>` text, env responds as `user` |
-
-### Tool parser types
-
-| Parser | Best for | Notes |
-| --- | --- | --- |
-| `legacy` | Custom XML-tag prompts | Expects `<tool_name>...</tool_name>`; effectively single-string-arg tools |
-| `vllm_hermes` | Qwen / Hermes-style tool calling | Good default for many chat models |
-| `vllm_llama3_json` | Llama 3 JSON tool calling | Uses vLLM native parser |
-| `vllm_olmo3` | OLMo 3 pythonic tool calling | Uses vLLM native parser |
-| `vllm_qwen3xml` | Qwen3 XML tool calling | Uses vLLM native parser |
-| `dr_tulu` | DR-Tulu-style `<call_tool ...>` prompting | Requires `dr_agent_mcp` and stop sequences |
-
-## Key Arguments
-
-### Environment and tool selection
-
-| Argument | Meaning |
+| Script | Description |
 | --- | --- |
-| `--tools` | Names from the tool/env registry to enable |
-| `--tool_call_names` | Names the model should emit for those tools |
-| `--tool_configs` | JSON config for each tool/env |
-| `--tool_parser_type` | Parser used to detect tool calls |
-| `--max_steps` | Maximum rollout turns for tools/envs |
-| `--per_turn_max_tokens` | Token cap for each turn inside the loop |
-| `--pool_size` | Number of Ray workers per tool/env pool |
-| `--pass_tools_to_chat_template` | Pass tool definitions into the chat template instead of relying on a custom system prompt |
+| `scripts/train/debug/tools/qwen3_vllm_hermes_parser_debug.sh` | Train a model to call common tools with a standard chat-style parser |
+| `scripts/train/debug/tools/mcp_weather_debug.sh` | Train a model against tools exposed by an MCP server |
+| `scripts/train/debug/tools/dr_tulu_parser_debug.sh` | Reproduce a DR-Tulu-style tool-calling setup |
+| `scripts/train/debug/envs/guess_number_1gpu.sh` | Train against a built-in tool-style environment |
+| `scripts/train/debug/envs/wordle_8gpu.sh` | Train against a built-in text environment. This uses `mason` to launch, so non-AI2 users will likely need to adapt the launcher. |
 
-### Reward and masking behavior
+## Quick Parameter Overview
 
-| Argument | Meaning |
+These are the main parameters you will usually touch when enabling tools or environments:
+
+| Parameter | What it controls | Typical use |
+| --- | --- | --- |
+| `--tools` | Which tools or environments are active for the run | `--tools python serper_search`. Look at `TOOL_REGISTRY` for the full list. |
+| `--tool_call_names` | The names the model sees and emits when calling those tools, in the order matching `--tools`. | `--tool_call_names code search` |
+| `--tool_configs` | Per-tool or per-environment settings, set globally for the run. e.g.API endpoints, MCP server info, timeouts, environment defaults. Again, order must match `--tools`. | `--tool_configs {'api_key': '1234567890'} {}` |
+| `--tool_parser_type` | How model output is parsed into tool calls. See [Parsers](#parsers) for more details. Use `vllm_*` unless you know what you are doing. | `--tool_parser_type vllm_hermes` |
+| `--max_steps` | Maximum number of tool/environment interaction steps per rollout. | `--max_steps 200` |
+| `--per_turn_max_tokens` | Optional per-turn token limit for each tool/environment interaction step. Useful if you want to allow many interactions (large overall response length) but limit amount of tokens per step. | `--per_turn_max_tokens 1024` |
+| `--pass_tools_to_chat_template` | By default true, but you can turn it off if you have a custom system prompt or parser that already provides information about the tools. | `--pass_tools_to_chat_template True` |
+| `--pool_size` | Number of worker actors per tool or environment. Increase if tool calls are becoming a bottleneck. Controls how many concurrent tool/environment interactions can run at once (e.g. useful for rate limits). By default, this is set to the number of rollouts per batch (`num_rollouts_per_batch * num_unique_prompts_rollout`). | `--pool_size 16` |
+| `--reward_aggregator` | How per-step rewards are combined across the rollout. Can be `last` (just take the last step's reward) or `sum` (add up all step rewards). | `--reward_aggregator sum` |
+
+## How the Rollout Works
+
+At a high level, a tool- or environment-enabled rollout looks like this:
+
+1. Open-Instruct builds the prompt from your dataset example.
+2. The model generates one turn of text.
+3. The parser either extracts a structured tool call or forwards the full text to a text environment.
+4. The selected tool or environment returns a `StepResult`.
+5. The `StepResult.result` text is formatted and appended back into the conversation.
+6. Training continues until the rollout hits `max_steps` or a step returns `done=True`.
+7. Per-step rewards are aggregated with `--reward_aggregator`, then combined with any final verifier reward.
+
+The key implementation idea is that you configure the rollout from the script layer, while Open-Instruct handles the multi-turn dispatch loop underneath.
+
+## Adding Your Own Tools or Environments
+
+When adding your own tool or environment, there are three potential options:
+
+| Class | Description |
 | --- | --- |
-| `--only_reward_good_outputs` | Ignore errored tool outputs when computing rewards |
-| `--mask_tool_use` | Mask tool/environment tokens from the policy loss |
-| `--reward_aggregator` | Aggregate per-turn rewards using `last` or `sum` |
+| `Tool` | A stateless tool that can be called by the model. You only need to implement the `step` method. |
+| `RLEnvironment` | A stateful environment that can be used to train a model. You need to implement the `reset` and `step` methods. Interfaces with the model via tool/function calling. |
+| `TextRLEnvironment` | A stateful environment that receives the model's full generation at each step. Use this when you want custom parsing or reward logic without relying on structured tool calls. In practice, subclasses implement `_reset` and `text_step`. |
 
-`mask_tool_use` is especially important in the current `grpo_fast.py` path. Some rollout and logprob settings assert that tool-use tokens stay masked.
+As a rule of thumb:
 
-## Dataset Format
+- use `Tool` for stateless request/response integrations like Python execution or web search.
+- use `RLEnvironment` for stateful tasks where the model acts through tool/function calls, e.g. a docker sandbox.
+- use `TextRLEnvironment` when the environment should inspect the model's raw text directly, e.g. proper multi-turn training with a simulated user.
 
-The standard chat dataset can be extended with two optional columns:
+`reset` is primarily for environment setup and returns the initial `StepResult` plus tool definitions. For stateless tools, the default `reset` implementation mainly exposes the tool schema.
 
-- `tools`: per-sample list of allowed tool names
-- `env_config`: per-sample environment configuration override
+Note that behind the scenes, Open-Instruct creates a worker pool for each tool or environment, and passes the config fields into the constructor. As such, each rollout gets a fresh instance of the tool or environment, and so **you can store state inside the tool or environment object if you want!**
 
-Tool-gated example:
+After this, you need to add a config class for your tool or environment for any runtime parameters that are not part of the `EnvCall` interface!
 
-```json
-{
-  "messages": [
-    {"role": "system", "content": "Use tools when needed."},
-    {"role": "user", "content": "Use code and search to answer the question."}
-  ],
-  "ground_truth": "42",
-  "tools": ["code", "search"]
-}
-```
+### Config classes and how config wiring works
 
-Environment-configured example:
+Each tool or environment is paired with a config dataclass that subclasses `BaseEnvConfig`. In practice, this is the object that holds the fixed settings for that tool or environment, such as API endpoints, timeouts, or game parameters.
 
-```json
-{
-  "messages": [
-    {"role": "system", "content": "You are playing a number guessing game."},
-    {"role": "user", "content": "Guess the hidden number efficiently."}
-  ],
-  "ground_truth": "7",
-  "env_config": {
-    "max_steps": 10,
-    "env_configs": [
-      {
-        "env_name": "guess_number",
-        "number": "7"
-      }
-    ]
-  }
-}
-```
+These config elements can have defaults, be set globally for a run, and/or be overridden per-sample in the dataset. This can be useful if you want to use the same tool or environment with different settings for different samples.
 
-Notes:
+### `tool_name` vs `tool_call_name`
 
-- If `tools` is `null`, all configured tools remain available for that sample.
-- If `tools` is an empty list, no tools are available for that sample.
-- `env_config` is normalized into a canonical `{"env_configs": [...]}` structure during dataset preprocessing.
-- Per-sample `env_config` overrides the base config supplied on the CLI for matching environment names.
-- Values in `tools` should match the tool-call names exposed to the model.
-- Values in `env_config.env_name` should match the configured pool target, which is usually the tool or environment name unless you override it with `--tool_call_names`.
+By default, the name you pass in `--tools` is also the name the model uses when calling that tool. You can override the model-facing name with `--tool_call_names`.
 
-## Quick Starts
-
-### Tool use with a vLLM parser
-
-For a local Qwen-based tool run:
+For example:
 
 ```bash
-bash scripts/train/debug/tools/qwen3_vllm_hermes_parser_debug.sh
+--tools python serper_search \
+--tool_call_names code search
 ```
 
-That script demonstrates:
+In that case:
 
-- `--tools python serper_search jina_browse`
-- `--tool_call_names code search browse`
-- `--tool_parser_type vllm_hermes`
-- per-sample tool activation through a dataset `tools` column
+- Open-Instruct looks up `python` and `serper_search` in the registry, and creates environments using the corresponding classes.
+- the model sees and calls `code` and `search` in its function calling interface.
 
-### Generic MCP
+This can be useful if you want to swap tool backends without changing the name the model uses, or if you want the tool names in training to better match some external setup you are reproducing.
 
-For a local MCP example with the weather demo server:
+### How tool definitions are exposed to the model
+
+Tool definitions are the OpenAI-style function schemas returned by `get_tool_definitions()`. Open-Instruct collects these definitions from the active tool or environment pools and uses them in two places:
+
+- to tell the parser which function names and argument schemas are valid
+- to pass tool schemas into the chat template when `--pass_tools_to_chat_template` is enabled
+
+This is the main connection between tools and environments: both ultimately expose tool definitions to the model, even if the underlying implementation is stateful.
+
+For a plain `Tool`, `get_tool_definitions()` usually exposes a single function schema. For a stateful `RLEnvironment`, `get_tool_definitions()` can expose one or more actions the model may take. For `TextRLEnvironment`, `reset()` returns no tool definitions, because the model interacts through raw text instead of function calls.
+
+For example, if you configure:
 
 ```bash
-bash scripts/train/debug/tools/mcp_weather_debug.sh
+--tools python \
+--tool_call_names code
 ```
 
-This uses:
+then the model is shown a function definition named `code`, not `python`. If your dataset uses per-sample `tools` filtering, those entries should also use `code`, because that is the function name exposed to the model.
 
-```bash
---tools generic_mcp \
---tool_configs '{"server_url": "http://localhost:8765/mcp", "transport": "http", "timeout": 30}' \
---tool_parser_type vllm_hermes
+### Subclass implementation details
+
+The `step` interface takes an `EnvCall` object, which contains:
+
+- `name`: the tool or action name
+- `args`: a keyword dict containing parsed arguments
+
+These arguments should follow the [OpenAI function calling spec](https://developers.openai.com/api/docs/guides/function-calling), so in practice you should stick to JSON-serializable types.
+
+The `step` method returns a `StepResult`, which contains the fields that matter during training:
+
+- `result`: the observation text appended back into the conversation
+- `reward`: the per-step reward
+- `done`: whether the rollout should terminate early
+- `metadata`: optional debugging or runtime information
+
+The `reward` is stored per turn and then aggregated at the end of the rollout depending on `--reward_aggregator`. If `done=True`, generation stops immediately.
+
+### Text environment implementation note
+
+`TextRLEnvironment` has a slightly different contract than `Tool` or `RLEnvironment`. Instead of receiving a parsed tool call from the model, it receives the model's full text output. Internally, Open-Instruct wraps that text into a synthetic `EnvCall` under `args["text"]` and forwards it to `text_step`.
+
+This is why text environments are the right fit when:
+
+- the model should emit plain text rather than strict tool calls
+- the environment needs to do its own parsing
+- reward depends on text format or multi-turn text behavior
+
+### Minimal implementation sketch
+
+For most custom integrations, the required surface is intentionally small:
+
+```python
+class MyEnv(RLEnvironment):
+    async def reset(self, **kwargs):
+        return StepResult(result="initial observation"), tool_definitions
+
+    async def step(self, call: EnvCall):
+        return StepResult(result="next observation", reward=0.0, done=False)
 ```
 
-If `tool_name` is omitted from the MCP config, Open-Instruct discovers the available MCP tools once at startup and expands them into separate tool pools.
+For a text environment:
 
-### DR-Tulu style tools
+```python
+class MyTextEnv(TextRLEnvironment):
+    async def _reset(self, **kwargs):
+        return StepResult(result="")
 
-For a DR-Tulu style run:
-
-```bash
-bash scripts/train/debug/tools/dr_tulu_parser_debug.sh
+    async def text_step(self, text: str):
+        return StepResult(result="feedback", reward=0.0, done=False)
 ```
 
-This path uses:
+## Parsers
 
-- `--tools dr_agent_mcp`
-- `--tool_parser_type dr_tulu`
-- a custom system prompt from `scripts/train/debug/tools/dr_tulu_system_prompt.txt`
-- `--pass_tools_to_chat_template false`
+Parsers are responsible for handling text formatting: both **extracting tool calls** from the model generation (either to call tools or to interact with environments) and **formatting environment observations** back into the conversation. We support three types of parsers right now:
 
-### RL environments
+| Parser | Description |
+| --- | --- |
+| `legacy` | XML-tag prompts within the assistant turn. Expects `<tool_name>...</tool_name>`; only passes the string inside to the tool. |
+| `vllm_*` | Wrapper around vLLM's native parsers. Uses native vLLM parsing to extract tool calls, and then wraps to add observation formatting. We support `vllm_hermes`, `vllm_llama3_json`, `vllm_olmo3`, and `vllm_qwen3xml`, and it should be easy to add more. |
+| `dr_tulu` | Wrapper around the `dr_agent_mcp` tool for DR-Tulu-style tool calling. |
 
-For a simple built-in environment:
+**We recommend using `vllm_*` parsers unless you have a strong reason for using another parser.**
 
-```bash
-bash scripts/train/debug/envs/guess_number_1gpu.sh
-```
+## Common Gotchas
 
-For a larger text-environment run:
+- `tool_call_names` must match the names exposed to the model and the names expected in your dataset
+- `TextRLEnvironment` is for full-text interaction, not structured function calls
+- `StepResult.result` should be written as model-readable feedback because it is what gets appended back into the conversation
+- if your environment needs custom metrics, implement `get_metrics`; if it needs initialization, implement `setup`
 
-```bash
-bash scripts/train/debug/envs/wordle_8gpu.sh
-```
+### Example Script: Wordle
 
-These runs do not need external search APIs. The environment itself provides the interaction loop and can emit rewards before the final verifier step.
+The `scripts/train/debug/envs/wordle_8gpu.sh` script is a good example of how to train against a built-in text environment. It uses the `vllm_hermes` parser together with the `WordleTextEnv` class. The environment handles parsing guesses, generating feedback, and assigning rewards. Over 200 steps, the training curves should look something like this:
 
-## RL Environment Notes
+![Wordle Training Curves](grpo/wordle_curves.png)
 
-Open-Instruct now supports both tool-style and text-style environments.
-
-### Tool-style environments
-
-These expose OpenAI-style tool definitions and are invoked through parsed calls. `counter` and `guess_number` fall into this bucket.
-
-### Text environments
-
-These consume the model's full text output instead of structured tool calls. `wordle` is the main example. Internally, Open-Instruct wraps the text into a synthetic environment call so it can reuse the same rollout loop.
-
-Current constraint:
-
-- Only one text environment can be active in a rollout at a time.
-
-## MCP Notes
-
-`generic_mcp` supports HTTP, SSE, and stdio transports. A few practical details matter:
-
-- Discovery happens at startup, not continuously during training.
-- The default integration currently assumes text outputs.
-- If your server's tool list changes during training, Open-Instruct will not automatically refresh it.
-
-## Common Caveats
-
-- `legacy` parsing is best for tools whose first required argument can absorb the full XML body as a single string.
-- `dr_tulu` requires exactly the `dr_agent_mcp` tool and depends on parser stop sequences to detect calls.
-- Dataset tool names must match configured tool call names seen by the model.
-- Some older comments in debug scripts are stale; prefer the actual command flags over nearby comments if they disagree.
-
-## Adding Your Own Tool or Environment
-
-To add a new integration:
-
-1. Subclass `Tool`, `RLEnvironment`, or `TextRLEnvironment`.
-2. Create a matching config dataclass that subclasses `BaseEnvConfig`.
-3. Register that config in `TOOL_REGISTRY`.
-4. Pass it through `--tools` and `--tool_configs`.
-
-Use a `Tool` when the component is effectively stateless and request/response shaped. Use an `RLEnvironment` when you need episode state, intermediate rewards, or custom termination rules.
+You can see the wandb for this run [here](https://wandb.ai/ai2-llm/open_instruct_internal/runs/1od05m9m?nw=nwuserhamishivi) and the beaker link [here](https://beaker.org/orgs/ai2/workspaces/open-instruct-dev/work/01KM66926V1PT6CBGR6ANDYS7J?taskId=01KM669270NVQF02Y1FXWHESVG&jobId=01KM6692AEMN8BZNPK1ZQQT90W).
