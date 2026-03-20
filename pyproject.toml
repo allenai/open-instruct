@@ -31,7 +31,6 @@ dependencies = [
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "flash-attn-3>=3.0.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
@@ -50,7 +49,6 @@ build-backend = "setuptools.build_meta"
 py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
-flash-attn = [{ requirement = "torch", match-runtime = true }]
 flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
