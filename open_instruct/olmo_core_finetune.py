@@ -287,7 +287,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     trainer_callbacks: dict[str, Any] = {
         "gpu_monitor": GPUMemoryMonitorCallback(),
-        "config_saver": ConfigSaverCallback(config=json_config),
+        "config_saver": ConfigSaverCallback(_config=json_config),
         "garbage_collector": GarbageCollectorCallback(),
         "checkpointer": CheckpointerCallback(
             save_interval=args.save_interval, ephemeral_save_interval=args.ephemeral_save_interval, save_async=True
