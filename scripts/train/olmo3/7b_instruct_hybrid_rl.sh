@@ -21,7 +21,7 @@ exp_name="grpo_hybrid_p64_4_8k_2node_v3_packing_fix"
 
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
-uv run python mason.py \
+uv run --no-sync python mason.py \
         --description $exp_name \
         --task_name ${EXP_NAME} \
         --cluster ${cluster} \
