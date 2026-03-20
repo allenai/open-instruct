@@ -111,7 +111,7 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 
 ???+ info
 
-    Here the `grpo_fast.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than `grpo_vllm_thread_ray_gtrl.py` which uses 2 nodes (12 GPUs for training and 4 GPUs for inference).
+    Here the `grpo_fast.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than the legacy `grpo_vllm_thread_ray_gtrl.py` which used 2 nodes (12 GPUs for training and 4 GPUs for inference).
 
 
 ![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo_fast.png)
@@ -230,7 +230,7 @@ bash scripts/train/olmo2/grpo_fast_13b_zero.sh
 
 ### Training Metrics
 
-See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general metrics. `grpo_fast.py` includes the following additional metrics:
+`grpo_fast.py` includes the following additional metrics beyond the standard training metrics:
 
 
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
@@ -239,11 +239,7 @@ See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general me
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (2 Nodes)
 
-You can reproduce our `allenai/Llama-3.1-Tulu-3.1-8B` model by running the following command:
-
-```bash
-bash scripts/train/tulu3/grpo_8b.sh
-```
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. See the [deleted script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/tulu3/grpo_8b.sh) for the original launch command.
 
 ![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo.png)
 ![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo-time.png)
@@ -270,11 +266,7 @@ bash scripts/train/tulu3/grpo_8b.sh
 
 ### Reproduce `allenai/OLMo-2-1124-7B-Instruct` but better (2 Nodes)
 
-You can reproduce our `allenai/OLMo-2-1124-7B-Instruct` model by running the following command:
-
-```bash
-bash scripts/train/olmo2/grpo_7b.sh
-```
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. See the [deleted script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/olmo2/grpo_7b.sh) for the original launch command.
 
 ![grpo_olmo2_7b](grpo/olmo2_7b_grpo.png)
 ![grpo_olmo2_7b_time](grpo/olmo2_7b_grpo-time.png)
@@ -301,11 +293,7 @@ bash scripts/train/olmo2/grpo_7b.sh
 
 ### (🧪 Experimental) Qwen 2.5 7B Zero-style
 
-Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), which is simply a zero-shot version of the RLVR MATH dataset. The training is done starting from a base model, similar to how [DeepSeek R1](https://arxiv.org/abs/2501.12948) does it.
-
-```bash
-bash scripts/train/qwen/grpo_7b.sh
-```
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. See the [deleted script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/qwen/grpo_7b.sh) for the original launch command. Training was done on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs) starting from a base model, similar to [DeepSeek R1](https://arxiv.org/abs/2501.12948).
 
 ![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_zero.png)
 ![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)

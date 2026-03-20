@@ -4,17 +4,7 @@
 
 ## Implemented Variants
 
-- `open_instruct/grpo_vllm_thread_ray_gtrl.py` contains the script for training PPO models.
-
-
-
-## `ppo_vllm_thread_ray_gtrl.py`
-
-
-This implementation has the following features:
-
-- Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
-- Uses vLLM and Ray to parallelize the training process, based on how [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF) does it
+PPO was previously implemented in [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. It used a thread-based approach for async training/inference ([Asynchronous RLHF](https://arxiv.org/abs/2410.18252)) with vLLM and Ray ([OpenRLHF](https://github.com/OpenRLHF/OpenRLHF)).
 
 
 

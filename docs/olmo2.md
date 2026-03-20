@@ -227,6 +227,8 @@ done
 
 ## RLVR
 
+> **Note**: These commands use the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. They are preserved here for historical reference.
+
 ### 1B
 
 The 1B OLMo 2 model has two RL stages run in sequence. The first is on MATH, GSM8K, and IF constraints:
