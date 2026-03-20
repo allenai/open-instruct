@@ -45,7 +45,6 @@ Usage:
 import argparse
 import gzip
 import json
-import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -102,7 +101,7 @@ except ImportError:
 from rich import print  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
-from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
+from open_instruct import logger_utils  # noqa: E402
 from open_instruct.dataset_transformation import (  # noqa: E402
     ATTENTION_MASK_KEY,
     DATASET_ORIGIN_KEY,
@@ -114,9 +113,10 @@ from open_instruct.dataset_transformation import (  # noqa: E402
     visualize_token,
 )
 from open_instruct.dataset_transformation import TokenizerConfig as OITokenizerConfig  # noqa: E402
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2  # noqa: E402
 from open_instruct.utils import is_beaker_job  # noqa: E402
 
-log = logging.getLogger(__name__)
+log = logger_utils.setup_logger(__name__)
 
 DEFAULT_SEQUENCE_LENGTH = 4096
 DEFAULT_NUM_NODES = 1
@@ -127,6 +127,7 @@ CLUSTER_TO_GPU_TYPE = {
     "ai2/jupiter": "NVIDIA H100 80GB HBM3",
     "ai2/augusta": "NVIDIA H100 80GB HBM3",
     "ai2/ceres": "NVIDIA H100 80GB HBM3",
+    "ai2/test-h100": "NVIDIA H100 80GB HBM3",
     "ai2/neptune": "NVIDIA B200",
 }
 
@@ -242,7 +243,6 @@ class BatchSizeConfig:
     world_size: int
     gpu_type: str
     rank_microbatch_size_tokens: int = field(init=False)
-    rank_microbatch_size_sequences: int = field(init=False)
     grad_accum_steps: int = field(init=False)
 
     def __post_init__(self):
@@ -273,7 +273,6 @@ class BatchSizeConfig:
             self.grad_accum_steps = 1
 
         assert self.rank_microbatch_size_tokens % self.sequence_length == 0
-        self.rank_microbatch_size_sequences = self.rank_microbatch_size_tokens // self.sequence_length
 
         total_tokens = self.rank_microbatch_size_tokens * dp_world_size * self.grad_accum_steps
         assert self.global_batch_size_tokens == total_tokens
@@ -444,7 +443,7 @@ class SFTConfig:
             run_name=run_name,
             launch=launch_config,
             model=model,
-            dataset=None,
+            dataset=dataset_config,
             data_loader=NumpyDataLoaderConfig(
                 global_batch_size=bs_config.global_batch_size_tokens, seed=init_seed + 1000, num_workers=4
             ),
@@ -488,18 +487,15 @@ class SFTConfig:
             init_seed=init_seed,
         )
 
-        config.dataset = dataset_config
-
         return config
 
 
-def write_memmap_chunked(base_filename: str, data: list, dtype, max_size_gb: float = 1) -> tuple[list, list]:
-    """Write data to multiple memmap files if size exceeds max_size_gb."""
+def write_memmap_chunked(base_filename: str, data: list, dtype, max_size_gb: float = 1) -> list:
+    """Write data to multiple memmap files if size exceeds max_size_gb. Returns chunk boundaries."""
     item_size = np.dtype(dtype).itemsize
     max_size_bytes = max_size_gb * 1024**3
 
     chunk_size = int(max_size_bytes // item_size)
-    chunks = []
     chunk_boundaries = []
 
     for i in range(0, len(data), chunk_size):
@@ -508,11 +504,11 @@ def write_memmap_chunked(base_filename: str, data: list, dtype, max_size_gb: flo
         mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
         mmap[:] = chunk_data
         mmap.flush()
-        chunks.append(mmap)
+        del mmap
         chunk_boundaries.append((i, i + len(chunk_data)))
         print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
 
-    return chunks, chunk_boundaries
+    return chunk_boundaries
 
 
 def write_metadata_for_chunks(base_filename: str, document_boundaries: list, chunk_boundaries: list) -> None:
@@ -702,16 +698,18 @@ def cache_dataset_only(args: CacheDatasetArguments, tc: OITokenizerConfig) -> No
 
         per_dataset_counts[dataset_source] += 1
         per_dataset_tokens[dataset_source] += sample_length
-        trainable_tokens_in_sample = sum(1 for label in sample_labels if label != -100)
+
+        sample_mask = [1 if label != -100 else 0 for label in sample_labels]
+        trainable_tokens_in_sample = sum(sample_mask)
         per_dataset_trainable_tokens[dataset_source] += trainable_tokens_in_sample
 
         token_ids.extend(sample_tokens)
-        labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
+        labels_mask.extend(sample_mask)
 
         document_boundaries.append((current_position, current_position + sample_length))
         current_position += sample_length
 
-        if all(label == -100 for label in sample_labels):
+        if trainable_tokens_in_sample == 0:
             num_samples_skipped += 1
             per_dataset_filtered[dataset_source] += 1
 
@@ -738,7 +736,7 @@ def cache_dataset_only(args: CacheDatasetArguments, tc: OITokenizerConfig) -> No
         raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
     print(f"Writing converted data to {output_dir}")
-    _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
+    token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
     write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
 
     for i, (start, end) in enumerate(token_chunk_boundaries):
