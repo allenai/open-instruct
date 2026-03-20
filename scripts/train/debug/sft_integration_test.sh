@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CHECKPOINT=allenai/OLMo-2-0325-32B-DPO
+CHECKPOINT=allenai/OLMo-2-0425-1B
 
 LAUNCH_CMD="torchrun \
     --nproc_per_node=1 \
@@ -16,7 +16,7 @@ LAUNCH_CMD="torchrun \
     --logging_steps 1 \
     --seed 123 \
     --output_dir output/ \
-    --chat_template_name tulu \
+    --chat_template_name olmo \
     --tokenizer_name_or_path $CHECKPOINT"
 
 if [ -n "$1" ]; then

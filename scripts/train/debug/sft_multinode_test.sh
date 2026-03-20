@@ -2,7 +2,7 @@
 # Two-node OLMo-core SFT integration test.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-CHECKPOINT=allenai/OLMo-2-0325-32B-DPO
+CHECKPOINT=allenai/OLMo-2-0425-1B
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
@@ -35,5 +35,5 @@ uv run python mason.py \
     --output_dir output/ \
     --with_tracking \
     --wandb_project open_instruct_internal \
-    --chat_template_name tulu \
+    --chat_template_name olmo \
     --tokenizer_name_or_path $CHECKPOINT
