@@ -182,13 +182,6 @@ Parsers are responsible for handling text formatting: both **extracting tool cal
 
 **We recommend using `vllm_*` parsers unless you have a strong reason for using another parser.**
 
-## Common Gotchas
-
-- `tool_call_names` must match the names exposed to the model and the names expected in your dataset
-- `TextRLEnvironment` is for full-text interaction, not structured function calls
-- `StepResult.result` should be written as model-readable feedback because it is what gets appended back into the conversation
-- if your environment needs custom metrics, implement `get_metrics`; if it needs initialization, implement `setup`
-
 ### Example Script: Wordle
 
 The `scripts/train/debug/envs/wordle_8gpu.sh` script is a good example of how to train against a built-in text environment. It uses the `vllm_hermes` parser together with the `WordleTextEnv` class. The environment handles parsing guesses, generating feedback, and assigning rewards. Over 200 steps, the training curves should look something like this:
