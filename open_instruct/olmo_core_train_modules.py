@@ -4,6 +4,7 @@ This module provides training modules for DPO and GRPO using
 OLMo-core's native training infrastructure.
 """
 
+import dataclasses
 import math
 from typing import Any, Literal
 
@@ -338,6 +339,11 @@ class GRPOTrainModule(TransformerTrainModule):
         """Execute one training step with GRPO loss."""
         self.model.train()
         data_BT: data_types.CollatedBatchData = batch["batch"]
+
+        for f in dataclasses.fields(data_BT):
+            val = getattr(data_BT, f.name)
+            if isinstance(val, list):
+                setattr(data_BT, f.name, [t.to(self.device) if isinstance(t, torch.Tensor) else t for t in val])
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
