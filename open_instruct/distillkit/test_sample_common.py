@@ -34,9 +34,12 @@ class TestSampleCommon(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             writer_dir = Path(tmp) / "writer"
             writer: StreamingParquetWriter | None = None
-            with self.assertRaisesRegex(RuntimeError, "boom"), StreamingParquetWriter(
-                output_path=str(writer_dir), schema=compressed_logit_schema(), file_max_rows=2, write_batch_size=1
-            ) as active_writer:
+            with (
+                self.assertRaisesRegex(RuntimeError, "boom"),
+                StreamingParquetWriter(
+                    output_path=str(writer_dir), schema=compressed_logit_schema(), file_max_rows=2, write_batch_size=1
+                ) as active_writer,
+            ):
                 writer = active_writer
                 writer.write(
                     {
