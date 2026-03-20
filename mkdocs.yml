@@ -83,7 +83,6 @@ nav:
     - algorithms/dpo.md
     - algorithms/grpo.md
     - algorithms/tool_training.md
-    - algorithms/dr_tulu_replication.md
     - algorithms/ppo.md
     - algorithms/reward_modeling.md
     - slack-alerts.md
