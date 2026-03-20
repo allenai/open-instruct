@@ -726,9 +726,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
-                        grad_norm = self.model.get_global_grad_norm()
-                        if grad_norm is not None:
-                            grad_norms.append(float(grad_norm))
+                        grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
