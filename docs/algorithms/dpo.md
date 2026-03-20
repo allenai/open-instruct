@@ -9,16 +9,7 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 
 ## `dpo.py` (OLMo-core)
 
-This is the recommended DPO implementation. It uses OLMo-core's `Trainer` with FSDP instead of DeepSpeed, and supports:
-
-- Tensor parallelism and configurable FSDP sharding
-- Sequence packing for improved GPU utilization
-- `torch.compile` with activation memory budgeting
-- DPO-norm (length-normalized) loss
-
 ### Debug Scripts
-
-You can use the following scripts to test the OLMo-core DPO implementation at various scales:
 
 **Local (single GPU, no Beaker):**
 
@@ -129,7 +120,7 @@ bash scripts/train/debug/dpo_integration_test.sh
     | **DeepSpeed** | `--zero_stage` | DeepSpeed ZeRO stage (0, 1, 2, or 3) | — |
     | | `--offload_optimizer` | Offload optimizer states to CPU | `False` |
     | | `--offload_param` | Offload parameters to CPU | `False` |
-    | **Model** | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
+    | **Optimization** | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
     | **LoRA** | `--use_lora` | Use LoRA for parameter-efficient training | `False` |
     | | `--lora_rank` | Rank of LoRA | `64` |
     | **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | — |

@@ -13,14 +13,6 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 ## `grpo.py` (OLMo-core)
 
-This is the recommended GRPO implementation. It uses OLMo-core's `Trainer` for training while keeping the same Ray-based distributed inference with vLLM.
-
-Key features:
-
-- OLMo-core's native training infrastructure
-- Same packing and async training as `grpo_fast.py`
-- Ray for distributed training coordination with Beaker
-
 ### Debug Scripts
 
 **Single GPU on Beaker:**
