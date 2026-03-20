@@ -29,6 +29,12 @@ bash scripts/train/olmo3/32b_instruct_sft.sh
 bash scripts/train/olmo3/32b_think_sft.sh
 ```
 
+### Key Flags
+
+???+ note "OLMo-core SFT configuration"
+
+    OLMo-core SFT uses **YAML config files** rather than CLI flags. Configuration is handled via OLMo-core's config system. See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for available options.
+
 ---
 
 ## `finetune.py` (Legacy)
@@ -63,6 +69,37 @@ bash scripts/train/debug/finetune.sh
 
 ![finetune](finetune/finetune_debug.png)
 
+### Key Flags
+
+???+ note "Key flags for `finetune.py`"
+
+    | Group | Flag | Description | Default |
+    |-------|------|-------------|---------|
+    | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+    | | `--use_flash_attn` | Use flash attention | `True` |
+    | | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
+    | **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
+    | | `--num_train_epochs` | Total number of training epochs | `2` |
+    | | `--per_device_train_batch_size` | Batch size per GPU | `8` |
+    | | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
+    | | `--max_seq_length` | Maximum sequence length after tokenization | — |
+    | | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
+    | | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
+    | | `--gradient_checkpointing` | Use gradient checkpointing (saves memory) | `False` |
+    | | `--seed` | Random seed | `42` |
+    | **Data** | `--dataset_mixer_list` | List of datasets (local or HF) to sample from | — |
+    | | `--dataset_mixer_list_splits` | Dataset splits for training | `["train"]` |
+    | | `--chat_template_name` | Chat template to use | `None` |
+    | | `--packing` | Use packing/padding-free collation | `False` |
+    | **Parallelism** | `--sequence_parallel_size` | Ulysses sequence parallelism degree | `1` |
+    | **LoRA** | `--use_lora` | Use LoRA for parameter-efficient training | `False` |
+    | | `--lora_rank` | Rank of LoRA | `64` |
+    | | `--lora_alpha` | Alpha parameter of LoRA | `16` |
+    | **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
+    | | `--checkpointing_steps` | Save every N steps or `epoch` | — |
+    | | `--resume_from_checkpoint` | Resume from checkpoint folder | `None` |
+    | **Logging** | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+    | | `--logging_steps` | Log training loss every N steps | — |
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3-8B-SFT` (8 Nodes)
 

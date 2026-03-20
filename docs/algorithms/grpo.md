@@ -41,6 +41,51 @@ bash scripts/train/debug/multi_node_grpo.sh
 bash scripts/train/debug/tools/olmo_3_parser_multigpu.sh
 ```
 
+### Key Flags
+
+Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the same flags.
+
+???+ note "Key flags for `grpo.py` / `grpo_fast.py`"
+
+    | Group | Flag | Description | Default |
+    |-------|------|-------------|---------|
+    | **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
+    | | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
+    | | `--per_device_train_batch_size` | Forward batch size per device | `1` |
+    | | `--total_episodes` | Total number of episodes in dataset | `100000` |
+    | | `--num_epochs` | Number of epochs to train | `1` |
+    | | `--num_mini_batches` | Mini-batches to split a batch into | `1` |
+    | | `--seed` | Random seed | `1` |
+    | **GRPO Algorithm** | `--beta` | KL coefficient for RLHF objective | `0.05` |
+    | | `--clip_lower` | Lower clip range | `0.2` |
+    | | `--clip_higher` | Higher clip range (see DAPO) | `0.2` |
+    | | `--loss_fn` | Loss function: `dapo` or `cispo` | `dapo` |
+    | | `--load_ref_policy` | Load and use reference policy for KL | `True` |
+    | **Rollout / Sampling** | `--num_unique_prompts_rollout` | Unique prompts per rollout | `16` |
+    | | `--num_samples_per_prompt_rollout` | Samples per prompt in rollout | `4` |
+    | | `--temperature` | Sampling temperature | `0.7` |
+    | | `--max_prompt_token_length` | Max tokens for prompts | `256` |
+    | | `--response_length` | Token length for responses | `256` |
+    | | `--pack_length` | Total pack length for packing | `512` |
+    | | `--async_steps` | Number of async generation steps | `1` |
+    | | `--active_sampling` | Enable active sampling | `False` |
+    | **Reward** | `--apply_verifiable_reward` | Apply verifiable reward | `True` |
+    | | `--verification_reward` | Verification reward value | `10.0` |
+    | | `--apply_r1_style_format_reward` | Apply R1-style format reward | `False` |
+    | **Infrastructure** | `--deepspeed_stage` | DeepSpeed stage (0, 2, or 3) | `0` |
+    | | `--sequence_parallel_size` | Sequence parallel size across GPUs | `1` |
+    | | `--num_learners_per_node` | GPUs per node for training | `[1]` |
+    | | `--single_gpu_mode` | Collocate vLLM and actor on same node | `False` |
+    | **vLLM** | `--vllm_num_engines` | Number of vLLM engines | `1` |
+    | | `--vllm_tensor_parallel_size` | Tensor parallelism size | `1` |
+    | | `--vllm_gpu_memory_utilization` | GPU memory utilization ratio | `0.9` |
+    | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+    | | `--gradient_checkpointing` | Use gradient checkpointing | `False` |
+    | | `--chat_template_name` | Chat template to use | `None` |
+    | **Saving** | `--output_dir` | Output directory for checkpoints | `output` |
+    | | `--save_freq` | Save every N train steps | `200` |
+    | | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+
 ---
 
 
@@ -79,6 +124,8 @@ bash scripts/train/debug/grpo_fast.sh
 # 3 GPU: 2 for training, 1 for inference (a more realistic setting for async training)
 bash scripts/train/debug/grpo_fast_3_gpu.sh
 ```
+
+`grpo_fast.py` accepts the same flags as `grpo.py`. See the [Key Flags table above](#key-flags).
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
 
@@ -230,7 +277,7 @@ This implementation has the following features:
 You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-bash scripts/train/debug/grpo.sh
+bash scripts/train/debug/grpo_integration_test.sh
 ```
 
 
