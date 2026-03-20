@@ -34,7 +34,8 @@ uv run --no-sync python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/dpo_utils__123__1769051928/hf_model \
+    --model_name_or_path allenai/Olmo-Hybrid-Instruct-DPO-7B \
+    --trust_remote_code \
     --add_bos \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
