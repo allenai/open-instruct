@@ -216,7 +216,7 @@ class GSM8KVerifier(VerifierFunction):
     ) -> VerificationResult:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         # Preserve explicit signs on both decimals and integers when extracting the final answer.
-        numbers = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", response)
+        numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", response)
         extracted = numbers[-1] if numbers else response
         score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
