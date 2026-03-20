@@ -2,19 +2,36 @@
 
 We support Supervised finetuning (SFT) on a variety of datasets.
 
-> **OLMo-core SFT**: For supported models (OLMo, Qwen, and more), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the current list of supported models.
-
-We plan to update `finetune.py` at some point to use Olmo-core: https://github.com/allenai/open-instruct/pull/1327. 
-
-
-
-
 ## Implemented Variants
 
-- `finetune.py` is the original SFT implementation.
+- **OLMo-core SFT** (recommended): Uses OLMo-core's native training infrastructure. For supported models (OLMo, Qwen, and more), this is more GPU-efficient. See `open_instruct/olmo_core_utils.py` for the current list of supported models.
+- `finetune.py` is the legacy SFT implementation using DeepSpeed/Accelerate.
 
+## OLMo-core SFT
 
-## `finetune.py`
+The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). It runs via `python src/scripts/train/sft/OLMo-sft.py` from the OLMo-core submodule. There are no debug scripts for OLMo-core SFT in this repo; see the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for testing instructions.
+
+### Olmo 3 SFT Scripts
+
+Production SFT scripts for Olmo 3 models are available in `scripts/train/olmo3/`:
+
+```bash
+# Olmo 3 7B Instruct SFT (4 nodes)
+bash scripts/train/olmo3/7b_instruct_sft.sh
+
+# Olmo 3 7B Think SFT (4 nodes)
+bash scripts/train/olmo3/7b_think_sft.sh
+
+# Olmo 3 32B Instruct SFT
+bash scripts/train/olmo3/32b_instruct_sft.sh
+
+# Olmo 3 32B Think SFT
+bash scripts/train/olmo3/32b_think_sft.sh
+```
+
+---
+
+## `finetune.py` (Legacy)
 
 
 This implementation has the following key features:
@@ -24,9 +41,21 @@ This implementation has the following key features:
 
 
 
-### Debug (Single GPU)
+### Debug Scripts
 
-You can run the script in a single GPU mode to debug the training process.
+**Single GPU integration test (runs locally or on Beaker):**
+
+```bash
+bash scripts/train/debug/sft_integration_test.sh
+```
+
+**Multi-node integration test (2 nodes) with sequence parallelism on Beaker:**
+
+```bash
+bash scripts/train/debug/sft_multinode_test.sh
+```
+
+**Quick local smoke test (single GPU, no Beaker):**
 
 ```bash
 bash scripts/train/debug/finetune.sh

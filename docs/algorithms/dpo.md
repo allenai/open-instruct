@@ -4,9 +4,55 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 
 ## Implemented Variants
 
-- `dpo_tune_cache.py` is the DPO implementation that directly optimizes model outputs based on human preferences.
+- `dpo.py` is the recommended DPO implementation, built on OLMo-core's native training infrastructure (FSDP). It supports tensor parallelism, sequence packing, and `torch.compile`.
+- `dpo_tune_cache.py` is the legacy DPO implementation using DeepSpeed.
 
-## `dpo_tune_cache.py`
+## `dpo.py` (OLMo-core)
+
+This is the recommended DPO implementation. It uses OLMo-core's `Trainer` with FSDP instead of DeepSpeed, and supports:
+
+- Tensor parallelism and configurable FSDP sharding
+- Sequence packing for improved GPU utilization
+- `torch.compile` with activation memory budgeting
+- DPO-norm (length-normalized) loss
+
+### Debug Scripts
+
+You can use the following scripts to test the OLMo-core DPO implementation at various scales:
+
+**Local (single GPU, no Beaker):**
+
+```bash
+bash scripts/train/debug/dpo/local.sh
+```
+
+**Single GPU on Beaker:**
+
+```bash
+bash scripts/train/debug/dpo/single_gpu.sh
+```
+
+**Multi-node (2 nodes, 16 GPUs) on Beaker:**
+
+```bash
+bash scripts/train/debug/dpo/multi_node.sh
+```
+
+### Olmo 3 7B DPO
+
+The Olmo 3 7B DPO training scripts are available in `scripts/train/olmo3/`:
+
+```bash
+# Debug (2 nodes, 16 GPUs)
+bash scripts/train/debug/dpo/7b_instruct_dpo_olmo_core.sh
+
+# Full training (4 nodes, 32 GPUs)
+bash scripts/train/olmo3/7b_instruct_dpo_olmocore.sh
+```
+
+---
+
+## `dpo_tune_cache.py` (Legacy)
 
 This implementation has the following key features:
 

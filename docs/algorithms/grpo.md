@@ -6,8 +6,42 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 ## Implemented Variants
 
-- `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing).
+- `grpo.py` is the recommended GRPO implementation, built on OLMo-core's native training infrastructure (FSDP). It uses Ray for distributed training with vLLM inference.
+- `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing) with DeepSpeed.
 - `grpo_vllm_thread_ray_gtrl.py` is a more vanilla GRPO implementation, using vLLM and Ray.
+
+
+## `grpo.py` (OLMo-core)
+
+This is the recommended GRPO implementation. It uses OLMo-core's `Trainer` for training while keeping the same Ray-based distributed inference with vLLM.
+
+Key features:
+
+- OLMo-core's native training infrastructure
+- Same packing and async training as `grpo_fast.py`
+- Ray for distributed training coordination with Beaker
+
+### Debug Scripts
+
+**Single GPU on Beaker:**
+
+```bash
+bash scripts/train/debug/single_gpu_grpo.sh
+```
+
+**Multi-node (2 nodes, 16 GPUs) on Beaker:**
+
+```bash
+bash scripts/train/debug/multi_node_grpo.sh
+```
+
+**Multi-node with tool use (2 nodes):**
+
+```bash
+bash scripts/train/debug/tools/olmo_3_parser_multigpu.sh
+```
+
+---
 
 
 
