@@ -1,5 +1,6 @@
+#!/bin/bash
 python mason.py \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \

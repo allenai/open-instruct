@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Test script for PuzzleMatcherVerifier functionality in Python
+Test script for verifier functionality in Python
 """
 
 import unittest
 
 from parameterized import parameterized
 
-from open_instruct.ground_truth_utils import PuzzleMatcherVerifier
+from open_instruct.ground_truth_utils import F1Verifier, PuzzleMatcherVerifier
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -83,6 +83,63 @@ class TestPuzzleMatcherVerifier(unittest.TestCase):
         result = self.verifier([], prediction, label)
         self.assertEqual(
             result.score, expected_score, f"Failed for {name}: prediction='{prediction}', label='{label}'"
+        )
+
+
+class TestF1Verifier(unittest.TestCase):
+    """Test suite for F1Verifier"""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up test fixtures"""
+        cls.verifier = F1Verifier()
+
+    @parameterized.expand(
+        [
+            # Basic F1 tests with single string label
+            ("exact_match", "hello world", "hello world", 1.0),
+            ("partial_match", "hello world", "hello", 2 / 3),  # precision=0.5, recall=1.0, f1=2/3
+            ("no_match", "hello world", "goodbye", 0.0),
+            # Thinking section removal
+            ("with_thinking", "<think>Let me think...</think>hello world", "hello world", 1.0),
+            ("with_thinking_partial", "<think>Analysis</think>hello world", "hello", 2 / 3),
+            # Answer tag removal
+            ("with_answer_tags", "<answer>hello world</answer>", "hello world", 1.0),
+            # Combined tags
+            ("both_tags", "<think>Thinking...</think><answer>hello world</answer>", "hello world", 1.0),
+        ]
+    )
+    def test_single_label(self, name, prediction, label, expected_score):
+        """Test F1 verifier with single string label"""
+        result = self.verifier([], prediction, label)
+        self.assertAlmostEqual(
+            result.score,
+            expected_score,
+            places=5,
+            msg=f"Failed for {name}: prediction='{prediction}', label='{label}'",
+        )
+
+    @parameterized.expand(
+        [
+            # List of labels - should return max F1
+            ("first_matches_best", "hello world", ["hello world", "goodbye"], 1.0),
+            ("second_matches_best", "hello world", ["goodbye", "hello world"], 1.0),
+            ("partial_matches", "hello world", ["hello", "world"], 2 / 3),  # both have same F1
+            ("none_match_well", "hello world", ["foo", "bar", "baz"], 0.0),
+            # Single element list should behave same as string
+            ("single_element_list", "hello world", ["hello world"], 1.0),
+            # With thinking section
+            ("list_with_thinking", "<think>hmm</think>hello world", ["goodbye", "hello world"], 1.0),
+        ]
+    )
+    def test_list_labels(self, name, prediction, labels, expected_score):
+        """Test F1 verifier with list of labels (should return max)"""
+        result = self.verifier([], prediction, labels)
+        self.assertAlmostEqual(
+            result.score,
+            expected_score,
+            places=5,
+            msg=f"Failed for {name}: prediction='{prediction}', labels={labels}",
         )
 
 

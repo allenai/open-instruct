@@ -1,3 +1,4 @@
+#!/bin/bash
 python open_instruct/grpo_fast.py \
     --exp_name "test" \
     --beta 0.01 \

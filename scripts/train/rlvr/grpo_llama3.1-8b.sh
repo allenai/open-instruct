@@ -1,3 +1,4 @@
+#!/bin/bash
 exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
 python mason.py \
     --cluster ai2/jupiter  \

@@ -59,8 +59,14 @@ from olmo_core.data.types import LongDocStrategy
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.distributed.utils import get_local_rank, get_rank
 from olmo_core.exceptions import OLMoConfigurationError
-from olmo_core.io import copy_dir, dir_is_empty, is_url, join_path
+from olmo_core.io import copy_dir, dir_is_empty, is_url, join_path, resource_path
+from olmo_core.nn.attention import AttentionConfig, SlidingWindowAttentionConfig
+from olmo_core.nn.feed_forward import FeedForwardConfig
+from olmo_core.nn.layer_norm import LayerNormConfig
+from olmo_core.nn.lm_head import LMHeadConfig
+from olmo_core.nn.rope import RoPEConfig
 from olmo_core.nn.transformer import TransformerConfig
+from olmo_core.nn.transformer.config import TransformerBlockConfig
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
 from olmo_core.train import (
     Duration,
@@ -87,10 +93,12 @@ from olmo_core.utils import prepare_cli_environment, seed_all
 
 SKIP_LAUNCH_CONFIG = False
 try:
+    from olmo_core.internal.common import build_launch_config
     from olmo_core.launch.beaker import BeakerLaunchConfig
 except ImportError:
     SKIP_LAUNCH_CONFIG = True
     BeakerLaunchConfig = None  # type: ignore
+    build_launch_config = None  # type: ignore
 from rich import print  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
@@ -134,14 +142,6 @@ DEFAULT_MODEL_CONFIG = "from_checkpoint"
 
 def load_model_config_from_checkpoint(checkpoint_path: str, vocab_size: int) -> TransformerConfig:
     """Load TransformerConfig from checkpoint's config.json file."""
-    from olmo_core.io import resource_path
-    from olmo_core.nn.attention import AttentionConfig, SlidingWindowAttentionConfig
-    from olmo_core.nn.feed_forward import FeedForwardConfig
-    from olmo_core.nn.layer_norm import LayerNormConfig
-    from olmo_core.nn.lm_head import LMHeadConfig
-    from olmo_core.nn.rope import RoPEConfig
-    from olmo_core.nn.transformer.config import TransformerBlockConfig
-
     local_config_path = resource_path(checkpoint_path, "config.json")
     with local_config_path.open("r") as f:
         config_dict = json.load(f)
@@ -416,8 +416,6 @@ class SFTConfig:
 
         launch_config = None
         if not SKIP_LAUNCH_CONFIG:
-            from olmo_core.internal.common import build_launch_config
-
             launch_config = build_launch_config(
                 name=run_name,
                 root_dir=root_dir,

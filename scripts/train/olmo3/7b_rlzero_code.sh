@@ -13,7 +13,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -78,4 +78,4 @@ python mason.py \
     --oe_eval_tasks $EVALS \
     --eval_on_step_0 True \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
-    --output_dir /output/olmo3-7b-rlzero-code/checkpoints $@
+    --output_dir /output/olmo3-7b-rlzero-code/checkpoints "$@"

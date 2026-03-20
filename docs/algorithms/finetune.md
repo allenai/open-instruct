@@ -2,7 +2,9 @@
 
 We support Supervised finetuning (SFT) on a variety of datasets.
 
+> **OLMo-core SFT**: For supported models (OLMo, Qwen, and more), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the current list of supported models.
 
+We plan to update `finetune.py` at some point to use Olmo-core: https://github.com/allenai/open-instruct/pull/1327. 
 
 
 

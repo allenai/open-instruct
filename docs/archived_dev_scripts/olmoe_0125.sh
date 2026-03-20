@@ -1,3 +1,4 @@
+#!/bin/bash
 
 # 1B full sweep
 for epoch in 2; do

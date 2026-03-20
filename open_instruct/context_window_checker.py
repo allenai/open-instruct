@@ -346,7 +346,7 @@ async def safe_acompletion_with_context_check(
     """
     try:
         # Import litellm here to avoid import issues
-        from litellm import acompletion
+        from litellm import acompletion  # noqa: PLC0415
 
         # Check if the request would exceed context window
         if not check_context_window_limit(

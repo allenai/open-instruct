@@ -1,5 +1,5 @@
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -20,6 +20,15 @@ class TokenStatistics:
 
 
 @dataclass
+class ToolCallStats:
+    """Statistics for a single tool call."""
+
+    tool_name: str
+    success: bool
+    runtime: float
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -29,6 +38,9 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
+    tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
+    rollout_states: list[dict] = field(default_factory=list)
+    """Per-sample rollout state dicts (rewards, step_count, done, info) — always present."""
 
 
 @dataclass
@@ -39,13 +51,31 @@ class GenerationResult:
     finish_reasons: list[str]
     masks: list[list[int]]
     request_info: RequestInfo
-    dataset_index: int | None
+    index: int | None
     prompt_id: str | None
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
+
+
+@dataclass
+class EnvConfigEntry:
+    """Entry for a single environment configuration."""
+
+    env_name: str
+    is_text_env: bool
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EnvConfig:
+    """Wrapper for environment configuration + related metadata."""
+
+    max_steps: int = 100
+    env_configs: dict[str, EnvConfigEntry] = field(default_factory=dict)
+    """Mapping from env_name to its configuration entry."""
 
 
 @dataclass
@@ -59,9 +89,12 @@ class PromptRequest:
 
     prompt: list[int]
     generation_config: Any
-    dataset_index: int
+    index: int
     prompt_id: str
     is_eval: bool = False
+    active_tools: list[str] | None = None
+    """List of tool names that are active for this sample. If None, all tools are active."""
+    env_config: EnvConfig = field(default_factory=EnvConfig)
 
 
 @dataclass

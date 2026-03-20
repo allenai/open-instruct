@@ -14,11 +14,9 @@ learning_rate: 5.0e-7
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.0
-num_train_epochs: 3
+num_epochs: 3
 output_dir: output/dpo_pythia_14m/
 with_tracking: true
-report_to:
-  - wandb
 logging_steps: 1
 checkpointing_steps: 1000
 keep_last_n_checkpoints: 3

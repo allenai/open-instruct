@@ -18,6 +18,9 @@ jobs:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
 
     steps:
       - name: Checkout repository
@@ -55,7 +58,7 @@ jobs:
           printf 'Changed files:\n%s\n' "$CHANGED_FILES"
 
           declare -A CHANGE_PATTERNS=(
-            [dpo_changed]="open_instruct/(dpo_tune_cache|dpo_utils)\.py"
+            [dpo_changed]="open_instruct/(dpo|dpo_tune_cache|dpo_utils)\.py"
             [finetune_changed]="open_instruct/finetune\.py"
             [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
@@ -106,8 +109,6 @@ jobs:
           FINETUNE_CHANGED: ${{ steps.changed-files.outputs.finetune_changed }}
           GRPO_CHANGED: ${{ steps.changed-files.outputs.grpo_changed }}
         run: |
-          set -euo pipefail
-
           echo "Building Docker image and launching experiments..."
           echo "Git commit: $(git rev-parse --short HEAD)"
 
@@ -143,7 +144,7 @@ jobs:
 
           EXPERIMENT_DEFINITIONS=(
             "grpo|scripts/train/debug/grpo_integration_test.sh|always"
-            "dpo|scripts/train/debug/dpo_integration_test.sh|${DPO_CHANGED}"
+            "dpo|scripts/train/debug/dpo/single_gpu.sh|${DPO_CHANGED}"
             "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
           )
 
@@ -155,10 +156,10 @@ jobs:
             fi
 
             echo "=== Launching ${EXP_NAME} ==="
-            if ! launch_and_capture "$EXP_SCRIPT" "$EXP_NAME"; then
+            launch_and_capture "$EXP_SCRIPT" "$EXP_NAME" || {
               EXIT_CODE=$?
               exit $EXIT_CODE
-            fi
+            }
           done
 
           if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
@@ -204,8 +205,6 @@ jobs:
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
-          set -euo pipefail
-
           EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
           EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
 
@@ -224,7 +223,13 @@ jobs:
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
               if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
-                echo "  [${EXP_NAME}] ✅ succeeded"
+                EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "  [${EXP_NAME}] ✅ succeeded"
+                else
+                  echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
+                  echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+                fi
               else
                 echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
                 echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
@@ -275,8 +280,6 @@ jobs:
           BEAKER_TARGET_IMAGE: open_instruct_auto
           SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
         run: |
-          set -euo pipefail
-
           SHORT_SHA=$(git rev-parse --short HEAD)
           DESCRIPTION="Created from commit: ${SHORT_SHA} (GitHub run ${GITHUB_RUN_ID})"
           BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -313,7 +316,7 @@ jobs:
           for i in "${!EXPERIMENT_IDS[@]}"; do
             EXP_ID="${EXPERIMENT_IDS[$i]}"
             EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-            if [ -n "${FAILED_MAP[$EXP_NAME]}" ]; then
+            if [ -n "${FAILED_MAP[$EXP_NAME]:-}" ]; then
               echo "- **$EXP_NAME** ❌: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
             else
               echo "- **$EXP_NAME** ✅: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
@@ -326,3 +329,54 @@ jobs:
           else
             echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Determine failure reason
+        id: failure-reason
+        if: failure()
+        run: |
+          FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
+
+          # Skip Slack notification for timeouts (when experiments didn't finalize in time)
+          if [ -n "$FAILED_EXPERIMENTS" ]; then
+            echo "is_timeout=true" >> $GITHUB_OUTPUT
+            echo "Skipping Slack notification - experiments timed out: ${FAILED_EXPERIMENTS}"
+          elif [ "${{ steps.launch.outcome }}" = "failure" ]; then
+            echo "reason=Build or launch failed" >> $GITHUB_OUTPUT
+            echo "emoji=🔨" >> $GITHUB_OUTPUT
+          else
+            echo "reason=Workflow failed (see logs for details)" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack on Failure
+        if: failure() && steps.failure-reason.outputs.is_timeout != 'true'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ steps.failure-reason.outputs.emoji }} Beaker Experiment Launch failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.failure-reason.outputs.emoji }} *Beaker Experiment Launch* failed on `${{ github.ref_name }}`\n\n*Reason:* ${{ steps.failure-reason.outputs.reason }}\n*Triggered by:* ${{ github.actor }}\n*Commit:* `${{ github.sha }}`"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Run"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }

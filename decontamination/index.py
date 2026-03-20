@@ -1,10 +1,12 @@
 import argparse
 import os
 
+import torch
 import yaml
 from datasets import Dataset, load_dataset
 from elasticsearch import Elasticsearch, helpers
 from tqdm import tqdm
+from transformers import AutoModel, AutoTokenizer
 
 import open_instruct.utils as open_instruct_utils
 
@@ -83,10 +85,6 @@ def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_t
         print(f"Index of size {index_size} exists. Adding data.")
 
     if index_size < len(data_to_index):
-        # Embedding model setup
-        import torch
-        from transformers import AutoModel, AutoTokenizer
-
         # Prompt based on the usage example at https://huggingface.co/nvidia/NV-Embed-v2
         query_prefix = "Instruct: Given a user request to a chatbot, retrieve requests that are semantically equivalent to the given request\nQuery: "
 

@@ -29,7 +29,7 @@ if ! [[ "$response_length" =~ ^[0-9]+$ ]]; then
 fi
 
 echo "Running benchmarks with response length: $response_length"
-echo "Models to benchmark: $@"
+echo "Models to benchmark: $*"
 echo "----------------------------------------"
 
 git_hash=$(git rev-parse --short HEAD)

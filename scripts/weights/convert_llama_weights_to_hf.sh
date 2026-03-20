@@ -1,3 +1,4 @@
+#!/bin/bash
 LLAMA_FOLDER=/net/nfs.cirrascale/allennlp/jacobm/llama/llama/models
 
 for MODEL_SIZE in 7B 13B 30B 65B; do
