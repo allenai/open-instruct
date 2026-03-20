@@ -9,7 +9,7 @@ We support Supervised finetuning (SFT) on a variety of datasets.
 
 ## OLMo-core SFT
 
-The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). It runs via `python src/scripts/train/sft/OLMo-sft.py` from the OLMo-core submodule. There are no debug scripts for OLMo-core SFT in this repo; see the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for testing instructions.
+The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). These scripts require a separate [OLMo-core](https://github.com/allenai/OLMo-core) clone — the `build_image_and_launch.sh` script only works for open-instruct jobs (DPO, RL), not for SFT. See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for setup and testing instructions.
 
 ### Olmo 3 SFT Scripts
 
