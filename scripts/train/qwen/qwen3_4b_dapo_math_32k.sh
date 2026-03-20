@@ -4,21 +4,14 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
-if [ -n "$1" ]; then
-    BEAKER_IMAGE="$1"
-    shift
-else
-    BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
-fi
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
 DATASET_SPLITS="train"
 
 LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0"
 LOCAL_EVAL_SPLITS="train"
-
-# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
@@ -42,7 +35,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --vllm_top_p 1.0 \
-    --local_eval_every 100 \
     --beta 0.0 \
     --async_steps 4 \
     --active_sampling \
