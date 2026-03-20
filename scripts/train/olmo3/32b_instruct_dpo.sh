@@ -49,7 +49,6 @@ uv run python mason.py \
     --zero_hpz_partition_size 1 \
     --learning_rate $LR \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_train_epochs 1 \
     --logging_steps 1 \
