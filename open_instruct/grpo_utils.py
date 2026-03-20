@@ -80,9 +80,9 @@ class ExperimentConfig:
     """the beta value of the RLHF objective (KL coefficient)"""
     clip_lower: float = 0.2
     """the lower clip range"""
-    clip_higher: float = 0.2
+    clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_cap: float = 0.0
+    truncated_importance_sampling_ratio_cap: float = 2.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""

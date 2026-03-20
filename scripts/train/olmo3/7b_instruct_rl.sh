@@ -71,7 +71,6 @@ uv run python mason.py \
         --gradient_checkpointing \
         --with_tracking \
         --vllm_enable_prefix_caching \
-        --clip_higher 0.272 \
         --mask_truncated_completions False \
         --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
         --llm_judge_timeout 600 \
@@ -82,8 +81,5 @@ uv run python mason.py \
         --oe_eval_tasks ${general_evals_int} \
         --eval_priority urgent \
         --code_pass_rate_reward_threshold 0.99 \
-        --inflight_updates true \
-        --async_steps 8 \
         --active_sampling \
-        --advantage_normalization_type centered \
         --no_resampling_pass_rate 0.875 \
