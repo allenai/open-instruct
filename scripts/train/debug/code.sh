@@ -2,8 +2,8 @@
 python open_instruct/grpo_fast.py \
     --exp_name "test" \
     --beta 0.01 \
-    --num_unique_prompts_rollout 48 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts 48 \
+    --num_samples_per_prompt 16 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator 2 \
     --learning_rate 5e-7 \

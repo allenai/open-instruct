@@ -22,8 +22,8 @@ uv run python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --load_ref_policy false \
-        --num_samples_per_prompt_rollout 16 \
-        --num_unique_prompts_rollout 32 \
+        --num_samples_per_prompt 16 \
+        --num_unique_prompts 32 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 5e-7 \

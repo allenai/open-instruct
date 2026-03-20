@@ -1000,17 +1000,17 @@ def validate_configs(
     sequence_parallel_size: int,
 ) -> None:
     """Validate cross-cutting config constraints."""
-    if streaming_config.num_unique_prompts_rollout < vllm_config.vllm_num_engines:
+    if streaming_config.num_unique_prompts < vllm_config.vllm_num_engines:
         logger.warning(
-            f"With num_unique_prompts_rollout={streaming_config.num_unique_prompts_rollout} < "
+            f"With num_unique_prompts={streaming_config.num_unique_prompts} < "
             f"vllm_num_engines={vllm_config.vllm_num_engines}, vllm will be generating data for multiple "
             "batches simultaneously. This is fine but might be unexpected behaviour."
         )
     assert (
-        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout
+        streaming_config.num_samples_per_prompt * streaming_config.num_unique_prompts
         >= sum(num_learners_per_node) // sequence_parallel_size
     ), (
-        "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
+        "num_samples_per_prompt * num_unique_prompts must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
     )
 
 
@@ -1033,7 +1033,7 @@ def setup_runtime_variables(
         )
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
-        streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt
     )
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
@@ -1290,7 +1290,7 @@ def create_model_and_optimizer(
         num_training_steps=args.num_training_steps,
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,
-        global_batch_size=streaming_config.num_unique_prompts_rollout,
+        global_batch_size=streaming_config.num_unique_prompts,
         dp_world_size=args.world_size // args.sequence_parallel_size,
         max_possible_score=streaming_config.max_possible_score,
         actor_manager=actor_manager,
@@ -1360,19 +1360,19 @@ def create_model_and_optimizer(
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
         expected_batch_size = (
-            streaming_config.num_unique_prompts_rollout
-            * streaming_config.num_samples_per_prompt_rollout
+            streaming_config.num_unique_prompts
+            * streaming_config.num_samples_per_prompt
             // vllm_config.vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
             nodes_needed = math.ceil(
-                streaming_config.num_unique_prompts_rollout
-                * streaming_config.num_samples_per_prompt_rollout
+                streaming_config.num_unique_prompts
+                * streaming_config.num_samples_per_prompt
                 / kv_cache_max_concurrency
             )
             logger.warning(
                 f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
-                f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
+                f"num_unique_prompts * num_samples_per_prompt // vllm_num_engines ({expected_batch_size}). "
                 f"This means actors will have to run multiple sequential batches, hurting performance. "
                 f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
             )
@@ -1383,9 +1383,7 @@ def create_model_and_optimizer(
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
     resume_training_step = results[0] + 1
     episode = (
-        (resume_training_step - 1)
-        * streaming_config.num_unique_prompts_rollout
-        * streaming_config.num_samples_per_prompt_rollout
+        (resume_training_step - 1) * streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt
     )
     logger.info("======== ✅ all models initialized =========")
 
@@ -1408,7 +1406,7 @@ def create_generation_configs(
         temperature=streaming_config.temperature,
         top_p=vllm_config.vllm_top_p,
         max_tokens=streaming_config.response_length,
-        n=streaming_config.num_samples_per_prompt_rollout,
+        n=streaming_config.num_samples_per_prompt,
         stop=streaming_config.stop_strings,
         seed=args.seed,
         logprobs=1,
@@ -1579,7 +1577,7 @@ def one_training_step(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
-        samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
+        samples_per_prompt=streaming_config.num_samples_per_prompt,
         num_engines=vllm_config.vllm_num_engines,
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
         training_time=train_timer.duration,
@@ -1592,7 +1590,7 @@ def one_training_step(
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "val/num_step_tokens": num_step_tokens,
-        "epoch": episode / streaming_config.num_samples_per_prompt_rollout / len(train_dataset),
+        "epoch": episode / streaming_config.num_samples_per_prompt / len(train_dataset),
         "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
         "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
@@ -1972,7 +1970,7 @@ def run_training(
                 )
             eval_data_loader.reset()
 
-        episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        episode += streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt
 
         data_thread_metrics = {}
         try:
@@ -2231,7 +2229,7 @@ def main(
 
     pool_size = tools_config.pool_size
     if pool_size is None:
-        pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        pool_size = streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt
     logger.info(f"Pool size per tool: {pool_size}")
 
     pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
@@ -2255,11 +2253,9 @@ def main(
         configured_tool_call_names=tools_config.tool_call_names if tools_config.enabled else None,
     )
 
-    if len(train_dataset) < (
-        needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
-    ):
+    if len(train_dataset) < (needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts):
         raise ValueError(
-            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
+            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts, or increasing the dataset size."
         )
 
     if args.cache_dataset_only:
@@ -2276,7 +2272,7 @@ def main(
     # - all prompts from async_steps + 1 training steps
     # - all eval prompts
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
-    queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
+    queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.

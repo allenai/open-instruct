@@ -15,8 +15,8 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.01 \
-    --num_unique_prompts_rollout 48 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts 48 \
+    --num_samples_per_prompt 16 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator 2 \
     --learning_rate 5e-7 \

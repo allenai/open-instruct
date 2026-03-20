@@ -35,8 +35,8 @@ python mason.py \
     --async_steps 4 \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
-    --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_samples_per_prompt 8 \
+    --num_unique_prompts 32 \
     --num_mini_batches 1 \
     --num_epochs 1 \
     --learning_rate 1e-6 \

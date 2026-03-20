@@ -26,8 +26,8 @@ uv run python open_instruct/grpo_fast.py \
     --response_length 8192 \
     --pack_length 16384 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 4 \
-    --num_samples_per_prompt_rollout 2 \
+    --num_unique_prompts 4 \
+    --num_samples_per_prompt 2 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 1.0 \
     --learning_rate 1e-6 \

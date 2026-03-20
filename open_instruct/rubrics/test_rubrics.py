@@ -200,11 +200,11 @@ class TestUpdateGroundTruthsWithEvolvingRubrics(unittest.TestCase):
             },
         ]
 
-        num_samples_per_prompt_rollout = 2
+        num_samples_per_prompt = 2
 
         updated_gts, rate, avg_gt, avg_ar, avg_active_buf, buffer, skipped = (
             update_ground_truths_with_evolving_rubrics(
-                ground_truths.copy(), all_evolving_rubrics, num_samples_per_prompt_rollout, rubric_buffer=None
+                ground_truths.copy(), all_evolving_rubrics, num_samples_per_prompt, rubric_buffer=None
             )
         )
 
@@ -286,7 +286,7 @@ class TestSaveEvolvingRubricCacheSafe(unittest.TestCase):
                 {"positive_rubrics": [], "negative_rubrics": []},
             ],
             "num_subsampled_answers_list": [2, 2],
-            "num_samples_per_prompt_rollout": 2,
+            "num_samples_per_prompt": 2,
             "use_full_responses": True,
             "answer_length_limit_in_words": None,
         }

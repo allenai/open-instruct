@@ -123,8 +123,8 @@ class ActorManager:
                 "timing_stats": self.get_timing_stats(),
                 "concurrency_per_engine": self._kv_cache_max_concurrency,
                 "total_concurrency": self._kv_cache_max_concurrency * self._vllm_config.vllm_num_engines,
-                "batch_size": self._streaming_config.num_unique_prompts_rollout
-                * self._streaming_config.num_samples_per_prompt_rollout,
+                "batch_size": self._streaming_config.num_unique_prompts
+                * self._streaming_config.num_samples_per_prompt,
             }
 
         def run_server():

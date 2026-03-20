@@ -409,8 +409,8 @@ class StreamingDataLoaderConfig:
 
     # Batching
     async_steps: int = 1
-    num_samples_per_prompt_rollout: int = 4
-    num_unique_prompts_rollout: int = 16
+    num_samples_per_prompt: int = 4
+    num_unique_prompts: int = 16
 
     # GRPO sampling/filtering
     active_sampling: bool = False
@@ -494,9 +494,9 @@ class StreamingDataLoaderConfig:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
-        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
-        if self.num_samples_per_prompt_rollout == 1:
-            logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
+        assert self.num_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
+        if self.num_samples_per_prompt == 1:
+            logger.warning("num_samples_per_prompt is 1. This reduces GRPO to REINFORCE.")
 
         if self.active_sampling:
             assert self.async_steps > 1, (
@@ -508,9 +508,9 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
-        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+        if self.num_samples_per_prompt == 1 and self.filter_zero_std_samples:
             raise ValueError(
-                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
             )
         if self.async_steps < 1:
@@ -550,7 +550,7 @@ class StreamingDataLoaderConfig:
             data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             work_dir=work_dir,
-            global_batch_size=self.num_unique_prompts_rollout,
+            global_batch_size=self.num_unique_prompts,
             num_training_steps=num_training_steps,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
@@ -1255,11 +1255,11 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
             scores = np.array(batch.scores)
-            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
+            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt, axis=0)
 
             if self.config.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
@@ -1276,7 +1276,7 @@ class DataPreparationActor:
                     batch,
                     result,
                     advantages,
-                    self.config.num_samples_per_prompt_rollout,
+                    self.config.num_samples_per_prompt,
                     self.total_samples_written,
                 )
                 self.total_samples_written += len(batch.queries)
@@ -1327,7 +1327,7 @@ class DataPreparationActor:
                 step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
             else:
                 real_num_responses = len(result.responses)
-                expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
+                expected_num_responses = self.config.num_samples_per_prompt * self.global_batch_size
                 unsolved_num_responses = (scores < self.config.max_possible_score).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
                 sequence_length_solved = (
@@ -1352,7 +1352,7 @@ class DataPreparationActor:
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                     "val/solve_rate_hist": batch_stats.percent_solved_hist,
-                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
+                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt,
                     "val/sequence_lengths": sequence_lengths.mean(),
                     "val/sequence_lengths_min": sequence_lengths.min(),
                     "val/sequence_lengths_max": sequence_lengths.max(),

@@ -111,9 +111,9 @@ def save_benchmark_results_to_csv(
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
         "total_batches": len(results),
-        "batch_size": streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout,
-        "num_unique_prompts_rollout": streaming_config.num_unique_prompts_rollout,
-        "num_samples_per_prompt_rollout": streaming_config.num_samples_per_prompt_rollout,
+        "batch_size": streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt,
+        "num_unique_prompts": streaming_config.num_unique_prompts,
+        "num_samples_per_prompt": streaming_config.num_samples_per_prompt,
         "response_length": streaming_config.response_length,
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
@@ -129,11 +129,7 @@ def save_benchmark_results_to_csv(
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_weight_sync_time_per_batch": agg_results["avg_weight_sync_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
-        / (
-            len(results)
-            * streaming_config.num_unique_prompts_rollout
-            * streaming_config.num_samples_per_prompt_rollout
-        ),
+        / (len(results) * streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt),
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -361,7 +357,7 @@ def run_benchmark(
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
     logger.info(
-        f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts_rollout}"
+        f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts}"
     )
 
     # Create sampling parameters with 'n' for multiple samples per prompt
@@ -369,7 +365,7 @@ def run_benchmark(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
         top_p=vllm_config.vllm_top_p,
-        n=streaming_config.num_samples_per_prompt_rollout,
+        n=streaming_config.num_samples_per_prompt,
         seed=args.seed,
         logprobs=1,
     )
@@ -384,7 +380,7 @@ def run_benchmark(
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
     warmup_start_idx = 0
-    warmup_end_idx = min(streaming_config.num_unique_prompts_rollout, len(dataset))
+    warmup_end_idx = min(streaming_config.num_unique_prompts, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     # Create individual PromptRequest for each warmup prompt
@@ -434,7 +430,7 @@ def run_benchmark(
             dataset,
             generation_config,
             stop_event,
-            streaming_config.num_unique_prompts_rollout,
+            streaming_config.num_unique_prompts,
             1,
             num_batches - 1,
         )
@@ -445,7 +441,7 @@ def run_benchmark(
                 submission_future.result()
 
             # Collect all results for this batch (one per prompt) using non-blocking polling
-            num_prompts = streaming_config.num_unique_prompts_rollout
+            num_prompts = streaming_config.num_unique_prompts
             batch_results = []
             batch_deadline = time.time() + 1200
             while len(batch_results) < num_prompts:
@@ -503,7 +499,7 @@ def run_benchmark(
                 all_prompt_lengths,
                 batch_generation_time,
                 response_lengths=all_response_lengths,
-                samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
+                samples_per_prompt=streaming_config.num_samples_per_prompt,
                 num_gpus=num_inference_gpus,
             )
 
@@ -511,7 +507,7 @@ def run_benchmark(
                 all_prompt_lengths,
                 batch_generation_time,
                 response_lengths=all_response_lengths,
-                samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
+                samples_per_prompt=streaming_config.num_samples_per_prompt,
                 num_engines=num_engines,
                 num_gpus_per_engine=num_gpus_per_engine,
             )
@@ -601,9 +597,7 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     agg_results = aggregate_results(results)
-    total_samples = (
-        len(results) * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-    )
+    total_samples = len(results) * streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt
     avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
 
     print("\n" + "=" * 60)
@@ -611,11 +605,9 @@ def print_summary(
     print("=" * 60)
     print(f"Model: {model_config.model_name_or_path}")
     print(f"Main benchmark batches: {len(results)} (after 1 warmup batch)")
-    print(
-        f"Batch size: {streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout}"
-    )
-    print(f"Unique prompts per batch: {streaming_config.num_unique_prompts_rollout}")
-    print(f"Num rollouts: {streaming_config.num_samples_per_prompt_rollout}")
+    print(f"Batch size: {streaming_config.num_unique_prompts * streaming_config.num_samples_per_prompt}")
+    print(f"Unique prompts per batch: {streaming_config.num_unique_prompts}")
+    print(f"Num rollouts: {streaming_config.num_samples_per_prompt}")
     print(f"Max tokens: {streaming_config.response_length}")
     print("-" * 60)
     print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")

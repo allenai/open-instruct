@@ -32,8 +32,8 @@ uv run python mason.py \
     --response_length 512 \
     --pack_length 1024 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 8 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts 8 \
+    --num_samples_per_prompt 4 \
     --model_name_or_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/dpo_utils__123__1769051928/hf_model \
     --add_bos \
     --stop_strings "</answer>" \

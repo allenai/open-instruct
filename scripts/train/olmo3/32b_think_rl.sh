@@ -26,8 +26,8 @@ uv run python mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_samples_per_prompt 8 \
+        --num_unique_prompts 64 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 2e-6 \

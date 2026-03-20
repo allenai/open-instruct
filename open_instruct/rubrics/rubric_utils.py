@@ -59,7 +59,7 @@ async def generate_instance_wise_evolving_rubrics(
 async def _generate_instance_wise_evolving_rubrics(
     responses: list[str],
     ground_truths: list,
-    num_samples_per_prompt_rollout: int,
+    num_samples_per_prompt: int,
     rubric_buffer: dict[str, Any] | None = None,
     use_full_responses: bool = True,
     answer_length_limit_in_words: int | None = None,
@@ -69,7 +69,7 @@ async def _generate_instance_wise_evolving_rubrics(
     Args:
         responses: List of all responses (flattened across prompts)
         ground_truths: List of ground truth data for each response
-        num_samples_per_prompt_rollout: Number of responses per prompt
+        num_samples_per_prompt: Number of responses per prompt
         rubric_buffer: Optional buffer of existing rubrics per query
         use_full_responses: Whether to use full responses vs extracted answers
         answer_length_limit_in_words: Optional word limit for answer subsampling
@@ -79,7 +79,7 @@ async def _generate_instance_wise_evolving_rubrics(
     """
     ground_truths = [json.loads(ground_truth[0]) for ground_truth in ground_truths]
 
-    num_prompts = len(responses) // num_samples_per_prompt_rollout
+    num_prompts = len(responses) // num_samples_per_prompt
 
     query_key = "query" if "query" in ground_truths[0] else "Question"
     assert query_key in ground_truths[0], f"Query key {query_key} not found in ground truth"
@@ -88,8 +88,8 @@ async def _generate_instance_wise_evolving_rubrics(
     tasks = []
     num_subsampled_answers_list = []
     for i in range(num_prompts):
-        start_idx = i * num_samples_per_prompt_rollout
-        end_idx = start_idx + num_samples_per_prompt_rollout
+        start_idx = i * num_samples_per_prompt
+        end_idx = start_idx + num_samples_per_prompt
 
         # Get the question from the first ground truth in this group
         question = ground_truths[start_idx][query_key]
@@ -147,7 +147,7 @@ async def _generate_instance_wise_evolving_rubrics(
 def update_ground_truths_with_evolving_rubrics(
     ground_truths: list,
     all_evolving_rubrics: list[dict[str, Any] | None],
-    num_samples_per_prompt_rollout: int,
+    num_samples_per_prompt: int,
     rubric_buffer: dict[str, Any] | None = None,
 ) -> tuple[list, float, float, float, float, dict[str, Any] | None, int]:
     """Update ground truths with newly generated evolving rubrics.
@@ -155,7 +155,7 @@ def update_ground_truths_with_evolving_rubrics(
     Args:
         ground_truths: List of ground truth data (may be wrapped in lists)
         all_evolving_rubrics: List of evolving rubrics per prompt
-        num_samples_per_prompt_rollout: Number of responses per prompt
+        num_samples_per_prompt: Number of responses per prompt
         rubric_buffer: Optional buffer to update with new rubrics
 
     Returns:
@@ -174,10 +174,10 @@ def update_ground_truths_with_evolving_rubrics(
     num_active_buffer_rubrics = []
 
     # Expand evolving_rubrics to match ground_truths structure
-    # Each evolving rubric applies to num_samples_per_prompt_rollout ground truths
+    # Each evolving rubric applies to num_samples_per_prompt ground truths
     expanded_evolving_rubrics = []
     for rubric in all_evolving_rubrics:
-        for _ in range(num_samples_per_prompt_rollout):
+        for _ in range(num_samples_per_prompt):
             expanded_evolving_rubrics.append(rubric)
 
     # Track processed queries to avoid duplicate buffer updates
@@ -298,7 +298,7 @@ def save_evolving_rubric_cache_safe(
     ground_truths: list,
     all_evolving_rubrics: list,
     num_subsampled_answers_list: list[int],
-    num_samples_per_prompt_rollout: int,
+    num_samples_per_prompt: int,
     use_full_responses: bool,
     answer_length_limit_in_words: int | None,
 ) -> str:
@@ -313,7 +313,7 @@ def save_evolving_rubric_cache_safe(
         ground_truths: List of ground truth data (inputs)
         all_evolving_rubrics: List of generated evolving rubrics (outputs)
         num_subsampled_answers_list: List of subsampled answer counts (outputs)
-        num_samples_per_prompt_rollout: Number of samples per prompt (config)
+        num_samples_per_prompt: Number of samples per prompt (config)
         use_full_responses: Whether full responses were used (config)
         answer_length_limit_in_words: Word limit for answers (config)
 
@@ -339,7 +339,7 @@ def save_evolving_rubric_cache_safe(
         "inputs": {
             "decoded_responses": decoded_responses,
             "ground_truths": ground_truths,
-            "num_samples_per_prompt_rollout": num_samples_per_prompt_rollout,
+            "num_samples_per_prompt": num_samples_per_prompt,
             "use_full_responses": use_full_responses,
             "answer_length_limit_in_words": answer_length_limit_in_words,
         },

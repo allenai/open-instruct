@@ -249,11 +249,11 @@ class TestGrpoFastBase(unittest.TestCase):
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
     @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
-    def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
+    def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts: int):
         """Test batch splitting and accumulation with various engine configurations."""
         # Create test data
         queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices = self.create_test_data(
-            num_unique_prompts_rollout
+            num_unique_prompts
         )
 
         # Setup and split batch
@@ -262,7 +262,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Verify that we have the expected number of items in the queue (one per prompt)
-        self.assertEqual(prompt_Q.qsize(), num_unique_prompts_rollout)
+        self.assertEqual(prompt_Q.qsize(), num_unique_prompts)
 
         # Simulate vLLM processing
         batch_idx = 0
@@ -283,7 +283,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         combined_ground_truths = []
         combined_datasets = []
 
-        for _ in range(num_unique_prompts_rollout):
+        for _ in range(num_unique_prompts):
             result = inference_results_Q.get()
             dataset_index = result.index
 
@@ -333,11 +333,11 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
     def test_dataset_index_preservation_through_pipeline(self):
         """Test that dataset indices are correctly preserved through the pipeline."""
         vllm_num_engines = 4
-        num_unique_prompts_rollout = 32
+        num_unique_prompts = 32
 
         # Create test data
         queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices = self.create_test_data(
-            num_unique_prompts_rollout
+            num_unique_prompts
         )
 
         # Setup and split batch
@@ -359,7 +359,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         combined_ground_truths = []
         combined_datasets = []
 
-        for _ in range(num_unique_prompts_rollout):
+        for _ in range(num_unique_prompts):
             result = inference_results_Q.get()
             dataset_index = result.index
 
@@ -381,11 +381,11 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
     @parameterized.expand([(1, 16), (2, 8), (4, 4)])
     def test_multiple_samples_per_prompt(self, vllm_num_engines: int, num_samples_per_prompt: int):
         """Test handling of multiple samples per prompt."""
-        num_unique_prompts_rollout = 16
+        num_unique_prompts = 16
 
         # Create test data
         queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices = self.create_test_data(
-            num_unique_prompts_rollout
+            num_unique_prompts
         )
 
         # Setup and split batch
@@ -408,7 +408,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         combined_ground_truths = []
         combined_datasets = []
 
-        for _ in range(num_unique_prompts_rollout):
+        for _ in range(num_unique_prompts):
             result = inference_results_Q.get()
             dataset_index = result.index
 
@@ -447,7 +447,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertEqual(sorted(combined_datasets), sorted(datasets_next))
 
         # Verify correct number of responses
-        expected_responses = num_unique_prompts_rollout * num_samples_per_prompt
+        expected_responses = num_unique_prompts * num_samples_per_prompt
         self.assertEqual(len(combined_result.responses), expected_responses)
 
 

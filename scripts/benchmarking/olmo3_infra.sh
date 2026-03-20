@@ -36,8 +36,8 @@ for split_var in mixin_it_up; do
         --exp_name ${exp_name} \
         --beta 0.0 \
 	--async_steps=4 \
-        --num_samples_per_prompt_rollout 2 \
-        --num_unique_prompts_rollout 64 \
+        --num_samples_per_prompt 2 \
+        --num_unique_prompts 64 \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 1e-6 \
