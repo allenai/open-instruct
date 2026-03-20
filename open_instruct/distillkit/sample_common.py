@@ -104,7 +104,7 @@ class StreamingParquetWriter:
         self.thread.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Flush and join writer thread before exiting context.
 
         Returning None means any exception from the with-block is propagated
