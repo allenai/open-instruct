@@ -282,7 +282,7 @@ class GRPOTrainModule(TransformerTrainModule):
         self,
         model: Transformer,
         optim: OptimConfig,
-        rank_microbatch_size: int,
+        sample_microbatch_size: int,
         max_sequence_length: int,
         grpo_config: grpo_utils.ExperimentConfig,
         tokenizer: PreTrainedTokenizer,
@@ -294,10 +294,11 @@ class GRPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ):
+        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
             model=model,
             optim=optim,
-            rank_microbatch_size=rank_microbatch_size,
+            rank_microbatch_size=rank_microbatch_size_tokens,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
             max_grad_norm=max_grad_norm,
@@ -307,6 +308,7 @@ class GRPOTrainModule(TransformerTrainModule):
             state_dict_load_opts=state_dict_load_opts,
         )
 
+        self.sample_microbatch_size = sample_microbatch_size
         self.grpo_config = grpo_config
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
@@ -314,6 +316,12 @@ class GRPOTrainModule(TransformerTrainModule):
         self.ref_policy = ref_policy
         if ref_policy is not None:
             self.ref_policy = ref_policy.to(device=self.device).eval().requires_grad_(False)
+
+    def pre_train(self):
+        # GRPO batches are prompt-grouped and do their own accumulation/token normalization
+        # inside train_batch(), so the base TransformerTrainModule global-batch validation
+        # does not apply here.
+        pass
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
@@ -382,7 +390,15 @@ class GRPOTrainModule(TransformerTrainModule):
             "clip_frac": torch.zeros(num_samples, device=self.device),
             "entropy": torch.zeros(num_samples, device=self.device),
             "token_count": torch.tensor(
-                [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
+                [
+                    (
+                        data_BT.response_masks[i].unsqueeze(0)
+                        if data_BT.response_masks[i].ndim == 1
+                        else data_BT.response_masks[i]
+                    )[:, 1:].sum().float()
+                    for i in range(num_samples)
+                ],
+                device=self.device,
             ),
         }
 
@@ -391,21 +407,35 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for _epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
+                query_responses = data_BT.query_responses[sample_idx]
+                attention_mask = data_BT.attention_masks[sample_idx]
+                position_ids = data_BT.position_ids[sample_idx]
+                if query_responses.ndim == 1:
+                    query_responses = query_responses.unsqueeze(0)
+                    attention_mask = attention_mask.unsqueeze(0)
+                    position_ids = position_ids.unsqueeze(0)
+
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
-                    data_BT.query_responses[sample_idx],
-                    data_BT.attention_masks[sample_idx],
-                    data_BT.position_ids[sample_idx],
+                    query_responses,
+                    attention_mask,
+                    position_ids,
                     self.pad_token_id,
                     self.grpo_config.temperature,
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
+                response_mask = data_BT.response_masks[sample_idx]
+                if response_mask.ndim == 1:
+                    response_mask = response_mask.unsqueeze(0)
+                response_mask = response_mask[:, 1:].bool().to(new_logprobs.device)
                 new_logprobs = torch.masked_fill(new_logprobs, ~response_mask, utils.INVALID_LOGPROB)
 
                 old_logprobs = old_logprobs_BT[sample_idx]
-                advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
+                advantages = data_BT.advantages[sample_idx]
+                if advantages.ndim == 1:
+                    advantages = advantages.unsqueeze(0)
+                advantages = advantages.to(new_logprobs.device)
 
                 log_ratio = new_logprobs - old_logprobs
                 ratio = torch.exp(log_ratio)

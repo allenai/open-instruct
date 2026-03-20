@@ -26,8 +26,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils, logger_utils, olmo_core_utils, vllm_utils
-from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
 
@@ -95,15 +95,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             f"[Rank {self.rank}] Set CUDA device to 0, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}"
         )
 
-        if not torch.distributed.is_initialized():
-            logger.info(f"[Rank {self.rank}] Calling init_process_group with NCCL backend...")
-            torch.distributed.init_process_group(
-                backend="nccl", timeout=timedelta(minutes=self.grpo_config.backend_timeout)
-            )
-            logger.info(f"[Rank {self.rank}] init_process_group completed successfully")
-        else:
-            logger.info(f"[Rank {self.rank}] Process group already initialized")
-
         backend = "cpu:gloo,cuda:nccl"
         logger.info(f"[Rank {self.rank}] Calling train.prepare_training_environment...")
         train.prepare_training_environment(seed=self.grpo_config.seed, backend=backend)
@@ -166,7 +157,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.train_module = GRPOTrainModule(
             model=self.model,
             optim=optim_config,
-            rank_microbatch_size=self.grpo_config.per_device_train_batch_size,
+            sample_microbatch_size=self.grpo_config.per_device_train_batch_size,
             max_sequence_length=self.max_sequence_length,
             grpo_config=self.grpo_config,
             tokenizer=self.tokenizer,

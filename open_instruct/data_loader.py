@@ -606,8 +606,8 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         dummy_qr = torch.tensor([self.tokenizer.pad_token_id, self.tokenizer.eos_token_id], dtype=torch.long)
         dummy_attention = torch.tensor([1, 1], dtype=torch.long)
         dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-        dummy_response_mask = torch.zeros_like(dummy_qr)
-        dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+        dummy_response_mask = torch.tensor([0, 1], dtype=torch.long)
+        dummy_advantage = torch.tensor([0.0, 1.0], dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
             query_responses=[dummy_qr],
