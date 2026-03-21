@@ -730,7 +730,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         checkpointing_steps = int(checkpointing_steps)
 
     # Train!
-    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+    dp_world_size = accelerator.num_processes // args.sequence_parallel_size
+    total_batch_size = args.per_device_train_batch_size * dp_world_size * args.gradient_accumulation_steps
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
