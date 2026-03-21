@@ -2,49 +2,41 @@
 
 set -euo pipefail
 
-EXP_NAME="${EXP_NAME:-olmo31_7b_rlzero_math_eval}"
-RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
-MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-allenai/Olmo-3.1-7B-RL-Zero-Math}"
-MODEL_REVISION="${MODEL_REVISION:-main}"
-BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
-
-DATASETS="${DATASETS:-mnoukhov/aime2024-25-rlvr-olmo3-7b-base-pass64-quartiles 1.0}"
-DATASET_SPLITS="${DATASET_SPLITS:-test}"
-LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/aime2024-25-rlvr-olmo3-7b-base-pass64-quartiles 1.0}"
-LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
-
+TASK_NAME="${TASK_NAME:-olmo31_7b_rlzero_math_eval}"
+DESCRIPTION="${DESCRIPTION:-${TASK_NAME}_$(date +%Y%m%d_%H%M%S)}"
+WORKSPACE="${WORKSPACE:-ai2/oe-adapt-code}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-high}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+NUM_NODES="${NUM_NODES:-1}"
 NUM_GPUS="${NUM_GPUS:-4}"
-VLLM_NUM_ENGINES="${VLLM_NUM_ENGINES:-4}"
-EVAL_PASS_AT_K="${EVAL_PASS_AT_K:-64}"
-EVAL_RESPONSE_LENGTH="${EVAL_RESPONSE_LENGTH:-32768}"
-MAX_PROMPT_TOKEN_LENGTH="${MAX_PROMPT_TOKEN_LENGTH:-4096}"
-PACK_LENGTH="${PACK_LENGTH:-36864}"
+BUDGET="${BUDGET:-ai2/oe-adapt}"
+
+DEFAULT_RUN_NAME="${TASK_NAME}_$(date +%Y%m%d_%H%M%S)"
 
 uv run mason.py \
-    --task_name "${EXP_NAME}" \
-    --description "${RUN_NAME}" \
+    --task_name "${TASK_NAME}" \
+    --description "${DESCRIPTION}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace "${WORKSPACE}" \
     --priority "${PRIORITY}" \
     --pure_docker_mode \
     --image "${BEAKER_IMAGE}" \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes "${NUM_NODES}" \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASHINFER" \
+    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus "${NUM_GPUS}" \
-    --budget ai2/oe-adapt \
+    --budget "${BUDGET}" \
     -- \
 uv run open_instruct/grpo_fast.py \
-    --run_name "${RUN_NAME}" \
-    --exp_name "${EXP_NAME}" \
+    --run_name "${DEFAULT_RUN_NAME}" \
+    --exp_name "olmo31_7b_rlzero_math_eval" \
     --eval_only \
-    --eval_pass_at_k "${EVAL_PASS_AT_K}" \
+    --eval_pass_at_k 64 \
     --eval_temperature 1.0 \
     --eval_top_p 1.0 \
-    --eval_response_length "${EVAL_RESPONSE_LENGTH}" \
+    --eval_response_length 32768 \
     --beta 0.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 8 \
@@ -52,17 +44,17 @@ uv run open_instruct/grpo_fast.py \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
-    --dataset_mixer_list ${DATASETS} \
-    --dataset_mixer_list_splits ${DATASET_SPLITS} \
-    --dataset_mixer_eval_list ${LOCAL_EVALS} \
-    --dataset_mixer_eval_list_splits ${LOCAL_EVAL_SPLITS} \
-    --max_prompt_token_length "${MAX_PROMPT_TOKEN_LENGTH}" \
-    --response_length "${EVAL_RESPONSE_LENGTH}" \
-    --pack_length "${PACK_LENGTH}" \
-    --model_name_or_path "${MODEL_NAME_OR_PATH}" \
-    --model_revision "${MODEL_REVISION}" \
+    --dataset_mixer_list mnoukhov/aime2024-25-rlvr-olmo3-7b-base-pass64-quartiles 1.0 \
+    --dataset_mixer_list_splits test \
+    --dataset_mixer_eval_list mnoukhov/aime2024-25-rlvr-olmo3-7b-base-pass64-quartiles 1.0 \
+    --dataset_mixer_eval_list_splits test \
+    --max_prompt_token_length 4096 \
+    --response_length 32768 \
+    --pack_length 36864 \
+    --model_name_or_path allenai/Olmo-3.1-7B-RL-Zero-Math \
+    --model_revision main \
     --non_stop_penalty False \
-    --vllm_num_engines "${VLLM_NUM_ENGINES}" \
+    --vllm_num_engines 4 \
     --apply_verifiable_reward true \
     --seed 1 \
     --with_tracking \
