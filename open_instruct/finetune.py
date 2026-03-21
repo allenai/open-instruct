@@ -794,6 +794,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = train_dataloader
         for batch in active_dataloader:
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
+            if args.sequence_parallel_size > 1 and "shift_labels" not in batch:
+                raise ValueError(
+                    "`shift_labels` not found in batch with sequence parallelism enabled. "
+                    "Check that UlyssesSPDataLoaderAdapter is wrapping the dataloader correctly."
+                )
             if "shift_labels" in batch and "labels" not in batch:
                 batch["labels"] = batch["shift_labels"]
             pred_tokens_in_batch = (batch["labels"] != -100).sum()
