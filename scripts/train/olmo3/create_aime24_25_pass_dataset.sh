@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
+USER=michaeln
 EXP_NAME="${EXP_NAME:-olmo3_7b_create_aime24_25_pass_dataset}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-allenai/Olmo-3-1025-7B}"
@@ -17,7 +18,7 @@ SAVE_LOCAL_DIR="${SAVE_LOCAL_DIR:-/weka/oe-adapt-default/allennlp/deletable_roll
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ai2/neptune \
+    --cluster ai2/jupiter \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --pure_docker_mode \
