@@ -159,7 +159,13 @@ class ExperimentConfig:
     whiten_advantages: bool = False
     """If True, normalize GAE advantages to zero-mean unit-variance across all workers before policy training."""
     value_model_ground_truth_conditioning: bool = False
-    """If True, prepend 'Answer: {ground_truth}' to value model input, giving it oracle access to the correct answer."""
+    """If True, prepend ground truth info to value model input, giving it oracle access to the correct answer."""
+    gt_conditioning_template: str = "answer_prefix"
+    """Template for ground truth conditioning. Options:
+    - 'answer_prefix': 'Answer: {gt}\n' (plain text, minimal)
+    - 'boxed_answer': 'The correct answer is \\boxed{{{gt}}}.\n' (matches expected output format)
+    - 'system_hint': '<|im_start|>system\nThe ground truth answer to this problem is: {gt}<|im_end|>\n' (chat-formatted system message)
+    """
 
     # Ray
     single_gpu_mode: bool = False

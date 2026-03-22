@@ -612,7 +612,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     gt_text = ""
 
                 if gt_text:
-                    prefix_text = f"Answer: {gt_text}" + chr(10)
+                    template = self.args.gt_conditioning_template
+                    if template == "boxed_answer":
+                        prefix_text = f"The correct answer is \\boxed{{{gt_text}}}.\n"
+                    elif template == "system_hint":
+                        prefix_text = f"<|im_start|>system\nThe ground truth answer to this problem is: {gt_text}<|im_end|>\n"
+                    else:
+                        prefix_text = f"Answer: {gt_text}\n"
                     prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
                     prefix_len = len(prefix_tokens)
                     prefix_ids = torch.tensor(prefix_tokens, device=device, dtype=seq_ids.dtype)
