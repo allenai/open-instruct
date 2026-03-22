@@ -25,6 +25,7 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "allenai/Olmo-3-1025-7B": "olmo3_7B",
     "allenai/OLMoE-1B-7B-0924": "olmoe_1B_7B",
     "Qwen/Qwen3-0.6B": "qwen3_0_6B",
+    "Qwen/Qwen3-0.6B-Base": "qwen3_0_6B",
     "Qwen/Qwen3-1.7B": "qwen3_1_7B",
     "Qwen/Qwen3-4B": "qwen3_4B",
     "Qwen/Qwen3-8B": "qwen3_8B",
