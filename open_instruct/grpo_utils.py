@@ -164,7 +164,7 @@ class ExperimentConfig:
     """Template for ground truth conditioning. Options:
     - 'answer_prefix': 'Answer: {gt}\n' (plain text, minimal)
     - 'boxed_answer': 'The correct answer is \\boxed{{{gt}}}.\n' (matches expected output format)
-    - 'system_hint': '<|im_start|>system\nThe ground truth answer to this problem is: {gt}<|im_end|>\n' (chat-formatted system message)
+    - 'cot_spoiler': 'Therefore, the final answer is \\boxed{{{gt}}}.\nNow let me show my working for this problem:\n' (mimics end of successful CoT)
     """
 
     # Ray

@@ -615,8 +615,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     template = self.args.gt_conditioning_template
                     if template == "boxed_answer":
                         prefix_text = f"The correct answer is \\boxed{{{gt_text}}}.\n"
-                    elif template == "system_hint":
-                        prefix_text = f"<|im_start|>system\nThe ground truth answer to this problem is: {gt_text}<|im_end|>\n"
+                    elif template == "cot_spoiler":
+                        prefix_text = f"Therefore, the final answer is \\boxed{{{gt_text}}}.\nNow let me show my working for this problem:\n"
                     else:
                         prefix_text = f"Answer: {gt_text}\n"
                     prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
