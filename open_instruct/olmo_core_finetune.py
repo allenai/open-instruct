@@ -63,7 +63,7 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
-from open_instruct.padding_free_collator import SFTCollator
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 
 log = logger_utils.setup_logger(__name__)
 
@@ -206,7 +206,9 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     model, model_config = _setup_model(args, device)
 
-    collator = SFTCollator(max_seq_length=args.max_seq_length)
+    collator = TensorDataCollatorWithFlattening(
+        return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
+    )
 
     rank_batch_size_seqs = args.per_device_train_batch_size * args.gradient_accumulation_steps
     global_batch_size_seqs = rank_batch_size_seqs * dp_world_size

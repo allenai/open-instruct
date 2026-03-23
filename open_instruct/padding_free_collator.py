@@ -7,20 +7,6 @@ from transformers import DefaultDataCollator
 from open_instruct import tensor_utils
 
 
-@dataclass
-class SFTCollator:
-    max_seq_length: int
-
-    def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
-        input_ids = torch.stack([f["input_ids"] for f in features])
-        label_mask = torch.stack([f["labels"] != -100 for f in features])
-
-        input_ids = tensor_utils.pad_to_length(input_ids, self.max_seq_length, pad_value=0)
-        label_mask = tensor_utils.pad_to_length(label_mask, self.max_seq_length, pad_value=False)
-
-        return {"input_ids": input_ids, "label_mask": label_mask}
-
-
 def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     shifted_labels = torch.full_like(labels, -100)
     shifted_labels[:, :-1] = labels[:, 1:]
