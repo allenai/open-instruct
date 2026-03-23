@@ -1430,15 +1430,29 @@ class PolicyTrainerRayProcess(RayProcess):
                             [v for v in variance_by_position if v > 0]
                         )) if any(v > 0 for v in variance_by_position) else 0.0
 
-                # (2) Mean value for correct vs incorrect rollouts
+                # (2) Mean value for correct vs incorrect rollouts + per-token curves
                 if num_samples > 0 and data_BT.rewards is not None and data_BT.dones is not None:
                     correct_values = []
                     incorrect_values = []
+                    # Per-token value curves split by correctness
+                    correct_by_position = defaultdict(list)
+                    incorrect_by_position = defaultdict(list)
+                    # Per-token value curves by normalized position (0-100 percentile bins)
+                    num_pct_bins = 20
+                    correct_by_pct = defaultdict(list)
+                    incorrect_by_pct = defaultdict(list)
+                    # Track advantages too
+                    correct_advantages = []
+                    incorrect_advantages = []
+                    correct_adv_by_pct = defaultdict(list)
+                    incorrect_adv_by_pct = defaultdict(list)
+                    has_gae = len(gae_advantages_BT) > 0
                     for i in range(num_samples):
                         mask = data_BT.response_masks[i][:, 1:].cpu().float()
                         vals = old_values_BT[i].cpu().float()
                         rewards = data_BT.rewards[i][:, 1:].cpu().float()
                         dones = data_BT.dones[i][:, 1:].cpu()
+                        advs = gae_advantages_BT[i].cpu().float() if has_gae else None
                         for b in range(vals.shape[0]):
                             eos_positions = (dones[b] > 0).nonzero(as_tuple=True)[0]
                             start = 0
@@ -1450,10 +1464,42 @@ class PolicyTrainerRayProcess(RayProcess):
                                 valid = seg_vals[seg_mask > 0]
                                 if len(valid) > 0:
                                     mean_val = valid.mean().item()
-                                    if seg_reward > 0:
+                                    resp_len = len(valid)
+                                    is_correct = seg_reward > 0
+                                    if is_correct:
                                         correct_values.append(mean_val)
                                     else:
                                         incorrect_values.append(mean_val)
+                                    # Per-absolute-position (unbounded)
+                                    for pos, v in enumerate(valid.tolist()):
+                                        if is_correct:
+                                            correct_by_position[pos].append(v)
+                                        else:
+                                            incorrect_by_position[pos].append(v)
+                                    # Per-normalized-position (percentile bins)
+                                    for pos, v in enumerate(valid.tolist()):
+                                        pct_bin = int(pos / resp_len * num_pct_bins)
+                                        pct_bin = min(pct_bin, num_pct_bins - 1)
+                                        if is_correct:
+                                            correct_by_pct[pct_bin].append(v)
+                                        else:
+                                            incorrect_by_pct[pct_bin].append(v)
+                                    # Track advantages per position
+                                    if advs is not None:
+                                        seg_advs = advs[b, start:end]
+                                        valid_advs = seg_advs[seg_mask > 0]
+                                        if len(valid_advs) > 0:
+                                            if is_correct:
+                                                correct_advantages.extend(valid_advs.tolist())
+                                            else:
+                                                incorrect_advantages.extend(valid_advs.tolist())
+                                            for pos, a in enumerate(valid_advs.tolist()):
+                                                pct_bin = int(pos / resp_len * num_pct_bins)
+                                                pct_bin = min(pct_bin, num_pct_bins - 1)
+                                                if is_correct:
+                                                    correct_adv_by_pct[pct_bin].append(a)
+                                                else:
+                                                    incorrect_adv_by_pct[pct_bin].append(a)
                                 start = end
                     if correct_values:
                         self.local_metrics["value/correct_rollout_mean"] = float(np.mean(correct_values))
@@ -1463,6 +1509,31 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics["value/correct_vs_incorrect_gap"] = (
                             float(np.mean(correct_values)) - float(np.mean(incorrect_values))
                         )
+                    # Log per-position value curves (absolute position, capped at 200)
+                    max_abs_pos = max(max(correct_by_position.keys(), default=0), max(incorrect_by_position.keys(), default=0)) + 1
+                    if max_abs_pos > 0:
+                        correct_curve = np.array([float(np.mean(correct_by_position[p])) if correct_by_position[p] else float('nan') for p in range(max_abs_pos)])
+                        incorrect_curve = np.array([float(np.mean(incorrect_by_position[p])) if incorrect_by_position[p] else float('nan') for p in range(max_abs_pos)])
+                        self._value_correct_by_position = correct_curve
+                        self._value_incorrect_by_position = incorrect_curve
+                    # Log per-normalized-position value curves (percentile bins)
+                    correct_pct_curve = np.array([float(np.mean(correct_by_pct[p])) if correct_by_pct[p] else float('nan') for p in range(num_pct_bins)])
+                    incorrect_pct_curve = np.array([float(np.mean(incorrect_by_pct[p])) if incorrect_by_pct[p] else float('nan') for p in range(num_pct_bins)])
+                    self._value_correct_by_pct = correct_pct_curve
+                    self._value_incorrect_by_pct = incorrect_pct_curve
+                    # Log advantage stats split by correctness
+                    if correct_advantages:
+                        self.local_metrics["value/advantage_correct_mean"] = float(np.mean(correct_advantages))
+                        self.local_metrics["value/advantage_correct_std"] = float(np.std(correct_advantages))
+                    if incorrect_advantages:
+                        self.local_metrics["value/advantage_incorrect_mean"] = float(np.mean(incorrect_advantages))
+                        self.local_metrics["value/advantage_incorrect_std"] = float(np.std(incorrect_advantages))
+                    # Log per-normalized-position advantage curves
+                    if has_gae:
+                        correct_adv_curve = np.array([float(np.mean(correct_adv_by_pct[p])) if correct_adv_by_pct[p] else float('nan') for p in range(num_pct_bins)])
+                        incorrect_adv_curve = np.array([float(np.mean(incorrect_adv_by_pct[p])) if incorrect_adv_by_pct[p] else float('nan') for p in range(num_pct_bins)])
+                        self._advantage_correct_by_pct = correct_adv_curve
+                        self._advantage_incorrect_by_pct = incorrect_adv_curve
 
                 # (8) Value model gradient norm (use DeepSpeed's built-in if available)
                 if hasattr(self, "value_model"):
@@ -1671,6 +1742,27 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "_value_mean_by_position") and len(self._value_mean_by_position) > 0:
                     array_metrics["value/mean_by_position"] = self._value_mean_by_position
                     del self._value_mean_by_position
+                # Per-token value curves split by correct/incorrect
+                if hasattr(self, "_value_correct_by_position") and len(self._value_correct_by_position) > 0:
+                    array_metrics["value/correct_by_position"] = self._value_correct_by_position
+                    del self._value_correct_by_position
+                if hasattr(self, "_value_incorrect_by_position") and len(self._value_incorrect_by_position) > 0:
+                    array_metrics["value/incorrect_by_position"] = self._value_incorrect_by_position
+                    del self._value_incorrect_by_position
+                # Normalized position curves (percentile bins)
+                if hasattr(self, "_value_correct_by_pct") and len(self._value_correct_by_pct) > 0:
+                    array_metrics["value/correct_by_pct"] = self._value_correct_by_pct
+                    del self._value_correct_by_pct
+                if hasattr(self, "_value_incorrect_by_pct") and len(self._value_incorrect_by_pct) > 0:
+                    array_metrics["value/incorrect_by_pct"] = self._value_incorrect_by_pct
+                    del self._value_incorrect_by_pct
+                # Advantage curves by normalized position
+                if hasattr(self, "_advantage_correct_by_pct") and len(self._advantage_correct_by_pct) > 0:
+                    array_metrics["value/advantage_correct_by_pct"] = self._advantage_correct_by_pct
+                    del self._advantage_correct_by_pct
+                if hasattr(self, "_advantage_incorrect_by_pct") and len(self._advantage_incorrect_by_pct) > 0:
+                    array_metrics["value/advantage_incorrect_by_pct"] = self._advantage_incorrect_by_pct
+                    del self._advantage_incorrect_by_pct
                 for key, value in batch_metrics.items():
                     if value is None:
                         continue
