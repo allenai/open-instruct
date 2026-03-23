@@ -79,6 +79,6 @@ uv run python mason.py \
     --gae_lambda 0.95 \
     --vf_clip_range 0.2 \
     --decoupled_gae \
-    --length_adaptive_gae
+    --length_adaptive_gae \
     --value_model_ground_truth_conditioning \
     --gt_conditioning_template cot_spoiler \
