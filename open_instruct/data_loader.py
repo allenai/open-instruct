@@ -408,7 +408,7 @@ class StreamingDataLoaderConfig:
     pack_length: int = 512
 
     # Batching
-    async_steps: int = 1
+    async_steps: int = 8
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -416,7 +416,7 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
-    advantage_normalization_type: str = "standard"
+    advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
@@ -436,7 +436,7 @@ class StreamingDataLoaderConfig:
     # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
-    inflight_updates: bool = False
+    inflight_updates: bool = True
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -608,11 +608,11 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.current_epoch = epoch
 
     def get_mock_batch(self) -> dict[str, Any]:
-        dummy_qr = torch.tensor([self.tokenizer.pad_token_id, self.tokenizer.eos_token_id], dtype=torch.long)
-        dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-        dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-        dummy_response_mask = torch.zeros_like(dummy_qr)
-        dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+        dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
+        dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
+        dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
+        dummy_response_mask = torch.tensor([[0, 1]], dtype=torch.long)
+        dummy_advantage = torch.tensor([[0.0, 1.0]], dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
             query_responses=[dummy_qr],
@@ -636,6 +636,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
+    padded_tensor = torch.atleast_2d(padded_tensor)
     if pin_memory and torch.cuda.is_available():
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor

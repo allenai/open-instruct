@@ -80,9 +80,9 @@ class ExperimentConfig:
     """the beta value of the RLHF objective (KL coefficient)"""
     clip_lower: float = 0.2
     """the lower clip range"""
-    clip_higher: float = 0.2
+    clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_cap: float = 0.0
+    truncated_importance_sampling_ratio_cap: float = 2.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
@@ -300,7 +300,7 @@ def forward_for_logprobs(
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
     logits = logits[:, :-1]
-    labels = query_responses[:, 1:].clone()
+    labels = query_responses[:, 1:].clone().to(logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
     logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
@@ -335,9 +335,33 @@ def compute_logprobs(
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = list(range(start_idx, end_idx))
 
-            batch_query_responses = torch.cat([data_BT.query_responses[i] for i in batch_indices], dim=0)
-            batch_attention_masks = torch.cat([data_BT.attention_masks[i] for i in batch_indices], dim=0)
-            batch_position_ids = torch.cat([data_BT.position_ids[i] for i in batch_indices], dim=0)
+            query_responses = [data_BT.query_responses[i] for i in batch_indices]
+            attention_masks = [data_BT.attention_masks[i] for i in batch_indices]
+            position_ids = [data_BT.position_ids[i] for i in batch_indices]
+            shapes = [tuple(t.shape) for t in query_responses]
+
+            if len(set(shapes)) != 1:
+                for i in batch_indices:
+                    single_logprobs, _ = forward_for_logprobs(
+                        model,
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
+                        pad_token_id,
+                        temperature,
+                        False,
+                    )
+
+                    response_mask_BT = data_BT.response_masks[i].to(single_logprobs.device)
+                    single_logprobs = torch.masked_fill(
+                        single_logprobs, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB
+                    )
+                    logprobs_BT.append(single_logprobs)
+                continue
+
+            batch_query_responses = torch.cat(query_responses, dim=0)
+            batch_attention_masks = torch.cat(attention_masks, dim=0)
+            batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
                 model,
@@ -356,8 +380,6 @@ def compute_logprobs(
                 response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
                 logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
                 logprobs_BT.append(logprob_BT)
-
-            torch.cuda.empty_cache()
 
     return logprobs_BT
 

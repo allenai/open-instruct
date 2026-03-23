@@ -36,8 +36,6 @@ python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 4 \
-    --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 2.0 \
     --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
@@ -76,7 +74,6 @@ python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
-    --clip_higher 0.272 \
     --keep_last_n_checkpoints -1 \
     --mask_truncated_completions True \
     --oe_eval_max_length 16384 \
