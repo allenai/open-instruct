@@ -61,4 +61,5 @@ uv run open_instruct/grpo_fast.py \
     --vllm_enable_prefix_caching \
     --mask_truncated_completions False \
     --load_ref_policy False \
+    --push_to_hub False \
     "$@"

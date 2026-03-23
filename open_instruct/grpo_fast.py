@@ -1104,6 +1104,18 @@ def setup_runtime_variables(
         streaming_config.dataset_mixer_eval_list is None or len(streaming_config.dataset_mixer_eval_list) == 0
     ):
         raise ValueError("`--eval_only` requires `--dataset_mixer_eval_list` to be set.")
+    if args.eval_only:
+        if args.save_freq != -1:
+            logger.info("`--eval_only` detected; disabling checkpoint saves by setting `save_freq=-1`.")
+            args.save_freq = -1
+        if args.checkpoint_state_freq != -1:
+            logger.info(
+                "`--eval_only` detected; disabling checkpoint-state saves by setting `checkpoint_state_freq=-1`."
+            )
+            args.checkpoint_state_freq = -1
+        if args.push_to_hub:
+            logger.info("`--eval_only` detected; disabling `push_to_hub`.")
+            args.push_to_hub = False
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():
