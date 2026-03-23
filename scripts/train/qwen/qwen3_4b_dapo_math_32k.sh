@@ -15,7 +15,7 @@ LOCAL_EVAL_SPLITS="train"
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
+CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
