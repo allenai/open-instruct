@@ -7,7 +7,7 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
-       --cluster ai2/jupiter ai2/triton ai2/neptune ai2/ceres \
+       --cluster ai2/jupiter ai2/neptune ai2/ceres \
        --image "$BEAKER_IMAGE" \
        --description "2-GPU OLMo-core GRPO test script." \
        --pure_docker_mode \
