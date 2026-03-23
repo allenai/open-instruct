@@ -1826,6 +1826,28 @@ class PolicyTrainerRayProcess(RayProcess):
 
             self.tokenizer.save_pretrained(output_dir)
 
+        # Save value model alongside the policy checkpoint
+        if self.args.use_value_model and self.value_model is not None:
+            value_model_dir = os.path.join(output_dir, "value_model")
+            if self.rank == 0:
+                os.makedirs(value_model_dir, exist_ok=True)
+
+            value_model_to_save = self.value_model
+            if hasattr(value_model_to_save, "module"):
+                value_model_to_save = value_model_to_save.module
+
+            value_state_dict = {}
+            for k, v in value_model_to_save.named_parameters():
+                params_to_fetch = _z3_params_to_fetch([v])
+                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                    vv = v.data.cpu()
+                    if self.rank == 0:
+                        value_state_dict[k] = vv
+
+            if self.rank == 0:
+                torch.save(value_state_dict, os.path.join(value_model_dir, "value_model.bin"))
+                logger.info(f"Saved value model to {value_model_dir}")
+
         if self.rank == 0:
             marker_path.touch()
 
