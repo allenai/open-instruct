@@ -19,7 +19,8 @@ uv run --active open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --system_prompt_override_file scripts/train/qwen/math_system_prompt.txt \
-    --learning_rate 3e-7 \
+    --apply_verifiable_reward true \
+    --learning_rate 1e-6 \
     --total_episodes 128 \
     --deepspeed_stage 2 \
     --num_epochs 1 \

@@ -399,15 +399,11 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for _epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
-                query_responses = data_BT.query_responses[sample_idx]
-                attention_mask = data_BT.attention_masks[sample_idx]
-                position_ids = data_BT.position_ids[sample_idx]
-
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
-                    query_responses,
-                    attention_mask,
-                    position_ids,
+                    data_BT.query_responses[sample_idx],
+                    data_BT.attention_masks[sample_idx],
+                    data_BT.position_ids[sample_idx],
                     self.pad_token_id,
                     self.grpo_config.temperature,
                     return_entropy=self.grpo_config.record_entropy,
