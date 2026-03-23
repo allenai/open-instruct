@@ -59,8 +59,6 @@ from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
-from vllm.v1.kv_cache_interface import MambaSpec
-
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
     EnvConfig,
@@ -75,12 +73,6 @@ from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_K
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
-
-# vLLM annotates MambaSpec.dtypes as tuple[torch.dtype] (fixed length 1),
-# but hybrid models (e.g. Olmo Hybrid) produce 2 dtypes. msgspec rejects
-# the length mismatch during RPC serialization. Remove when vLLM fixes this.
-if MambaSpec.__annotations__.get("dtypes") == tuple[torch.dtype]:
-    MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 logger = logger_utils.setup_logger(__name__)
 
