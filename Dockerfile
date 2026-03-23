@@ -65,8 +65,8 @@ WORKDIR /stage/
 ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0 \
-    UV_CONCURRENT_DOWNLOADS=1 \
-    UV_HTTP_TIMEOUT=600
+    UV_CONCURRENT_DOWNLOADS=4 \
+    UV_HTTP_TIMEOUT=3600
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
