@@ -174,7 +174,8 @@ class ActorManager:
             }
         )
 
-        self._generation_batch_history.append(token_stats.generation_time)
+        if token_stats.engine_generation_time is not None:
+            self._generation_batch_history.append(token_stats.engine_generation_time)
 
     def report_training_step_time(self, duration: float):
         """Report the time taken for a training step."""

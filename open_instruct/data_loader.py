@@ -915,7 +915,7 @@ def accumulate_inference_batches(
 
     total_prompt_tokens = 0
     total_response_tokens = 0
-    max_generation_time = 0
+    max_per_request_generation_time = 0.0
 
     for i, result in enumerate(results):
         combined_responses.extend(result.responses)
@@ -932,7 +932,8 @@ def accumulate_inference_batches(
 
         combined_logprobs.extend(result.logprobs)
 
-        earliest_start_time = min(earliest_start_time, result.start_time)
+        if result.start_time is not None:
+            earliest_start_time = min(earliest_start_time, result.start_time)
 
         prompt_lengths.append(len(all_queries[i * generation_config.n]))
 
@@ -941,13 +942,41 @@ def accumulate_inference_batches(
 
         total_prompt_tokens += result.token_statistics.num_prompt_tokens
         total_response_tokens += result.token_statistics.num_response_tokens
-        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+        if result.token_statistics.max_per_request_generation_time is not None:
+            max_per_request_generation_time = max(
+                max_per_request_generation_time, result.token_statistics.max_per_request_generation_time
+            )
+
+    # Per-engine batch elapsed (first start to last end per engine, then max over engines).
+    engine_generation_time: float | None = None
+    results_with_engine_id = [r for r in results if r.engine_id is not None]
+    if results_with_engine_id:
+        by_engine: dict[int, list[data_types.GenerationResult]] = {}
+        for r in results_with_engine_id:
+            by_engine.setdefault(r.engine_id, []).append(r)
+        engine_elapsed_list = []
+        for group in by_engine.values():
+            starts = [r.start_time for r in group if r.start_time is not None]
+            if not starts:
+                continue
+            ends = [
+                r.start_time + r.token_statistics.max_per_request_generation_time
+                for r in group
+                if r.start_time is not None
+                and r.token_statistics is not None
+                and r.token_statistics.max_per_request_generation_time is not None
+            ]
+            if ends:
+                engine_elapsed_list.append(max(ends) - min(starts))
+        if engine_elapsed_list:
+            engine_generation_time = max(engine_elapsed_list)
 
     accumulated_stats = data_types.TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
-        generation_time=max_generation_time,
-        earliest_start_time=earliest_start_time,
+        earliest_start_time=earliest_start_time if earliest_start_time != float("inf") else None,
+        max_per_request_generation_time=max_per_request_generation_time,
+        engine_generation_time=engine_generation_time,
     )
 
     combined_request_info = data_types.RequestInfo(
@@ -1382,8 +1411,19 @@ class DataPreparationActor:
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
-                step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-                step_metrics["time/getting_response"] = result.token_statistics.generation_time
+                if (
+                    result.token_statistics.engine_generation_time is not None
+                    and result.token_statistics.engine_generation_time > 0
+                ):
+                    step_metrics["val/actor_tokens_per_second"] = (
+                        total_tokens / result.token_statistics.engine_generation_time
+                    )
+                if result.token_statistics.max_per_request_generation_time is not None:
+                    step_metrics["time/generation_max_per_request"] = (
+                        result.token_statistics.max_per_request_generation_time
+                    )
+                if result.token_statistics.engine_generation_time is not None:
+                    step_metrics["time/generation_engine_estimate"] = result.token_statistics.engine_generation_time
 
             with self.lock:
                 self.prepared_data[step] = collated_data

@@ -15,8 +15,11 @@ class TokenStatistics:
 
     num_prompt_tokens: int
     num_response_tokens: int
-    generation_time: float
     earliest_start_time: float | None = None
+    max_per_request_generation_time: float | None = None
+    """Max of per-request generation durations in the batch (longest single-request time)."""
+    engine_generation_time: float | None = None
+    """Batch elapsed from per-engine timestamps (first start to last end, max over engines)."""
 
 
 @dataclass
@@ -55,6 +58,8 @@ class GenerationResult:
     prompt_id: str | None
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
+    engine_id: int | None = None
+    """Index of the vLLM engine that produced this result (for per-engine batch elapsed)."""
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None

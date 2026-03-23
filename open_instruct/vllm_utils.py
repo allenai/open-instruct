@@ -347,7 +347,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
             num_response_tokens=total_generation_tokens,
-            generation_time=current_time - metadata["start_time"],
+            max_per_request_generation_time=current_time - metadata["start_time"],
+            engine_generation_time=None,
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
@@ -529,6 +530,8 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
+    result.engine_id = getattr(actor, "engine_index", None)
+
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
@@ -601,6 +604,7 @@ class LLMRayActor:
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
+        self.engine_index = kwargs.pop("engine_index", None)
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
@@ -1319,6 +1323,7 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                engine_index=i,
             )
         )
 

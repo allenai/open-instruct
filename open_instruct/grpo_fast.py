@@ -1569,7 +1569,11 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = average_metrics["time/getting_response"]
+    total_generation_time = (
+        average_metrics.get("time/generation_engine_estimate")
+        or average_metrics.get("time/generation_max_per_request")
+        or 0.0
+    )
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
@@ -1711,7 +1715,13 @@ def maybe_evaluate(
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
         )
-        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+        if (
+            eval_result.token_statistics.engine_generation_time is not None
+            and eval_result.token_statistics.engine_generation_time > 0
+        ):
+            eval_metrics["eval/actor_tokens_per_second"] = (
+                total_tokens / eval_result.token_statistics.engine_generation_time
+            )
 
         print_rich_single_line_metrics(eval_metrics)
 
