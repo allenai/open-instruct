@@ -373,14 +373,13 @@ class GRPOTrainModule(TransformerTrainModule):
                     )
 
                 for i in range(num_samples):
-                    vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
-                    response_mask_i = data_BT.response_masks[i][:, 1:].bool().to(vllm_old_logprob_BT.device)
-                    vllm_old_logprob_BT = torch.masked_fill(
-                        vllm_old_logprob_BT, ~response_mask_i, utils.INVALID_LOGPROB
-                    )
-                    vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=utils.INVALID_LOGPROB)
-
                     if self.grpo_config.use_vllm_logprobs:
+                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                        response_mask_i = data_BT.response_masks[i][:, 1:].bool().to(vllm_old_logprob_BT.device)
+                        vllm_old_logprob_BT = torch.masked_fill(
+                            vllm_old_logprob_BT, ~response_mask_i, utils.INVALID_LOGPROB
+                        )
+                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=utils.INVALID_LOGPROB)
                         old_logprobs_BT[i] = vllm_old_logprob_BT
                     else:
                         assert local_old_logprobs_BT is not None
@@ -401,8 +400,6 @@ class GRPOTrainModule(TransformerTrainModule):
         token_counts_per_sample = torch.tensor(
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
-        total_valid_tokens = token_counts_per_sample.sum().item()
-
         loss_stats_B: dict[str, torch.Tensor] = {
             "kl": torch.zeros(4, num_samples, device=self.device),
             "kl_loss": torch.zeros(num_samples, device=self.device),
@@ -454,7 +451,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 ratio = torch.exp(log_ratio)
 
                 tis_weights = None
-                if self.grpo_config.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs is not None:
+                if self.grpo_config.truncated_importance_sampling_ratio_cap > 0:
                     valid_mask = response_mask
                     tis_weights = torch.ones_like(old_logprob)
                     if valid_mask.any():
@@ -547,4 +544,4 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.trainer.max_steps,
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
-            self.record_metric("_token_count", total_valid_tokens, reduce_type=None)
+            self.record_metric("_token_count", total_tokens.item(), reduce_type=None)
