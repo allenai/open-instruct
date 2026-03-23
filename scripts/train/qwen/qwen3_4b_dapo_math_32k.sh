@@ -57,8 +57,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 32768 \
-    --pack_length 34816 \
+    --response_length 30720 \
+    --pack_length 32768 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
