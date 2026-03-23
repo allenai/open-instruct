@@ -4,27 +4,64 @@ We support Supervised finetuning (SFT) on a variety of datasets.
 
 ## Implemented Variants
 
-- **OLMo-core SFT** (recommended): Uses OLMo-core's native training infrastructure. For supported models (OLMo, Qwen, and more), this is more GPU-efficient. See `open_instruct/olmo_core_utils.py` for the current list of supported models.
-- `finetune.py` is the legacy SFT implementation using DeepSpeed/Accelerate.
+- **OLMo-core SFT** (recommended): Uses OLMo-core's native training infrastructure. Most users should use this — it is more GPU-efficient and supports OLMo, Qwen, and other models. See `open_instruct/olmo_core_utils.py` for the current list of supported models.
+- `finetune.py` is the legacy SFT implementation using DeepSpeed/Accelerate. Use this only if you need a model architecture not yet supported by OLMo-core.
 
 ## OLMo-core SFT
 
-The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). These scripts require a separate [OLMo-core](https://github.com/allenai/OLMo-core) clone — the `build_image_and_launch.sh` script only works for open-instruct jobs (DPO, RL), not for SFT. See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for setup and testing instructions.
+The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft).
+
+### Setup
+
+OLMo-core SFT requires a **separate OLMo-core clone** — the `build_image_and_launch.sh` script only works for open-instruct jobs (DPO, RL), not for SFT.
+
+1. Clone OLMo-core: `git clone https://github.com/allenai/OLMo-core.git`
+2. Follow the [OLMo-core setup instructions](https://github.com/allenai/OLMo-core) to install dependencies.
+3. Run the SFT training script from the OLMo-core checkout. For example:
+
+```bash
+cd /path/to/OLMo-core
+python src/scripts/train/sft/OLMo-sft.py train \
+    my-experiment-name \
+    gs://my-bucket/checkpoint/path \
+    ai2/jupiter \
+    --trainer.max_duration.value=2 \
+    --train_module.optim.lr=8e-5 \
+    --seq_len=32768 \
+    --launch.num_gpus=8 \
+    --num_nodes=4 \
+    --global_batch_size=1048576 \
+    --model_name=olmo3-7b
+```
+
+### Key Flags
+
+OLMo-core SFT uses **CLI flags** (not YAML config files). Key options include:
+
+| Flag | Description |
+|------|-------------|
+| `--trainer.max_duration.value` | Number of training epochs |
+| `--train_module.optim.lr` | Learning rate |
+| `--seq_len` | Maximum sequence length |
+| `--launch.num_gpus` | GPUs per node |
+| `--num_nodes` | Number of nodes |
+| `--global_batch_size` | Global batch size in tokens |
+| `--model_name` | Model architecture (e.g., `olmo3-7b`, `olmo3-32b`) |
+| `--dataset_path` | Path to the SFT dataset |
+| `--trainer.callbacks.wandb.enabled` | Enable W&B logging |
+
+See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for the full list of options.
 
 ### Olmo 3 SFT Scripts
 
 These scripts are run from the OLMo-core checkout, not via `build_image_and_launch.sh`.
 
-| Script | Description |
-|--------|-------------|
-| `scripts/train/olmo3/7b_instruct_sft.sh` | Olmo 3 7B Instruct SFT (4 nodes) |
-| `scripts/train/olmo3/7b_think_sft.sh` | Olmo 3 7B Think SFT (4 nodes) |
-| `scripts/train/olmo3/32b_instruct_sft.sh` | Olmo 3 32B Instruct SFT |
-| `scripts/train/olmo3/32b_think_sft.sh` | Olmo 3 32B Think SFT |
-
-### Key Flags
-
-OLMo-core SFT uses **YAML config files** rather than CLI flags. Configuration is handled via OLMo-core's config system. See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for available options.
+| Script | Scale | Description |
+|--------|-------|-------------|
+| `scripts/train/olmo3/7b_instruct_sft.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Instruct SFT, 32k sequence length |
+| `scripts/train/olmo3/7b_think_sft.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Think SFT, 32k sequence length |
+| `scripts/train/olmo3/32b_instruct_sft.sh` | 8 nodes (64 GPUs) | Olmo 3 32B Instruct SFT, 32k sequence length |
+| `scripts/train/olmo3/32b_think_sft.sh` | 32 nodes (256 GPUs) | Olmo 3 32B Think SFT, 32k sequence length |
 
 ---
 

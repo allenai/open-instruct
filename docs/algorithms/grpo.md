@@ -20,6 +20,20 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 | `scripts/train/debug/multi_node_grpo.sh` | 2 nodes (16 GPUs), Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/multi_node_grpo.sh` |
 | `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` | 2 nodes, tools, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh` |
 
+### Olmo 3 Scripts
+
+| Script | Scale | Description | Launch |
+|--------|-------|-------------|--------|
+| `scripts/train/olmo3/7b_instruct_rl.sh` | 8 nodes (64 GPUs) | Olmo 3 7B Instruct GRPO with multi-task reasoning datasets | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_rl.sh` |
+| `scripts/train/olmo3/7b_think_rl.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Think GRPO with pipeline RL | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_think_rl.sh` |
+| `scripts/train/olmo3/32b_instruct_rl.sh` | 12 nodes (96 GPUs) | Olmo 3 32B Instruct GRPO | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_instruct_rl.sh` |
+| `scripts/train/olmo3/32b_think_rl.sh` | 28 nodes (224 GPUs) | Olmo 3 32B Think GRPO | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_think_rl.sh` |
+| `scripts/train/olmo3/7b_rlzero_math.sh` | 9 nodes (72 GPUs) | Olmo 3 7B RL-Zero for math | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_math.sh` |
+| `scripts/train/olmo3/7b_rlzero_code.sh` | 5 nodes (40 GPUs) | Olmo 3 7B RL-Zero for code | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_code.sh` |
+| `scripts/train/olmo3/7b_rlzero_general.sh` | 5 nodes (40 GPUs) | Olmo 3 7B RL-Zero for general tasks | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_general.sh` |
+| `scripts/train/olmo3/7b_rlzero_instruction_following.sh` | 5 nodes (40 GPUs) | Olmo 3 7B RL-Zero for instruction following | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_instruction_following.sh` |
+| `scripts/train/olmo3/7b_rlzero_mix.sh` | 4 nodes (32 GPUs) | Olmo 3 7B RL-Zero mixed (code, IF, general) | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_mix.sh` |
+
 ### Key Flags
 
 Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the same flags.
