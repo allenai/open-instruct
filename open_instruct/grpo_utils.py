@@ -76,8 +76,12 @@ class ExperimentConfig:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
+    advantage_realignment: bool = False
+    """Whether to recompute grouped advantages using local-vs-vLLM logprob ratios."""
     truncated_importance_sampling_ratio_cap: float = 0.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
+    clamp_threshold: float = 1.0
+    """Maximum per-response ratio used during advantage realignment (0 means disabled)."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -235,6 +239,57 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+
+
+def realign_advantages(
+    data_BT: data_types.CollatedBatchData,
+    local_logprobs_BT: list[torch.Tensor],
+    scores_per_prompt: torch.Tensor,
+    num_samples_per_prompt_rollout: int,
+    advantage_normalization_type: str,
+    clamp_threshold: float,
+) -> list[torch.Tensor]:
+    scores_per_prompt = scores_per_prompt.to(local_logprobs_BT[0].device, non_blocking=True)
+    scores_flat = scores_per_prompt.reshape(-1)
+    max_response_idx = scores_flat.numel()
+    response_log_ratio_sums = torch.zeros(max_response_idx + 1, device=scores_flat.device)
+
+    for i, local_logprobs in enumerate(local_logprobs_BT):
+        response_mask_BT = data_BT.response_masks[i][:, 1:].long()
+        if not response_mask_BT.numel():
+            continue
+        vllm_logprobs_BT = torch.nan_to_num(data_BT.vllm_logprobs[i][:, 1:], nan=0.0)
+        logprob_delta_BT = (local_logprobs - vllm_logprobs_BT)[response_mask_BT > 0]
+        response_ids_BT = response_mask_BT[response_mask_BT > 0]
+        if response_ids_BT.numel() > 0:
+            response_log_ratio_sums.scatter_add_(0, response_ids_BT, logprob_delta_BT)
+
+    response_ratios = torch.exp(response_log_ratio_sums[1:])
+    if clamp_threshold > 0:
+        response_ratios = response_ratios.clamp(max=clamp_threshold)
+
+    prompt_indices = torch.arange(max_response_idx, device=scores_flat.device) // num_samples_per_prompt_rollout
+    prompt_means = scores_per_prompt.mean(dim=-1)
+    centered_scores = scores_flat - prompt_means[prompt_indices]
+    adjusted_centered_scores = response_ratios * centered_scores
+
+    prompt_adjustments = torch.zeros_like(prompt_means)
+    prompt_adjustments.scatter_add_(0, prompt_indices, adjusted_centered_scores)
+    prompt_adjustments /= num_samples_per_prompt_rollout
+    realigned_prompt_means = prompt_means + prompt_adjustments
+    realigned_scores = scores_flat - realigned_prompt_means[prompt_indices]
+
+    if advantage_normalization_type == "standard":
+        prompt_stds = scores_per_prompt.std(dim=-1, unbiased=False)
+        realigned_scores = realigned_scores / (prompt_stds[prompt_indices] + 1e-8)
+    elif advantage_normalization_type != "centered":
+        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
+
+    advantage_lookup = torch.zeros(max_response_idx + 1, device=scores_flat.device)
+    advantage_lookup[1:] = realigned_scores
+    return [
+        advantage_lookup[response_mask.long().clamp(max=max_response_idx)] for response_mask in data_BT.response_masks
+    ]
 
 
 def compute_grpo_loss(

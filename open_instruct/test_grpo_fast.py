@@ -14,8 +14,15 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import rl_utils, utils
-from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct import grpo_utils, rl_utils, utils
+from open_instruct.data_types import (
+    CollatedBatchData,
+    EnvConfig,
+    GenerationResult,
+    PromptRequest,
+    RequestInfo,
+    TokenStatistics,
+)
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -245,6 +252,30 @@ class TestGrpoFastBase(unittest.TestCase):
             data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         return prompt_Q, inference_results_Q, mock_dataset
+
+
+class TestAdvantageRealignment(unittest.TestCase):
+    def test_realign_advantages_updates_group_baseline(self):
+        data_BT = CollatedBatchData(
+            query_responses=[torch.tensor([[10, 11], [10, 12]], dtype=torch.long)],
+            attention_masks=[torch.tensor([[1, 1], [1, 2]], dtype=torch.long)],
+            position_ids=[torch.tensor([[0, 1], [0, 1]], dtype=torch.long)],
+            advantages=[torch.tensor([[0.0, 0.5], [0.0, -0.5]], dtype=torch.float32)],
+            response_masks=[torch.tensor([[0, 1], [0, 2]], dtype=torch.long)],
+            vllm_logprobs=[torch.tensor([[float("nan"), 0.0], [float("nan"), 0.0]], dtype=torch.float32)],
+        )
+
+        realigned_advantages = grpo_utils.realign_advantages(
+            data_BT=data_BT,
+            local_logprobs_BT=[torch.tensor([[torch.log(torch.tensor(2.0))], [0.0]], dtype=torch.float32)],
+            scores_per_prompt=torch.tensor([[1.0, 0.0]], dtype=torch.float32),
+            num_samples_per_prompt_rollout=2,
+            advantage_normalization_type="centered",
+            clamp_threshold=0.0,
+        )
+
+        expected = torch.tensor([[0.0, 0.25], [0.0, -0.75]], dtype=torch.float32)
+        torch.testing.assert_close(realigned_advantages[0], expected)
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):

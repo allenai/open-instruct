@@ -513,6 +513,7 @@ class PolicyTrainerRayProcess(RayProcess):
         """
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
+        scores_per_prompt = batch_data.get("scores_per_prompt")
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
@@ -545,28 +546,41 @@ class PolicyTrainerRayProcess(RayProcess):
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
-        if num_mini_batches > 1:
+        local_old_logprobs_BT: list[torch.Tensor] | None = None
+        if num_mini_batches > 1 or (self.args.advantage_realignment and scores_per_prompt is not None):
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
-                local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
                         self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                     )
 
-                with torch.no_grad():
-                    for i in range(len(data_BT.query_responses)):
-                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
-                        vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
-                        )
-                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
+                if num_mini_batches > 1:
+                    with torch.no_grad():
+                        for i in range(len(data_BT.query_responses)):
+                            vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                            vllm_old_logprob_BT = torch.masked_fill(
+                                vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
+                            )
+                            vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
 
-                        if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = vllm_old_logprob_BT
-                        else:
-                            old_logprobs_BT[i] = local_old_logprobs_BT[i]
+                            if self.args.use_vllm_logprobs:
+                                old_logprobs_BT[i] = vllm_old_logprob_BT
+                            else:
+                                old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
-                        torch.cuda.empty_cache()
+                            torch.cuda.empty_cache()
+
+        if self.args.advantage_realignment and scores_per_prompt is not None:
+            if local_old_logprobs_BT is None:
+                raise ValueError("advantage_realignment requires local logprobs to be available")
+            data_BT.advantages = grpo_utils.realign_advantages(
+                data_BT=data_BT,
+                local_logprobs_BT=local_old_logprobs_BT,
+                scores_per_prompt=scores_per_prompt,
+                num_samples_per_prompt_rollout=self.streaming_config.num_samples_per_prompt_rollout,
+                advantage_normalization_type=self.streaming_config.advantage_normalization_type,
+                clamp_threshold=self.args.clamp_threshold,
+            )
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
@@ -999,8 +1013,16 @@ def validate_configs(
     vllm_config: data_loader_lib.VLLMConfig,
     num_learners_per_node: tuple[int, ...],
     sequence_parallel_size: int,
+    args: grpo_utils.ExperimentConfig | None = None,
 ) -> None:
     """Validate cross-cutting config constraints."""
+    world_size = sum(num_learners_per_node)
+    dp_world_size = world_size // sequence_parallel_size
+    if args is not None and args.advantage_realignment and dp_world_size != 1:
+        raise ValueError(
+            "advantage_realignment currently requires dp_world_size == 1. "
+            f"Got world_size={world_size}, sequence_parallel_size={sequence_parallel_size}, dp_world_size={dp_world_size}."
+        )
     if streaming_config.num_unique_prompts_rollout < vllm_config.vllm_num_engines:
         logger.warning(
             f"With num_unique_prompts_rollout={streaming_config.num_unique_prompts_rollout} < "
@@ -1008,8 +1030,7 @@ def validate_configs(
             "batches simultaneously. This is fine but might be unexpected behaviour."
         )
     assert (
-        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout
-        >= sum(num_learners_per_node) // sequence_parallel_size
+        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout >= dp_world_size
     ), (
         "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
     )
@@ -1021,6 +1042,11 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.ExperimentConfig:
     """Set up runtime variables for the experiment."""
+    if args.advantage_realignment and streaming_config.mask_truncated_completions:
+        logger.warning(
+            "advantage_realignment with mask_truncated_completions is not supported; "
+            "realignment will use the unfiltered scores_per_prompt layout."
+        )
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
@@ -2211,7 +2237,9 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
-    validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+    validate_configs(
+        streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size, args
+    )
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)

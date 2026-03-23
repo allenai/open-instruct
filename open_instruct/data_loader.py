@@ -1061,6 +1061,7 @@ class DataPreparationActor:
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
         self.metrics: dict[int, dict] = {}
+        self.scores_per_prompt: dict[int, torch.Tensor | None] = {}
         self.current_prepared_step = -1
         self._last_consumed_step = -1
         self.lock = threading.Lock()
@@ -1154,6 +1155,7 @@ class DataPreparationActor:
                 with self.lock:
                     self.prepared_data[step] = empty_data
                     self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                    self.scores_per_prompt[step] = None
                     self.current_prepared_step = step
                 continue
 
@@ -1161,6 +1163,7 @@ class DataPreparationActor:
             assert batch_stats is not None
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
+            scores_per_prompt_tensor = torch.tensor(scores_per_prompt, dtype=torch.float32)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
@@ -1230,6 +1233,11 @@ class DataPreparationActor:
 
             if len(result.responses) == 0:
                 step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                with self.lock:
+                    self.prepared_data[step] = collated_data
+                    self.metrics[step] = step_metrics
+                    self.current_prepared_step = step
+
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1290,10 +1298,11 @@ class DataPreparationActor:
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
-            with self.lock:
-                self.prepared_data[step] = collated_data
-                self.metrics[step] = step_metrics
-                self.current_prepared_step = step
+                with self.lock:
+                    self.prepared_data[step] = collated_data
+                    self.metrics[step] = step_metrics
+                    self.current_prepared_step = step
+                    self.scores_per_prompt[step] = scores_per_prompt_tensor
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
@@ -1307,7 +1316,11 @@ class DataPreparationActor:
             with self.lock:
                 if step <= self.current_prepared_step:
                     batch_data = self.prepared_data[step][rank]
-                    result = {"batch": batch_data, "metrics": self.metrics[step]}
+                    result = {
+                        "batch": batch_data,
+                        "metrics": self.metrics[step],
+                        "scores_per_prompt": self.scores_per_prompt[step],
+                    }
                     self._last_consumed_step = max(self._last_consumed_step, step)
                     self._cleanup_old_steps(step)
                     logger.info(
@@ -1328,6 +1341,8 @@ class DataPreparationActor:
             del self.prepared_data[s]
             if s in self.metrics:
                 del self.metrics[s]
+            if s in self.scores_per_prompt:
+                del self.scores_per_prompt[s]
 
     def get_state(self) -> dict:
         return {
