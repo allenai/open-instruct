@@ -1246,6 +1246,7 @@ def create_model_and_optimizer(
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
     prompt_Q: ray_queue.Queue,
+    eval_prompt_Q: ray_queue.Queue | None,
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1273,6 +1274,8 @@ def create_model_and_optimizer(
         "Prompt Queue": prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
+    if eval_prompt_Q is not None:
+        queues_to_monitor["Eval Prompt Queue"] = eval_prompt_Q
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
 
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
@@ -1346,6 +1349,7 @@ def create_model_and_optimizer(
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
+        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -1672,6 +1676,20 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
+        num_eval_prompts = len(eval_dataset)
+        is_final_step = training_step >= args.num_training_steps
+        # On non-final steps, only evaluate when we have a full batch ready.
+        # This avoids partially draining the queue and losing results.
+        if not is_final_step:
+            queued_results = evaluation_inference_results_Q.qsize()
+            if queued_results < num_eval_prompts:
+                logger.info(
+                    "[Main Thread] Eval responses pending (%s/%s); deferring evaluation.",
+                    queued_results,
+                    num_eval_prompts,
+                )
+                return False
+
         # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if training_step < args.num_training_steps else 100
@@ -1680,7 +1698,7 @@ def maybe_evaluate(
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=len(eval_dataset),
+            num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1855,6 +1873,7 @@ def run_training(
     executor,
     inference_results_Q,
     prompt_Q,
+    eval_prompt_Q: ray_queue.Queue | None,
     evaluation_inference_results_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
@@ -1961,11 +1980,12 @@ def run_training(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
                     "Consider increasing local_eval_every."
                 )
+            eval_queue = eval_prompt_Q if eval_prompt_Q is not None else prompt_Q
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
                     eval_example,
                     training_step,
-                    prompt_Q,
+                    eval_queue,
                     generation_configs["eval"],
                     is_eval=True,
                     base_env_config=base_env_config,
@@ -2279,6 +2299,7 @@ def main(
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    eval_prompt_Q = ray_queue.Queue(maxsize=queue_size) if eval_dataset is not None else None
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -2322,6 +2343,7 @@ def main(
             tokenizer,
             inference_results_Q,
             prompt_Q,
+            eval_prompt_Q,
             evaluation_inference_results_Q,
             streaming_config,
             vllm_config,
@@ -2366,6 +2388,7 @@ def main(
             executor,
             inference_results_Q,
             prompt_Q,
+            eval_prompt_Q,
             evaluation_inference_results_Q,
             weight_sync_metrics_Q,
             actor_manager,
@@ -2381,9 +2404,11 @@ def main(
             utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
         raise
     finally:
-        cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
-        )
+        shutdown_queues: list[ray_queue.Queue] = [inference_results_Q, prompt_Q]
+        if eval_prompt_Q is not None:
+            shutdown_queues.append(eval_prompt_Q)
+        shutdown_queues.append(evaluation_inference_results_Q)
+        cleanup_training_resources(stop_event, executor, shutdown_queues, actor_manager)
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
