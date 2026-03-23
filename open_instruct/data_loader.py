@@ -408,7 +408,7 @@ class StreamingDataLoaderConfig:
     pack_length: int = 512
 
     # Batching
-    async_steps: int = 1
+    async_steps: int = 8
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -416,7 +416,7 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
-    advantage_normalization_type: str = "standard"
+    advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
@@ -436,7 +436,7 @@ class StreamingDataLoaderConfig:
     # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
-    inflight_updates: bool = False
+    inflight_updates: bool = True
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
