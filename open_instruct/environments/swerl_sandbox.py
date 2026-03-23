@@ -148,10 +148,14 @@ class SWERLSandboxEnv(RLEnvironment):
 
         if self._backend is not None:
             self._backend.close()
-        bkwargs = dict(self._backend_kwargs)
-        bkwargs.setdefault("timeout", self._timeout)
-        self._backend = create_backend(self._backend_type, **bkwargs)
-        self._backend.start()
+            # Update image in case it changed per-sample
+            self._backend._image = self._backend_kwargs.get("image", self._backend._image)
+            self._backend.start()
+        else:
+            bkwargs = dict(self._backend_kwargs)
+            bkwargs.setdefault("timeout", self._timeout)
+            self._backend = create_backend(self._backend_type, **bkwargs)
+            self._backend.start()
         self._step_count = 0
         self._task_id = task_id
 
