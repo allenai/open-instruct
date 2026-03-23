@@ -233,9 +233,14 @@ def setup_vllm_engines(
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
     param_prompt_Q = ray_queue.Queue(maxsize=10)
+    eval_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
+    queues_to_monitor = {
+        "Param Prompt Queue": param_prompt_Q,
+        "Eval Prompt Queue": eval_prompt_Q,
+        "Inference Results Queue": inference_results_Q,
+    }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
 
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
@@ -259,6 +264,7 @@ def setup_vllm_engines(
         tool_parser_type="legacy",
         max_steps=5,  # default, no tools used in benchmarks
         prompt_queue=param_prompt_Q,
+        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=streaming_config.inflight_updates,

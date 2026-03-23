@@ -48,9 +48,10 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         model.apply_fsdp()
 
         param_prompt_Q = ray_queue.Queue(maxsize=100)
+        eval_prompt_Q = ray_queue.Queue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
+        self._ray_queues.extend([param_prompt_Q, eval_prompt_Q, inference_results_Q, eval_results_Q])
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
@@ -73,6 +74,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
             single_gpu_mode=True,
             pg=pg,
             prompt_queue=param_prompt_Q,
+            eval_prompt_queue=eval_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             reward_config=RewardConfig(),

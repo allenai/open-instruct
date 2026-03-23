@@ -446,46 +446,37 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    if actor.eval_prompt_queue is None:
-        while True:
-            if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
-                time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-                continue
+    poll_timeout_s = 0.1
+    while True:
+        has_pending_eval = actor.eval_prompt_queue.qsize() > 0
 
-            request = actor.prompt_queue.get()
-            add_request(actor, request)
-    else:
-        poll_timeout_s = 0.1
-        while True:
-            has_pending_eval = actor.eval_prompt_queue.qsize() > 0
+        # Strict eval priority: when eval work is pending, stop admitting new train requests
+        # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
+        if has_pending_eval and len(actor.active_tasks) > 0:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
 
-            # Strict eval priority: when eval work is pending, stop admitting new train requests
-            # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
-            if has_pending_eval and len(actor.active_tasks) > 0:
-                time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-                continue
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
 
-            if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
-                time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-                continue
-
-            # Prioritize eval requests so local evals don't starve behind train backlog.
-            # Use timed gets so this worker doesn't block forever on train queue when eval
-            # items arrive later (e.g., final-step eval after training prompts are drained).
-            request = None
-            if has_pending_eval:
-                try:
-                    request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
-                except queue.Empty:
-                    request = None
-            if request is None:
-                try:
-                    request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
-                except queue.Empty:
-                    request = None
-            if request is None:
-                continue
-            add_request(actor, request)
+        # Prioritize eval requests so local evals don't starve behind train backlog.
+        # Use timed gets so this worker doesn't block forever on train queue when eval
+        # items arrive later (e.g., final-step eval after training prompts are drained).
+        request = None
+        if has_pending_eval:
+            try:
+                request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            try:
+                request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            continue
+        add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
@@ -607,7 +598,7 @@ class LLMRayActor:
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
-        eval_prompt_queue: ray_queue.Queue | None = None,
+        eval_prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
@@ -1272,6 +1263,10 @@ def create_vllm_engines(
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
 ) -> list[ray.actor.ActorHandle]:
+    if eval_prompt_queue is None:
+        raise ValueError(
+            "eval_prompt_queue is required (use ray_queue.Queue() when no local eval prompts are enqueued)."
+        )
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
     # Using "ray" executor causes placement group context loss in vLLM v1's

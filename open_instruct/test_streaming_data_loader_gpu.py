@@ -88,9 +88,10 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         train_dataset = self._create_test_dataset(tokenizer, prompts, ground_truths)
 
         param_prompt_Q = ray_queue.Queue(maxsize=100)
+        eval_prompt_Q = ray_queue.Queue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
+        self._ray_queues.extend([param_prompt_Q, eval_prompt_Q, inference_results_Q, eval_results_Q])
 
         engines = create_vllm_engines(
             num_engines=1,
@@ -104,6 +105,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             max_model_len=512,
             vllm_gpu_memory_utilization=0.5,
             prompt_queue=param_prompt_Q,
+            eval_prompt_queue=eval_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             reward_config=RewardConfig(),
@@ -183,9 +185,10 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         train_dataset = self._create_test_dataset(tokenizer, prompts, ground_truths)
 
         param_prompt_Q = ray_queue.Queue(maxsize=100)
+        eval_prompt_Q = ray_queue.Queue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
+        self._ray_queues.extend([param_prompt_Q, eval_prompt_Q, inference_results_Q, eval_results_Q])
 
         pools, _ = create_tool_pools(
             [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
@@ -213,6 +216,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             single_gpu_mode=True,
             pg=pg,
             prompt_queue=param_prompt_Q,
+            eval_prompt_queue=eval_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             pools=pools,
