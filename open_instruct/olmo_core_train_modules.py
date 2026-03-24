@@ -282,7 +282,7 @@ class GRPOTrainModule(TransformerTrainModule):
         self,
         model: Transformer,
         optim: OptimConfig,
-        sample_microbatch_size: int,
+        rank_microbatch_size: int,
         max_sequence_length: int,
         grpo_config: grpo_utils.ExperimentConfig,
         tokenizer: PreTrainedTokenizer,
@@ -294,11 +294,10 @@ class GRPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ):
-        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
             model=model,
             optim=optim,
-            rank_microbatch_size=rank_microbatch_size_tokens,
+            rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
             max_grad_norm=max_grad_norm,
@@ -308,7 +307,6 @@ class GRPOTrainModule(TransformerTrainModule):
             state_dict_load_opts=state_dict_load_opts,
         )
 
-        self.sample_microbatch_size = sample_microbatch_size
         self.grpo_config = grpo_config
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
@@ -316,12 +314,6 @@ class GRPOTrainModule(TransformerTrainModule):
         self.ref_policy = ref_policy
         if ref_policy is not None:
             self.ref_policy = ref_policy.to(device=self.device).eval().requires_grad_(False)
-
-    def pre_train(self):
-        # GRPO batches are prompt-grouped and do their own accumulation/token normalization
-        # inside train_batch(), so the base TransformerTrainModule global-batch validation
-        # does not apply here.
-        pass
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
