@@ -76,5 +76,7 @@ uv run python mason.py \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
     --gamma 1.0 \
-    --gae_lambda 1.0 \
-    --vf_clip_range 0.2
+    --gae_lambda 0.95 \
+    --vf_clip_range 0.2 \
+    --decoupled_gae \
+    --length_adaptive_gae
