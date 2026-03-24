@@ -35,6 +35,7 @@ uv run python mason.py \
     --pack_length 4096 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
+    --async_steps 1 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --apply_verifiable_reward true \
