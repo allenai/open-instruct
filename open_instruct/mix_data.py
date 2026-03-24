@@ -41,7 +41,6 @@ def main() -> None:
     (args,) = parser.parse()
     assert isinstance(args, MixDataArguments)
 
-    # assert that data_mixer is not none in config
     assert args.dataset_mixer is not None, "data_mixer is required in config"
     configs = [args.dataset_config_name] if args.dataset_config_name else None
 
@@ -55,11 +54,9 @@ def main() -> None:
         add_source_col=True,
     )
 
-    # print first 5 samples of dataset
     for i in range(5):
         print(raw_datasets["train"][i])
 
-    # if args.save_to_hub is not none, push dataset to hub
     if args.save_to_hub:
         raw_datasets["train"].push_to_hub(args.save_to_hub, private=True)
 

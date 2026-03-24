@@ -68,7 +68,6 @@ from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 log = logger_utils.setup_logger(__name__)
 
 DEFAULT_SEQUENCE_LENGTH = 4096
-GPUS_PER_NODE = 8
 
 
 @dataclass
@@ -103,7 +102,9 @@ class SFTArguments:
     gradient_accumulation_steps: int = field(default=1, metadata={"help": "Gradient accumulation steps."})
 
     compile_model: bool = field(default=True, metadata={"help": "Whether to torch.compile the model."})
-    attn_backend: str = field(default="auto", metadata={"help": "Attention backend: auto, flash_2, flash_3."})
+    attn_backend: Literal["auto", "flash_2", "flash_3"] = field(
+        default="auto", metadata={"help": "Attention backend: auto, flash_2, flash_3."}
+    )
 
     wandb_project: str | None = field(default=None, metadata={"help": "W&B project name."})
     wandb_entity: str | None = field(default=None, metadata={"help": "W&B entity."})
@@ -143,7 +144,7 @@ def _load_dataset_distributed(
     return dataset
 
 
-def _setup_model(args: SFTArguments, device: torch.device):
+def _setup_model(args: SFTArguments):
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     log.info(f"Building OLMo-core model with vocab_size={vocab_size}")
@@ -188,8 +189,6 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     global_rank = get_rank() if is_distributed() else 0
     is_main_process = global_rank == 0
     world_size = get_world_size() if is_distributed() else 1
-    dp_world_size = world_size
-
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
@@ -204,10 +203,10 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = _setup_model(args, device)
+    model, model_config = _setup_model(args)
 
     rank_batch_size_seqs = args.per_device_train_batch_size * args.gradient_accumulation_steps
-    global_batch_size_seqs = rank_batch_size_seqs * dp_world_size
+    global_batch_size_seqs = rank_batch_size_seqs * world_size
 
     collator = TensorDataCollatorWithFlattening(
         return_position_ids=True,
@@ -220,7 +219,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         batch_size=global_batch_size_seqs,
         seed=args.seed,
         dp_rank=global_rank,
-        dp_world_size=dp_world_size,
+        dp_world_size=world_size,
         work_dir=args.output_dir,
         collator=collator,
         device=device,
@@ -231,7 +230,6 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     # but HFDataLoader internally uses it as example count. Override for trainer validation.
     data_loader._global_batch_size = global_batch_size_seqs * args.max_seq_length
 
-    data_loader.reshuffle(epoch=0)
     num_training_steps = len(data_loader) * args.num_train_epochs
     effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
     log.info(
@@ -242,7 +240,8 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
 
     rank_microbatch_size = rank_batch_size_seqs * args.max_seq_length
-    dp_shard_degree = GPUS_PER_NODE if world_size >= GPUS_PER_NODE else world_size
+    gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
+    dp_shard_degree = gpus_per_node if world_size >= gpus_per_node else world_size
 
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp if world_size > dp_shard_degree else DataParallelType.fsdp,
