@@ -13,21 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
+import dataclasses
 
 from open_instruct.utils import ArgumentParserPlus, get_datasets
 
 
-@dataclass
+@dataclasses.dataclass
 class MixDataArguments:
-    """Arguments for mixing datasets."""
-
-    dataset_mixer: dict | None = field(default=None, metadata={"help": "A dictionary of datasets to sample from."})
-    dataset_config_name: str | None = field(default=None, metadata={"help": "The configuration name of the dataset."})
-    dataset_mix_dir: str | None = field(default=None, metadata={"help": "Directory to save the mixed dataset."})
-    save_to_hub: str | None = field(
-        default=None, metadata={"help": "Push the mixed dataset to this HuggingFace Hub repo."}
-    )
+    dataset_mixer: dict | None = None
+    dataset_config_name: str | None = None
+    dataset_mix_dir: str | None = None
+    save_to_hub: str | None = None
 
 
 # Run as module for local imports, e.g.:
