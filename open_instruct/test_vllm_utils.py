@@ -215,7 +215,7 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_calleds, [False, False])
         self.assertEqual(result.request_info.rollout_states, [{}, {}])
 
-    def test_process_completed_request_tolerates_missing_vllm_metric_fields(self):
+    def test_process_completed_request_generation_time(self):
         idx = 201
         epoch = 0
         prompt_id = f"{epoch}_{idx}"
@@ -234,7 +234,6 @@ class TestVllmUtils3(unittest.TestCase):
         mock_request_output.request_id = f"{request_id}_0"
         mock_request_output.outputs = [mock_output]
         mock_request_output.prompt_token_ids = [1, 2, 3]
-        mock_request_output.metrics = object()
 
         request_metadata = {
             request_id: {
@@ -256,7 +255,7 @@ class TestVllmUtils3(unittest.TestCase):
 
         self.assertFalse(is_eval)
         self.assertEqual(result.responses, [[7, 8]])
-        self.assertEqual(result.token_statistics.vllm_sum_generation_time, 1.5)
+        self.assertEqual(result.token_statistics.generation_time, 1.5)
 
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):

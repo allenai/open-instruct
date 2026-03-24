@@ -180,7 +180,7 @@ class TestGrpoFastBase(unittest.TestCase):
             prompt_id=prompt_id,
             start_time=time.perf_counter(),
             token_statistics=TokenStatistics(
-                num_prompt_tokens=10, num_response_tokens=3 * total_responses, thread_generation_time=0.1
+                num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
             ),
             logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
             reward_scores=reward_scores,
@@ -737,7 +737,7 @@ class TestAccumulateInferenceBatchesProgress(unittest.TestCase):
                     token_statistics=TokenStatistics(
                         num_prompt_tokens=10,
                         num_response_tokens=3 * num_samples_per_prompt,
-                        thread_generation_time=0.1,
+                        generation_time=0.1,
                     ),
                     logprobs=[[0.0, 0.0, 0.0] for _ in range(num_samples_per_prompt)],
                     reward_scores=[i / num_samples_per_prompt for i in range(num_samples_per_prompt)],

@@ -59,7 +59,6 @@ from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
-from vllm.v1.metrics.stats import RequestStateStats
 
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
@@ -141,7 +140,6 @@ class RequestOutput:
     prompt_token_ids: list[int]
     outputs: list[CompletionOutput]
     finished: bool = True
-    metrics: RequestStateStats | None = None
 
 
 def process_tool_tokens(
@@ -331,19 +329,6 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_calleds = [False] * len(response_ids)
         tool_call_stats = [[] for _ in response_ids]
 
-    thread_generation_time = current_time - metadata["start_time"]
-    vllm_sum_generation_time = 0.0
-    found_per_response_metrics = False
-    for out in outs:
-        metrics = getattr(out, "metrics", None)
-        last_token_ts = getattr(metrics, "last_token_ts", None)
-        scheduled_ts = getattr(metrics, "scheduled_ts", None)
-        if last_token_ts is not None and scheduled_ts is not None and last_token_ts > 0 and scheduled_ts > 0:
-            vllm_sum_generation_time += last_token_ts - scheduled_ts
-            found_per_response_metrics = True
-    if not found_per_response_metrics:
-        vllm_sum_generation_time = thread_generation_time * len(response_ids)
-
     result = GenerationResult(
         responses=response_ids,
         finish_reasons=finish_reasons,
@@ -363,8 +348,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
             num_response_tokens=total_generation_tokens,
-            thread_generation_time=thread_generation_time,
-            vllm_sum_generation_time=vllm_sum_generation_time,
+            generation_time=current_time - metadata["start_time"],
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
@@ -1248,7 +1232,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 request_id=sub_request_id,
                 prompt_token_ids=request_metadata["prompt_token_ids"],
                 outputs=[complete_output],
-                metrics=getattr(output, "metrics", None),
             ),
             "use_tools": bool(actor.pools),
         }
@@ -1327,26 +1310,12 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
-    # Ensure we use bundles on the same node where possible if tp>1.
-    # In hybrid single_gpu_mode, the incoming placement group can have fewer bundles
-    # than vLLM engines (e.g., one bundle with 2 GPUs and 2+ engines at 0.5 GPU each),
-    # so we may need to reuse bundle indices.
+    # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
-    if not bundle_indices_list:
-        raise ValueError("Placement group has no bundles available for vLLM engine scheduling.")
 
     for i in range(num_engines):
         if use_hybrid_engine:
-            if tensor_parallel_size == 1:
-                # Reuse bundles round-robin when engines outnumber bundles.
-                bundle_indices = [bundle_indices_list[i % len(bundle_indices_list)]]
-            else:
-                bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
-                if len(bundle_indices) < tensor_parallel_size:
-                    raise ValueError(
-                        "Insufficient placement-group bundles for requested vLLM tensor parallelism in hybrid mode. "
-                        f"Need {num_engines * tensor_parallel_size}, found {len(bundle_indices_list)}."
-                    )
+            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
         else:
             bundle_indices = [bundle_indices_list[i]]
 

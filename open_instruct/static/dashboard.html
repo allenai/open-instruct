@@ -152,14 +152,9 @@
                                 <div class="token-rate">Moving avg: last ${timing.training_step_count} of 100 steps</div>
                             </div>
                             <div class="token-stat">
-                                <div class="token-label">Avg vLLM Generation Time</div>
-                                <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_vllm_batch_generation_time)}</div>
-                                <div class="token-rate">Moving avg: last ${timing.vllm_batch_generation_count} of 100 batches</div>
-                            </div>
-                            <div class="token-stat">
-                                <div class="token-label">Avg Thread Generation Time</div>
-                                <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_thread_batch_generation_time)}</div>
-                                <div class="token-rate">Moving avg: last ${timing.thread_batch_generation_count} of 100 batches</div>
+                                <div class="token-label">Avg Batch Generation Time</div>
+                                <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_batch_generation_time)}</div>
+                                <div class="token-rate">Moving avg: last ${timing.batch_generation_count} of 100 batches</div>
                             </div>
                         </div>
                     </div>

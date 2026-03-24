@@ -109,10 +109,8 @@ class ExperimentConfig:
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
     # Ray
-    colocate_train_inference_mode: bool = False
-    """Whether to colocate trainer and vLLM inference actors on the same GPUs (mostly for debugging)."""
     single_gpu_mode: bool = False
-    """Deprecated alias for `colocate_train_inference_mode` (kept for backwards compatibility)."""
+    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
@@ -215,10 +213,6 @@ class ExperimentConfig:
     """Timeout in minutes for final local eval result collection. Defaults to 2 hours."""
 
     def __post_init__(self):
-        # Backwards-compatible alias handling:
-        # `--single_gpu_mode` and `--colocate_train_inference_mode` are equivalent.
-        self.colocate_train_inference_mode = self.colocate_train_inference_mode or self.single_gpu_mode
-        self.single_gpu_mode = self.colocate_train_inference_mode
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
