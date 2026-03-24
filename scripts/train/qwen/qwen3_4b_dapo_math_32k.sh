@@ -79,4 +79,4 @@ source configs/beaker_configs/ray_node_setup.sh \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy True \
     --keep_last_n_checkpoints -1 \
-    --push_to_hub False $@
+    --push_to_hub False "$@"

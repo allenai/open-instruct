@@ -148,8 +148,6 @@ def _setup_model(args: SFTArguments):
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     log.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
-
     attn_backend = args.attn_backend
     if attn_backend == "auto":
         device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
@@ -158,7 +156,7 @@ def _setup_model(args: SFTArguments):
         log.info(f"Auto-detected attn_backend={attn_backend} for device: {device_name}")
 
     model_config = olmo_core_utils.get_transformer_config(
-        config_name_for_lookup, vocab_size, attn_backend=attn_backend
+        args.config_name or args.model_name_or_path, vocab_size, attn_backend=attn_backend
     )
     model = model_config.build(init_device="cpu")
 
@@ -236,12 +234,10 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         f"Total training steps: {effective_steps} (data_loader len={len(data_loader)}, epochs={args.num_train_epochs})"
     )
 
-    warmup_steps = int(effective_steps * args.warmup_ratio)
-    scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+    scheduler = LinearWithWarmup(warmup_steps=int(effective_steps * args.warmup_ratio), alpha_f=0.0)
 
     rank_microbatch_size = rank_batch_size_seqs * args.max_seq_length
-    gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
-    dp_shard_degree = gpus_per_node if world_size >= gpus_per_node else world_size
+    dp_shard_degree = min(world_size, torch.cuda.device_count() if torch.cuda.is_available() else 1)
 
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp if world_size > dp_shard_degree else DataParallelType.fsdp,

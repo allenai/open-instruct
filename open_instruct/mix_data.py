@@ -33,7 +33,7 @@ class MixDataArguments:
 
 
 def main() -> None:
-    parser = ArgumentParserPlus([MixDataArguments])
+    parser = ArgumentParserPlus((MixDataArguments,))
     (args,) = parser.parse()
     assert isinstance(args, MixDataArguments)
 
