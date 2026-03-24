@@ -43,6 +43,7 @@ with contextlib.suppress(Exception):
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
 import asyncio
@@ -60,7 +61,6 @@ from typing import Any
 
 import backoff
 import datasets
-import huggingface_hub
 import numpy as np
 import pandas as pd
 import ray
@@ -70,23 +70,20 @@ import torch.utils
 import torch.utils.data
 import wandb
 from datasets import Dataset
-from einops import rearrange
-from fla.layers import utils as fla_layer_utils
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
-from transformers import initialization as transformers_init
+from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from transformers.models.olmo_hybrid import modeling_olmo_hybrid
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
@@ -94,6 +91,11 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
+from open_instruct.environments.base import BaseEnvConfig, TextRLEnvironment
+from open_instruct.environments.pool import EnvironmentPool
+from open_instruct.environments.tools.parsers import create_tool_parser
+from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
+from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -106,9 +108,6 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tools.parsers import create_tool_parser
-from open_instruct.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -134,123 +133,13 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-WEIGHT_SYNC_TIMEOUT_S = 1200.0
+WEIGHT_SYNC_TIMEOUT_S = 120.0
+EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
-
-
-def _patch_gated_deltanet_cu_seqlens():
-    """Monkey-patch OlmoHybridGatedDeltaNet.forward to pass cu_seqlens to recurrent kernels.
-
-    The transformers implementation doesn't pass cu_seqlens, so recurrent state leaks
-    across packed sequence boundaries. The FLA kernels (chunk_gated_delta_rule and
-    ShortConvolution) already support cu_seqlens — we just need to derive it from
-    the attention mask and pass it through, matching what olmo-core does.
-    """
-    _original_forward = modeling_olmo_hybrid.OlmoHybridGatedDeltaNet.forward
-
-    def _cu_seqlens_from_packed_mask(attention_mask: torch.Tensor) -> torch.Tensor:
-        """Derive cu_seqlens from a packed attention mask with unique sequence IDs.
-
-        For a mask like [1,1,1,2,2,0,0], returns cu_seqlens [0, 3, 5] (ignoring padding).
-        For a standard 0/1 mask, returns cu_seqlens [0, num_ones].
-        """
-        flat = attention_mask.flatten()
-        non_pad = flat > 0
-        non_pad_ids = flat[non_pad]
-        if len(non_pad_ids) == 0:
-            return torch.tensor([0], dtype=torch.int32, device=attention_mask.device)
-        boundaries = torch.where(non_pad_ids[1:] != non_pad_ids[:-1])[0] + 1
-        cu_seqlens = torch.zeros(len(boundaries) + 2, dtype=torch.int32, device=attention_mask.device)
-        cu_seqlens[1:-1] = boundaries
-        cu_seqlens[-1] = len(non_pad_ids)
-        return cu_seqlens
-
-    def _forward_with_cu_seqlens(
-        self, hidden_states: torch.Tensor, cache_params=None, cache_position=None, attention_mask=None, **kwargs
-    ) -> torch.Tensor:
-        batch_size, seq_len, _ = hidden_states.shape
-
-        use_cache = cache_params is not None
-        use_precomputed = use_cache and getattr(cache_params, "has_previous_state", False) and seq_len == 1
-
-        # For single-token decoding or no attention mask, fall back to original.
-        if use_precomputed or attention_mask is None:
-            return _original_forward(self, hidden_states, cache_params, cache_position, attention_mask, **kwargs)
-
-        # Derive cu_seqlens and unpad hidden_states (matching olmo-core approach).
-        cu_seqlens = _cu_seqlens_from_packed_mask(attention_mask)
-        indices = torch.nonzero(attention_mask.flatten() > 0, as_tuple=False).flatten()
-        hidden_states = fla_layer_utils.index_first_axis(
-            rearrange(hidden_states, "b s ... -> (b s) ..."), indices
-        ).unsqueeze(0)
-
-        conv_state_q = cache_params.conv_states_q[self.layer_idx] if cache_params else None
-        conv_state_k = cache_params.conv_states_k[self.layer_idx] if cache_params else None
-        conv_state_v = cache_params.conv_states_v[self.layer_idx] if cache_params else None
-        recurrent_state = cache_params.recurrent_states[self.layer_idx] if cache_params else None
-
-        q = self.q_proj(hidden_states)
-        k = self.k_proj(hidden_states)
-        v = self.v_proj(hidden_states)
-
-        q, new_conv_state_q = self.q_conv1d(q, cache=conv_state_q, output_final_state=use_cache, cu_seqlens=cu_seqlens)
-        k, new_conv_state_k = self.k_conv1d(k, cache=conv_state_k, output_final_state=use_cache, cu_seqlens=cu_seqlens)
-        v, new_conv_state_v = self.v_conv1d(v, cache=conv_state_v, output_final_state=use_cache, cu_seqlens=cu_seqlens)
-
-        if cache_params is not None:
-            cache_params.conv_states_q[self.layer_idx] = new_conv_state_q
-            cache_params.conv_states_k[self.layer_idx] = new_conv_state_k
-            cache_params.conv_states_v[self.layer_idx] = new_conv_state_v
-
-        unpadded_len = hidden_states.shape[1]
-        q = q.view(1, unpadded_len, -1, self.head_k_dim)
-        k = k.view(1, unpadded_len, -1, self.head_k_dim)
-        v = v.view(1, unpadded_len, -1, self.head_v_dim)
-
-        if self.num_v_heads > self.num_k_heads:
-            expand_ratio = self.num_v_heads // self.num_k_heads
-            q = q.repeat_interleave(expand_ratio, dim=2)
-            k = k.repeat_interleave(expand_ratio, dim=2)
-
-        beta = self.b_proj(hidden_states).sigmoid()
-        if self.allow_neg_eigval:
-            beta = beta * 2.0
-
-        g = -self.A_log.float().exp() * torch.nn.functional.softplus(self.a_proj(hidden_states).float() + self.dt_bias)
-
-        output, new_recurrent_state = self.chunk_gated_delta_rule(
-            q,
-            k,
-            v,
-            g=g,
-            beta=beta,
-            initial_state=recurrent_state,
-            output_final_state=use_cache,
-            cu_seqlens=cu_seqlens,
-            use_qk_l2norm_in_kernel=True,
-        )
-
-        if cache_params is not None:
-            cache_params.recurrent_states[self.layer_idx] = new_recurrent_state
-
-        gate = self.g_proj(hidden_states)
-        output = output.reshape(-1, self.head_v_dim)
-        gate = gate.reshape(-1, self.head_v_dim)
-        output = self.o_norm(output, gate)
-        output = output.reshape(1, unpadded_len, -1)
-        output = self.o_proj(output)
-
-        # Re-pad output to original shape.
-        output = fla_layer_utils.pad_input(output.squeeze(0), indices, batch_size, seq_len)
-
-        return output
-
-    modeling_olmo_hybrid.OlmoHybridGatedDeltaNet.forward = _forward_with_cu_seqlens
-    logger.info("Patched OlmoHybridGatedDeltaNet.forward to pass cu_seqlens for packed sequences")
 
 
 @ray.remote(num_gpus=1)
@@ -362,28 +251,6 @@ class PolicyTrainerRayProcess(RayProcess):
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-        # Workaround: olmo_hybrid's _init_weights accesses Embedding weights by
-        # padding_idx, which crashes under ZeRO-3 where weights are partitioned (size 0
-        # on non-owning ranks). Monkey-patch until fixed upstream:
-        # https://github.com/yanhong-lbh/transformers/commit/01f141b902a489c481d13f09e217dca657309a73
-        _model_config = AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
-        if _model_config.model_type == "olmo_hybrid":
-            _original_init_weights = modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights
-
-            def _init_weights_zero3_safe(self, module):
-                if (
-                    isinstance(module, torch.nn.Embedding)
-                    and module.padding_idx is not None
-                    and module.padding_idx >= module.weight.shape[0]
-                ):
-                    transformers_init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
-                    return
-                _original_init_weights(self, module)
-
-            modeling_olmo_hybrid.OlmoHybridPreTrainedModel._init_weights = _init_weights_zero3_safe
-
-            _patch_gated_deltanet_cu_seqlens()
-
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -581,7 +448,6 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
-            deepspeed_stage=self.args.deepspeed_stage,
             gather_whole_model=self.args.gather_whole_model,
         )
 
@@ -709,6 +575,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
+        grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
@@ -770,14 +637,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
                         )
                         self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
-
-                        # Split metrics by packed vs unpacked sequences.
-                        attn_ids = data_BT.attention_masks[i]
-                        num_seqs = (attn_ids.unique() > 0).sum().item()
-                        is_packed = num_seqs > 1
-                        tag = "packed" if is_packed else "unpacked"
-                        self.local_metrics[f"debug/vllm_diff_mean_{tag}"] = float(mean_diff)
-                        self.local_metrics[f"debug/vllm_reverse_kl_{tag}"] = float(mean_reverse_kl)
 
                     new_logprobs_BT = local_logprobs_BT
 
@@ -861,9 +720,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                    # Tell deepspeed whether this backward is the last in the accumulation group.
+                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
-                    if (local_step + 1) % accumulation_steps == 0:
+                    if is_accumulation_boundary:
                         self.model.step()
+                        grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -884,6 +747,7 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -923,17 +787,11 @@ class PolicyTrainerRayProcess(RayProcess):
             # For reference policy, we save just the model weights
             # We can't use save_checkpoint because it would try to save DummyOptim
             # which doesn't have state_dict
-            # Use GatheredParameters to assemble the full ZeRO-3 sharded weights on rank 0
-            # before saving; without this, rank 0's state_dict() only has its local shard.
-            ref_state_dict = {}
-            for k, v in self.ref_policy.module.named_parameters():
-                params_to_fetch = _z3_params_to_fetch([v])
-                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
-                    vv = v.data.cpu()
-                    if self.rank == 0:
-                        ref_state_dict[k] = vv
             if self.rank == 0:
-                torch.save(ref_state_dict, os.path.join(ref_policy_dir, "pytorch_model.bin"))
+                # Only rank 0 saves the model state
+                model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
+                # Save the state dict
+                torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
@@ -1041,7 +899,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
                 stop_strings=streaming_config.stop_strings,
-                gs_bucket_path=args.gs_bucket_path,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,
@@ -1163,7 +1020,7 @@ def validate_configs(
 def setup_runtime_variables(
     args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    tools_config: ToolsConfig,
+    tools_config: EnvsConfig,
 ) -> grpo_utils.ExperimentConfig:
     """Set up runtime variables for the experiment."""
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
@@ -1201,9 +1058,7 @@ def setup_runtime_variables(
 def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     """Setup experiment tracking and seeds."""
     all_configs = {}
-    beaker_config = None
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
+    if (beaker_config := maybe_get_beaker_config()) is not None:
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
 
@@ -1287,7 +1142,6 @@ def setup_datasets(
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
-    train_dataset = train_dataset.shuffle(seed=args.seed)
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
@@ -1305,8 +1159,6 @@ def setup_datasets(
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
-        if streaming_config.shuffle_eval_dataset:
-            eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
         eval_dataset = None
 
@@ -1315,22 +1167,22 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
-    """Create tool actors based on tool configuration using the TOOL_REGISTRY.
+def create_tool_pools(
+    parsed_tools: list[ParsedEnvConfig], pool_size: int
+) -> tuple[dict[str, ray.actor.ActorHandle], list[str]]:
+    """Create an EnvironmentPool for each tool/env in the registry.
 
     Args:
         parsed_tools: List of ParsedTool instances containing name, call_name, and config.
+        pool_size: Number of actors per pool.
 
     Returns:
-        A tuple of (tool_actors, tool_call_names) where:
-        - tool_actors: List of Ray actor handles for the requested tools.
-        - tool_call_names: List of call names for each tool (may differ from input for MCP tools, which decide their own call names).
-
-    Raises:
-        ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
+        A tuple of (pools, tool_call_names) where:
+        - pools: Dict mapping call_name -> EnvironmentPool Ray actor handle.
+        - tool_call_names: List of call names (may differ from input for MCP tools).
     """
-    tool_actors = []
-    tool_call_names = []
+    pools: dict[str, ray.actor.ActorHandle] = {}
+    tool_call_names: list[str] = []
 
     for parsed_tool in parsed_tools:
         if parsed_tool.name not in TOOL_REGISTRY:
@@ -1338,15 +1190,12 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
             raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
         tool_config_class = TOOL_REGISTRY[parsed_tool.name]
-        # Build config from dictionary
         try:
             config = tool_config_class(**parsed_tool.config)
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
-        # Collect (config, call_name, tool_class) tuples to process
-        # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
-        configs_to_create: list[tuple[BaseToolConfig, str, type]] = []
+        configs_to_create: list[tuple[BaseEnvConfig, str, type]] = []
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
             logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
@@ -1360,16 +1209,35 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
-            _kwarg_dict = asdict(cfg) | {"call_name": call_name}
-            # max_concurrency is only needed for Ray actor options, not passed to the tool class
-            tool_actors.append(
-                ray.remote(tool_class)
-                .options(max_concurrency=_kwarg_dict.pop("max_concurrency"))
-                .remote(**_kwarg_dict)
-            )
+            kwargs = asdict(cfg) | {"call_name": call_name}
+            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
-    return tool_actors, tool_call_names
+    # Wait for all pools to initialize
+    if pools:
+        ray.get([pool.size.remote() for pool in pools.values()])
+
+    return pools, tool_call_names
+
+
+def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.ActorHandle]) -> EnvConfig:
+    """Build canonical base env config from active pools.
+
+    Includes auto-discovered dataset targets so text env routing metadata
+    (e.g., is_text_env) is available even when --tools is empty.
+    """
+    entries: dict[str, EnvConfigEntry] = {}
+    registry_name_by_call_name = {parsed.call_name: parsed.name for parsed in tools_config._parsed_tools}
+
+    for pool_name in sorted(pools):
+        registry_name = registry_name_by_call_name.get(pool_name, pool_name)
+        config_cls = TOOL_REGISTRY.get(registry_name)
+        if config_cls is None:
+            continue
+        entries[pool_name] = EnvConfigEntry(
+            env_name=pool_name, is_text_env=issubclass(config_cls.tool_class, TextRLEnvironment)
+        )
+    return EnvConfig(max_steps=tools_config.max_steps, env_configs=entries)
 
 
 def create_model_and_optimizer(
@@ -1388,9 +1256,12 @@ def create_model_and_optimizer(
     eval_dataset,
     reward_config: RewardConfig,
     generation_config,
+    base_env_config: EnvConfig,
     data_prep_actor_state: dict | None = None,
-    tool_actors: list[ray.actor.ActorHandle] | None = None,
-    tools_config: ToolsConfig | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+    tools_config: EnvsConfig | None = None,
+    pools: dict[str, ray.actor.ActorHandle] | None = None,
+    tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1433,6 +1304,7 @@ def create_model_and_optimizer(
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
+        base_env_config=base_env_config,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -1455,7 +1327,7 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # Create vLLM engines with queues
+    # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
@@ -1469,10 +1341,13 @@ def create_model_and_optimizer(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tool_actors=tool_actors,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
-        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
+        tool_definitions=tool_definitions,
+        tool_stop_sequences=tool_stop_sequences,
+        max_steps=tools_config.max_steps if tools_config else 5,
+        per_turn_max_tokens=tools_config.per_turn_max_tokens if tools_config else None,
         mask_tool_use=streaming_config.mask_tool_use,
+        pools=pools,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -1481,8 +1356,6 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        vllm_dtype=vllm_config.vllm_dtype,
-        trust_remote_code=tc.trust_remote_code,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -1495,10 +1368,10 @@ def create_model_and_optimizer(
             // vllm_config.vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
-            nodes_needed = (
+            nodes_needed = math.ceil(
                 streaming_config.num_unique_prompts_rollout
                 * streaming_config.num_samples_per_prompt_rollout
-                // kv_cache_max_concurrency
+                / kv_cache_max_concurrency
             )
             logger.warning(
                 f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
@@ -1529,7 +1402,9 @@ def create_model_and_optimizer(
 
 
 def create_generation_configs(
-    args: grpo_utils.ExperimentConfig, streaming_config: data_loader_lib.StreamingDataLoaderConfig
+    args: grpo_utils.ExperimentConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
 ):
     """Create generation configs for training and evaluation."""
     generation_config = vllm_utils.SamplingConfig(
@@ -1553,6 +1428,7 @@ def weight_sync_thread(
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
+    inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
@@ -1578,12 +1454,24 @@ def weight_sync_thread(
             # First get the futures
             weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
-            # Wait for all weight updates to complete and collect individual timings
-            _, actor_sync_times = ray_get_with_progress(
+            # Wait for all trainer-side broadcasts to finish and collect timing stats.
+            # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
+            weight_broadcast_results, actor_sync_times = ray_get_with_progress(
                 weight_broadcast_futures,
                 desc="[Weight Sync Thread] Waiting for weight updates to complete",
                 enable=args.verbose,
             )
+
+            if not inflight_updates:
+                # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+                # Without waiting here, should_stop may flip to False while updates are still queued.
+                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+                if engine_update_refs:
+                    ray_get_with_progress(
+                        engine_update_refs,
+                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
+                        enable=False,
+                    )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1717,9 +1605,6 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
-    if "time/weight_sync" in metrics and step_time > 0:
-        metrics["time/weight_sync_pct_total"] = metrics["time/weight_sync"] / step_time
-
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
@@ -1744,7 +1629,9 @@ def maybe_save_checkpoint(
     wandb_url: str,
 ) -> float:
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (
+        (args.eval_on_step_0 and training_step == 1) or (training_step % args.save_freq == 0 and training_step > 1)
+    ):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
@@ -1776,6 +1663,7 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
+    base_env_config: EnvConfig,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1799,6 +1687,7 @@ def maybe_evaluate(
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -1974,7 +1863,10 @@ def run_training(
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
     checkpoint_state=None,
+    base_env_config: EnvConfig | None = None,
 ):
+    if base_env_config is None:
+        base_env_config = EnvConfig()
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
@@ -2000,6 +1892,7 @@ def run_training(
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
+        streaming_config.inflight_updates,
     )
 
     """Run the main training loop with worker threads."""
@@ -2038,14 +1931,11 @@ def run_training(
             dp_world_size=1,
             work_dir=args.output_dir,
             automatic_reshuffle=False,
-            collator=lambda x: x[0],
+            collator=data_loader_lib.single_example_collator,
         )
     else:
         eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
-    logger.info(
-        f"[DEBUG] BEAKER_JOB_ID in env: {'BEAKER_JOB_ID' in os.environ}, BEAKER_WORKLOAD_ID: {os.environ.get('BEAKER_WORKLOAD_ID', 'NOT SET')}"
-    )
     maybe_update_beaker_description(
         current_step=resume_training_step - 1,
         total_steps=args.num_training_steps,
@@ -2062,9 +1952,12 @@ def run_training(
         health_check_time = time.perf_counter() - health_check_start
 
         if (
-            training_step % args.local_eval_every == 0
-            and eval_data_loader is not None
-            and (args.eval_on_step_0 or training_step > 1)
+            eval_data_loader is not None
+            and args.local_eval_every > 0
+            and (
+                (args.eval_on_step_0 and training_step == 1)
+                or (training_step % args.local_eval_every == 0 and training_step > 1)
+            )
         ):
             if not last_eval_collected:
                 logger.warning(
@@ -2072,7 +1965,15 @@ def run_training(
                     "Consider increasing local_eval_every."
                 )
             for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+                add_prompt_to_generator(
+                    eval_example,
+                    training_step,
+                    prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                    base_env_config=base_env_config,
+                )
+            eval_data_loader.reset()
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2147,17 +2048,16 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
+            base_env_config,
             actor_manager,
         )
 
-        logger.info(f"[DEBUG] About to update Beaker description for step {training_step}")
         maybe_update_beaker_description(
             current_step=training_step,
             total_steps=args.num_training_steps,
             start_time=training_start_time,
             wandb_url=wandb_url,
         )
-        logger.info(f"[DEBUG] Beaker description update completed for step {training_step}")
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
@@ -2165,32 +2065,143 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
-    """Initialize tool actors and get tool definitions and stop sequences.
+def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
+    """Scan datasets for tool names referenced in 'tools' and 'env_config' columns."""
+    tool_names: set[str] = set()
 
-    Args:
-        tools_config: Configuration for tools.
-        tokenizer: Tokenizer for the model.
+    if len(dataset_mixer_list_splits) == 1:
+        splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    else:
+        splits = dataset_mixer_list_splits
+
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        split = splits[i // 2]
+        ds = datasets.load_dataset(dataset_name, split=split)
+        if TOOLS_COLUMN_KEY in ds.column_names:
+            for tools in ds[TOOLS_COLUMN_KEY]:
+                if tools:
+                    tool_names.update(t for t in tools if t)
+        if ENV_CONFIG_KEY in ds.column_names:
+            for row in ds:
+                env_cfg = row.get(ENV_CONFIG_KEY)
+                env_cfgs = None
+                if isinstance(env_cfg, dict):
+                    if env_cfg.get("env_name"):
+                        tool_names.add(env_cfg["env_name"])
+                    env_cfgs = env_cfg.get("env_configs")
+                elif isinstance(env_cfg, list):
+                    env_cfgs = env_cfg
+                if isinstance(env_cfgs, list):
+                    for cfg in env_cfgs:
+                        if isinstance(cfg, dict) and cfg.get("env_name"):
+                            tool_names.add(cfg["env_name"])
+
+    return tool_names
+
+
+def initialize_tools_and_envs(
+    tools_config: EnvsConfig,
+    tokenizer,
+    pool_size: int,
+    dataset_mixer_list: list[str] | None = None,
+    dataset_mixer_list_splits: list[str] | None = None,
+) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str]]:
+    """Initialize all tool/env pools and collect tool definitions.
+
+    Creates an EnvironmentPool for each tool specified via --tools CLI.
+    Also scans datasets for tool names and auto-creates pools for any
+    that exist in TOOL_REGISTRY but weren't in --tools.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences, tool_call_names).
-        Note: tool_call_names may differ from tools_config.tool_call_names if MCP
-        tools were auto-expanded.
+        Tuple of (pools, tool_definitions, stop_sequences).
     """
-    tool_actors, tool_call_names = create_tools(tools_config._parsed_tools)
-    tool_definitions = (
-        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
-    )
+    pools, tool_call_names = create_tool_pools(tools_config._parsed_tools, pool_size)
 
-    # Create parser temporarily to get stop sequences for generation config
-    # The actual parser used during generation will be created inside vLLM actors
-    stop_sequences = []
-    if tool_actors:
+    # Collect tool definitions from CLI-specified pools so we know inner tool names
+    # (e.g., GenericSandboxEnv exposes "execute_bash" and "str_replace_editor").
+    tool_definitions: list[dict[str, Any]] = []
+    for pool in pools.values():
+        actor = ray.get(pool.acquire.remote())
+        defs = ray.get(actor.get_tool_definitions.remote())
+        pool.release.remote(actor)
+        tool_definitions.extend(defs)
+    known_tool_names = set(tool_call_names) | {d["function"]["name"] for d in tool_definitions}
+
+    # Auto-discover tools from datasets and create pools for any in TOOL_REGISTRY but not in --tools
+    if dataset_mixer_list and dataset_mixer_list_splits:
+        dataset_tool_names = _discover_tools_from_datasets(dataset_mixer_list, dataset_mixer_list_splits)
+        for name in sorted(dataset_tool_names):
+            if name in pools or name in known_tool_names:
+                continue
+            if name not in TOOL_REGISTRY:
+                continue
+            logger.info(f"Auto-creating pool for '{name}' (discovered from dataset)")
+            config_cls = TOOL_REGISTRY[name]
+            config = config_cls()
+            tool_cls = config_cls.tool_class
+            call_name = getattr(tool_cls, "call_name", name)
+            kwargs = asdict(config) | {"call_name": call_name}
+            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_cls, **kwargs)
+            tool_call_names.append(call_name)
+            # Collect tool definitions from newly created pool
+            new_actor = ray.get(pools[call_name].acquire.remote())
+            new_defs = ray.get(new_actor.get_tool_definitions.remote())
+            pools[call_name].release.remote(new_actor)
+            tool_definitions.extend(new_defs)
+            known_tool_names.add(call_name)
+            known_tool_names.update(d["function"]["name"] for d in new_defs)
+        extra = dataset_tool_names - known_tool_names - set(TOOL_REGISTRY.keys())
+        if extra:
+            logger.warning(f"Dataset references tools not in TOOL_REGISTRY (ignored): {sorted(extra)}")
+        # Wait for any newly created pools
+        ray.get([pool.size.remote() for pool in pools.values()])
+
+    # Collect tool definitions and stop strings from all pools (batched for parallelism)
+    acquire_refs = [pool.acquire.remote() for pool in pools.values()]
+    actors = ray.get(acquire_refs)
+
+    def_refs = [actor.get_tool_definitions.remote() for actor in actors]
+    stop_refs = (
+        [actor.get_stop_strings.remote() for actor in actors] if tools_config.tool_parser_type == "dr_tulu" else []
+    )
+    all_results = ray.get(def_refs + stop_refs)
+    def_results = all_results[: len(def_refs)]
+    stop_results = all_results[len(def_refs) :]
+
+    tool_definitions: list[dict[str, Any]] = []
+    for defs in def_results:
+        tool_definitions.extend(defs)
+
+    # Use tool definition names (what the model actually calls) rather than pool keys.
+    # For simple Tools, pool key == function name. For stateful envs (e.g., GenericSandboxEnv),
+    # the pool key is the env name but function names are the inner tools (execute_bash, etc.).
+    tool_def_names = [d["function"]["name"] for d in tool_definitions]
+    tools_config.tool_call_names = list(dict.fromkeys(tool_def_names))
+
+    tool_stop_strings: list[str] = []
+    for stop_strings in stop_results:
+        if stop_strings:
+            tool_stop_strings.extend(stop_strings)
+
+    for pool, actor in zip(pools.values(), actors):
+        pool.release.remote(actor)
+
+    stop_sequences: list[str] = []
+    if pools:
         stop_sequences = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
+            parser_type=tools_config.tool_parser_type,
+            tokenizer=tokenizer,
+            tool_definitions=tool_definitions,
+            stop_sequences=tool_stop_strings,
         ).stop_sequences
 
-    return tool_actors, tool_definitions, stop_sequences, tool_call_names
+    logger.info(
+        f"Initialized {len(pools)} tool pools (size={pool_size}). "
+        f"Tool definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
+
+    return pools, tool_definitions, stop_sequences
 
 
 def main(
@@ -2199,17 +2210,9 @@ def main(
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
-    tools_config: ToolsConfig,
+    tools_config: EnvsConfig,
 ):
-    # Pre-download model to shared HF cache so parallel processes don't all hit HF API.
-    # After download, set offline mode so transformers doesn't make API calls (e.g.
-    # model_info() inside AutoTokenizer which triggers 429 rate limits).
-    huggingface_hub.snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
-    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
-        huggingface_hub.snapshot_download(tc.tokenizer_name_or_path)
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    logger.info("Model and tokenizer cached in shared HF cache; switching to offline mode.")
-
+    utils.configure_hf_hub_retry()
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
@@ -2222,14 +2225,25 @@ def main(
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
-
-    tool_actors, tool_definitions, tool_stop_sequences, tool_call_names = initialize_tools(tools_config, tokenizer)
-    logger.info(
-        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    ray.init(
+        runtime_env={
+            "excludes": [".git/"],
+            "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
+        }
     )
-    # Update tools_config with expanded tool call names (for MCP auto-expansion)
-    tools_config.tool_call_names = tool_call_names
+
+    pool_size = tools_config.pool_size
+    if pool_size is None:
+        pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    logger.info(f"Pool size per tool: {pool_size}")
+
+    pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
+        tools_config,
+        tokenizer,
+        pool_size=pool_size,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
+    )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
@@ -2254,6 +2268,10 @@ def main(
     if args.cache_dataset_only:
         return
 
+    utils.ensure_hf_repo_cached(model_config.model_name_or_path, revision=model_config.model_revision)
+    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+        utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
+
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Create Ray queues.
@@ -2277,10 +2295,11 @@ def main(
         only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
+        reward_aggregator=streaming_config.reward_aggregator,
     )
 
     # AFTER potentially adding tool stop sequences, create generation configs
-    generation_configs = create_generation_configs(args, streaming_config)
+    generation_configs = create_generation_configs(args, streaming_config, vllm_config)
 
     checkpoint_state = None
     data_prep_actor_state = None
@@ -2295,6 +2314,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
+    base_env_config = build_base_env_config(tools_config, pools)
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2312,9 +2332,12 @@ def main(
             eval_dataset,
             reward_config,
             generation_configs["train"],
+            base_env_config,
             data_prep_actor_state,
-            tool_actors,
+            tool_definitions,
             tools_config,
+            pools,
+            tool_stop_sequences,
         )
     )
 
@@ -2351,6 +2374,7 @@ def main(
             actor_manager,
             model_dims,
             checkpoint_state,
+            base_env_config,
         )
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
@@ -2392,7 +2416,7 @@ if __name__ == "__main__":
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
-            ToolsConfig,
+            EnvsConfig,
         )
     )
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
@@ -2403,6 +2427,6 @@ if __name__ == "__main__":
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
-    assert isinstance(tools_config, ToolsConfig)
+    assert isinstance(tools_config, EnvsConfig)
 
     main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)

@@ -44,7 +44,6 @@ The main things we are looking for are:
 """
 
 import copy
-import functools
 import hashlib
 import json
 import multiprocessing
@@ -905,9 +904,7 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
-        tokenizer.apply_chat_template = functools.partial(tokenizer.apply_chat_template, return_dict=False)
-        return tokenizer
+        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
@@ -936,11 +933,51 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 
 TOOLS_COLUMN_KEY = "tools"
+ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
-# v3: Fixed apply_chat_template to use return_dict=False for transformers v5 compat.
-DATASET_CACHE_VERSION = "v3"
+# to invalidate old caches. v5: Normalized env_config into canonical payloads in preprocessing.
+DATASET_CACHE_VERSION = "v5"
+
+
+def _normalize_env_config_column(row: dict[str, Any]) -> None:
+    """Normalize row-level env_config to canonical dict form.
+
+    We turn dict-only or list-only configs into the same form.
+    """
+    env_config = row.get(ENV_CONFIG_KEY)
+    if env_config is None:
+        return
+
+    if isinstance(env_config, list):
+        row[ENV_CONFIG_KEY] = {"env_configs": [dict(cfg) for cfg in env_config]}
+        return
+
+    if not isinstance(env_config, dict):
+        raise TypeError(f"{ENV_CONFIG_KEY} must be a dict, list, or None, got {type(env_config).__name__}")
+
+    if "env_configs" in env_config:
+        normalized = dict(env_config)
+        normalized["env_configs"] = [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    if "env_name" in env_config:
+        single_env = dict(env_config)
+        max_steps = single_env.pop("max_steps", None)
+        normalized: dict[str, Any] = {"env_configs": [single_env]}
+        if max_steps is not None:
+            normalized["max_steps"] = max_steps
+        row[ENV_CONFIG_KEY] = normalized
+        return
+
+    row[ENV_CONFIG_KEY] = {"env_configs": []}
+
+
+def _normalize_env_config_row(row: dict[str, Any]) -> dict[str, Any]:
+    """HF map wrapper for env_config normalization."""
+    _normalize_env_config_column(row)
+    return row
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1021,8 +1058,8 @@ def sft_tokenize_v1(
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1036,8 +1073,8 @@ def sft_tokenize_mask_out_prompt_v1(
     """mask out the prompt tokens by manipulating labels"""
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
@@ -1213,15 +1250,15 @@ def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     prompt = row["chosen"][:-1]
 
     # Tokenize prompt
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
 
     # Tokenize chosen completion
-    row[CHOSEN_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["chosen"], return_dict=False)
+    row[CHOSEN_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["chosen"])
     row[CHOSEN_ATTENTION_MASK_KEY] = [1] * len(row[CHOSEN_INPUT_IDS_KEY])
 
     # Tokenize rejected completion
-    row[REJECTED_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["rejected"], return_dict=False)
+    row[REJECTED_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["rejected"])
     row[REJECTED_ATTENTION_MASK_KEY] = [1] * len(row[REJECTED_INPUT_IDS_KEY])
 
     return row
@@ -1301,16 +1338,6 @@ def preference_tulu_tokenize_and_truncate_v1_2(
         raise ValueError("chosen messages field is empty.")
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
-    for messages in (chosen_messages, rejected_messages):
-        if any(m.get("content") is None for m in messages):
-            return {
-                CHOSEN_INPUT_IDS_KEY: [],
-                CHOSEN_LABELS_KEY: [],
-                CHOSEN_ATTENTION_MASK_KEY: [],
-                REJECTED_INPUT_IDS_KEY: [],
-                REJECTED_LABELS_KEY: [],
-                REJECTED_ATTENTION_MASK_KEY: [],
-            }
 
     chosen_encoded = last_turn_tulu_tokenize_and_truncate_v1(
         {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
@@ -1366,9 +1393,8 @@ def rlvr_tokenize_v1(
         prompt,
         add_generation_prompt=True,
         tools=tools_for_template,  # type: ignore[arg-type]
-        return_dict=False,
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1387,8 +1413,8 @@ def rlvr_tokenize_v2(
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough
     if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
@@ -1418,6 +1444,27 @@ def rlvr_tokenize_v2(
     return row
 
 
+def _resolve_tools_for_sample(
+    row: dict[str, Any], tool_definitions: list[dict[str, Any]] | None, pass_tools: bool
+) -> list[dict[str, Any]] | None:
+    """Resolve which tool definitions to inject into this sample's prompt.
+
+    Filters global tool_definitions by per-sample active_tools column.
+    """
+    if not pass_tools or not tool_definitions:
+        return None
+
+    sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+    if sample_active_tools is not None:
+        known_names = {t.get("function", {}).get("name") for t in tool_definitions}
+        unknown = set(sample_active_tools) - known_names
+        if unknown:
+            logger.warning(f"Sample references unknown tools: {sorted(unknown)}. Known: {sorted(known_names)}")
+        filtered = [t for t in tool_definitions if t.get("function", {}).get("name") in sample_active_tools]
+        return filtered or None
+    return tool_definitions
+
+
 def rlvr_tokenize_v3(
     row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1439,22 +1486,12 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    tools_for_template: list[dict[str, Any]] | None = None
-    if pass_tools_to_chat_template and tool_definitions:
-        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        if sample_active_tools is not None:
-            active_tool_names = set(sample_active_tools)
-            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            if filtered_tools:
-                tools_for_template = filtered_tools
-        else:
-            tools_for_template = tool_definitions
+    tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
         tools=tools_for_template,  # type: ignore[arg-type]
-        return_dict=False,
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
@@ -1665,6 +1702,21 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         num_proc=num_proc,
         desc=f"Adding dataset source field for {dc.dataset_name}",
     )
+
+    # Normalize env_config before tokenization so downstream always sees canonical payloads.
+    if ENV_CONFIG_KEY in dataset.column_names:
+        env_config_fingerprint = hashlib.sha256(
+            f"{DATASET_CACHE_VERSION}:normalize_env_config:{dataset._fingerprint}".encode()
+        ).hexdigest()[:16]
+        dataset = dataset.map(
+            _normalize_env_config_row,
+            num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+            new_fingerprint=env_config_fingerprint,
+            desc=f"Normalizing {ENV_CONFIG_KEY} for {dc.dataset_name}",
+        )
+
+    tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
+    tc_json = json.dumps(tc_dict, sort_keys=True)
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1674,7 +1726,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}".encode()
         ).hexdigest()[:16]
 
         # perform the transformation
@@ -1682,6 +1734,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
         target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(

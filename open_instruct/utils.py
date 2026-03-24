@@ -54,6 +54,7 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
 import beaker
+import huggingface_hub
 import numpy as np
 import ray
 import requests
@@ -66,13 +67,15 @@ from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
+from requests.adapters import HTTPAdapter
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
+from urllib3.util.retry import Retry
 
 from open_instruct import data_types, logger_utils
-from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
+from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -939,6 +942,32 @@ def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
 
 
+def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
+    """Configure HF Hub HTTP retries with exponential backoff on 429/5xx."""
+
+    def backend_factory() -> requests.Session:
+        session = requests.Session()
+        retries = Retry(total=total, backoff_factor=backoff_factor, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
+
+
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
+    """Download a HF repo if not a local path, then verify it is available locally or in cache."""
+    if os.path.exists(repo_id):
+        return
+    huggingface_hub.snapshot_download(repo_id, revision=revision)
+    result = huggingface_hub.try_to_load_from_cache(repo_id, "config.json", revision=revision)
+    if not isinstance(result, str):
+        raise RuntimeError(
+            f"Model repo '{repo_id}' (revision={revision}) is not available locally or in the HF cache."
+        )
+
+
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1019,6 +1048,8 @@ def get_beaker_whoami() -> str | None:
 
 
 def maybe_get_beaker_config():
+    if not is_beaker_job():
+        return None
     beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
     # fix condition on basic interactive jobs
     if beaker_dataset_ids is None:
@@ -1157,48 +1188,23 @@ def launch_ai2_evals_on_weka(
     training_step: int | None = None,
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
-    gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    beaker_users = get_beaker_whoami()
-
-    if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
-        if beaker_users is not None:
-            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
-        else:
-            gs_saved_path = f"{gs_bucket_path}/{path}"
-        # save the model to the gs bucket first
-        # TODO: use upload_to_gs_bucket instead
-        gs_command = f"""gsutil \\
-            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
-            cp -r {path} \\
-            {gs_saved_path}"""
-        print(f"Copying model to GS bucket with command: {gs_command}")
-        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(f"GS bucket copy stdout:\n{stdout.decode()}")
-        print(f"GS bucket copy stderr:\n{stderr.decode()}")
-        print(f"GS bucket copy process return code: {process.returncode}")
-
-        # Update path to use the GS bucket path for evaluation
-        path = gs_saved_path
-    else:
-        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} {cluster_str} \
+--location {path} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
---skip_oi_evals"""
+--skip_oi_evals \
+--evaluate_on_weka"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
         wandb_run_path = wandb_url_to_run_path(wandb_url)
@@ -1207,8 +1213,6 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if gs_bucket_path is None:
-        command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
@@ -1336,9 +1340,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
         dist.broadcast_object_list(path_list, src=0)
         args.output_dir = path_list[0]
 
-    beaker_config = None
-    if is_beaker_job() and is_main_process:
-        beaker_config = maybe_get_beaker_config()
+    beaker_config = maybe_get_beaker_config() if is_main_process else None
 
     if getattr(args, "push_to_hub", False) and is_main_process:
         if args.hf_repo_id is None:
@@ -2533,9 +2535,9 @@ def send_slack_message(message: str) -> None:
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
 
     beaker_url = get_beaker_experiment_url()
