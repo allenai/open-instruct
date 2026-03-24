@@ -1052,12 +1052,19 @@ def setup_runtime_variables(
     return args
 
 
-def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(
+    args: grpo_utils.ExperimentConfig,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+):
     """Setup experiment tracking and seeds."""
     all_configs = {}
     if (beaker_config := maybe_get_beaker_config()) is not None:
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
+    all_configs.update(**asdict(vllm_config))
 
     wandb_url = None
     if args.with_tracking:
@@ -1065,6 +1072,7 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
+            group=args.wandb_group_name,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
@@ -2219,7 +2227,7 @@ def main(
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, streaming_config, vllm_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(

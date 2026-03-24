@@ -40,6 +40,8 @@ CACHE_EXCLUDED_ARGS = {
     "--checkpoint_state_dir": True,
     "--gs_checkpoint_state_dir": True,
 }
+WANDB_TAG_MAX_LENGTH = 64
+WANDB_LENGTH_CHECKED_ARGS = ("--exp_name",)
 
 
 # ----------------------------------------------------------------------
@@ -71,6 +73,27 @@ def build_command_without_args(command, args_to_remove):
         result.append(item)
 
     return result
+
+
+def validate_wandb_tag_lengths(commands: list[list[str]]) -> None:
+    """Fail fast if any wandb-relevant identifier exceeds the tag length limit."""
+    for command_idx, command in enumerate(commands):
+        for idx, item in enumerate(command):
+            if item in WANDB_LENGTH_CHECKED_ARGS and idx + 1 < len(command):
+                value = command[idx + 1]
+                if len(value) > WANDB_TAG_MAX_LENGTH:
+                    raise ValueError(
+                        f"{item} value exceeds wandb's {WANDB_TAG_MAX_LENGTH}-character tag limit "
+                        f"(command {command_idx}, length={len(value)}): {value}"
+                    )
+            elif item.startswith("WANDB_TAGS="):
+                tags = [tag for tag in item.split("=", 1)[1].split(",") if tag]
+                for tag in tags:
+                    if len(tag) > WANDB_TAG_MAX_LENGTH:
+                        raise ValueError(
+                            f"WANDB_TAGS entry exceeds wandb's {WANDB_TAG_MAX_LENGTH}-character tag limit "
+                            f"(command {command_idx}, length={len(tag)}): {tag}"
+                        )
 
 
 def parse_beaker_dataset(dataset_str: str) -> dict[str, str]:
@@ -143,7 +166,7 @@ def get_args():
         "--description",
         type=str,
         help="Optionally, a description for this job in Beaker.",
-        default="Beaker-Mason job.",
+        default=os.environ.get("RUN_NAME", "Beaker-Mason job."),
     )
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
@@ -200,6 +223,7 @@ def get_args():
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
+    validate_wandb_tag_lengths(commands)
 
     def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
         for cmd in cmds:
