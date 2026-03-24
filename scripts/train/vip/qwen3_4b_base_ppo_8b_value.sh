@@ -1,5 +1,5 @@
 #!/bin/bash
-# Qwen3-4B-Base PPO with Qwen3-8B-Base value model, 1000 step value warmup
+# Qwen3-4B-Base PPO with Qwen3-8B-Base value model, 100 step value warmup
 # 1 node (8 GPUs): 4 learner + 4 vLLM engines
 DDMM=$(date +"%d%m")
 exp_name=vip_ppo_base_8bval_${DDMM}_qwen3_4b_math
@@ -73,7 +73,7 @@ uv run python mason.py \
     --use_value_model \
     --value_model_name_or_path Qwen/Qwen3-8B-Base \
     --value_learning_rate 1e-5 \
-    --value_warmup_steps 1000 \
+    --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
     --gamma 1.0 \
