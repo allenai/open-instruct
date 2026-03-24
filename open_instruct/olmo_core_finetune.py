@@ -206,12 +206,14 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     model, model_config = _setup_model(args, device)
 
-    collator = TensorDataCollatorWithFlattening(
-        return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
-    )
-
     rank_batch_size_seqs = args.per_device_train_batch_size * args.gradient_accumulation_steps
     global_batch_size_seqs = rank_batch_size_seqs * dp_world_size
+
+    collator = TensorDataCollatorWithFlattening(
+        return_position_ids=True,
+        return_flash_attn_kwargs=True,
+        max_seq_length=rank_batch_size_seqs * args.max_seq_length,
+    )
 
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
@@ -239,7 +241,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     warmup_steps = int(effective_steps * args.warmup_ratio)
     scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
 
-    rank_microbatch_size = args.per_device_train_batch_size * args.max_seq_length
+    rank_microbatch_size = rank_batch_size_seqs * args.max_seq_length
     dp_shard_degree = GPUS_PER_NODE if world_size >= GPUS_PER_NODE else world_size
 
     dp_config = TransformerDataParallelConfig(
