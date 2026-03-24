@@ -335,7 +335,14 @@ class GRPOTrainModule(TransformerTrainModule):
             self.ref_policy.load_state_dict(state_dict["ref_policy"])
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        """Execute one training step with GRPO loss."""
+        """Execute one training step with GRPO loss.
+
+        This method implements the GRPO training algorithm with:
+        - Multi-epoch PPO-style training
+        - DAPO/CISPO loss variants
+        - KL penalty computation
+        - Importance sampling with clipping
+        """
         self.model.train()
         data_BT: data_types.CollatedBatchData = batch["batch"]
 
@@ -374,13 +381,9 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 for i in range(num_samples):
                     if self.grpo_config.use_vllm_logprobs:
-                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
-                        response_mask_i = data_BT.response_masks[i][:, 1:].bool().to(vllm_old_logprob_BT.device)
-                        vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~response_mask_i, utils.INVALID_LOGPROB
+                        old_logprobs_BT[i] = grpo_utils.clean_vllm_logprobs(
+                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
                         )
-                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=utils.INVALID_LOGPROB)
-                        old_logprobs_BT[i] = vllm_old_logprob_BT
                     else:
                         assert local_old_logprobs_BT is not None
                         old_logprobs_BT[i] = local_old_logprobs_BT[i]
@@ -397,10 +400,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
 
-        token_counts_per_sample = torch.tensor(
-            [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
-        )
-        loss_stats_B: dict[str, torch.Tensor] = {
+        loss_stats_B = {
             "kl": torch.zeros(4, num_samples, device=self.device),
             "kl_loss": torch.zeros(num_samples, device=self.device),
             "pg_clipfrac": torch.zeros(num_samples, device=self.device),
@@ -408,7 +408,9 @@ class GRPOTrainModule(TransformerTrainModule):
             "loss": torch.zeros(num_samples, device=self.device),
             "ratio": torch.zeros(num_samples, device=self.device),
             "entropy": torch.zeros(num_samples, device=self.device),
-            "token_count": token_counts_per_sample,
+            "token_count": torch.tensor(
+                [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
+            ),
         }
 
         num_steps = 0
@@ -429,40 +431,26 @@ class GRPOTrainModule(TransformerTrainModule):
                 response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
                 new_logprobs = torch.masked_fill(new_logprobs, ~response_mask, utils.INVALID_LOGPROB)
 
-                vllm_logprobs = data_BT.vllm_logprobs[sample_idx][:, 1:]
-                vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, utils.INVALID_LOGPROB)
-                vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=utils.INVALID_LOGPROB)
+                vllm_logprobs = grpo_utils.clean_vllm_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
 
-                if num_mini_batches > 1:
-                    old_logprob = old_logprobs_BT[sample_idx]
-                else:
-                    with torch.no_grad():
-                        if epoch_idx == 0:
-                            if self.grpo_config.use_vllm_logprobs:
-                                old_logprobs_BT[sample_idx] = vllm_logprobs
-                            else:
-                                old_logprobs_BT[sample_idx] = new_logprobs.detach()
-                        old_logprob = old_logprobs_BT[sample_idx]
-                assert old_logprob is not None
+                old_logprob = grpo_utils.resolve_old_logprob(
+                    old_logprobs_BT,
+                    sample_idx,
+                    epoch_idx,
+                    num_mini_batches,
+                    self.grpo_config.use_vllm_logprobs,
+                    vllm_logprobs,
+                    new_logprobs,
+                )
 
                 advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
 
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
-                tis_weights = None
-                if self.grpo_config.truncated_importance_sampling_ratio_cap > 0:
-                    valid_mask = response_mask
-                    tis_weights = torch.ones_like(old_logprob)
-                    if valid_mask.any():
-                        logprob_diff_is = old_logprob - vllm_logprobs
-                        logprob_diff_is = torch.where(
-                            valid_mask, logprob_diff_is.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff_is)
-                        )
-                        tis_weights = torch.where(valid_mask, torch.exp(logprob_diff_is), tis_weights)
-                        tis_weights = torch.clamp(
-                            tis_weights, max=self.grpo_config.truncated_importance_sampling_ratio_cap
-                        )
+                tis_weights = grpo_utils.compute_tis_weights(
+                    old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
+                )
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,

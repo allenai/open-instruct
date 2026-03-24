@@ -247,6 +247,49 @@ class ExperimentConfig:
             )
 
 
+def clean_vllm_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
+    vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
+    return vllm_logprobs
+
+
+def compute_tis_weights(
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
+) -> torch.Tensor | None:
+    if cap <= 0:
+        return None
+    tis_weights = torch.ones_like(old_logprob)
+    if response_mask.any():
+        logprob_diff = old_logprob - vllm_logprobs
+        logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
+        tis_weights = torch.where(response_mask, torch.exp(logprob_diff), tis_weights)
+        tis_weights = torch.clamp(tis_weights, max=cap)
+    return tis_weights
+
+
+def resolve_old_logprob(
+    old_logprobs_cache: list[torch.Tensor | None],
+    sample_idx: int,
+    epoch_idx: int,
+    num_mini_batches: int,
+    use_vllm_logprobs: bool,
+    vllm_logprobs: torch.Tensor,
+    new_logprobs: torch.Tensor,
+) -> torch.Tensor:
+    if num_mini_batches > 1:
+        result = old_logprobs_cache[sample_idx]
+    else:
+        with torch.no_grad():
+            if epoch_idx == 0:
+                if use_vllm_logprobs:
+                    old_logprobs_cache[sample_idx] = vllm_logprobs
+                else:
+                    old_logprobs_cache[sample_idx] = new_logprobs.detach()
+            result = old_logprobs_cache[sample_idx]
+    assert result is not None
+    return result
+
+
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
