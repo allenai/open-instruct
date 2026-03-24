@@ -4,23 +4,20 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
-BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
 DATASET_SPLITS="train"
 
 LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0"
 LOCAL_EVAL_SPLITS="train"
-
-# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/titan}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
-    --cluster ${CLUSTER} \
+    --cluster "ai2/jupiter" \
     --workspace ai2/oe-adapt-code \
     --priority ${PRIORITY} \
     --pure_docker_mode \
@@ -29,6 +26,7 @@ uv run mason.py \
     --num_nodes 2 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --no_auto_dataset_cache \
     --gpus 8 \
     --budget ai2/oe-adapt \
     -- \
@@ -37,7 +35,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --vllm_top_p 1.0 \
-    --local_eval_every 100 \
     --beta 0.0 \
     --async_steps 4 \
     --active_sampling \
@@ -54,8 +51,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 32768 \
-    --pack_length 34816 \
+    --response_length 30720 \
+    --pack_length 32768 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
@@ -76,7 +73,9 @@ source configs/beaker_configs/ray_node_setup.sh \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
+    --remap_verifier math_dapo=math \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy True \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME} \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False "$@"

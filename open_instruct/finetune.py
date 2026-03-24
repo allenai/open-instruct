@@ -795,8 +795,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = train_dataloader
         for batch in active_dataloader:
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
+            if args.sequence_parallel_size > 1 and "shift_labels" not in batch:
+                raise ValueError(
+                    "`shift_labels` not found in batch with sequence parallelism enabled. "
+                    "Check that UlyssesSPDataLoaderAdapter is wrapping the dataloader correctly."
+                )
             if "shift_labels" in batch and "labels" not in batch:
-                batch["labels"] = batch.pop("shift_labels")
+                batch["labels"] = batch["shift_labels"]
             pred_tokens_in_batch = (batch["labels"] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
@@ -827,7 +832,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 if args.sequence_parallel_size > 1:
                     sp_group = accelerator.torch_device_mesh["sp"].get_group()
                     losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
-                    labels_for_counting = batch["labels"]
+                    labels_for_counting = batch["shift_labels"]
                     good_tokens = (labels_for_counting != -100).view(-1).sum().float()
                     good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
                         good_tokens.unsqueeze(0), group=sp_group
