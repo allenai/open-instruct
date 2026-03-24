@@ -799,6 +799,19 @@ wheels = [
 ]
 
 [[package]]
+name = "cupy-cuda12x"
+version = "14.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cuda-pathfinder", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/ca/b93ef9fca1471a65f136a73e10819634c0b83427362fc08fc9f29f935bf0/cupy_cuda12x-14.0.1-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:f244bc14fad6f1ef0c74abd98afa4b82d2534aecdba911197810ec0047f0d1f3", size = 145578614, upload-time = "2026-02-20T10:22:49.108Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/a6/944406223a190815d9df156a1d66f3b0352bd8827dc4a8c752196d616dbc/cupy_cuda12x-14.0.1-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:9f0c81c3509f77be3ae8444759d5b314201b2dfcbbf2ae0d0b5fb7a61f20893c", size = 134613763, upload-time = "2026-02-20T10:22:56.792Z" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1228,7 +1241,7 @@ wheels = [
 
 [[package]]
 name = "flashinfer-python"
-version = "0.6.6"
+version = "0.6.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apache-tvm-ffi", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -1246,9 +1259,9 @@ dependencies = [
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "tqdm", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/70/c5a235297351021f5d3d3233523a85f5a6468495587489ad2f257e8eafe2/flashinfer_python-0.6.6.tar.gz", hash = "sha256:0730ba7c7aad332961933bcebc5119762797161ede57d955f6fd199818ed1d92", size = 5344156, upload-time = "2026-03-11T01:36:21.434Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/45/15645d2a4ee81d08206f3e132a77323e48312f510462415d7cd1122eba43/flashinfer_python-0.6.4.tar.gz", hash = "sha256:e6ab798bd1030e5ff7a3bc6952f36386c406928f60b79cf964a6db7aa7ccde75", size = 5337134, upload-time = "2026-02-19T07:33:36.647Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/61/385d06755f3ab66333018285657adf0daf8a90a129448231fd09e315bd2e/flashinfer_python-0.6.6-py3-none-any.whl", hash = "sha256:078f158636969eec1a0d3dea19c3ca90b426b66df89bbf7b7b8276ce2ec08148", size = 7817047, upload-time = "2026-03-11T01:36:19.198Z" },
+    { url = "https://files.pythonhosted.org/packages/17/9a/d2bab76d2bb15062c6a2329614653e4f8bec9c78eec9069856ef0c7c0a79/flashinfer_python-0.6.4-py3-none-any.whl", hash = "sha256:105596b505892ae330af84e250ee0eb6fc2c3a22e8dc42bd46de1b90d36004c8", size = 7819999, upload-time = "2026-02-19T07:33:34.82Z" },
 ]
 
 [[package]]
@@ -1479,6 +1492,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/86/f6ec2164f743d9609691115ae8ece098c76b894ebe4f7c94a655c6b03e98/grpcio-1.76.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:980a846182ce88c4f2f7e2c22c56aefd515daeb36149d1c897f83cf57999e0b6", size = 6573963, upload-time = "2025-10-21T16:21:28.631Z" },
     { url = "https://files.pythonhosted.org/packages/60/bc/8d9d0d8505feccfdf38a766d262c71e73639c165b311c9457208b56d92ae/grpcio-1.76.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:f92f88e6c033db65a5ae3d97905c8fea9c725b63e28d5a75cb73b49bda5024d8", size = 7164484, upload-time = "2025-10-21T16:21:30.837Z" },
     { url = "https://files.pythonhosted.org/packages/3f/c8/dce8ff21c86abe025efe304d9e31fdb0deaaa3b502b6a78141080f206da0/grpcio-1.76.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:615ba64c208aaceb5ec83bfdce7728b80bfeb8be97562944836a7a0a9647d882", size = 7594014, upload-time = "2025-10-21T16:21:41.882Z" },
+]
+
+[[package]]
+name = "grpcio-reflection"
+version = "1.76.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "grpcio", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "protobuf", version = "6.33.5", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/10/767f9c2719c435616141efb3371f6e158f95cdde36a34876ae1d08ba7440/grpcio_reflection-1.76.0.tar.gz", hash = "sha256:e0e7e49921c2ee951e5ddff0bdbacbd1ac1a70888beb61d567f3d01b799decb1", size = 18845, upload-time = "2025-10-21T16:28:57.776Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/af/6168cf4ff389deed1388b1196281c67cb36dbbf44aaee40e2bfb72ac0202/grpcio_reflection-1.76.0-py3-none-any.whl", hash = "sha256:d7c43f2047a2a9c9320a5905aa7133c677977436b5f63e6a868e507864a11c73", size = 22702, upload-time = "2025-10-21T16:27:40.846Z" },
 ]
 
 [[package]]
@@ -2802,7 +2828,7 @@ requires-dist = [
     { name = "torch", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "transformers", specifier = ">=5.3.0" },
     { name = "uvicorn", specifier = ">=0.20.0" },
-    { name = "vllm", marker = "sys_platform != 'darwin'", specifier = ">=0.18.0" },
+    { name = "vllm", marker = "sys_platform != 'darwin'", git = "https://github.com/yanhong-lbh/vllm?rev=3677c274d" },
     { name = "wandb", specifier = "==0.23.1" },
 ]
 provides-extras = ["code", "dr-tulu"]
@@ -3889,6 +3915,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+cgraph = [
+    { name = "cupy-cuda12x", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
 default = [
     { name = "aiohttp", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "aiohttp-cors", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -4810,8 +4839,8 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.18.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.dev14521+g3677c274d.cu128"
+source = { git = "https://github.com/yanhong-lbh/vllm?rev=3677c274d#3677c274dcbafeb665f741b29f2607f696d42728" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "anthropic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4827,6 +4856,8 @@ dependencies = [
     { name = "filelock", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "flashinfer-python", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "gguf", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "grpcio", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "grpcio-reflection", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "ijson", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "lark", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "llguidance", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4838,7 +4869,6 @@ dependencies = [
     { name = "ninja", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numba", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nvidia-cudnn-frontend", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nvidia-cutlass-dsl", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "openai", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "openai-harmony", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4861,6 +4891,7 @@ dependencies = [
     { name = "pyyaml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pyzmq", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "quack-kernels", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "ray", extra = ["cgraph"], marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "regex", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "requests", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sentencepiece", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4878,11 +4909,6 @@ dependencies = [
     { name = "typing-extensions", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "watchfiles", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "xgrammar", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/39/a9/ed48c497572a41552cc71b5ede15291d882c546a01df27ed42944eb3b3ad/vllm-0.18.0.tar.gz", hash = "sha256:9a1bee091db8dbb4664a2a09cd9c61912e9912a44af1ce12b8593a231d05971c", size = 30812817, upload-time = "2026-03-20T22:16:59.039Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/f8/d677aef63536b54d8d0268241dc50a4fe01efcf162ef26190b9ed4bed109/vllm-0.18.0-cp38-abi3-manylinux_2_31_aarch64.whl", hash = "sha256:66a2c5bcf1bdf8de3e63b9fee067754068108cd510c65ffba70ff4368c33cba8", size = 385589729, upload-time = "2026-03-20T22:16:38.734Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/e9/59cf9b8939b51e859d2166ac3336b353f52ec4f9ceda34228aae7b386840/vllm-0.18.0-cp38-abi3-manylinux_2_31_x86_64.whl", hash = "sha256:0bc51491598f4bcd161b693b27cbe2864082d6c49fa9065965d94b371f6ae8ef", size = 433215727, upload-time = "2026-03-20T22:16:00.336Z" },
 ]
 
 [[package]]
@@ -4995,7 +5021,7 @@ wheels = [
 
 [[package]]
 name = "xgrammar"
-version = "0.1.32"
+version = "0.1.29"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5006,10 +5032,10 @@ dependencies = [
     { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "typing-extensions", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/6a/d51b44fc0b43e2d4adae42b6a17fe9ee49e177d6d768be739ed7dec7b57e/xgrammar-0.1.32.tar.gz", hash = "sha256:5d424d52779ca2d3ccaf72f2289d6519efe308e933d0d3fc3c292c780825bb12", size = 2365047, upload-time = "2026-03-04T12:01:52.544Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/a3/70dbe3ffd331a1e7e1ad5a95690a4086e6c7cdb8089f5c7eda712219ccec/xgrammar-0.1.29.tar.gz", hash = "sha256:cf195afa81b489eebf35d4c6f37f27136d05420739ab4a6f7f065c938d7e4baa", size = 2321317, upload-time = "2025-12-19T08:23:54.53Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/29/3b0306800ccabce8f565123a5b97432dee43822c30142085d9b13b43f166/xgrammar-0.1.32-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f9a637d4e0c541149e0d409c24f4ec79cd74d87508ee6a17a7e64a9b9c0cf56f", size = 37680849, upload-time = "2026-03-04T12:00:46.712Z" },
-    { url = "https://files.pythonhosted.org/packages/69/62/65e664d861cdadf2d788c03dd8fe67f1faaa7bd4bd2317a2ab850aebee20/xgrammar-0.1.32-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f96c7a4fcbd68e18b13cb3b6ed5d24b5326b256933f476bdaf2cc8e609c228db", size = 37711100, upload-time = "2026-03-04T12:00:50.188Z" },
+    { url = "https://files.pythonhosted.org/packages/57/94/18793c64bf0368075a34c06e196bf002f1e6ab0aee332268f44e8d356d5a/xgrammar-0.1.29-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6eb370a16b27a683e5f2b9e429ab41440c69977d4a504849ed61831b94cc704c", size = 34705239, upload-time = "2025-12-19T08:23:28.369Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/da/4c14e3e00be698009b52700f15326a23272b4b00475939b6acc86b151188/xgrammar-0.1.29-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:79e6e4f5cd33be77418cf91efc482f2b3d773d309891224383bc8a4948ad7b07", size = 34906135, upload-time = "2025-12-19T08:23:30.838Z" },
 ]
 
 [[package]]

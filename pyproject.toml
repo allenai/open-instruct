@@ -27,7 +27,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
     "transformers>=5.3.0",
-    "vllm>=0.18.0; platform_system != 'Darwin'",
+    "vllm; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -60,6 +60,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "002958a8f15a" }
+vllm = { git = "https://github.com/yanhong-lbh/vllm", rev = "3677c274d" }
 
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
