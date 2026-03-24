@@ -512,31 +512,42 @@ class GRPOTrainModule(TransformerTrainModule):
 
         if not dry_run and num_steps > 0:
             token_counts = loss_stats_B["token_count"]
-            total_tokens = token_counts.sum()
-            weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
+            local_total_tokens = token_counts.sum()
 
-            if self.grpo_config.load_ref_policy and ref_logprobs_BT is not None:
+            metric_keys: list[str] = ["pg_loss", "loss", "pg_clipfrac", "ratio", "ratio_var_term"]
+            loss_stats_B["ratio_var_term"] = (
+                loss_stats_B["ratio"] - (loss_stats_B["ratio"] * token_counts).sum() / local_total_tokens.clamp(min=1)
+            ) ** 2
+            has_kl = self.grpo_config.load_ref_policy and ref_logprobs_BT is not None
+            if has_kl:
                 for j in range(4):
-                    self.record_metric(
-                        f"objective/kl{j}_avg", (loss_stats_B["kl"][j] * weights).sum().item(), reduce_type=None
-                    )
-                self.record_metric("loss/kl_avg", (loss_stats_B["kl_loss"] * weights).sum().item(), reduce_type=None)
-            self.record_metric("loss/policy_avg", (loss_stats_B["pg_loss"] * weights).sum().item(), reduce_type=None)
-            self.record_metric("loss/total_avg", (loss_stats_B["loss"] * weights).sum().item(), reduce_type=None)
-            self.record_metric(
-                "policy/clipfrac_avg", (loss_stats_B["pg_clipfrac"] * weights).sum().item(), reduce_type=None
-            )
-            weighted_mean_ratio = (loss_stats_B["ratio"] * weights).sum()
-            self.record_metric("val/ratio", weighted_mean_ratio.item(), reduce_type=None)
-            self.record_metric(
-                "val/ratio_var",
-                (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum().item(),
-                reduce_type=None,
-            )
-            if self.grpo_config.record_entropy:
-                self.record_metric(
-                    "policy/entropy_avg", (loss_stats_B["entropy"] * weights).sum().item(), reduce_type=None
-                )
+                    metric_keys.append(f"kl_{j}")
+                    loss_stats_B[f"kl_{j}"] = loss_stats_B["kl"][j]
+                metric_keys.append("kl_loss")
+            has_entropy = self.grpo_config.record_entropy
+            if has_entropy:
+                metric_keys.append("entropy")
+
+            local_sums_list = [local_total_tokens.float()] + [
+                (loss_stats_B[k] * token_counts).sum().float() for k in metric_keys
+            ]
+            local_sums = torch.stack(local_sums_list)
+            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+
+            global_total_tokens = local_sums[0]
+            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
+
+            if has_kl:
+                for j in range(4):
+                    self.record_metric(f"objective/kl{j}_avg", global_metrics[f"kl_{j}"].item(), reduce_type=None)
+                self.record_metric("loss/kl_avg", global_metrics["kl_loss"].item(), reduce_type=None)
+            self.record_metric("loss/policy_avg", global_metrics["pg_loss"].item(), reduce_type=None)
+            self.record_metric("loss/total_avg", global_metrics["loss"].item(), reduce_type=None)
+            self.record_metric("policy/clipfrac_avg", global_metrics["pg_clipfrac"].item(), reduce_type=None)
+            self.record_metric("val/ratio", global_metrics["ratio"].item(), reduce_type=None)
+            self.record_metric("val/ratio_var", global_metrics["ratio_var_term"].item(), reduce_type=None)
+            if has_entropy:
+                self.record_metric("policy/entropy_avg", global_metrics["entropy"].item(), reduce_type=None)
             if self.scheduler is not None and self.trainer.max_steps is not None:
                 lr = self.scheduler.get_lr(
                     self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
@@ -544,4 +555,4 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.trainer.max_steps,
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
-            self.record_metric("_token_count", total_tokens.item(), reduce_type=None)
+            self.record_metric("_token_count", global_total_tokens.item(), reduce_type=None)
