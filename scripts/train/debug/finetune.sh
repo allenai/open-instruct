@@ -1,92 +1,47 @@
 #!/bin/bash
-# SFT debug script using OLMo-core training infrastructure.
-#
-# This script first creates a numpy dataset from HuggingFace data using
-# --cache_dataset_only mode, then runs training on the cached data.
-#
-# Usage:
-#   # Run on Beaker:
-#   ./scripts/train/debug/finetune.sh <beaker_image>
 
-RUN_NAME="debug-sft-olmo25-7b"
-CHECKPOINT="/weka/oe-training-default/ai2-llm/checkpoints/OLMo25/step1413814"
-CLUSTER="ai2/jupiter"
-SEQ_LEN=4096
-NUM_NODES=1
-GLOBAL_BATCH_SIZE=$((64 * SEQ_LEN))
-BUDGET="ai2/oe-adapt"
-WORKSPACE="ai2/open-instruct-dev"
-NUM_EPOCHS=1
-MODEL_CONFIG="from_checkpoint"
-CHECKPOINT_OUTPUT_DIR="/weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/test_please_delete_without_asking"
+LAUNCH_CMD="accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 1 \
+    open_instruct/finetune.py \
+    --model_name_or_path Qwen/Qwen3-0.6B \
+    --tokenizer_name Qwen/Qwen3-0.6B \
+    --max_seq_length 1024 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 4 \
+    --learning_rate 5e-06 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.03 \
+    --weight_decay 0.0 \
+    --num_train_epochs 2 \
+    --report_to wandb \
+    --logging_steps 1 \
+    --model_revision main \
+    --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
+    --add_bos \
+    --seed 123 \
+    --chat_template_name tulu \
+    --with_tracking"
 
 if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"
     echo "Using Beaker image: $BEAKER_IMAGE"
 
     uv run python mason.py \
-        --cluster "$CLUSTER" \
-        --workspace "$WORKSPACE" \
-        --priority urgent \
+        --cluster ai2/jupiter \
+        --workspace ai2/open-instruct-dev \
+        --priority normal \
         --image "$BEAKER_IMAGE" \
-        --description "OLMo-core SFT debug job - cache dataset and train." \
+        --description "Single GPU finetune job." \
         --pure_docker_mode \
         --preemptible \
-        --num_nodes "$NUM_NODES" \
-        --budget "$BUDGET" \
-        --gpus 8 \
+        --num_nodes 1 \
+        --budget ai2/oe-adapt \
+        --gpus 1 \
         --non_resumable \
         -- \
-        bash -c '
-set -e
-OUTPUT_DIR="/weka/oe-adapt-default/allennlp/deletable_checkpoint/$(whoami)/debug-sft-data"
-
-echo "Step 1: Caching dataset to numpy format..."
-python open_instruct/olmo_core_finetune.py cache_dataset_only \
-    --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 0.01 \
-    --output_dir "$OUTPUT_DIR" \
-    --max_seq_length '"$SEQ_LEN"' \
-    --tokenizer_name_or_path allenai/OLMo-2-1124-7B
-
-echo "Step 2: Running training..."
-torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/olmo_core_finetune.py train \
-    '"$RUN_NAME"' \
-    '"$CHECKPOINT"' \
-    '"$CLUSTER"' \
-    --dataset_path "$OUTPUT_DIR" \
-    --save_folder '"$CHECKPOINT_OUTPUT_DIR"' \
-    --seq_len '"$SEQ_LEN"' \
-    --num_nodes '"$NUM_NODES"' \
-    --global_batch_size '"$GLOBAL_BATCH_SIZE"' \
-    --budget '"$BUDGET"' \
-    --workspace '"$WORKSPACE"' \
-    --num_epochs '"$NUM_EPOCHS"' \
-    --model_config '"$MODEL_CONFIG"' \
-    --wandb_project open_instruct_internal \
-    --wandb_entity ai2-llm
-'
+        $LAUNCH_CMD
 else
     echo "Running locally..."
-    echo "Note: Local execution requires a GPU with CUDA support."
-    OUTPUT_DIR="output/debug-sft-data"
-
-    echo "Step 1: Caching dataset to numpy format..."
-    uv run python open_instruct/olmo_core_finetune.py cache_dataset_only \
-        --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 0.01 \
-        --output_dir "$OUTPUT_DIR" \
-        --max_seq_length "$SEQ_LEN" \
-        --tokenizer_name_or_path allenai/OLMo-2-1124-7B
-
-    echo "Step 2: Running training..."
-    uv run torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/olmo_core_finetune.py train \
-        "$RUN_NAME" \
-        "$CHECKPOINT" \
-        "$CLUSTER" \
-        --dataset_path "$OUTPUT_DIR" \
-        --save_folder "$OUTPUT_DIR/checkpoints" \
-        --seq_len "$SEQ_LEN" \
-        --num_nodes "$NUM_NODES" \
-        --global_batch_size "$GLOBAL_BATCH_SIZE" \
-        --num_epochs "$NUM_EPOCHS" \
-        --model_config "$MODEL_CONFIG"
+    uv run $LAUNCH_CMD
 fi
