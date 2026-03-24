@@ -2389,9 +2389,9 @@ def run_eval_only_round(
         generation_configs["eval"],
         model_dims,
         max_possible_score,
-        local_eval_start_time,
-        base_env_config,
-        actor_manager,
+        base_env_config=base_env_config,
+        local_eval_start_time=local_eval_start_time,
+        actor_manager=actor_manager,
         beaker_progress_label="eval",
         beaker_wandb_url=wandb_url,
     )
@@ -2636,9 +2636,9 @@ def run_training(
                 generation_configs["eval"],
                 model_dims,
                 streaming_config.max_possible_score,
-                local_eval_start_time,
-                base_env_config,
-                actor_manager,
+                base_env_config=base_env_config,
+                actor_manager=actor_manager,
+                local_eval_start_time=local_eval_start_time,
             )
             if not eval_collected:
                 break
