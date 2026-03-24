@@ -2673,7 +2673,14 @@ def one_training_step(
         # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics[key] = wandb.Histogram(value)
+                arr = np.asarray(value, dtype=float)
+                arr = arr[np.isfinite(arr)]
+                if len(arr) > 0:
+                    metrics[key] = wandb.Histogram(arr)
+                else:
+                    metrics[key] = None
+        # Remove None entries before logging
+        metrics = {k: v for k, v in metrics.items() if v is not None}
         wandb.log(metrics, step=training_step)
 
     return num_step_tokens
