@@ -70,6 +70,8 @@ class ExperimentConfig:
     """How many train steps to save the model"""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
+    model_dtype: str = "bfloat16"
+    """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
     num_epochs: int = 1
@@ -80,9 +82,9 @@ class ExperimentConfig:
     """the beta value of the RLHF objective (KL coefficient)"""
     clip_lower: float = 0.2
     """the lower clip range"""
-    clip_higher: float = 0.2
+    clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_cap: float = 0.0
+    truncated_importance_sampling_ratio_cap: float = 2.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
@@ -217,7 +219,6 @@ class ExperimentConfig:
         # `--single_gpu_mode` and `--colocate_train_inference_mode` are equivalent.
         self.colocate_train_inference_mode = self.colocate_train_inference_mode or self.single_gpu_mode
         self.single_gpu_mode = self.colocate_train_inference_mode
-
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
@@ -243,6 +244,11 @@ class ExperimentConfig:
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
+        if self.eval_on_step_0 and self.local_eval_every <= 0:
+            raise ValueError(
+                "`eval_on_step_0` requires `local_eval_every` > 0. "
+                "Set `local_eval_every` to a positive value or disable `eval_on_step_0`."
+            )
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
@@ -363,7 +369,7 @@ def forward_for_logprobs(
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
     logits = logits[:, :-1]
-    labels = query_responses[:, 1:].clone()
+    labels = query_responses[:, 1:].clone().to(logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
     logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
@@ -398,9 +404,33 @@ def compute_logprobs(
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = list(range(start_idx, end_idx))
 
-            batch_query_responses = torch.cat([data_BT.query_responses[i] for i in batch_indices], dim=0)
-            batch_attention_masks = torch.cat([data_BT.attention_masks[i] for i in batch_indices], dim=0)
-            batch_position_ids = torch.cat([data_BT.position_ids[i] for i in batch_indices], dim=0)
+            query_responses = [data_BT.query_responses[i] for i in batch_indices]
+            attention_masks = [data_BT.attention_masks[i] for i in batch_indices]
+            position_ids = [data_BT.position_ids[i] for i in batch_indices]
+            shapes = [tuple(t.shape) for t in query_responses]
+
+            if len(set(shapes)) != 1:
+                for i in batch_indices:
+                    single_logprobs, _ = forward_for_logprobs(
+                        model,
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
+                        pad_token_id,
+                        temperature,
+                        False,
+                    )
+
+                    response_mask_BT = data_BT.response_masks[i].to(single_logprobs.device)
+                    single_logprobs = torch.masked_fill(
+                        single_logprobs, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB
+                    )
+                    logprobs_BT.append(single_logprobs)
+                continue
+
+            batch_query_responses = torch.cat(query_responses, dim=0)
+            batch_attention_masks = torch.cat(attention_masks, dim=0)
+            batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
                 model,
@@ -419,8 +449,6 @@ def compute_logprobs(
                 response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
                 logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
                 logprobs_BT.append(logprob_BT)
-
-            torch.cuda.empty_cache()
 
     return logprobs_BT
 

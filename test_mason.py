@@ -118,6 +118,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "hostname": None,
                     "preemptible": False,
+                    "mount_docker_socket": False,
                 },
             ),
             (
@@ -142,6 +143,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "preemptible": True,
                     "hostname": None,
+                    "mount_docker_socket": False,
                 },
             ),
         ]

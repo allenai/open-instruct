@@ -46,7 +46,7 @@ class WorkerWrap:
             f"rank={rank}, world_size={world_size}, group_name={group_name}",
         )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
+    def update_weight(self, name, dtype, shape):
         import torch
 
         assert str(dtype) == str(self.model_config.dtype), (
