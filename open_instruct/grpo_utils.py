@@ -248,6 +248,7 @@ class ExperimentConfig:
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    """Set non-response positions to INVALID_LOGPROB and replace NaNs."""
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
     vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
     return vllm_logprobs
@@ -256,14 +257,17 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
 def compute_tis_weights(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
 ) -> torch.Tensor | None:
+    """Compute truncated importance sampling weights: clamp(π_old / π_vllm, max=cap).
+
+    Returns None when cap <= 0 (disabled).
+    """
     if cap <= 0:
         return None
     tis_weights = torch.ones_like(old_logprob)
-    if response_mask.any():
-        logprob_diff = old_logprob - vllm_logprobs
-        logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
-        tis_weights = torch.where(response_mask, torch.exp(logprob_diff), tis_weights)
-        tis_weights = torch.clamp(tis_weights, max=cap)
+    logprob_diff = old_logprob - vllm_logprobs
+    logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
+    tis_weights = torch.where(response_mask, torch.exp(logprob_diff), tis_weights)
+    tis_weights = torch.clamp(tis_weights, max=cap)
     return tis_weights
 
 
@@ -276,6 +280,12 @@ def resolve_old_logprob(
     vllm_logprobs: torch.Tensor,
     new_logprobs: torch.Tensor,
 ) -> torch.Tensor:
+    """Return the old (baseline) logprobs for a sample.
+
+    With multiple mini-batches, old logprobs are pre-computed and cached.
+    With a single mini-batch, they are lazily set on the first epoch from
+    either vllm logprobs or the current policy's detached logprobs.
+    """
     if num_mini_batches > 1:
         result = old_logprobs_cache[sample_idx]
     else:
