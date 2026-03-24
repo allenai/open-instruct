@@ -58,7 +58,7 @@ RUN curl --silent \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
     && rm beaker.tar.gz
 
-COPY --from=ghcr.io/astral-sh/uv:0.10.12 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 WORKDIR /stage/
 
