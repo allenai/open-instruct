@@ -405,25 +405,28 @@ class PolicyTrainerRayProcess(RayProcess):
         self.vllm_engines = vllm_engines
         self.model_update_group = None
         if self.rank == 0:
-            master_address = ray._private.services.get_node_ip_address()
-            with socket.socket() as sock:
-                sock.bind(("", 0))
-                master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
-                self.vllm_config.vllm_num_engines,
-                self.vllm_config.vllm_tensor_parallel_size,
-            )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            refs = [
-                engine.init_weight_transfer_engine.remote(
-                    master_address, master_port, i * vllm_tensor_parallel_size + 1, world_size
+            if self.args.single_gpu_mode:
+                refs = [engine.init_weight_transfer_engine_ipc.remote() for engine in vllm_engines]
+            else:
+                master_address = ray._private.services.get_node_ip_address()
+                with socket.socket() as sock:
+                    sock.bind(("", 0))
+                    master_port = sock.getsockname()[1]
+                vllm_num_engines, vllm_tensor_parallel_size = (
+                    self.vllm_config.vllm_num_engines,
+                    self.vllm_config.vllm_tensor_parallel_size,
                 )
-                for i, engine in enumerate(vllm_engines)
-            ]
-            torch.cuda.set_device(self.local_rank)
-            self.model_update_group = NCCLWeightTransferEngine.trainer_init(
-                {"master_address": master_address, "master_port": master_port, "world_size": world_size}
-            )
+                world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+                refs = [
+                    engine.init_weight_transfer_engine.remote(
+                        master_address, master_port, i * vllm_tensor_parallel_size + 1, world_size
+                    )
+                    for i, engine in enumerate(vllm_engines)
+                ]
+                torch.cuda.set_device(self.local_rank)
+                self.model_update_group = NCCLWeightTransferEngine.trainer_init(
+                    {"master_address": master_address, "master_port": master_port, "world_size": world_size}
+                )
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 

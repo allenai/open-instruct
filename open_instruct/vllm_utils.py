@@ -46,6 +46,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.config import WeightTransferConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
+from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
 from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
@@ -735,6 +736,10 @@ class LLMRayActor:
         )
         return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
 
+    def init_weight_transfer_engine_ipc(self) -> None:
+        request = WeightTransferInitRequest(init_info={})
+        return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
+
     def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
@@ -1203,7 +1208,7 @@ def create_vllm_engines(
                 revision=revision,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
-                weight_transfer_config=WeightTransferConfig(backend="nccl"),
+                weight_transfer_config=WeightTransferConfig(backend="ipc" if use_hybrid_engine else "nccl"),
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
                 dtype=vllm_dtype,
@@ -1280,6 +1285,31 @@ def _collect_weight_metadata(
     return names, dtype_names, shapes
 
 
+def _broadcast_weights_ipc(
+    model: torch.nn.Module,
+    vllm_engines: list[ray.actor.ActorHandle],
+    name_mapper: Callable[[str], str] | None,
+    gather_whole_model: bool,
+) -> list[ray.ObjectRef]:
+    """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
+    is_rank_0 = torch.distributed.get_rank() == 0
+    params = list(model.named_parameters())
+    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
+
+    if isinstance(model, FSDP):
+        ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+    else:
+        ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+
+    with ctx:
+        if is_rank_0:
+            for engine in vllm_engines:
+                mapped_params = [(name_mapper(n) if name_mapper else n, p) for n, p in params]
+                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+    return []
+
+
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
@@ -1291,14 +1321,18 @@ def broadcast_weights_to_vllm(
 
     Must be called on ALL ranks when using DeepSpeed stage 3 or FSDP,
     since gathering is a collective operation. Only rank 0 sends weights.
-    """
-    is_rank_0 = torch.distributed.get_rank() == 0
 
+    When model_update_group is None, uses IPC backend (single GPU mode).
+    Otherwise uses NCCL backend.
+    """
     if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
 
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
+    if model_update_group is None:
+        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model)
 
+    is_rank_0 = torch.distributed.get_rank() == 0
+    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
     use_packed = gather_whole_model and not isinstance(model, FSDPModule)
 
     if is_rank_0:
