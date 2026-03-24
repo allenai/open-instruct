@@ -1309,7 +1309,7 @@ def _broadcast_weights_ipc(
     with ctx:
         if is_rank_0:
             for engine in vllm_engines:
-                mapped_params = [(name_mapper(n) if name_mapper else n, p) for n, p in params]
+                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
     return []
@@ -1356,7 +1356,7 @@ def broadcast_weights_to_vllm(
             try:
                 if is_rank_0:
                     block_params = [
-                        (name_mapper(f"{block_name}.{n}") if name_mapper else f"{block_name}.{n}", p)
+                        (name_mapper(f"{block_name}.{n}") if name_mapper else f"{block_name}.{n}", p.data)
                         for n, p in block.named_parameters()
                     ]
                     NCCLWeightTransferEngine.trainer_send_weights(
@@ -1376,7 +1376,7 @@ def broadcast_weights_to_vllm(
             ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
         with ctx:
             if is_rank_0:
-                mapped_params = [(name_mapper(n) if name_mapper else n, p) for n, p in params]
+                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return refs
     else:
@@ -1385,6 +1385,6 @@ def broadcast_weights_to_vllm(
                 if is_rank_0:
                     mapped_name = name_mapper(name) if name_mapper else name
                     NCCLWeightTransferEngine.trainer_send_weights(
-                        iterator=iter([(mapped_name, param)]), trainer_args=trainer_args
+                        iterator=iter([(mapped_name, param.data)]), trainer_args=trainer_args
                     )
         return refs
