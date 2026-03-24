@@ -744,15 +744,20 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
-    def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], packed: bool = True
-    ) -> None:
+    def update_weights(self, request_or_names, dtype_names=None, shapes=None, packed=True) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        request = WeightTransferUpdateRequest(
-            update_info={"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        )
+        if isinstance(request_or_names, (dict, WeightTransferUpdateRequest)):
+            request = (
+                WeightTransferUpdateRequest(**request_or_names)
+                if isinstance(request_or_names, dict)
+                else request_or_names
+            )
+        else:
+            request = WeightTransferUpdateRequest(
+                update_info={"names": request_or_names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
+            )
         return self._run_async(self.llm_engine.update_weights(request))
 
     def reset_prefix_cache(self) -> None:
