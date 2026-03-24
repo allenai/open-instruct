@@ -33,13 +33,17 @@ will fail. To update the expected data:
        ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 """
 
-import inspect
 import json
 import logging
+import os
 import pathlib
 import subprocess
 import time
 import unittest
+
+os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
+
+import inspect
 
 import datasets
 import ray
