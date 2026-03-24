@@ -223,11 +223,8 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         device=device,
         drop_last=True,
         fs_local_rank=global_rank,
+        max_seq_length=args.max_seq_length,
     )
-    # The trainer validates global_batch_size against rank_microbatch_size (both in tokens),
-    # but HFDataLoader internally uses it as example count. Override for trainer validation.
-    data_loader._global_batch_size = global_batch_size_seqs * args.max_seq_length
-
     num_training_steps = len(data_loader) * args.num_train_epochs
     effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
     log.info(
