@@ -400,18 +400,10 @@ class GRPOTrainModule(TransformerTrainModule):
 
         dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
 
-        loss_stats_B = {
-            "kl": torch.zeros(4, num_samples, device=self.device),
-            "kl_loss": torch.zeros(num_samples, device=self.device),
-            "pg_clipfrac": torch.zeros(num_samples, device=self.device),
-            "pg_loss": torch.zeros(num_samples, device=self.device),
-            "loss": torch.zeros(num_samples, device=self.device),
-            "ratio": torch.zeros(num_samples, device=self.device),
-            "entropy": torch.zeros(num_samples, device=self.device),
-            "token_count": torch.tensor(
-                [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
-            ),
-        }
+        token_counts = torch.tensor(
+            [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
+        )
+        loss_stats_B = grpo_utils.create_loss_stats(num_samples, token_counts, self.device)
 
         num_steps = 0
         local_step = 0
@@ -468,22 +460,20 @@ class GRPOTrainModule(TransformerTrainModule):
                 loss = loss * dp_world_size
                 loss.backward()
 
-                with torch.no_grad():
-                    if self.grpo_config.load_ref_policy and ref_logprobs_BT is not None:
-                        ref_logprobs_diff = (new_logprobs - ref_logprobs_BT[sample_idx]).clamp(-40.0, 40.0)
-                        kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
-                        loss_stats_B["kl"][:, sample_idx] = masked_mean(kl_4BT, response_mask).float()
-                        loss_stats_B["kl_loss"][sample_idx] = (
-                            loss_stats_B["kl"][self.grpo_config.kl_estimator, sample_idx] * self.grpo_config.beta
-                        )
-                    loss_stats_B["pg_clipfrac"][sample_idx] = masked_mean(
-                        (pg_losses2 > pg_losses).float(), response_mask
-                    )
-                    loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
-                    loss_stats_B["loss"][sample_idx] = loss
-                    loss_stats_B["ratio"][sample_idx] = masked_mean(ratio, response_mask)
-                    if entropy is not None:
-                        loss_stats_B["entropy"][sample_idx] = masked_mean(entropy, response_mask).float()
+                grpo_utils.populate_sample_loss_stats(
+                    loss_stats_B,
+                    sample_idx,
+                    pg_losses,
+                    pg_losses2,
+                    pg_loss,
+                    ratio,
+                    loss,
+                    response_mask,
+                    new_logprobs,
+                    ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
+                    entropy,
+                    self.grpo_config,
+                )
 
                 num_steps += 1
                 local_step += 1
@@ -499,43 +489,17 @@ class GRPOTrainModule(TransformerTrainModule):
             self.zero_grads()
 
         if not dry_run and num_steps > 0:
-            token_counts = loss_stats_B["token_count"]
-            local_total_tokens = token_counts.sum()
+            local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, self.grpo_config)
+            local_tokens = local_metrics.pop("_token_count")
 
-            metric_keys: list[str] = ["pg_loss", "loss", "pg_clipfrac", "ratio", "ratio_var_term"]
-            loss_stats_B["ratio_var_term"] = (
-                loss_stats_B["ratio"] - (loss_stats_B["ratio"] * token_counts).sum() / local_total_tokens.clamp(min=1)
-            ) ** 2
-            has_kl = self.grpo_config.load_ref_policy and ref_logprobs_BT is not None
-            if has_kl:
-                for j in range(4):
-                    metric_keys.append(f"kl_{j}")
-                    loss_stats_B[f"kl_{j}"] = loss_stats_B["kl"][j]
-                metric_keys.append("kl_loss")
-            has_entropy = self.grpo_config.record_entropy
-            if has_entropy:
-                metric_keys.append("entropy")
+            keys = sorted(local_metrics.keys())
+            values = [local_tokens] + [local_metrics[k] * local_tokens for k in keys]
+            tensor = torch.tensor(values, device=self.device)
+            dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 
-            local_sums_list = [local_total_tokens.float()] + [
-                (loss_stats_B[k] * token_counts).sum().float() for k in metric_keys
-            ]
-            local_sums = torch.stack(local_sums_list)
-            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
-
-            global_total_tokens = local_sums[0]
-            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
-
-            if has_kl:
-                for j in range(4):
-                    self.record_metric(f"objective/kl{j}_avg", global_metrics[f"kl_{j}"].item(), reduce_type=None)
-                self.record_metric("loss/kl_avg", global_metrics["kl_loss"].item(), reduce_type=None)
-            self.record_metric("loss/policy_avg", global_metrics["pg_loss"].item(), reduce_type=None)
-            self.record_metric("loss/total_avg", global_metrics["loss"].item(), reduce_type=None)
-            self.record_metric("policy/clipfrac_avg", global_metrics["pg_clipfrac"].item(), reduce_type=None)
-            self.record_metric("val/ratio", global_metrics["ratio"].item(), reduce_type=None)
-            self.record_metric("val/ratio_var", global_metrics["ratio_var_term"].item(), reduce_type=None)
-            if has_entropy:
-                self.record_metric("policy/entropy_avg", global_metrics["entropy"].item(), reduce_type=None)
+            global_tokens = tensor[0].item()
+            for i, k in enumerate(keys):
+                self.record_metric(k, (tensor[i + 1] / global_tokens).item(), reduce_type=None)
             if self.scheduler is not None and self.trainer.max_steps is not None:
                 lr = self.scheduler.get_lr(
                     self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
@@ -543,4 +507,4 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.trainer.max_steps,
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
-            self.record_metric("_token_count", global_total_tokens.item(), reduce_type=None)
+            self.record_metric("_token_count", global_tokens, reduce_type=None)
