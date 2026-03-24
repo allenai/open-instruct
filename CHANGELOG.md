@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ### Changed
-- **smolzero-merge cleanup:** Restore single `generation_time` token stats (remove vLLM-summed timing split), main-style placement group and vLLM hybrid bundling, void `ensure_hf_repo_cached`, drop Qwen `CHAT_TEMPLATES` entries and `TokenizerConfig` template validation, remove `dataset_overwrite_cache` and `system_prompt_remove`. Follow-up PRs: push branches `feat/wandb-experiment-tracking` (W&B group + mason tag checks + config logging) and `feat/llm-judge-compass` (Compass verifier + judge utils) from dedicated worktrees.
+- **smolzero-merge cleanup:** Restore single `generation_time` token stats (remove vLLM-summed timing split), main-style placement group and vLLM hybrid bundling, void `ensure_hf_repo_cached`, drop Qwen `CHAT_TEMPLATES` entries and `TokenizerConfig` template validation, remove `dataset_overwrite_cache` and `system_prompt_remove`. Follow-up PRs: push branches `feat/wandb-experiment-tracking` (W&B group, extended `wandb.init` config, mason `RUN_NAME` default description) and `feat/llm-judge-compass` (Compass verifier + judge utils) from dedicated worktrees.
 
 ### Added
 - Add documentation for Slack alert integrations in GRPO and DPO training (https://github.com/allenai/open-instruct/pull/1529).
