@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 
 MODEL = "allenai/Olmo-Hybrid-Instruct-DPO-7B"
 
-logger.info("Starting vLLM with %s — expect msgspec.ValidationError", MODEL)
-llm = vllm.LLM(model=MODEL, trust_remote_code=True, enforce_eager=True, gpu_memory_utilization=0.5)
-outputs = llm.generate(["What is 2 + 2?"], vllm.SamplingParams(temperature=0.7, max_tokens=64))
-for output in outputs:
-    logger.info("Generated: %s", output.outputs[0].text)
+if __name__ == "__main__":
+    logger.info("Starting vLLM with %s — expect msgspec.ValidationError", MODEL)
+    llm = vllm.LLM(model=MODEL, trust_remote_code=True, enforce_eager=True, gpu_memory_utilization=0.5)
+    outputs = llm.generate(["What is 2 + 2?"], vllm.SamplingParams(temperature=0.7, max_tokens=64))
+    for output in outputs:
+        logger.info("Generated: %s", output.outputs[0].text)
