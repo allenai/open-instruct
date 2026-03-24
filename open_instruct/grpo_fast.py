@@ -1722,7 +1722,7 @@ def one_training_step(
     wandb_url: str,
     chat_template_name: str,
     model_dims: utils.ModelDims,
-    local_eval_start_time: float | None = None,
+    vllm_config: data_loader_lib.VLLMConfig,
     actor_manager: ActorManager | None = None,
 ) -> int:
     """Train the model for one step. Returns the number of tokens processed."""
@@ -1790,10 +1790,10 @@ def one_training_step(
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
-    local_eval_time_during_training = 0.0
-    if local_eval_start_time is not None:
-        local_eval_time_during_training = min(time.perf_counter() - local_eval_start_time, train_timer.duration)
-    pure_training_time = max(train_timer.duration - local_eval_time_during_training, 0.0)
+    # Learner MFU uses only the distributed training step duration. Local eval runs on vLLM
+    # workers; wall time since local_eval_start_time spans health checks, checkpointing, etc.,
+    # and must not be subtracted from train_timer.duration (that wrongly drives MFU to ~0 time).
+    training_time_for_utilization = max(train_timer.duration, 1e-9)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1803,7 +1803,7 @@ def one_training_step(
         samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
         num_engines=vllm_config.vllm_num_engines,
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
-        training_time=max(pure_training_time, 1e-9),
+        training_time=training_time_for_utilization,
         num_training_gpus=args.world_size,
     )
 
@@ -1823,7 +1823,7 @@ def one_training_step(
         **utilization_metrics,
     }
     metrics["model_step_diff"] = float(training_step - metrics["model_step_mean"])
-    metrics["time/training"] = pure_training_time
+    metrics["time/training"] = train_timer.duration
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
@@ -2379,6 +2379,7 @@ def run_eval_only_round(
 def run_training(
     args,
     streaming_config,
+    vllm_config: data_loader_lib.VLLMConfig,
     tokenizer,
     train_dataset,
     eval_dataset,
@@ -2548,7 +2549,7 @@ def run_training(
             wandb_url,
             tc.chat_template_name,
             model_dims,
-            local_eval_start_time,
+            vllm_config,
             actor_manager,
         )
         num_total_tokens += num_step_tokens
@@ -2984,6 +2985,7 @@ def main(
             episode = run_training(
                 args,
                 streaming_config,
+                vllm_config,
                 tokenizer,
                 train_dataset,
                 eval_dataset,

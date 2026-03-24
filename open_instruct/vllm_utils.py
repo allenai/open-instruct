@@ -1101,10 +1101,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             if top_k is not None:
                 extra_body["top_k"] = top_k
             api_response = await actor.client.completions.create(
-                model=actor.model_name,
-                prompt=current_prompt,
-                extra_body=extra_body,
-                **request_body,
+                model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **request_body
             )
 
             output = api_response.choices[0]
