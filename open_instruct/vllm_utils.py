@@ -1338,7 +1338,7 @@ def broadcast_weights_to_vllm(
 
     is_rank_0 = torch.distributed.get_rank() == 0
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
-    use_packed = gather_whole_model and not isinstance(model, FSDPModule)
+    use_packed = False
 
     if is_rank_0:
         refs = [engine.update_weights.remote(names, dtype_names, shapes, packed=use_packed) for engine in vllm_engines]
