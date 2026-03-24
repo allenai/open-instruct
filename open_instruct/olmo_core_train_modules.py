@@ -20,7 +20,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator, utils
+from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -381,7 +381,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 for i in range(num_samples):
                     if self.grpo_config.use_vllm_logprobs:
-                        old_logprobs_BT[i] = grpo_utils.clean_vllm_logprobs(
+                        old_logprobs_BT[i] = grpo_utils.mask_logprobs(
                             data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
                         )
                     else:
@@ -429,9 +429,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
 
                 response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
-                new_logprobs = torch.masked_fill(new_logprobs, ~response_mask, utils.INVALID_LOGPROB)
+                new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
 
-                vllm_logprobs = grpo_utils.clean_vllm_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
+                vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
 
                 old_logprob = grpo_utils.resolve_old_logprob(
                     old_logprobs_BT,

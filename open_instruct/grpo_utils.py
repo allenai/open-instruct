@@ -247,7 +247,7 @@ class ExperimentConfig:
             )
 
 
-def clean_vllm_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
     vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
     return vllm_logprobs
@@ -421,7 +421,7 @@ def compute_logprobs(
 
             for i, logprob_BT in zip(batch_indices, split_logprobs):
                 response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
-                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
+                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:].bool())
                 logprobs_BT.append(logprob_BT)
 
     return logprobs_BT

@@ -109,7 +109,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
-    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
@@ -550,7 +549,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
                         if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = grpo_utils.clean_vllm_logprobs(
+                            old_logprobs_BT[i] = grpo_utils.mask_logprobs(
                                 data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
                             )
                         else:
@@ -602,10 +601,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
-                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = grpo_utils.clean_vllm_logprobs(
-                        data_BT.vllm_logprobs[i][:, 1:], response_mask_BT
-                    )
+                    local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
+                    vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
