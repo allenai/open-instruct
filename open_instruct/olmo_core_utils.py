@@ -5,6 +5,9 @@ This module provides common utilities for working with OLMo-core models,
 including model configuration mappings and helper functions.
 """
 
+import os
+
+import torch
 import transformers
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import save_hf_model
@@ -22,6 +25,7 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "allenai/Olmo-3-1025-7B": "olmo3_7B",
     "allenai/OLMoE-1B-7B-0924": "olmoe_1B_7B",
     "Qwen/Qwen3-0.6B": "qwen3_0_6B",
+    "Qwen/Qwen3-0.6B-Base": "qwen3_0_6B",
     "Qwen/Qwen3-1.7B": "qwen3_1_7B",
     "Qwen/Qwen3-4B": "qwen3_4B",
     "Qwen/Qwen3-8B": "qwen3_8B",
@@ -67,9 +71,16 @@ def get_transformer_config(
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
-    unwrapped_model = model_config.build(init_device="cpu")
-    unwrapped_model.load_state_dict(state_dict)
-    save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
+    try:
+        unwrapped_model = model_config.build(init_device="cpu")
+        unwrapped_model.load_state_dict(state_dict)
+        save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
+    except NotImplementedError as exc:
+        logger.warning(
+            "Falling back to raw state_dict save because HF export is unsupported for this OLMo-core model: %s", exc
+        )
+        os.makedirs(save_dir, exist_ok=True)
+        torch.save(state_dict, os.path.join(save_dir, "model_state_dict.pt"))
     tokenizer.save_pretrained(save_dir)
     original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
     original_config.save_pretrained(save_dir)
