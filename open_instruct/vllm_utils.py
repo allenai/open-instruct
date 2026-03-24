@@ -115,6 +115,7 @@ class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
     max_tokens: int = 256
+    min_tokens: int = 0
     n: int = 1
     stop: list[str] | None = None
     seed: int | None = None
@@ -1232,6 +1233,7 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
+    trust_remote_code: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1316,6 +1318,7 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                trust_remote_code=trust_remote_code,
             )
         )
 

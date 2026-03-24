@@ -12,7 +12,6 @@ import csv
 import dataclasses
 import gc
 import json
-import logging
 import os
 import pathlib
 import threading
@@ -33,7 +32,6 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 
-logging.getLogger("vllm").setLevel(logging.INFO)
 logger = logger_utils.setup_logger(__name__)
 
 
