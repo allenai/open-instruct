@@ -735,9 +735,7 @@ class TestAccumulateInferenceBatchesProgress(unittest.TestCase):
                     prompt_id=f"0_{i}",
                     start_time=time.perf_counter(),
                     token_statistics=TokenStatistics(
-                        num_prompt_tokens=10,
-                        num_response_tokens=3 * num_samples_per_prompt,
-                        generation_time=0.1,
+                        num_prompt_tokens=10, num_response_tokens=3 * num_samples_per_prompt, generation_time=0.1
                     ),
                     logprobs=[[0.0, 0.0, 0.0] for _ in range(num_samples_per_prompt)],
                     reward_scores=[i / num_samples_per_prompt for i in range(num_samples_per_prompt)],
