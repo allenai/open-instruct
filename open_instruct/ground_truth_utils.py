@@ -27,7 +27,13 @@ from litellm import acompletion
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
+from open_instruct.judge_utils import (
+    EXTRACTOR_MAP,
+    JUDGE_PROMPT_MAP,
+    PRICE_PER_TOKEN,
+    REQUIRED_OUTPUT_SUFFIX_MAP,
+    build_messages,
+)
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -99,6 +105,7 @@ class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
+    metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -705,8 +712,10 @@ class LMJudgeVerifier(VerifierFunction):
 
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
+        self.judge_type = judge_type
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.extractor = EXTRACTOR_MAP[judge_type]
+        self.required_output_suffix = REQUIRED_OUTPUT_SUFFIX_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
@@ -763,8 +772,15 @@ class LMJudgeVerifier(VerifierFunction):
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
         # client = self._get_client()
-        final_answer = extract_final_answer(prediction)
-        prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
+        judged_output = prediction if self.judge_type == "compass_verifier" else extract_final_answer(prediction)
+        prompt = self.prompt_template.format(
+            input=query,
+            output=judged_output,
+            label=label,
+            question=query,
+            gold_answer=label,
+            llm_response=judged_output,
+        )
 
         max_retries = 3  # for rate limits
         retry_delay = 1.0
@@ -789,6 +805,7 @@ class LMJudgeVerifier(VerifierFunction):
                         model_name=self.verifier_config.llm_judge_model,
                         max_context_length=self.verifier_config.llm_judge_max_context_length,
                         safety_margin=200,
+                        required_suffix=self.required_output_suffix,
                     )
 
                     # Check again after truncation
@@ -849,9 +866,9 @@ class LMJudgeVerifier(VerifierFunction):
                     "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
                 )
             else:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
         except RuntimeError:
-            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
 
     @classmethod
     async def cleanup_all_clients(cls):
@@ -877,6 +894,82 @@ class LMJudgeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return LMJudgeVerifierConfig
+
+
+class LLMJudgeFallbackVerifier(VerifierFunction):
+    """Run a primary verifier first and only fall back to an LLM judge on failures."""
+
+    def __init__(self, primary_verifier: VerifierFunction, fallback_verifier: LMJudgeVerifier) -> None:
+        super().__init__(
+            primary_verifier.name,
+            weight=getattr(primary_verifier, "weight", 1.0),
+            verifier_config=getattr(primary_verifier, "verifier_config", None),
+        )
+        self.primary_verifier = primary_verifier
+        self.fallback_verifier = fallback_verifier
+
+    async def async_call(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        try:
+            primary_result = await self.primary_verifier.async_call(
+                tokenized_prediction, prediction, label, query, rollout_state
+            )
+        except TypeError:
+            primary_result = await self.primary_verifier.async_call(tokenized_prediction, prediction, label, query)
+        if primary_result.score > 0.0:
+            return primary_result
+
+        try:
+            fallback_result = await self.fallback_verifier.async_call(
+                tokenized_prediction, prediction, label, query, rollout_state
+            )
+        except TypeError:
+            fallback_result = await self.fallback_verifier.async_call(tokenized_prediction, prediction, label, query)
+        fallback_metadata = dict(fallback_result.metadata)
+        fallback_metadata.update(
+            {
+                "llm_judge_fallback_used": 1,
+                "llm_judge_fallback_primary_verifier": self.primary_verifier.name,
+                "llm_judge_correct_when_primary_wrong": int(fallback_result.score > 0.0),
+            }
+        )
+        return VerificationResult(
+            score=fallback_result.score,
+            cost=primary_result.cost + fallback_result.cost,
+            reasoning=fallback_result.reasoning,
+            metadata=fallback_metadata,
+        )
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
+
+
+def _judge_type_for_verifier(verifier_name: str) -> str:
+    verifier_name = verifier_name.lower()
+    if verifier_name in {"gsm8k", "math"}:
+        return "compass_verifier"
+    return "quality"
 
 
 class CodeVerifier(VerifierFunction):
@@ -1200,7 +1293,7 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
     """
     verifiers: dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
-        if subclass == LMJudgeVerifier:
+        if subclass in {LMJudgeVerifier, LLMJudgeFallbackVerifier}:
             continue
 
         verifier_config = subclass.get_config_class().from_args(args, streaming_config)
@@ -1218,6 +1311,40 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
+
+    fallback_verifier_name = (
+        getattr(streaming_config, "llm_judge_fallback_verifier", None) if streaming_config else None
+    )
+
+    if streaming_config and streaming_config.llm_judge_override_verifier:
+        override_verifier = streaming_config.llm_judge_override_verifier.lower()
+        assert override_verifier in verifiers, (
+            f"`llm_judge_override_verifier` must be one of {sorted(verifiers.keys())}, got: {override_verifier}"
+        )
+        if fallback_verifier_name and fallback_verifier_name.lower() == override_verifier:
+            raise ValueError(
+                "`llm_judge_override_verifier` and `llm_judge_fallback_verifier` cannot target the same verifier"
+            )
+        judge_type = _judge_type_for_verifier(override_verifier)
+        verifiers[override_verifier] = LMJudgeVerifier(
+            judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config)
+        )
+
+    if fallback_verifier_name:
+        fallback_verifier_name = fallback_verifier_name.lower()
+        assert fallback_verifier_name in verifiers, (
+            f"`llm_judge_fallback_verifier` must be one of {sorted(verifiers.keys())}, got: {fallback_verifier_name}"
+        )
+        primary_verifier = verifiers[fallback_verifier_name]
+        if isinstance(primary_verifier, LMJudgeVerifier):
+            raise ValueError(
+                f"`llm_judge_fallback_verifier={fallback_verifier_name}` resolved to an LLM judge; "
+                "fallback requires a non-LLM primary verifier"
+            )
+        fallback_judge = LMJudgeVerifier(
+            _judge_type_for_verifier(fallback_verifier_name), LMJudgeVerifierConfig.from_args(args, streaming_config)
+        )
+        verifiers[fallback_verifier_name] = LLMJudgeFallbackVerifier(primary_verifier, fallback_judge)
 
     # if we have remap arg, remap!
     if streaming_config and streaming_config.remap_verifier:
@@ -1268,6 +1395,17 @@ async def apply_verifiable_reward(
     async_tasks = []
     task_metadata = []
 
+    def resolve_reward_function(dataset_name: str) -> VerifierFunction | None:
+        dataset_key = dataset_name.lower()
+        reward_func = reward_fn_mapping.get(dataset_key)
+        if reward_func is not None:
+            return reward_func
+        if dataset_key.startswith("gsm8k"):
+            return reward_fn_mapping.get("gsm8k")
+        if dataset_key.startswith("math"):
+            return reward_fn_mapping.get("math")
+        return None
+
     for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(
         zip(responses, decoded_responses, ground_truths, datasets, queries, rollout_states)
     ):
@@ -1276,7 +1414,7 @@ async def apply_verifiable_reward(
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
 
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = reward_fn_mapping.get(ds.lower())
+            reward_func = resolve_reward_function(ds)
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
@@ -1299,6 +1437,8 @@ async def apply_verifiable_reward(
 
     response_rewards = [0] * len(responses)
     response_per_func_rewards = [{} for _ in range(len(responses))]
+    fallback_used_counts: Counter[str] = Counter()
+    fallback_correct_counts: Counter[str] = Counter()
 
     for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
@@ -1313,7 +1453,34 @@ async def apply_verifiable_reward(
             response_per_func_rewards[response_idx].get(dataset, 0) + weighted_reward
         )
 
-    return response_rewards, response_per_func_rewards
+        result_metadata = getattr(result, "metadata", {}) or {}
+        if result_metadata.get("llm_judge_fallback_used"):
+            verifier_name = result_metadata.get("llm_judge_fallback_primary_verifier", dataset)
+            fallback_used_counts[verifier_name] += 1
+            fallback_correct_counts[verifier_name] += int(
+                result_metadata.get("llm_judge_correct_when_primary_wrong", 0)
+            )
+
+    extra_metrics: dict[str, float] = {}
+    total_fallback_uses = sum(fallback_used_counts.values())
+    total_fallback_correct = sum(fallback_correct_counts.values())
+    if total_fallback_uses > 0:
+        extra_metrics["objective/llm_judge_fallback_used_count"] = float(total_fallback_uses)
+        extra_metrics["objective/llm_judge_correct_when_primary_wrong_count"] = float(total_fallback_correct)
+        extra_metrics["objective/llm_judge_correct_when_primary_wrong_rate"] = (
+            total_fallback_correct / total_fallback_uses
+        )
+        for verifier_name, used_count in fallback_used_counts.items():
+            extra_metrics[f"objective/{verifier_name}_llm_judge_fallback_used_count"] = float(used_count)
+            correct_count = fallback_correct_counts[verifier_name]
+            extra_metrics[f"objective/{verifier_name}_llm_judge_correct_when_primary_wrong_count"] = float(
+                correct_count
+            )
+            extra_metrics[f"objective/{verifier_name}_llm_judge_correct_when_primary_wrong_rate"] = (
+                correct_count / used_count
+            )
+
+    return response_rewards, response_per_func_rewards, extra_metrics
 
 
 @dataclasses.dataclass
@@ -1324,6 +1491,7 @@ class RewardConfig:
     r1_style_format_reward: float = 1.0
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
+    spurious_reward_mode: bool = False
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False
@@ -1369,7 +1537,7 @@ class RewardConfig:
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
             if self.apply_verifiable_reward:
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                verifiable_reward_result = await apply_verifiable_reward(
                     self.verifier_functions,
                     responses,
                     decoded_responses,
@@ -1379,6 +1547,11 @@ class RewardConfig:
                     queries=queries,
                     rollout_states=rollout_states,
                 )
+                if len(verifiable_reward_result) == 2:
+                    verifiable_rewards, per_func_rewards = verifiable_reward_result
+                    verifier_metrics = {}
+                else:
+                    verifiable_rewards, per_func_rewards, verifier_metrics = verifiable_reward_result
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
 
@@ -1412,12 +1585,21 @@ class RewardConfig:
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                metrics.update(verifier_metrics)
 
             if self.non_stop_penalty:
                 assert len(finish_reasons) == len(scores)
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = self.non_stop_penalty_value
+
+            if self.spurious_reward_mode:
+                random_binary_scores = np.random.randint(0, 2, size=len(decoded_responses)).astype(float)
+                spurious_scores = random_binary_scores * float(self.verification_reward)
+                scores = spurious_scores.tolist()
+
+                metrics["objective/spurious_reward"] = spurious_scores.mean()
+                metrics["objective/spurious_correct_rate"] = (spurious_scores > 0.0).mean()
 
             return scores, metrics
 
