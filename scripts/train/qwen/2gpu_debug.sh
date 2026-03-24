@@ -6,12 +6,8 @@ MODEL_NAME_OR_PATH="Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
 # LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-25 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-50 8 mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
-# LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
-# LOCAL_EVAL_SPLITS="train"
-    # --dataset_mixer_eval_list $LOCAL_EVALS \
-    # --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
-    # --local_eval_every 2 \
-    # --eval_pass_at_k 4 \
+LOCAL_EVALS="mnoukhov/gsm8k-platinum-openinstruct-0.5b-instruct-75 8"
+LOCAL_EVAL_SPLITS="train"
 
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
@@ -24,7 +20,6 @@ uv run --active open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 1 \
     --inflight_updates \
-    --filter_zero_std_samples False \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 8 \
@@ -34,6 +29,10 @@ uv run --active open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
+    --local_eval_every 5 \
+    --eval_pass_at_k 4 \
     --max_prompt_token_length 512 \
     --response_length 2048 \
     --pack_length 4096 \
@@ -54,7 +53,6 @@ uv run --active open_instruct/grpo_fast.py \
     --mask_truncated_completions False \
     --load_ref_policy True \
     --with_tracking False \
-    --send_slack_alerts \
     --push_to_hub False $@
 
     # --checkpoint_state_freq 200 \
