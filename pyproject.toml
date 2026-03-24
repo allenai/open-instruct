@@ -27,11 +27,10 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
     "transformers>=5.3.0",
-    "vllm; platform_system != 'Darwin'",
+    "vllm>=0.18.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "flash-attn-3>=3.0.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
@@ -50,17 +49,14 @@ build-backend = "setuptools.build_meta"
 py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
-flash-attn = [{ requirement = "torch", match-runtime = true }]
 flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
-flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "002958a8f15a" }
-vllm = { git = "https://github.com/yanhong-lbh/vllm", rev = "3677c274d" }
 
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
@@ -87,7 +83,7 @@ explicit = true
 
 [[tool.uv.index]]
 name = "flash-attn-3-wheels"
-url = "https://windreamer.github.io/flash-attention3-wheels/cu129_torch290"
+url = "https://windreamer.github.io/flash-attention3-wheels/cu129_torch2100"
 format = "flat"
 explicit = true
 
