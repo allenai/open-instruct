@@ -79,5 +79,4 @@ uv run python mason.py \
     --gae_lambda 0.95 \
     --vf_clip_range 0.2 \
     --length_adaptive_gae \
-    --value_model_ground_truth_conditioning \
-    --gt_conditioning_template boxed_answer
+    --value_model_ground_truth_conditioning
