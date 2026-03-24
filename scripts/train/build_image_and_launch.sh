@@ -64,18 +64,9 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-# Ensure pip-bundled NVIDIA libs are found before system CUDA libs.
-# This must run before uv sync so that flash-attn's build can load torch.
-VENV_NVIDIA_DIR=".venv/lib/python3.12/site-packages/nvidia"
-if [ -d "$VENV_NVIDIA_DIR" ]; then
-    for lib_dir in "$VENV_NVIDIA_DIR"/*/lib; do
-        [ -d "$lib_dir" ] && export LD_LIBRARY_PATH="${lib_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    done
-fi
-
 # Install Python dependencies
 echo "Installing dependencies with uv..."
-uv sync --no-install-package flash-attn --no-install-package vllm
+uv sync
 
 # Run the provided script with the image name and all remaining arguments
 script="$1"
