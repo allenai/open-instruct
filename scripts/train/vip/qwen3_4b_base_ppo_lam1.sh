@@ -72,8 +72,7 @@ uv run python mason.py \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False \
     --use_value_model \
-    --value_learning_rate 5e-6 \
-    --value_num_mini_batches 16 \
+    --value_learning_rate 1e-5 \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
