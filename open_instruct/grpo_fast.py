@@ -78,6 +78,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -413,29 +414,17 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.vllm_config.vllm_tensor_parallel_size,
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            backend = self.vllm_config.vllm_sync_backend
             refs = [
-                engine.init_process_group.remote(
-                    master_address,
-                    master_port,
-                    i * vllm_tensor_parallel_size + 1,
-                    world_size,
-                    "openrlhf",
-                    backend=backend,
-                    timeout_minutes=self.args.backend_timeout,
+                engine.init_weight_transfer_engine.remote(
+                    master_address, master_port, i * vllm_tensor_parallel_size + 1, world_size
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
             torch.cuda.set_device(self.local_rank)
-            self.model_update_group = vllm_utils.init_process_group(
-                backend=backend,
-                init_method=f"tcp://{master_address}:{master_port}",
-                world_size=world_size,
-                rank=0,
-                group_name="openrlhf",
-                timeout=timedelta(minutes=self.args.backend_timeout),
+            self.model_update_group = NCCLWeightTransferEngine.trainer_init(
+                {"master_address": master_address, "master_port": master_port, "world_size": world_size}
             )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
+            ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
