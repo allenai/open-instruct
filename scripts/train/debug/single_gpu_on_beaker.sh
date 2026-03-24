@@ -6,7 +6,7 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-uv run --no-sync python mason.py \
+uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
        --cluster ai2/ceres \
@@ -34,8 +34,7 @@ uv run --no-sync python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path allenai/Olmo-Hybrid-Instruct-DPO-7B \
-    --trust_remote_code \
+    --model_name_or_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/dpo_utils__123__1769051928/hf_model \
     --add_bos \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \

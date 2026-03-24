@@ -4,7 +4,7 @@
 num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-uv run --no-sync python mason.py \
+uv run python mason.py \
         --cluster ai2/jupiter \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
@@ -36,10 +36,7 @@ uv run --no-sync python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path allenai/Olmo-3-1025-7B \
-	--trust_remote_code \
-	--add_bos \
-	--vllm_enforce_eager \
+        --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
