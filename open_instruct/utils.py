@@ -953,7 +953,8 @@ def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
         session.mount("https://", adapter)
         return session
 
-    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
+    if hasattr(huggingface_hub, "configure_http_backend"):
+        huggingface_hub.configure_http_backend(backend_factory=backend_factory)
 
 
 def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
