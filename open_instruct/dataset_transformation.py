@@ -48,7 +48,6 @@ import hashlib
 import json
 import multiprocessing
 import os
-import shutil
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from typing import Any, Literal
@@ -256,55 +255,6 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ '<|assistant|>\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "qwen_instruct": (
-        "{% for message in messages %}"
-        "{% if message['role'] == 'user' %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "qwen_instruct_boxed_math": (
-        "{% if messages[0]['role'] == 'system' %}"
-        "{{ '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>system\nPlease reason step by step, and put your final answer within \\\\boxed{}.<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'user' %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "qwen_base_boxed_math": (
-        "{{ 'Solve the math problem by reasoning step by step, and put your final answer within \\\\boxed{}.\n' }}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'user' %}"
-        "{{ message['content'] + '\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "qwen_instruct_user_boxed_math": (
-        "{% for message in messages %}"
-        "{% if message['role'] == 'user' %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and put your final answer within \\\\boxed{}<|im_end|>\n' }}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -937,13 +887,6 @@ class TokenizerConfig:
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
     """columns name for the sft messages"""
 
-    def __post_init__(self):
-        if self.chat_template_name is not None and self.chat_template_name not in CHAT_TEMPLATES:
-            available_templates = ", ".join(sorted(CHAT_TEMPLATES.keys()))
-            raise ValueError(
-                f"Invalid chat_template_name='{self.chat_template_name}'. Expected one of: {available_templates}"
-            )
-
     @cached_property
     def tokenizer(self):
         if self.tokenizer_name_or_path is None:
@@ -1429,13 +1372,11 @@ def rlvr_tokenize_v1(
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    # Override the system prompt if provided.
-    # Use `is not None` so an empty string explicitly means "remove system prompt".
-    if system_prompt_override is not None:
+    # Override the system prompt if provided
+    if system_prompt_override:
         if prompt[0]["role"] == "system":
             prompt = prompt[1:]
-        if system_prompt_override != "":
-            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template: list[dict[str, Any]] | None = None
     if pass_tools_to_chat_template and tool_definitions:
@@ -1540,13 +1481,10 @@ def rlvr_tokenize_v3(
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
     if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
         prompt = prompt[:-1]
-    # Override the system prompt if we have a new one provided.
-    # Use `is not None` so an empty string explicitly means "remove system prompt".
-    if system_prompt_override is not None:
+    if system_prompt_override:
         if prompt[0]["role"] == "system":
             del prompt[0]
-        if system_prompt_override != "":
-            prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
 
@@ -1565,10 +1503,6 @@ def rlvr_tokenize_v3(
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    # Get the raw values from the source keys
-    ground_truths_val = row[ground_truths_key]
-    verifier_source_val = row[verifier_source_key]
-
     # Get the raw values from the source keys
     ground_truths_val = row[ground_truths_key]
     verifier_source_val = row[verifier_source_key]
@@ -1866,15 +1800,7 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    template_source_hash = None
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        template_source_hash = hashlib.sha256(CHAT_TEMPLATES[tc.chat_template_name].encode()).hexdigest()
-    combined_dict = {
-        "cache_version": DATASET_CACHE_VERSION,
-        "dataset_configs": dc_dicts,
-        "tokenizer_config": tc_dict,
-        "chat_template_source_hash": template_source_hash,
-    }
+    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
@@ -1885,16 +1811,9 @@ class DatasetTransformationCache:
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
-        self,
-        dcs: list[DatasetConfig],
-        tc: TokenizerConfig,
-        dataset_skip_cache: bool = False,
-        dataset_overwrite_cache: bool = False,
+        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
     ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
-        if dataset_overwrite_cache:
-            raise ValueError("`dataset_overwrite_cache` is only supported when `dataset_cache_mode='local'`.")
-
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
         # NOTE: the cached dataset is always train split
@@ -2003,18 +1922,10 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self,
-        dcs: list[DatasetConfig],
-        tc: TokenizerConfig,
-        dataset_skip_cache: bool = False,
-        dataset_overwrite_cache: bool = False,
+        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
     ) -> tuple[Dataset, dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
-
-        if dataset_overwrite_cache and os.path.exists(cache_path):
-            print(f"dataset_overwrite_cache is True, removing existing cache at {cache_path}")
-            shutil.rmtree(cache_path)
 
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
@@ -2210,7 +2121,6 @@ def get_cached_dataset_tulu_with_statistics(
     hf_entity: str | None = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-    dataset_overwrite_cache: bool = False,
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
@@ -2234,9 +2144,7 @@ def get_cached_dataset_tulu_with_statistics(
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
 
-    dataset, statistics = cache.load_or_transform_dataset(
-        dcs, tc, dataset_skip_cache=dataset_skip_cache, dataset_overwrite_cache=dataset_overwrite_cache
-    )
+    dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
     if drop_dataset_source:
         dataset = remove_dataset_source_field(dataset)
@@ -2256,7 +2164,6 @@ def get_cached_dataset_tulu(
     hf_entity: str | None = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-    dataset_overwrite_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
 ) -> Dataset:
@@ -2272,7 +2179,6 @@ def get_cached_dataset_tulu(
         hf_entity=hf_entity,
         dataset_local_cache_dir=dataset_local_cache_dir,
         dataset_skip_cache=dataset_skip_cache,
-        dataset_overwrite_cache=dataset_overwrite_cache,
         drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,

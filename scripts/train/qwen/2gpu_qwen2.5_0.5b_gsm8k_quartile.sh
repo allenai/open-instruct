@@ -54,7 +54,7 @@ uv run --active open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
-    --colocate_train_inference_mode \
+    --single_gpu_mode \
     --vllm_num_engines 2 \
     --vllm_enforce_eager \
     --vllm_sync_backend gloo \

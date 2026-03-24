@@ -100,7 +100,7 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_result = SimpleNamespace(
             responses=[[1], [2]],
             finish_reasons=["stop", "stop"],
-            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=4, thread_generation_time=2.0),
+            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=4, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
             scores=[1.0, 0.0],
@@ -158,7 +158,7 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_result = SimpleNamespace(
             responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
             finish_reasons=["stop"] * 8,
-            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, thread_generation_time=2.0),
+            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
             scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
@@ -220,7 +220,7 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_result = SimpleNamespace(
             responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
             finish_reasons=["stop"] * 8,
-            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, thread_generation_time=2.0),
+            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
             scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
@@ -289,7 +289,7 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_result = SimpleNamespace(
             responses=[[0], [0, 1], [0, 1, 2], [0, 1, 2, 3], [0] * 5, [0] * 6, [0] * 7, [0] * 8],
             finish_reasons=["stop"] * 8,
-            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, thread_generation_time=2.0),
+            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
             scores=[1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0],

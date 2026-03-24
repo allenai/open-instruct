@@ -15,8 +15,7 @@ class TokenStatistics:
 
     num_prompt_tokens: int
     num_response_tokens: int
-    thread_generation_time: float
-    vllm_sum_generation_time: float | None = None
+    generation_time: float
     earliest_start_time: float | None = None
 
 
