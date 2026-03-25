@@ -12,10 +12,10 @@ Run on a GPU node:
 
 import vllm
 
-llm = vllm.LLM(
-    model="allenai/Olmo-Hybrid-Instruct-DPO-7B",
-    trust_remote_code=True,
-    enforce_eager=True,
-)
-output = llm.generate(["Hello, world!"], vllm.SamplingParams(max_tokens=16))
-print(output[0].outputs[0].text)
+if __name__ == "__main__":
+    llm = vllm.LLM(
+        model="allenai/Olmo-Hybrid-Instruct-DPO-7B",
+        enforce_eager=True,
+    )
+    output = llm.generate(["Hello, world!"], vllm.SamplingParams(max_tokens=16))
+    print(output[0].outputs[0].text)
