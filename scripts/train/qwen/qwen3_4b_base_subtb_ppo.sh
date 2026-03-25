@@ -41,7 +41,7 @@ uv run mason.py \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
     --num_mini_batches 1 \
-    --learning_rate 1e-6 \
+    --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
@@ -81,15 +81,15 @@ uv run mason.py \
     --push_to_hub False \
     --use_value_model \
     --value_loss_type subtb_gm \
-    --value_learning_rate 2e-6 \
+    --value_learning_rate 1e-6 \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
     --subtb_q 0.5 \
-    --subtb_alpha 1.0 \
+    --subtb_alpha 2.0 \
     --subtb_omega 1.0 \
-    --subtb_reward_scale 15.0 \
-    --subtb_num_windows 8 \
+    --subtb_reward_scale 10.0 \
+    --subtb_num_windows 4 \
     --subtb_min_window_size 16 \
-    --subtb_max_window_size 512 \
+    --subtb_max_window_size 256 \
     --subtb_lambda 0.9 "$@"
