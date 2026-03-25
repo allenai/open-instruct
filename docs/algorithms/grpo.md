@@ -253,7 +253,7 @@ bash scripts/train/olmo2/grpo_fast_13b_zero.sh
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (2 Nodes)
 
-These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. See the [deleted script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/tulu3/grpo_8b.sh) for the original launch command.
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py) script, which has since been removed. The experiments were run at commit [`745bf58d321c`](https://github.com/allenai/open-instruct/tree/745bf58d321c). They are preserved here for historical reference. See the [original launch script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/tulu3/grpo_8b.sh) for the launch command.
 
 ![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo.png)
 ![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo-time.png)
