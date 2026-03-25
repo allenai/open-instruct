@@ -1162,7 +1162,10 @@ def setup_datasets(
     else:
         eval_dataset = None
 
-    visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
+    try:
+        visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
+    except Exception:
+        logger.warning("Failed to visualize tokens (dataset format may differ from expected)", exc_info=True)
 
     return train_dataset, eval_dataset
 
