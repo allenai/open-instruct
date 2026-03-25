@@ -467,6 +467,8 @@ TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \
 
 ### (NEW) Llama-3.1-Tulu-3.1-8B Reproduction
 
+> **Note**: These commands use the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py) script, which has since been removed. The experiments were run at commit [`745bf58d321c`](https://github.com/allenai/open-instruct/tree/745bf58d321c). They are preserved here for historical reference.
+
 This is the exact command which produced [allenai/Llama-3.1-Tulu-3.1-8B](https://huggingface.co/allenai/Llama-3.1-Tulu-3.1-8B), which uses 2 nodes (16 GPUs)
 
 
