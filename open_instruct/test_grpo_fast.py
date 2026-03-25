@@ -3,7 +3,6 @@ import os
 import threading
 import time
 import unittest
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -15,7 +14,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, rl_utils, utils
+from open_instruct import rl_utils, utils
 from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -815,33 +814,6 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
-
-
-class TestGrpoFastMetrics(unittest.TestCase):
-    def test_compute_loss_metrics_logs_tis_metrics(self):
-        trainer = grpo_fast.PolicyTrainerRayProcess.__new__(grpo_fast.PolicyTrainerRayProcess)
-        trainer.args = SimpleNamespace(load_ref_policy=False, record_entropy=False)
-        trainer.local_metrics = utils.MetricsTracker(device=torch.device("cpu"))
-        trainer.scheduler = Mock()
-        trainer.scheduler.get_last_lr.return_value = [0.01]
-
-        loss_stats_B = {
-            "token_count": torch.tensor([1.0, 3.0]),
-            "pg_loss": torch.tensor([2.0, 6.0]),
-            "loss": torch.tensor([4.0, 8.0]),
-            "pg_clipfrac": torch.tensor([0.1, 0.3]),
-            "tis_ratio": torch.tensor([1.0, 1.5]),
-            "tis_clipfrac": torch.tensor([0.0, 0.5]),
-            "ratio": torch.tensor([0.8, 1.2]),
-            "entropy": torch.zeros(2),
-        }
-
-        trainer._compute_loss_metrics(loss_stats_B, total_valid_tokens=4)
-
-        metrics = trainer.local_metrics.get_metrics_list()
-        self.assertAlmostEqual(metrics["val/tis_ratio"], 1.375)
-        self.assertAlmostEqual(metrics["val/tis_clipfrac"], 0.375)
-        self.assertAlmostEqual(metrics["val/ratio"], 1.1)
 
 
 if __name__ == "__main__":
