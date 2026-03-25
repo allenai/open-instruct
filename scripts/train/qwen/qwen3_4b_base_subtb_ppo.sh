@@ -33,6 +33,7 @@ uv run mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
+    --algorithm_mode subtb \
     --beta 0.0 \
     --async_steps 8 \
     --inflight_updates \
@@ -76,7 +77,7 @@ uv run mason.py \
     --loss_fn dapo \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
-    --load_ref_policy True \
+    --load_ref_policy False \
     --oe_eval_max_length 10240 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero \
@@ -89,11 +90,6 @@ uv run mason.py \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
-    --gamma 1.0 \
-    --gae_lambda 0.95 \
-    --decoupled_gae \
-    --length_adaptive_gae \
-    --length_adaptive_gae_alpha 0.05 \
     --subtb_q 0.5 \
     --subtb_alpha 1.0 \
     --subtb_omega 1.0 \

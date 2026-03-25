@@ -9,6 +9,7 @@ export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 
 uv run python open_instruct/grpo_fast.py \
     --exp_name qwen3_0p6b_subtb_1gpu_test \
+    --algorithm_mode subtb \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
@@ -45,7 +46,7 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --loss_fn dapo \
     --clip_higher 0.272 \
-    --load_ref_policy True \
+    --load_ref_policy False \
     --push_to_hub false \
     --use_value_model \
     --value_loss_type subtb_gm \
@@ -53,11 +54,6 @@ uv run python open_instruct/grpo_fast.py \
     --value_warmup_steps 4 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
-    --gamma 1.0 \
-    --gae_lambda 0.95 \
-    --decoupled_gae \
-    --length_adaptive_gae \
-    --length_adaptive_gae_alpha 0.05 \
     --subtb_q 0.5 \
     --subtb_alpha 2.0 \
     --subtb_omega 1.0 \

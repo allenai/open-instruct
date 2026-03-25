@@ -23,6 +23,11 @@ class GRPOLossType(enum.StrEnum):
     cispo = "cispo"
 
 
+class TrainingAlgorithm(enum.StrEnum):
+    grpo = "grpo"
+    subtb = "subtb"
+
+
 @dataclass
 class ExperimentConfig:
     # Experiment
@@ -108,8 +113,10 @@ class ExperimentConfig:
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
     temperature: float = field(default=1.0, init=False)
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
+    algorithm_mode: TrainingAlgorithm = TrainingAlgorithm.grpo
+    """Top-level training algorithm. `grpo` keeps PPO/GRPO-style updates; `subtb` runs proper SubTB training."""
     use_value_model: bool = False
-    """Whether to train a separate value/flow model for PPO-style advantages."""
+    """Whether to train a separate value/flow model."""
     value_model_name_or_path: str | None = None
     """Optional path for initializing the separate value/flow model."""
     value_learning_rate: float | None = None
@@ -300,6 +307,15 @@ class ExperimentConfig:
                 raise ValueError(f"Unsupported value_loss_type: {self.value_loss_type}")
             if self.value_loss_type == "subtb_gm" and self.subtb_q <= 0:
                 raise ValueError(f"subtb_q must be > 0 for GM filtering, got {self.subtb_q}")
+        if self.algorithm_mode == TrainingAlgorithm.subtb:
+            if not self.use_value_model:
+                raise ValueError("Proper SubTB training requires `use_value_model=True` for the flow model.")
+            if self.value_loss_type != "subtb_gm":
+                raise ValueError("Proper SubTB training requires `value_loss_type=subtb_gm`.")
+            if self.load_ref_policy:
+                raise ValueError("Proper SubTB training does not use a PPO reference policy. Set `load_ref_policy=False`.")
+            if self.beta != 0.0:
+                raise ValueError("Proper SubTB training does not use KL regularization. Set `beta=0.0`.")
 
 
 def compute_grpo_loss(
