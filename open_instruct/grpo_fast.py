@@ -1162,10 +1162,7 @@ def setup_datasets(
     else:
         eval_dataset = None
 
-    try:
-        visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-    except (TypeError, ValueError):
-        logger.warning("Could not visualize tokens (likely a dataset format issue), skipping.")
+    visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
     return train_dataset, eval_dataset
 

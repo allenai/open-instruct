@@ -224,9 +224,6 @@ def ray_get_with_progress(
             completion_times[idx] = time.perf_counter() - t0
     except TimeoutError as e:
         raise TimeoutError(f"{desc} failed.") from e
-    except Exception as e:
-        logger.error(f"{desc} failed with error: {e}")
-        raise
 
     return results, completion_times
 
@@ -953,8 +950,7 @@ def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
         session.mount("https://", adapter)
         return session
 
-    if hasattr(huggingface_hub, "configure_http_backend"):
-        huggingface_hub.configure_http_backend(backend_factory=backend_factory)
+    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
 
 
 def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
