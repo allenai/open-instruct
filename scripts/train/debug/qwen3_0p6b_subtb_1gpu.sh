@@ -24,7 +24,7 @@ uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 768 \
-    --pack_length 1024 \
+    --pack_length 1536 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --chat_template qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
