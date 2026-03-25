@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Single-GPU local smoke test for SubTB+GM with a separate flow/value model.
-# Uses a small Qwen3 base checkpoint to validate trainer wiring cheaply.
+# This is tuned for quick debugging rather than faithfulness to the full run:
+# shorter context, shorter value warmup, and slightly stronger GM filtering.
 
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
@@ -22,13 +23,13 @@ uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
-    --response_length 1024 \
-    --pack_length 1536 \
+    --response_length 768 \
+    --pack_length 1024 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --chat_template qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 0.6666667 \
-    --total_episodes 256 \
+    --total_episodes 128 \
     --deepspeed_stage 2 \
     --num_learners_per_node 1 \
     --vllm_num_engines 1 \
@@ -37,8 +38,7 @@ uv run python open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
     --seed 1 \
-    --local_eval_every 5 \
-    --gradient_checkpointing \
+    --local_eval_every 20 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
@@ -50,7 +50,7 @@ uv run python open_instruct/grpo_fast.py \
     --use_value_model \
     --value_loss_type subtb_gm \
     --value_learning_rate 2e-6 \
-    --value_warmup_steps 50 \
+    --value_warmup_steps 4 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
     --gamma 1.0 \
@@ -59,7 +59,7 @@ uv run python open_instruct/grpo_fast.py \
     --length_adaptive_gae \
     --length_adaptive_gae_alpha 0.05 \
     --subtb_q 0.5 \
-    --subtb_alpha 1.0 \
+    --subtb_alpha 2.0 \
     --subtb_omega 1.0 \
     --subtb_reward_scale 15.0 \
     --subtb_num_windows 8 \
