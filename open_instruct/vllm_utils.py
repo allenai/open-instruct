@@ -1239,7 +1239,6 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
-    vllm_dtype: str = "bfloat16",
     trust_remote_code: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
@@ -1301,7 +1300,7 @@ def create_vllm_engines(
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
-                dtype=vllm_dtype,
+                dtype="bfloat16",
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
