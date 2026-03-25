@@ -324,11 +324,9 @@ def compute_grpo_loss(
         pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
         clip_mask = torch.zeros_like(pg_loss, dtype=torch.bool)
     elif config.loss_fn == GRPOLossType.tvpo:
-        if tv_divergence is None:
-            raise ValueError("TVPO loss requires `tv_divergence`.")
-        clipped_ratio = torch.where(tv_divergence > config.clip_higher, torch.ones_like(ratio), ratio)
+        clip_mask = (tv_divergence > config.clip_higher) * (((ratio.detach() - 1) * advantages) > 0)
+        clipped_ratio = torch.where(clip_mask, torch.ones_like(ratio), ratio)
         pg_loss = -advantages * clipped_ratio
-        clip_mask = tv_divergence > config.clip_higher
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
