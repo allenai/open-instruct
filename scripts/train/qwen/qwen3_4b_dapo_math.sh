@@ -6,7 +6,7 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
 BEAKER_IMAGE="michaeln/open_instruct"
 
-DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
+DATASETS="hamishivi/DAPO-Math-17k-Processed_filtered 1.0"
 DATASET_SPLITS="train"
 
 LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0"
