@@ -601,7 +601,14 @@ class LLMRayActor:
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
-        self.inference_batch_size = self.get_kv_cache_info()
+        try:
+            self.inference_batch_size = self.get_kv_cache_info()
+        except Exception:
+            logger.warning(
+                "Failed to get KV cache info (likely vLLM hybrid model dtype bug). Disabling prefetch backpressure.",
+                exc_info=True,
+            )
+            self.inference_batch_size = sys.maxsize
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
