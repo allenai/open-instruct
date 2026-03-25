@@ -11,6 +11,9 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+if [ $# -gt 0 ]; then
+    shift
+fi
 
 uv run mason.py \
     --budget ai2/oe-adapt \
