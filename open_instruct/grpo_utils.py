@@ -108,6 +108,52 @@ class ExperimentConfig:
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
     temperature: float = field(default=1.0, init=False)
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
+    use_value_model: bool = False
+    """Whether to train a separate value/flow model for PPO-style advantages."""
+    value_model_name_or_path: str | None = None
+    """Optional path for initializing the separate value/flow model."""
+    value_learning_rate: float | None = None
+    """Learning rate for the value/flow model. Defaults to the policy LR."""
+    value_loss_coef: float = 0.5
+    """Overall coefficient applied to the value/flow loss."""
+    value_num_mini_batches: int | None = None
+    """Optional number of minibatches for value/flow updates."""
+    vf_clip_range: float = 0.2
+    """Value-function clipping range for plain MSE regression mode."""
+    gamma: float = 1.0
+    """Discount factor for GAE-based policy advantages."""
+    gae_lambda: float = 0.95
+    """GAE lambda used for policy advantages unless decoupled/length-adaptive GAE is enabled."""
+    decoupled_gae: bool = False
+    """Use VAPO-style decoupled lambdas for policy and critic targets."""
+    length_adaptive_gae: bool = False
+    """Use length-adaptive policy lambda as in VAPO."""
+    length_adaptive_gae_alpha: float = 0.05
+    """Alpha parameter for length-adaptive GAE."""
+    value_warmup_steps: int = 0
+    """Number of initial steps that train only the value/flow model."""
+    reset_optimizer_after_value_warmup: bool = False
+    """Reset the policy optimizer state after value warmup ends."""
+    whiten_advantages: bool = False
+    """Whiten GAE advantages across workers before policy updates."""
+    value_loss_type: Literal["mse", "subtb_gm"] = "subtb_gm"
+    """Loss used to train the separate value/flow model."""
+    subtb_q: float = 0.5
+    """GM q parameter; must be > 0 to sparsify decision-critical tokens."""
+    subtb_alpha: float = 1.0
+    """GM alpha parameter controlling the sharper comparison distribution."""
+    subtb_omega: float = 1.0
+    """GM omega parameter controlling the policy distribution temperature."""
+    subtb_reward_scale: float = 15.0
+    """Terminal reward scale for the SubTB terminal boundary."""
+    subtb_num_windows: int = 8
+    """Number of windows sampled per rollout for SubTB training."""
+    subtb_min_window_size: int = 16
+    """Minimum SubTB window length."""
+    subtb_max_window_size: int = 512
+    """Maximum SubTB window length."""
+    subtb_lambda: float = 0.9
+    """Length decay applied to SubTB windows."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -245,6 +291,15 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.use_value_model:
+            if self.value_loss_coef < 0:
+                raise ValueError(f"value_loss_coef must be >= 0, got {self.value_loss_coef}")
+            if self.vf_clip_range < 0:
+                raise ValueError(f"vf_clip_range must be >= 0, got {self.vf_clip_range}")
+            if self.value_loss_type not in {"mse", "subtb_gm"}:
+                raise ValueError(f"Unsupported value_loss_type: {self.value_loss_type}")
+            if self.value_loss_type == "subtb_gm" and self.subtb_q <= 0:
+                raise ValueError(f"subtb_q must be > 0 for GM filtering, got {self.subtb_q}")
 
 
 def compute_grpo_loss(
@@ -312,6 +367,44 @@ def forward_for_logprobs(
             entropy = model_utils.entropy_from_logits(logits)
 
     return logprob_BT, entropy
+
+
+def forward_for_logprobs_and_logits(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor,
+    position_ids: torch.Tensor,
+    pad_token_id: int,
+    temperature: float,
+    return_entropy: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+    """Forward pass that returns gathered logprobs and aligned logits."""
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
+    logits = getattr(output, "logits", output)
+    logits = logits / temperature
+    aligned_logits = logits[:, :-1]
+    labels = query_responses[:, 1:].clone()
+    labels[labels == pad_token_id] = 0
+    logprob_BT = model_utils.log_softmax_and_gather(aligned_logits, labels)
+
+    entropy = None
+    if return_entropy:
+        with torch.no_grad():
+            entropy = model_utils.entropy_from_logits(aligned_logits)
+
+    return logprob_BT, entropy, aligned_logits
+
+
+def forward_for_aligned_logits(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor,
+    position_ids: torch.Tensor,
+) -> torch.Tensor:
+    """Forward pass that returns raw next-token logits aligned to `query_responses[:, 1:]`."""
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
+    logits = getattr(output, "logits", output)
+    return logits[:, :-1]
 
 
 def compute_logprobs(

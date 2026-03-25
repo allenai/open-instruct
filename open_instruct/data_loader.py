@@ -419,6 +419,8 @@ class StreamingDataLoaderConfig:
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
+    use_value_model: bool = field(default=False, init=False)
+    """Synced from the training config to pass terminal rewards/dones to the trainer."""
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -1010,6 +1012,7 @@ def prepare_collated_data_for_workers(
     per_device_train_batch_size: int,
     pad_token_id: int,
     pin_memory: bool = True,
+    include_rewards: bool = False,
 ) -> list[data_types.CollatedBatchData]:
     """Distributes and collates packed sequences for distributed training.
 
@@ -1042,6 +1045,9 @@ def prepare_collated_data_for_workers(
     assert packed_sequences.position_ids is not None
     assert packed_sequences.advantages is not None
     assert packed_sequences.vllm_logprobs is not None
+    if include_rewards:
+        assert packed_sequences.rewards is not None
+        assert packed_sequences.dones is not None
     for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
@@ -1049,6 +1055,8 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)] if include_rewards else None
+        per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)] if include_rewards else None
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1058,6 +1066,8 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_rewards = [] if include_rewards else None
+        collated_dones = [] if include_rewards else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1078,6 +1088,13 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            if include_rewards:
+                assert collated_rewards is not None
+                assert collated_dones is not None
+                assert per_device_packed_rewards is not None
+                assert per_device_packed_dones is not None
+                collated_rewards.append(collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0, pin_memory))
+                collated_dones.append(collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory))
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1086,6 +1103,8 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                rewards=collated_rewards,
+                dones=collated_dones,
             )
         )
     return collated_data
@@ -1243,6 +1262,8 @@ class DataPreparationActor:
                         advantages=[],
                         response_masks=[],
                         vllm_logprobs=[],
+                        rewards=[] if self.config.use_value_model else None,
+                        dones=[] if self.config.use_value_model else None,
                     )
                     for _ in range(self.dp_world_size)
                 ]
@@ -1318,9 +1339,27 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+            if self.config.use_value_model:
+                lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
+                lookup_rewards[1:] = scores
+                packed_rewards = []
+                for packed_mask, dones in zip(packed_sequences.response_masks, packed_sequences.dones):
+                    reward_tensor = torch.zeros_like(packed_mask, dtype=torch.float32)
+                    eos_positions = dones > 0
+                    if eos_positions.any():
+                        for pos_idx in torch.where(eos_positions)[0]:
+                            seq_idx = packed_mask[pos_idx].item()
+                            if seq_idx > 0:
+                                reward_tensor[pos_idx] = float(lookup_rewards[seq_idx])
+                    packed_rewards.append(reward_tensor)
+                packed_sequences.rewards = packed_rewards
 
             collated_data = prepare_collated_data_for_workers(
-                packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
+                packed_sequences,
+                self.dp_world_size,
+                self.per_device_train_batch_size,
+                self.tokenizer.pad_token_id,
+                include_rewards=self.config.use_value_model,
             )
 
             if len(result.responses) == 0:

@@ -423,6 +423,74 @@ def calculate_advantages_packed(
     return advantages, returns
 
 
+def calculate_length_adaptive_lambda(sequence_length: int, alpha: float) -> float:
+    if sequence_length <= 0:
+        return 1.0
+    return max(0.0, min(1.0, 1.0 - 1.0 / (alpha * sequence_length + 1.0)))
+
+
+def calculate_advantages_packed_vapo(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    lam_policy: float = 0.95,
+    lam_critic: float = 1.0,
+    length_adaptive: bool = False,
+    length_adaptive_alpha: float = 0.05,
+):
+    """VAPO-style decoupled GAE for packed sequences."""
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+    gen_length = values.shape[1]
+
+    lastgaelam_critic = 0
+    advantages_reversed_critic = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        lastgaelam_critic = delta + gamma * lam_critic * lastgaelam_critic * nonterminal
+        advantages_reversed_critic.append(lastgaelam_critic)
+    advantages_critic = np.stack(advantages_reversed_critic[::-1], axis=1)
+    critic_returns = advantages_critic + values
+
+    if length_adaptive:
+        batch_size = values.shape[0]
+        lam_policy_arr = np.full_like(values, lam_policy, dtype=np.float64)
+        for b in range(batch_size):
+            eos_positions = np.where(dones[b] > 0)[0]
+            start = 0
+            for eos_pos in eos_positions:
+                end = int(eos_pos) + 1
+                seq_resp_len = int(response_masks[b, start:end].sum())
+                seq_lambda = calculate_length_adaptive_lambda(seq_resp_len, length_adaptive_alpha)
+                lam_policy_arr[b, start:end] = seq_lambda
+                start = end
+        avg_lam = float(lam_policy_arr[response_masks > 0].mean()) if (response_masks > 0).any() else lam_policy
+    else:
+        lam_policy_arr = lam_policy
+        avg_lam = lam_policy
+
+    lastgaelam_policy = 0
+    advantages_reversed_policy = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        if length_adaptive:
+            lastgaelam_policy = delta + gamma * lam_policy_arr[:, t] * lastgaelam_policy * nonterminal
+        else:
+            lastgaelam_policy = delta + gamma * lam_policy * lastgaelam_policy * nonterminal
+        advantages_reversed_policy.append(lastgaelam_policy)
+    policy_advantages = np.stack(advantages_reversed_policy[::-1], axis=1)
+
+    return policy_advantages, critic_returns, avg_lam
+
+
 def masked_mean(
     values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:

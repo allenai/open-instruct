@@ -774,6 +774,10 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         advantages = [torch.ones(1, length) * (i + 1) for i, length in enumerate(seq_lengths)]
         response_masks = [torch.ones(1, length, dtype=torch.long) for length in seq_lengths]
         vllm_logprobs = [torch.zeros(1, length) - 0.5 for length in seq_lengths]
+        rewards = [torch.arange(length, dtype=torch.float32).unsqueeze(0) for length in seq_lengths]
+        dones = [torch.zeros(1, length, dtype=torch.long) for length in seq_lengths]
+        for done in dones:
+            done[0, -1] = 1
 
         return data_types.CollatedBatchData(
             query_responses=query_responses,
@@ -782,6 +786,8 @@ class TestUlyssesSPSplitter(unittest.TestCase):
             advantages=advantages,
             response_masks=response_masks,
             vllm_logprobs=vllm_logprobs,
+            rewards=rewards,
+            dones=dones,
         )
 
     @mock.patch("open_instruct.utils.dist.all_gather")
@@ -914,6 +920,8 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.advantages[0].shape[-1], chunk_len)
         self.assertEqual(result.response_masks[0].shape[-1], chunk_len)
         self.assertEqual(result.vllm_logprobs[0].shape[-1], chunk_len)
+        self.assertEqual(result.rewards[0].shape[-1], chunk_len)
+        self.assertEqual(result.dones[0].shape[-1], chunk_len)
 
     @mock.patch("open_instruct.utils.dist.all_gather")
     def test_global_max_seqlen_respected(self, mock_all_gather):
