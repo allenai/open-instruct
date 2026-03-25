@@ -142,7 +142,7 @@ def get_args():
         "--description",
         type=str,
         help="Optionally, a description for this job in Beaker.",
-        default="Beaker-Mason job.",
+        default=os.environ.get("RUN_NAME", "Beaker-Mason job."),
     )
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
