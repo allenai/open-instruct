@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# Qwen3-4B-Base PPO with a separate SubTB+GM flow model.
-# Mirrors the value-model PPO setup from hamish/ppo-value-model, but replaces
-# the critic regression loss with SubTB windows and GM-filtered g-values.
+# Qwen3-4B-Base proper SubTB+GM training run.
+# Uses the dedicated SubTB algorithm mode rather than PPO-style policy updates.
 
 DDMM=$(date +"%d%m")
 EXP_NAME="${EXP_NAME:-vip_subtb_${DDMM}_qwen3_4b_math}"
@@ -38,8 +37,6 @@ uv run mason.py \
     --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
-    --truncated_importance_sampling_ratio_cap 2.0 \
-    --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
@@ -74,8 +71,6 @@ uv run mason.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --eval_on_step_0 True \
-    --loss_fn dapo \
-    --clip_higher 0.272 \
     --mask_truncated_completions False \
     --load_ref_policy False \
     --oe_eval_max_length 10240 \

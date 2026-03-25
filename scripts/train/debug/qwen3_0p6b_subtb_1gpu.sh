@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Single-GPU local smoke test for SubTB+GM with a separate flow/value model.
+# Single-GPU local smoke test for proper SubTB+GM training.
 # This is tuned for quick debugging rather than faithfulness to the full run:
 # shorter context, shorter value warmup, and slightly stronger GM filtering.
 
@@ -13,7 +13,6 @@ uv run python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
-    --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 4 \
     --num_unique_prompts_rollout 4 \
     --num_mini_batches 1 \
@@ -44,8 +43,6 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
     --single_gpu_mode \
-    --loss_fn dapo \
-    --clip_higher 0.272 \
     --load_ref_policy False \
     --push_to_hub false \
     --use_value_model \
