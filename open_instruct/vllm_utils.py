@@ -59,6 +59,7 @@ from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
+from vllm.v1.kv_cache_interface import MambaSpec
 
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
@@ -76,6 +77,27 @@ from open_instruct.environments.tools.parsers import ToolParser, create_tool_par
 from open_instruct.ground_truth_utils import RewardConfig
 
 logger = logger_utils.setup_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
+#
+# vLLM's MambaSpec.dtypes field is typed as tuple[torch.dtype] (fixed-length,
+# exactly 1 element). Hybrid models like Olmo-Hybrid-Instruct-DPO-7B have
+# Mamba layers with 2 state tensors of different dtypes, producing a 2-element
+# tuple. When the EngineCore subprocess serializes collective_rpc results back
+# to the client via msgspec, the fixed-length tuple type is enforced and the
+# deserialization fails:
+#   msgspec.ValidationError: Expected `array` of length 1, got 2 - at `$.dtypes`
+#
+# The client-side decoder (in serial_utils._convert_result) dynamically imports
+# MambaSpec and calls msgspec.convert(data, MambaSpec), which checks the live
+# type annotations. By widening dtypes to tuple[torch.dtype, ...] (variable-
+# length), msgspec accepts any number of dtypes during deserialization.
+#
+# Upstream fix: change dtypes annotation in vllm/v1/kv_cache_interface.py.
+# ---------------------------------------------------------------------------
+MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
+MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
