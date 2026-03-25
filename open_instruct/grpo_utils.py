@@ -117,6 +117,9 @@ class ExperimentConfig:
     value_model_name_or_path: str | None = None
     """Optional path to a separate value model. If None, the value model shares the same 
     base architecture as the policy but with a separate value head."""
+    init_value_from_rm: bool = False
+    """If True, load value_model_name_or_path as a reward model (AutoModelForSequenceClassification)
+    and use its trained score head as the value head, instead of randomly initializing."""
     value_loss_coef: float = 0.5
     """Coefficient for the value function loss in the total loss."""
     value_learning_rate: float | None = None

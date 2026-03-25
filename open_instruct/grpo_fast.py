@@ -431,22 +431,55 @@ class PolicyTrainerRayProcess(RayProcess):
         _hf_ds_integration._hf_deepspeed_config_weak_ref = None
 
         value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
-        self.value_model = AutoModelForCausalLM.from_pretrained(
-            value_model_path,
-            revision=model_config.model_revision if args.value_model_name_or_path is None else None,
-            torch_dtype=torch.bfloat16,
-            attn_implementation=model_config.attn_implementation,
-            use_cache=False,
-        )
-        disable_dropout_in_model(self.value_model)
+        value_revision = model_config.model_revision if args.value_model_name_or_path is None else None
 
-        # Replace the LM head with a newly initialized Linear(hidden_size, 1)
-        hidden_size = self.value_model.config.hidden_size
-        value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
-        std = 1.0 / (hidden_size + 1) ** 0.5
-        torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
-        self.value_model.lm_head = value_head
-        logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
+        if args.init_value_from_rm:
+            from transformers import AutoModelForSequenceClassification
+            rm = AutoModelForSequenceClassification.from_pretrained(
+                value_model_path,
+                revision=value_revision,
+                num_labels=1,
+                torch_dtype=torch.bfloat16,
+                attn_implementation=model_config.attn_implementation,
+                use_cache=False,
+            )
+            # Load the base causal LM with same architecture
+            base_model_path = model_config.model_name_or_path
+            self.value_model = AutoModelForCausalLM.from_pretrained(
+                base_model_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation=model_config.attn_implementation,
+                use_cache=False,
+            )
+            # Copy backbone weights from RM to value model
+            rm_backbone = getattr(rm, rm.base_model_prefix)
+            vm_backbone = getattr(self.value_model, self.value_model.config.model_type if hasattr(self.value_model, self.value_model.config.model_type) else "model")
+            vm_backbone.load_state_dict(rm_backbone.state_dict())
+            # Use RM's trained score head as the value head
+            hidden_size = rm.config.hidden_size
+            value_head = torch.nn.Linear(hidden_size, 1, bias=rm.score.bias is not None, dtype=torch.bfloat16)
+            value_head.weight.data.copy_(rm.score.weight.data)
+            if rm.score.bias is not None:
+                value_head.bias.data.copy_(rm.score.bias.data)
+            self.value_model.lm_head = value_head
+            del rm
+            logger.info(f"{self.rank=}: Initialized value model from RM {value_model_path} with trained score head")
+        else:
+            self.value_model = AutoModelForCausalLM.from_pretrained(
+                value_model_path,
+                revision=value_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation=model_config.attn_implementation,
+                use_cache=False,
+            )
+            # Replace the LM head with a newly initialized Linear(hidden_size, 1)
+            hidden_size = self.value_model.config.hidden_size
+            value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+            std = 1.0 / (hidden_size + 1) ** 0.5
+            torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
+            self.value_model.lm_head = value_head
+            logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
 
         # Restore HfDeepSpeedConfig
         _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
