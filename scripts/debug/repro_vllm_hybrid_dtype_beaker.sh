@@ -16,4 +16,4 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --description "Repro: vLLM 0.18.0 hybrid dtype serialization bug" \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
-    --gpus 1 -- python scripts/debug/repro_vllm_hybrid_dtype.py
+    --gpus 2 -- python scripts/debug/repro_vllm_hybrid_dtype.py
