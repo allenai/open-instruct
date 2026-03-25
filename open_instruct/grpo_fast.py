@@ -512,6 +512,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
         self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
         self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+        self.local_metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum()
+        self.local_metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum()
         self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
         weighted_mean_ratio = self.local_metrics["val/ratio"]
         self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
@@ -620,6 +622,8 @@ class PolicyTrainerRayProcess(RayProcess):
             loss_stats_B: dict[str, torch.Tensor] = {
                 "kl": torch.zeros(4, num_samples, device=device),
                 "kl_loss": torch.zeros(num_samples, device=device),
+                "tis_ratio": torch.zeros(num_samples, device=device),
+                "tis_clipfrac": torch.zeros(num_samples, device=device),
                 "pg_clipfrac": torch.zeros(num_samples, device=device),
                 "pg_loss": torch.zeros(num_samples, device=device),
                 "loss": torch.zeros(num_samples, device=device),
@@ -744,7 +748,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
                             )
                             # Apply cap
-                            tis_imp_ratio_BT = torch.clamp(
+                            clipped_tis_imp_ratio_BT = torch.clamp(
                                 tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                             )
 
@@ -754,7 +758,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_imp_ratio_BT,
+                        tis_weights=clipped_tis_imp_ratio_BT,
                         tv_divergence=tv_divergence_BT,
                     )
 
@@ -783,6 +787,10 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
+                        loss_stats_B["tis_ratio"][i] = masked_mean(clipped_tis_imp_ratio_BT.float(), response_mask_BT)
+                        loss_stats_B["tis_clipfrac"][i] = masked_mean(
+                            (clipped_tis_imp_ratio_BT < tis_imp_ratio_BT).float(), response_mask_BT
+                        )
                         loss_stats_B["pg_clipfrac"][i] = masked_mean(clip_mask_BT.float(), response_mask_BT)
                         loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
                         loss_stats_B["loss"][i] = loss
