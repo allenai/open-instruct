@@ -540,7 +540,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    self.ref_policy, data_BT, self.pad_token_id, self.vllm_config.temperature, use_grad=False
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -552,7 +552,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                        self.model, data_BT, self.pad_token_id, self.vllm_config.temperature, use_grad=False
                     )
 
                 with torch.no_grad():
@@ -614,7 +614,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         data_BT.attention_masks[i],
                         data_BT.position_ids[i],
                         self.pad_token_id,
-                        self.streaming_config.temperature,
+                        self.vllm_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
@@ -1423,7 +1423,7 @@ def create_generation_configs(
 ):
     """Create generation configs for training and evaluation."""
     generation_config = vllm_utils.SamplingConfig(
-        temperature=streaming_config.temperature,
+        temperature=vllm_config.temperature,
         top_p=vllm_config.vllm_top_p,
         max_tokens=streaming_config.response_length,
         n=streaming_config.num_samples_per_prompt_rollout,

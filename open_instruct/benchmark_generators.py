@@ -366,7 +366,7 @@ def run_benchmark(
 
     # Create sampling parameters with 'n' for multiple samples per prompt
     generation_config = vllm_utils.SamplingConfig(
-        temperature=streaming_config.temperature,
+        temperature=vllm_config.temperature,
         max_tokens=streaming_config.response_length,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,

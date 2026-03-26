@@ -391,6 +391,7 @@ class VLLMConfig:
     vllm_sync_backend: str = "nccl"
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
+    temperature: float = 0.7
     vllm_top_p: float = 1.0
 
 
@@ -428,7 +429,6 @@ class StreamingDataLoaderConfig:
     system_prompt_override_file: str | None = None
 
     # Generation
-    temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
 
