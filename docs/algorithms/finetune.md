@@ -90,7 +90,6 @@ This implementation has the following key features:
 | Group | Flag | Description | Default |
 |-------|------|-------------|---------|
 | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
-| | `--use_flash_attn` | Use flash attention | `True` |
 | | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
 | **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
 | | `--num_train_epochs` | Total number of training epochs | `2` |

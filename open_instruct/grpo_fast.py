@@ -244,10 +244,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # set sequence parallel
         # note this returns None if sequence_parallel_size == 1
-        attn_impl = model_utils.detect_attn_implementation()
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=attn_impl,
+            core_attn_implementation=model_utils.detect_attn_implementation(),
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
@@ -256,7 +255,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation=attn_impl,
+            attn_implementation=model_utils.detect_attn_implementation(),
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )

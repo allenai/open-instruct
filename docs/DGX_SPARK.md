@@ -33,7 +33,6 @@ uv run python -m accelerate.commands.launch \
     --num_processes 1 \
     open_instruct/finetune.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     ...
 ```
 

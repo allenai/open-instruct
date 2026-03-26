@@ -288,10 +288,6 @@ class ModelConfig:
 
     model_name_or_path: str | None = None
     """The model checkpoint for weights initialization."""
-    use_flash_attn: bool = True
-    """Whether to use flash attention in the model training"""
-    attn_backend: str = "auto"
-    """Attention backend for OLMo-core models. Options: flash_2, flash_3, auto."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False

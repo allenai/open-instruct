@@ -46,7 +46,6 @@ uv run python mason.py \
         allenai/repeat_gpt_pairs_filtered_lbc100 312 \
         allenai/self-talk_gpt_pairs_filtered_lbc100 2500 \
     --seed 123 \
-    --use_flash_attn \
     --loss_type dpo_norm \
     --beta 5 \
     --gradient_checkpointing \
