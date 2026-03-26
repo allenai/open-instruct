@@ -36,6 +36,7 @@ from transformers import (
     PreTrainedTokenizer,
 )
 
+from open_instruct import model_utils
 from open_instruct.model_utils import get_reward
 from open_instruct.rejection_sampling.generation import GenerationArgs, format_conversation, generate_with_openai
 
@@ -109,7 +110,7 @@ def process_shard(
     )
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name_or_path, dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+        model_name_or_path, dtype=torch.bfloat16, attn_implementation=model_utils.detect_attn_implementation()
     )
     model = model.to(device)
     model.eval()

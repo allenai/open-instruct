@@ -41,7 +41,7 @@ with contextlib.suppress(Exception):
     from deepspeed.utils import groups
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, grpo_utils, utils
+from open_instruct import data_types, grpo_utils, model_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
@@ -244,9 +244,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # set sequence parallel
         # note this returns None if sequence_parallel_size == 1
+        attn_impl = model_utils.detect_attn_implementation()
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_config.attn_implementation,
+            core_attn_implementation=attn_impl,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
@@ -255,7 +256,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation=model_config.attn_implementation,
+            attn_implementation=attn_impl,
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
