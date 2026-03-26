@@ -152,14 +152,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
 
-        self.grpo_config.temperature = self.streaming_config.temperature
-
         self.train_module = GRPOTrainModule(
             model=self.model,
             optim=optim_config,
             sample_microbatch_size=self.grpo_config.per_device_train_batch_size,
             max_sequence_length=self.max_sequence_length,
             grpo_config=self.grpo_config,
+            temperature=self.streaming_config.temperature,
             tokenizer=self.tokenizer,
             ref_policy=self.ref_policy,
             dp_config=dp_config,
