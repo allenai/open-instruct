@@ -431,6 +431,7 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
+    eval_response_length: int | None = None
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -519,6 +520,8 @@ class StreamingDataLoaderConfig:
 
         if self.stop_strings is None:
             self.stop_strings = []
+        if self.eval_response_length is not None and self.eval_response_length < 1:
+            raise ValueError("`eval_response_length` must be greater than 0 when provided.")
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:
