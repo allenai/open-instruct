@@ -288,14 +288,17 @@ class ModelConfig:
 
     model_name_or_path: str | None = None
     """The model checkpoint for weights initialization."""
-    use_flash_attn: bool = True
-    """Whether to use flash attention in the model training"""
-    attn_backend: str = "auto"
-    """Attention backend for OLMo-core models. Options: flash_2, flash_3, auto."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa", "eager"] | None = None
+    """Which attention implementation to use.
+    If None, auto-detects the best available implementation."""
+
+    def __post_init__(self):
+        if self.attn_implementation is None:
+            self.attn_implementation = model_utils.detect_attn_implementation()
 
 
 REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
@@ -437,6 +440,7 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        super().__post_init__()
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."

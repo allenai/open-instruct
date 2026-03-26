@@ -25,7 +25,7 @@ from olmo_core.train.train_module.transformer import (
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, olmo_core_utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, vllm_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -108,7 +108,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        self.model_config = olmo_core_utils.get_transformer_config(self.model_name_or_path, vocab_size)
+        assert self.grpo_config.attn_implementation is not None
+        self.model_config = olmo_core_utils.get_transformer_config(
+            self.model_name_or_path,
+            vocab_size,
+            attn_backend=model_utils.hf_attn_to_olmo_core_backend(self.grpo_config.attn_implementation),
+        )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model = self.model_config.build(init_device="cpu")
 

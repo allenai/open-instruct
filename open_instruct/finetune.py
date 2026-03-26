@@ -99,9 +99,6 @@ class FlatArguments:
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
-    use_flash_attn: bool = field(
-        default=True, metadata={"help": "Whether to use flash attention in the model training"}
-    )
     model_revision: str | None = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
@@ -334,8 +331,6 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
-        if self.sequence_parallel_size > 1 and not self.use_flash_attn:
-            raise ValueError("Sequence parallelism requires flash attention (--use_flash_attn).")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
         if self.final_lr_ratio is not None:

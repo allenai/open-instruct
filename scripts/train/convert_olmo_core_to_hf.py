@@ -13,7 +13,7 @@ import torch
 import torch.distributed.checkpoint.state_dict as dcp_state_dict
 import transformers
 
-from open_instruct import logger_utils, olmo_core_utils
+from open_instruct import logger_utils, model_utils, olmo_core_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -31,7 +31,9 @@ def main():
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name)
     vocab_size = hf_config.vocab_size
 
-    model_config = olmo_core_utils.get_transformer_config(args.model_name, vocab_size)
+    model_config = olmo_core_utils.get_transformer_config(
+        args.model_name, vocab_size, attn_backend=model_utils.hf_attn_to_olmo_core_backend(model_utils.detect_attn_implementation())
+    )
     model = model_config.build(init_device="cpu")
 
     state_dict = {"model": model.state_dict()}
