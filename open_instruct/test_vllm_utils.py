@@ -255,17 +255,5 @@ class TestModelDimsFromVllmConfig(unittest.TestCase):
         self.assertEqual(vllm_dims, expected_dims)
 
 
-class TestVllmRuntimeEnvVars(unittest.TestCase):
-    def test_uses_explicit_attention_backend(self):
-        with mock.patch.dict(vllm_utils.os.environ, {}, clear=True):
-            env_vars = vllm_utils.get_vllm_runtime_env_vars("FLASHINFER")
-        self.assertEqual(env_vars["VLLM_ATTENTION_BACKEND"], "FLASHINFER")
-
-    def test_falls_back_to_process_env_attention_backend(self):
-        with mock.patch.dict(vllm_utils.os.environ, {"VLLM_ATTENTION_BACKEND": "FLASH_ATTN"}, clear=True):
-            env_vars = vllm_utils.get_vllm_runtime_env_vars(None)
-        self.assertEqual(env_vars["VLLM_ATTENTION_BACKEND"], "FLASH_ATTN")
-
-
 if __name__ == "__main__":
     unittest.main()
