@@ -32,7 +32,7 @@ import contextlib
 import os
 import pathlib
 from concurrent import futures
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -1094,6 +1094,9 @@ def setup_runtime_variables(
         if args.push_to_hub:
             logger.info("`--eval_only` detected; disabling `push_to_hub`.")
             args.push_to_hub = False
+
+    if args.run_name is None:
+        args.run_name = f"{args.exp_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():

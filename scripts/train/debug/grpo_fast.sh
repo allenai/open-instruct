@@ -4,8 +4,8 @@ set -euo pipefail
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
-export VLLM_ATTENTION_BACKEND="FLASHINFER"
 export VLLM_USE_V1=1
+
 uv run --active open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
