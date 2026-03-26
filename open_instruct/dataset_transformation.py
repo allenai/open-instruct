@@ -1128,7 +1128,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                 message_start_idx = 0
             else:
                 message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],
+                    conversation=messages[:message_idx],  # here marks the end of the previous messages
                     tokenize=True,
                     return_tensors="pt",
                     return_dict=False,
@@ -1202,7 +1202,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                 message_start_idx = 0
             else:
                 message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],
+                    conversation=messages[:message_idx],  # here marks the end of the previous messages
                     tokenize=True,
                     return_tensors="pt",
                     return_dict=False,
