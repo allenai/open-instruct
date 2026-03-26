@@ -13,7 +13,6 @@ export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
-export VLLM_ATTENTION_BACKEND="FLASHINFER"
 uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name $EXP_NAME \
@@ -34,10 +33,10 @@ uv run --active open_instruct/grpo_fast.py \
     --local_eval_every 5 \
     --eval_pass_at_k 4 \
     --max_prompt_token_length 512 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --response_length 1536 \
+    --pack_length 2048 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name "qwen_instruct_boxed_math" \
+    --chat_template_name "qwen_instruct_user_boxed_math" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \
