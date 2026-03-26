@@ -145,6 +145,8 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
+    attn_implementation: str | None = None
+    """Override attention implementation. If None, auto-detected via detect_attn_implementation()."""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -260,7 +262,7 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation=detect_attn_implementation(),
+        attn_implementation=model_config.attn_implementation or detect_attn_implementation(),
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
