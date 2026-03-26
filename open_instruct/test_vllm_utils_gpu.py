@@ -80,6 +80,15 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         )
         ray.get(engines[0].ready.remote())
 
+        engine_pg_ref = engines[0].init_process_group.remote(
+            master_address=master_address,
+            master_port=master_port + 1,
+            rank_offset=1,
+            world_size=2,
+            group_name="test_fsdp2_broadcast",
+            backend="gloo",
+        )
+
         model_update_group = vllm_utils.init_process_group(
             backend="gloo",
             init_method=f"tcp://{master_address}:{master_port + 1}",
@@ -88,16 +97,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
             group_name="test_fsdp2_broadcast",
         )
 
-        ray.get(
-            engines[0].init_process_group.remote(
-                master_address=master_address,
-                master_port=master_port + 1,
-                rank_offset=1,
-                world_size=2,
-                group_name="test_fsdp2_broadcast",
-                backend="gloo",
-            )
-        )
+        ray.get(engine_pg_ref)
 
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=model,
