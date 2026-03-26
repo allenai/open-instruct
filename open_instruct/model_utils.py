@@ -608,7 +608,7 @@ def add_hooks(model: "DeepSpeedEngine") -> None:
         optimizer_offload = model.optimizer.parameter_offload
     elif model.optimizer is not None:
         optimizer_offload = model.optimizer
-    optimizer_offload._register_hooks_recursively(optimizer_offload.module)
+    optimizer_offload.setup_zero_stage3_hooks()
 
 
 @contextmanager
