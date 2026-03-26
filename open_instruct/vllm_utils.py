@@ -1257,6 +1257,8 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     trust_remote_code: bool = False,
+    vllm_dtype: str = "bfloat16",
+    vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1317,7 +1319,7 @@ def create_vllm_engines(
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
-                dtype="bfloat16",
+                dtype=vllm_dtype,
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
@@ -1342,6 +1344,7 @@ def create_vllm_engines(
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
                 trust_remote_code=trust_remote_code,
+                attention_backend=vllm_attention_backend,
             )
         )
 
