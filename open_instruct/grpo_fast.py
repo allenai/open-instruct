@@ -710,7 +710,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     tv_divergence_BT = 0.5 * masked_mean(token_tv_div_BT, response_mask_BT)
 
                     # Apply truncated importance sampling if enabled
-                    tis_imp_ratio_BT = None
+                    tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
+                    clipped_tis_imp_ratio_BT = tis_imp_ratio_BT
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
@@ -728,8 +729,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         valid_mask_BT = response_mask_BT
                         # Initialize importance ratio to 1.0 (no effect) for all positions
-                        tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
-
                         if valid_mask_BT.any():
                             # Calculate logprob difference only for valid positions
                             logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
@@ -1441,6 +1440,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        vllm_attention_backend=vllm_config.vllm_attention_backend,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

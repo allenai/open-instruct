@@ -285,6 +285,7 @@ class GRPOTrainModule(TransformerTrainModule):
         sample_microbatch_size: int,
         max_sequence_length: int,
         grpo_config: grpo_utils.ExperimentConfig,
+        temperature: float,
         tokenizer: PreTrainedTokenizer,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
@@ -310,6 +311,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         self.sample_microbatch_size = sample_microbatch_size
         self.grpo_config = grpo_config
+        self.temperature = temperature
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
 
@@ -352,7 +354,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.ref_policy,
                     data_BT,
                     self.pad_token_id,
-                    self.grpo_config.temperature,
+                    self.temperature,
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
                 )
@@ -364,7 +366,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 self.model,
                 data_BT,
                 self.pad_token_id,
-                self.grpo_config.temperature,
+                self.temperature,
                 use_grad=False,
                 batch_size=3 * self.rank_microbatch_size,
             )
@@ -408,7 +410,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     data_BT.attention_masks[sample_idx],
                     data_BT.position_ids[sample_idx],
                     self.pad_token_id,
-                    self.grpo_config.temperature,
+                    self.temperature,
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
