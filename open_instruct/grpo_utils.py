@@ -106,8 +106,6 @@ class ExperimentConfig:
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
-    temperature: float = field(default=1.0, init=False)
-    """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -142,6 +140,8 @@ class ExperimentConfig:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
+    wandb_group_name: str | None = None
+    """Optional W&B group name used to group related runs together."""
     wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
