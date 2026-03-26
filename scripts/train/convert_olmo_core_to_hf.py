@@ -32,7 +32,7 @@ def main():
     vocab_size = hf_config.vocab_size
 
     model_config = olmo_core_utils.get_transformer_config(
-        args.model_name, vocab_size, attn_backend=model_utils.detect_olmo_core_attn_backend()
+        args.model_name, vocab_size, attn_backend=model_utils.hf_attn_to_olmo_core_backend(model_utils.detect_attn_implementation())
     )
     model = model_config.build(init_device="cpu")
 

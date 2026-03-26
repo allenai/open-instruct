@@ -60,11 +60,8 @@ def detect_attn_implementation() -> str:
     return result
 
 
-def detect_olmo_core_attn_backend() -> str:
-    hf_attn = detect_attn_implementation()
-    result = _HF_TO_OLMO_CORE_ATTN[hf_attn]
-    logger.info(f"Mapped HF attn '{hf_attn}' to olmo-core backend '{result}'")
-    return result
+def hf_attn_to_olmo_core_backend(hf_attn: str) -> str:
+    return _HF_TO_OLMO_CORE_ATTN[hf_attn]
 
 
 @dataclass
