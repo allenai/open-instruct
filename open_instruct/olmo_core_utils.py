@@ -10,7 +10,6 @@ import os
 import torch
 import transformers
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import TransformerConfig
 
@@ -35,20 +34,13 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
-def _detect_attn_backend() -> str:
-    device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
-    is_h100 = "h100" in device_name or "h800" in device_name
-    backend = "flash_3" if (is_h100 and has_flash_attn_3()) else "flash_2"
-    logger.info(f"Auto-detected attn_backend={backend} for device: {device_name}")
-    return backend
-
-
-def get_transformer_config(model_name_or_config: str, vocab_size: int) -> TransformerConfig:
+def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_backend: str) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name or config name.
 
     Args:
         model_name_or_config: HuggingFace model name, path, or direct config name (e.g., 'olmo3_7B').
         vocab_size: Vocabulary size for the model.
+        attn_backend: Attention backend name (e.g., 'flash_2', 'flash_3', 'torch').
 
     Returns:
         TransformerConfig for the specified model.
@@ -70,7 +62,6 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int) -> Transf
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
-    attn_backend = _detect_attn_backend()
     return getattr(TransformerConfig, config_name)(
         vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend)
     )

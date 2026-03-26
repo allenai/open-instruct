@@ -45,6 +45,9 @@ from open_instruct.utils import retry_on_exception
 logger = logger_utils.setup_logger(__name__)
 
 
+_HF_TO_OLMO_CORE_ATTN = {"flash_attention_3": "flash_3", "flash_attention_2": "flash_2", "sdpa": "torch"}
+
+
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> str:
     if transformers.utils.is_flash_attn_3_available():
@@ -54,6 +57,13 @@ def detect_attn_implementation() -> str:
     else:
         result = "sdpa"
     logger.info(f"Auto-detected attention implementation: {result}")
+    return result
+
+
+def detect_olmo_core_attn_backend() -> str:
+    hf_attn = detect_attn_implementation()
+    result = _HF_TO_OLMO_CORE_ATTN[hf_attn]
+    logger.info(f"Mapped HF attn '{hf_attn}' to olmo-core backend '{result}'")
     return result
 
 

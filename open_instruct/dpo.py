@@ -90,7 +90,9 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
 
-    model_config = olmo_core_utils.get_transformer_config(config_name_for_lookup, vocab_size)
+    model_config = olmo_core_utils.get_transformer_config(
+        config_name_for_lookup, vocab_size, attn_backend=model_utils.detect_olmo_core_attn_backend()
+    )
     model = model_config.build(init_device="cpu")
 
     return model, model_config
