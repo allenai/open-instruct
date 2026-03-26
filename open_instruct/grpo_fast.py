@@ -1371,9 +1371,6 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        fallback_inference_batch_size=streaming_config.num_unique_prompts_rollout
-        * streaming_config.num_samples_per_prompt_rollout
-        // vllm_config.vllm_num_engines,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

@@ -600,7 +600,6 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
-        fallback_inference_batch_size: int = 1,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -623,14 +622,7 @@ class LLMRayActor:
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
-        try:
-            self.inference_batch_size = self.get_kv_cache_info()
-        except Exception:
-            logger.warning(
-                "Failed to get KV cache info (likely vLLM hybrid model dtype bug). Disabling prefetch backpressure.",
-                exc_info=True,
-            )
-            self.inference_batch_size = fallback_inference_batch_size
+        self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
@@ -1265,7 +1257,6 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     trust_remote_code: bool = False,
-    fallback_inference_batch_size: int = 1,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1351,7 +1342,6 @@ def create_vllm_engines(
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
                 trust_remote_code=trust_remote_code,
-                fallback_inference_batch_size=fallback_inference_batch_size,
             )
         )
 
