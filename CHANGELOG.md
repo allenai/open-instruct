@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Added GRPO local eval `pass@k` metrics, plus optional `eval_response_length` handling so eval generations can exceed rollout response length without undersizing vLLM `max_model_len` (https://github.com/allenai/open-instruct/pull/1464).
 - Added other configs to wandb logging so all hyperparams are visible, set beaker name with RUN_NAME for grpo_fast.py (https://github.com/allenai/open-instruct/pull/1554).
 - Updated vLLM to 0.17.1 and torch to 2.10+.
 - Log `optim/grad_norm` in `grpo_fast`, including non-finite DeepSpeed values (`nan`/`inf`) when they occur (https://github.com/allenai/open-instruct/pull/1540).
