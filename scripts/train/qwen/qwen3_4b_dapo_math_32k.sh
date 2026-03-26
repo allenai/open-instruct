@@ -5,7 +5,8 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+# BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 DATASETS="mnoukhov/dapo_math_14k_en_openinstruct 1.0"
 DATASET_SPLITS="train"
