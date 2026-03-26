@@ -98,6 +98,7 @@ class SWERLSandboxEnv(RLEnvironment):
         self._task_data_hf_repo = task_data_hf_repo
         self._test_timeout = test_timeout
         self._instruction = ""
+        self._tests_dir: str | None = None
 
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
@@ -179,7 +180,7 @@ class SWERLSandboxEnv(RLEnvironment):
         )
 
     def _load_task_data(self, task_dir: str) -> None:
-        """Load instruction, seeds, and tests from the task directory into the container."""
+        """Load instruction, seeds, and setup into the container. Tests are deferred to submit."""
         assert self._backend is not None
 
         instruction_file = os.path.join(task_dir, "instruction.md")
@@ -191,10 +192,8 @@ class SWERLSandboxEnv(RLEnvironment):
         if os.path.isdir(seeds_dir):
             self._upload_directory(seeds_dir, "/workspace")
 
-        tests_dir = os.path.join(task_dir, "tests")
-        if os.path.isdir(tests_dir):
-            self._upload_directory(tests_dir, "/tests")
-            self._backend.run_command("chmod +x /tests/test.sh 2>/dev/null || true")
+        # Tests are NOT uploaded here — they're uploaded on submit to prevent peeking.
+        self._tests_dir = os.path.join(task_dir, "tests") if os.path.isdir(os.path.join(task_dir, "tests")) else None
 
         setup_file = os.path.join(task_dir, "setup.sh")
         if os.path.isfile(setup_file):
@@ -285,8 +284,15 @@ class SWERLSandboxEnv(RLEnvironment):
     # submit (test execution)
     # ------------------------------------------------------------------
     def _run_tests(self) -> StepResult:
-        """Run the task's test script and return the reward."""
+        """Upload tests (deferred from reset to prevent peeking), then run."""
         assert self._backend is not None
+
+        if self._tests_dir is None:
+            return StepResult(result="No test data available. Reward: 0.2", reward=0.2, done=True)
+
+        # Upload tests only at submit time
+        self._upload_directory(self._tests_dir, "/tests")
+        self._backend.run_command("chmod +x /tests/test.sh 2>/dev/null || true")
 
         check = self._backend.run_command("test -f /tests/test.sh && echo EXISTS")
         if check.stdout.strip() != "EXISTS":
