@@ -34,7 +34,7 @@ uv run mason.py \
     --exp_name "${EXP_NAME}" \
     --algorithm_mode subtb \
     --beta 0.0 \
-    --async_steps 8 \
+    --async_steps 1 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
     --active_sampling \
