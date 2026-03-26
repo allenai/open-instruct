@@ -35,7 +35,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen3.5-9B \
+        --model_name_or_path allenai/Olmo-Hybrid-Instruct-DPO-7B \
         --chat_template_name olmo123 \
         --trust_remote_code \
         --vllm_enforce_eager \
