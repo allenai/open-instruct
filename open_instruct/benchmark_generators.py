@@ -251,6 +251,7 @@ def setup_vllm_engines(
         num_engines=vllm_config.vllm_num_engines,
         tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
         enforce_eager=vllm_config.vllm_enforce_eager,
+        vllm_attention_backend=vllm_config.vllm_attention_backend,
         tokenizer_name_or_path=tokenizer_name_or_path,
         pretrain=model_config.model_name_or_path,
         revision=model_config.model_revision,
@@ -274,6 +275,7 @@ def setup_vllm_engines(
             verifier_functions=build_all_verifiers(args, streaming_config),
         ),
         train_dataset=dataset,
+        trust_remote_code=tokenizer_config.trust_remote_code,
     )
 
     logger.info("vLLM engines ready")
@@ -374,8 +376,10 @@ def run_benchmark(
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
+        min_tokens=streaming_config.response_length if not streaming_config.stop_strings else 0,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
+        stop=streaming_config.stop_strings,
         seed=args.seed,
         logprobs=1,
     )

@@ -99,7 +99,6 @@ DEFAULT_ENV_VARS = {
     "VLLM_DISABLE_COMPILE_CACHE": "1",
     "NCCL_DEBUG": "ERROR",
     "VLLM_LOGGING_LEVEL": "WARNING",
-    "VLLM_USE_V1": "1",
     "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
     "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
 }
@@ -143,7 +142,7 @@ def get_args():
         "--description",
         type=str,
         help="Optionally, a description for this job in Beaker.",
-        default="Beaker-Mason job.",
+        default=os.environ.get("RUN_NAME", "Beaker-Mason job."),
     )
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")

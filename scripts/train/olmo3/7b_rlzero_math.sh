@@ -36,11 +36,7 @@ uv run mason.py \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 8 \
-    --inflight_updates \
     --no_resampling_pass_rate 0.875 \
-    --truncated_importance_sampling_ratio_cap 2.0 \
-    --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
@@ -73,7 +69,6 @@ uv run mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
-    --clip_higher 0.272 \
     --mask_truncated_completions False \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \

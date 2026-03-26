@@ -127,14 +127,16 @@ def main(
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
-    ray.init(
-        address="auto",
-        dashboard_host="0.0.0.0",
-        runtime_env={
+    ray_init_kwargs = {
+        "dashboard_host": "0.0.0.0",
+        "runtime_env": {
             "excludes": [".git/"],
             "env_vars": {k: v for k, v in os.environ.items() if k not in grpo_fast.EXCLUDED_ENV_VARS},
         },
-    )
+    }
+    if ray_address := utils.get_ray_address():
+        ray_init_kwargs["address"] = ray_address
+    ray.init(**ray_init_kwargs)
 
     pool_size = tools_config.pool_size
     if pool_size is None:
@@ -198,6 +200,8 @@ def main(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     data_prep_actor_name = "data_prep_singleton"
+    base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
+
     _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(  # type: ignore[attr-defined]
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
@@ -215,8 +219,11 @@ def main(
         model_dims=model_dims,
         verbose=args.verbose,
         work_dir=args.output_dir,
+        tool_names=tools_config.tool_call_names if tools_config else [],
+        run_name=args.run_name,
+        model_name=model_config.model_name_or_path,
+        base_env_config=base_env_config,
         initial_state=None,
-        allow_world_padding=False,
     )
 
     wait_for_gpus(sum(args.num_learners_per_node))
@@ -269,6 +276,7 @@ def main(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
+        vllm_attention_backend=vllm_config.vllm_attention_backend,
         inflight_updates=streaming_config.inflight_updates,
         reward_config=reward_config,
         train_dataset=train_dataset,

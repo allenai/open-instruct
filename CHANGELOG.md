@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add hybrid model (Olmo-Hybrid) support: MambaSpec monkey-patch for vLLM dtype serialization, `trust_remote_code` pass-through to vLLM engines, `get_text_config()` for multimodal model support, dependency upgrades (vllm>=0.18.0, transformers>=5.3.0), `return_dict=False` for transformers 5.x compat, and hybrid test/production training scripts (https://github.com/allenai/open-instruct/pull/1425).
+- Add Ulysses sequence parallelism support to SFT training via `--sequence_parallel_size`, using HF Accelerate's `ParallelismConfig` with the DeepSpeed Ulysses SP backend. Enables training with much longer context lengths by sharding sequences across GPUs. Includes SP-aware loss aggregation, batch collation (padding to divisible seq len, index column removal), LR scheduler correction, and a two-node integration test script (https://github.com/allenai/open-instruct/pull/1539).
 - Added a GRPO implementation that uses OLMo-core with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1389).
 - Add the Qwen 3 4B DAPO math 32k training launch script under `scripts/train/qwen/` (https://github.com/allenai/open-instruct/pull/1536).
 - Add Muon optimizer support to DPO training via OLMo-core's native MuonConfig (https://github.com/allenai/open-instruct/pull/1533).
@@ -16,12 +18,27 @@ All notable changes to this project will be documented in this file.
 - OLMo-core GRPO actor with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1398).
 
 ### Fixed
+- Use `setup_zero_stage3_hooks()` for DeepSpeed 0.18+ compat in `add_hooks` (https://github.com/allenai/open-instruct/pull/1566).
+- Remove the runtime `temperature` field from GRPO `ExperimentConfig` and pass streaming temperature explicitly, avoiding W&B config collisions with `StreamingDataLoaderConfig.temperature` (https://github.com/allenai/open-instruct/pull/1561).
+- Log `val/tis_ratio` and `val/tis_clipfrac` in `grpo_fast` so truncated importance sampling diagnostics are visible during GRPO training (https://github.com/allenai/open-instruct/pull/1558).
+- Fix SP double-shift bug: keep both `labels` and `shift_labels` in batch so `ForCausalLMLoss` uses pre-shifted labels (https://github.com/allenai/open-instruct/pull/1549).
+- Fix `total_batch_size` logging to account for sequence parallelism (SP ranks share data, not independent) (https://github.com/allenai/open-instruct/pull/1542).
+- Got Olmo-core GRPO running in single-gpu mode and added a grpo.py debug script (https://github.com/allenai/open-instruct/pull/1543).
+- Batch vLLM weight sync broadcasts to reduce Ray RPCs from ~200+ to 1, fixing timeouts with 32k response lengths (https://github.com/allenai/open-instruct/pull/1535).
+- Fix `wandb_tracker.run.url` `AttributeError` on non-main processes in multi-node SFT training by guarding accesses with `accelerator.is_main_process` checks (https://github.com/allenai/open-instruct/pull/1539).
+- Fix `UnboundLocalError` for `beaker_config` in SFT tracking setup when `push_to_hub` is disabled (https://github.com/allenai/open-instruct/pull/1539).
 - Pre-download HF model on main process before Ray actors spawn to avoid hitting HuggingFace rate limits (https://github.com/allenai/open-instruct/pull/1528).
 - Fixed GPU test failures: DPO `get_num_tokens` attention mask matching, DPO forward pass logps computation, mock model interface in `test_dpo_utils_gpu.py`, patch target in `test_olmo_core_callbacks_gpu.py`, reference logprobs cache `drop_last`, and flaky streaming dataloader tool test (https://github.com/allenai/open-instruct/pull/1514).
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
 - Add a dedicated Ray eval prompt queue (always allocated; unused queues stay empty) for `grpo_fast` and legacy `grpo`, prioritize eval work in vLLM prefetch workers so eval is not starved by training backlog, and on non-final training steps defer `maybe_evaluate` until the full eval batch is present in the results queue (https://github.com/allenai/open-instruct/pull/1553).
+- Add a configurable vLLM attention backend option and switch remaining `flash_attention_2` defaults/references to `flash_attention_3` (https://github.com/allenai/open-instruct/pull/1559).
+- Switch back to CUDA 12.8.1, pin `flash-attn-3` to a direct x86_64 wheel URL to avoid flat-index drift to aarch64-only releases (https://github.com/allenai/open-instruct/pull/1560).
+- Added other configs to wandb logging so all hyperparams are visible, set beaker name with RUN_NAME for grpo_fast.py (https://github.com/allenai/open-instruct/pull/1554).
+- Updated vLLM to 0.17.1 and torch to 2.10+.
+- Log `optim/grad_norm` in `grpo_fast`, including non-finite DeepSpeed values (`nan`/`inf`) when they occur (https://github.com/allenai/open-instruct/pull/1540).
+- Update GRPO/DPO defaults to match Olmo 3 experiments (`async_steps=8`, `advantage_normalization_type=mean_std`, `inflight_updates=True`, `clip_higher=0.28`, `truncated_importance_sampling_ratio_cap=10.0`) and remove redundant flags from training scripts (https://github.com/allenai/open-instruct/pull/1547).
 - Removed all Augusta cluster (`ai2/augusta`) references and GCP-cluster-specific code paths since the cluster has been decommissioned.
 - Added GRPO fast idle wait-time metrics for trainer waiting on inference and generation waiting on trainer consumption (`time/trainer_idle_waiting_for_inference`, `time/generation_idle_waiting_for_trainer`) (https://github.com/allenai/open-instruct/pull/1516).
 - Updated vLLM to 0.16.0 and fixed `ChatCompletionRequest` import path which moved to `vllm.entrypoints.openai.chat_completion.protocol` (https://github.com/allenai/open-instruct/pull/1510).
@@ -38,6 +55,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fixed GSM8K reward verification for signed final answers by preserving explicit `+` and `-` signs when extracting the last numeric prediction, including boxed negative answers (https://github.com/allenai/open-instruct/pull/1530).
 - Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
 - Include tokenizer configuration in per-transform dataset cache fingerprints so rerunning transformations with a different tokenizer does not silently reuse stale cached outputs (https://github.com/allenai/open-instruct/pull/1518).
 - Fixed `grpo_fast` local eval rounds enqueueing 0 prompts after the first run by resetting `eval_data_loader` after each eval pass (stateful `DataLoaderBase` requires reset after epoch exhaustion); also switched eval prompt ID prefix from constant `0` to `training_step` to avoid cross-round metadata key collisions in vLLM request tracking (https://github.com/allenai/open-instruct/pull/1493).
