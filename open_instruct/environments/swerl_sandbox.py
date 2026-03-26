@@ -288,7 +288,7 @@ class SWERLSandboxEnv(RLEnvironment):
         assert self._backend is not None
 
         if self._tests_dir is None:
-            return StepResult(result="No test data available. Reward: 0.2", reward=0.2, done=True)
+            raise RuntimeError(f"No test data directory for task {self._task_id}")
 
         # Upload tests only at submit time
         self._upload_directory(self._tests_dir, "/tests")
@@ -296,7 +296,7 @@ class SWERLSandboxEnv(RLEnvironment):
 
         check = self._backend.run_command("test -f /tests/test.sh && echo EXISTS")
         if check.stdout.strip() != "EXISTS":
-            return StepResult(result="No test script found at /tests/test.sh. Reward: 0.2", reward=0.2, done=True)
+            raise RuntimeError(f"No test.sh found in test data for task {self._task_id}")
 
         result = self._backend.run_command(f"timeout {self._test_timeout} bash /tests/test.sh")
 
