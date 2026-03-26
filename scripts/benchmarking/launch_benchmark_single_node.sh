@@ -41,16 +41,14 @@ for model_name_or_path in "$@"; do
     echo "Launching benchmark for model: $model_name_or_path"
 
     uv run python mason.py \
-        --cluster ai2/ceres \
-        --cluster ai2/jupiter \
-        --cluster ai2/saturn \
+        --cluster ai2/titan \
 	      --non_resumable \
         --image "$image_name" \
         --description "Running single node benchmark with response length of $response_length at commit $git_hash on branch $git_branch with model $model_name_or_path." \
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
       	--preemptible \
-        --priority urgent \
+        --priority high \
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -58,6 +56,7 @@ for model_name_or_path in "$@"; do
         --budget ai2/oe-adapt \
         --gpus 8 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
+        --no_auto_dataset_cache \
         --task_name open_instruct-benchmark_generators -- source configs/beaker_configs/ray_node_setup.sh \&\& python -m open_instruct.benchmark_generators \
             --model_name_or_path "$model_name_or_path" \
             --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
@@ -71,8 +70,8 @@ for model_name_or_path in "$@"; do
             --num_unique_prompts_rollout 16 \
             --num_samples_per_prompt_rollout 4 \
 	    --inflight_updates True \
-            --vllm_num_engines 2 \
-            --vllm_tensor_parallel_size 4 \
+            --vllm_num_engines 8 \
+            --vllm_tensor_parallel_size 1 \
             --vllm_enable_prefix_caching \
             --vllm_gpu_memory_utilization 0.9 \
             --pack_length 40000 \
