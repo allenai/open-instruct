@@ -21,7 +21,7 @@ for step in $(seq "${STEP_START}" "${STEP_INCREMENT}" "${STEP_END}"); do
 
         # --model_revision "${revision}" \
         #
-    NUM_GPUS=4 bash scripts/train/qwen/qwen3_4b_dapo_math.sh \
+    NUM_GPUS=4 EXP_NAME=$EXP_NAME bash scripts/train/qwen/qwen3_4b_dapo_math.sh \
         --model_name_or_path "${HF_REPO_ID}" \
         --exp_name "${EXP_NAME}" \
         --run_name "${RUN_NAME}_step_${step}" \

@@ -1093,6 +1093,12 @@ def setup_runtime_variables(
         if args.push_to_hub:
             logger.info("`--eval_only` detected; disabling `push_to_hub`.")
             args.push_to_hub = False
+        if args.eval_response_length is not None and streaming_config.response_length != args.eval_response_length:
+            logger.info(
+                "`--eval_only` detected; aligning `response_length` with `eval_response_length=%s`.",
+                args.eval_response_length,
+            )
+            streaming_config.response_length = args.eval_response_length
 
     if args.run_name is None:
         args.run_name = f"{args.exp_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"

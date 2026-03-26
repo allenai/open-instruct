@@ -134,9 +134,10 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_3", "sdpa"] = "flash_attention_3"
+    attn_implementation: Literal["flash_attention_2", "flash_attention_3", "sdpa"] = "flash_attention_2"
     """Which attention implementation to use.
-    flash_attention_3: Requires flash-attn package (default)
+    flash_attention_2: Uses FlashAttention 2
+    flash_attention_3: Uses FlashAttention 3
     sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
