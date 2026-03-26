@@ -223,11 +223,8 @@ class ExperimentConfig:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        if self.loss_fn == GRPOLossType.tvpo and self.use_vllm_logprobs:
-            raise ValueError(
-                "Cannot use `loss_fn=tvpo` with `use_vllm_logprobs=True`. "
-                "TVPO compares old_logprobs against vLLM logprobs, which would collapse to zero divergence."
-            )
+        if self.loss_fn == GRPOLossType.tvpo and not self.use_vllm_logprobs:
+            raise ValueError("Must use `loss_fn=tvpo` with `use_vllm_logprobs=True`.")
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
