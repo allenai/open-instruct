@@ -108,10 +108,7 @@ class ExperimentConfig:
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
-<<<<<<< HEAD
-=======
 
->>>>>>> d2cf8a90df202006eddf4fdc2f79a0e15d1b54a8
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
