@@ -1344,15 +1344,17 @@ def create_model_and_optimizer(
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
+    eval_only: bool = False,
 ) -> tuple[
-    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
+    ModelGroup | None,
+    list[vllm_utils.LLMRayActor],
+    int,
+    int,
+    ray.actor.ActorHandle,
+    utils.ModelDims,
+    ray.actor.ActorHandle | None,
 ]:
     """Create the model, optimizer, and vLLM engines."""
-    # Create placement group
-    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
-    pg = placement_group(bundles, strategy="STRICT_SPREAD")
-    ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
-
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Prompt Queue": prompt_Q,
@@ -1364,51 +1366,65 @@ def create_model_and_optimizer(
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
-    # Create DataPreparationActor FIRST so StreamingDataLoader can find it
-    data_prep_actor_name = "data_prep_singleton"
-    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
-        dataset=train_dataset,
-        inference_results_Q=inference_results_Q,
-        param_prompt_Q=prompt_Q,
-        tokenizer=tokenizer,
-        config=streaming_config,
-        generation_config=generation_config,
-        num_training_steps=args.num_training_steps,
-        seed=args.seed,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        global_batch_size=streaming_config.num_unique_prompts_rollout,
-        dp_world_size=args.world_size // args.sequence_parallel_size,
-        max_possible_score=streaming_config.max_possible_score,
-        actor_manager=actor_manager,
-        model_dims=model_dims,
-        verbose=args.verbose,
-        work_dir=args.output_dir,
-        tool_names=tools_config.tool_call_names if tools_config else [],
-        run_name=args.run_name,
-        model_name=model_config.model_name_or_path,
-        initial_state=data_prep_actor_state,
-        base_env_config=base_env_config,
-    )
+    policy_group = None
+    inits = []
+    resume_training_step = 1
+    episode = 0
+    _data_prep_actor = None
+    pg = None
+    if not eval_only:
+        # Create placement group
+        bundles = [
+            {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node
+        ]
+        pg = placement_group(bundles, strategy="STRICT_SPREAD")
+        ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
-    # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
-    # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
-    # the vLLM placement group and prevents port collisions during vLLM initialization.
-    wandb_url = wandb.run.url if args.with_tracking else None
-    policy_group = ModelGroup(
-        pg,
-        PolicyTrainerRayProcess,
-        args.num_learners_per_node,
-        args.single_gpu_mode,
-        args=args,
-        streaming_config=streaming_config,
-        vllm_config=vllm_config,
-        data_prep_actor_name=data_prep_actor_name,
-        tokenizer=tokenizer,
-    )
-    inits = [
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
-        for model in policy_group.models
-    ]
+        # Create DataPreparationActor FIRST so StreamingDataLoader can find it
+        data_prep_actor_name = "data_prep_singleton"
+        _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+            dataset=train_dataset,
+            inference_results_Q=inference_results_Q,
+            param_prompt_Q=prompt_Q,
+            tokenizer=tokenizer,
+            config=streaming_config,
+            generation_config=generation_config,
+            num_training_steps=args.num_training_steps,
+            seed=args.seed,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            global_batch_size=streaming_config.num_unique_prompts_rollout,
+            dp_world_size=args.world_size // args.sequence_parallel_size,
+            max_possible_score=streaming_config.max_possible_score,
+            actor_manager=actor_manager,
+            model_dims=model_dims,
+            verbose=args.verbose,
+            work_dir=args.output_dir,
+            tool_names=tools_config.tool_call_names if tools_config else [],
+            run_name=args.run_name,
+            model_name=model_config.model_name_or_path,
+            initial_state=data_prep_actor_state,
+            base_env_config=base_env_config,
+        )
+
+        # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
+        # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
+        # the vLLM placement group and prevents port collisions during vLLM initialization.
+        wandb_url = wandb.run.url if args.with_tracking else None
+        policy_group = ModelGroup(
+            pg,
+            PolicyTrainerRayProcess,
+            args.num_learners_per_node,
+            args.single_gpu_mode,
+            args=args,
+            streaming_config=streaming_config,
+            vllm_config=vllm_config,
+            data_prep_actor_name=data_prep_actor_name,
+            tokenizer=tokenizer,
+        )
+        inits = [
+            model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+            for model in policy_group.models
+        ]
 
     # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
     vllm_engines = vllm_utils.create_vllm_engines(
@@ -1422,8 +1438,8 @@ def create_model_and_optimizer(
         vllm_config.vllm_enable_prefix_caching,
         streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
         vllm_config.vllm_gpu_memory_utilization,
-        args.single_gpu_mode,
-        pg=pg if args.single_gpu_mode else None,
+        False if eval_only else args.single_gpu_mode,
+        pg=pg if pg is not None and args.single_gpu_mode else None,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
         tool_stop_sequences=tool_stop_sequences,
@@ -1467,94 +1483,24 @@ def create_model_and_optimizer(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    # Wait for policy models to finish loading
-    results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0] + 1
-    episode = (
-        (resume_training_step - 1)
-        * streaming_config.num_unique_prompts_rollout
-        * streaming_config.num_samples_per_prompt_rollout
-    )
-    logger.info("======== ✅ all models initialized =========")
+    if not eval_only:
+        # Wait for policy models to finish loading
+        results, _ = ray_get_with_progress(inits, desc="Initializing models")
+        resume_training_step = results[0] + 1
+        episode = (
+            (resume_training_step - 1)
+            * streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
+        )
+        logger.info("======== ✅ all models initialized =========")
 
-    ray_get_with_progress(
-        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
-        desc="Setting up model update group",
-    )
-    logger.info("======== ✅ model update group setup successfully =========")
+        ray_get_with_progress(
+            [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+            desc="Setting up model update group",
+        )
+        logger.info("======== ✅ model update group setup successfully =========")
 
     return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
-
-
-def create_eval_only_runtime(
-    args: grpo_utils.ExperimentConfig,
-    tc: TokenizerConfig,
-    model_config: ModelConfig,
-    tokenizer: PreTrainedTokenizer,
-    inference_results_Q: ray_queue.Queue,
-    prompt_Q: ray_queue.Queue,
-    eval_prompt_Q: ray_queue.Queue,
-    evaluation_inference_results_Q: ray_queue.Queue,
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    vllm_config: data_loader_lib.VLLMConfig,
-    train_dataset: Dataset,
-    eval_dataset,
-    reward_config: RewardConfig,
-    base_env_config: EnvConfig,
-    tool_definitions: list[dict[str, Any]] | None = None,
-    tools_config: EnvsConfig | None = None,
-    pools: dict[str, ray.actor.ActorHandle] | None = None,
-    tool_stop_sequences: list[str] | None = None,
-) -> tuple[list[vllm_utils.LLMRayActor], ray.actor.ActorHandle, utils.ModelDims]:
-    """Create inference-only runtime resources for eval-only mode."""
-    queues_to_monitor = {
-        "Inference Results Queue": inference_results_Q,
-        "Prompt Queue": prompt_Q,
-        "Eval Prompt Queue": eval_prompt_Q,
-        "Evaluation Queue": evaluation_inference_results_Q,
-    }
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
-    model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
-
-    vllm_engines = vllm_utils.create_vllm_engines(
-        vllm_config.vllm_num_engines,
-        vllm_config.vllm_tensor_parallel_size,
-        vllm_config.vllm_enforce_eager,
-        tc.tokenizer_name_or_path,
-        model_config.model_name_or_path,
-        model_config.model_revision,
-        args.seed,
-        vllm_config.vllm_enable_prefix_caching,
-        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
-        vllm_config.vllm_gpu_memory_utilization,
-        single_gpu_mode=False,
-        pg=None,
-        tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
-        tool_definitions=tool_definitions,
-        tool_stop_sequences=tool_stop_sequences,
-        max_steps=tools_config.max_steps if tools_config else 5,
-        per_turn_max_tokens=tools_config.per_turn_max_tokens if tools_config else None,
-        mask_tool_use=streaming_config.mask_tool_use,
-        pools=pools,
-        prompt_queue=prompt_Q,
-        eval_prompt_queue=eval_prompt_Q,
-        results_queue=inference_results_Q,
-        eval_results_queue=evaluation_inference_results_Q,
-        actor_manager=actor_manager,
-        inflight_updates=streaming_config.inflight_updates,
-        reward_config=reward_config,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-    )
-    logger.info("======== ✅ eval-only vLLM engines and actor_manager initialized =========")
-
-    if vllm_engines:
-        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-    else:
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
-
-    return vllm_engines, actor_manager, model_dims
 
 
 def create_generation_configs(
@@ -2891,6 +2837,7 @@ def main(
             tools_config,
             pools,
             tool_stop_sequences,
+            eval_only=args.eval_only,
         )
     )
 
