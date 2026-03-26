@@ -17,6 +17,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import os
 import queue
@@ -465,15 +466,13 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         # items arrive later (e.g., final-step eval after training prompts are drained).
         request = None
         if has_pending_eval:
-            try:
+            with contextlib.suppress(queue.Empty):
                 request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
-            except queue.Empty:
-                request = None
+
         if request is None:
-            try:
+            with contextlib.suppress(queue.Empty):
                 request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
-            except queue.Empty:
-                request = None
+
         if request is None:
             continue
         add_request(actor, request)
