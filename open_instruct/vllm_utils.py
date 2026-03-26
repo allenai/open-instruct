@@ -602,7 +602,6 @@ class LLMRayActor:
         eval_dataset=None,
         **kwargs,
     ):
-        utils.configure_hf_hub_retry()
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
