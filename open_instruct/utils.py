@@ -67,10 +67,12 @@ from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
+from requests.adapters import HTTPAdapter
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
+from urllib3.util.retry import Retry
 
 from open_instruct import data_types, logger_utils
 from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
@@ -935,6 +937,20 @@ class BeakerRuntimeConfig:
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
+
+
+def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
+    """Configure HF Hub HTTP retries with exponential backoff on 429/5xx."""
+
+    def backend_factory() -> requests.Session:
+        session = requests.Session()
+        retries = Retry(total=total, backoff_factor=backoff_factor, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
 
 
 def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
