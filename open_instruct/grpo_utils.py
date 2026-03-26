@@ -192,6 +192,8 @@ class ExperimentConfig:
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for local pass@k metrics."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
