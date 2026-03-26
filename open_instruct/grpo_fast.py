@@ -99,7 +99,6 @@ from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
-    detect_attn_implementation,
     disable_dropout_in_model,
     estimate_kl,
     get_olmo3_generation_config,
@@ -247,7 +246,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # note this returns None if sequence_parallel_size == 1
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_config.attn_implementation or detect_attn_implementation(),
+            core_attn_implementation=model_config.attn_implementation,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
@@ -256,7 +255,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation=model_config.attn_implementation or detect_attn_implementation(),
+            attn_implementation=model_config.attn_implementation,
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )

@@ -21,7 +21,7 @@ import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Union
+from typing import Literal, Union
 
 import deepspeed
 import pandas as pd
@@ -42,17 +42,6 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
-
-
-def detect_attn_implementation() -> str:
-    if transformers.utils.is_flash_attn_3_available():
-        result = "flash_attention_3"
-    elif transformers.utils.is_flash_attn_2_available():
-        result = "flash_attention_2"
-    else:
-        result = "sdpa"
-    logger.info(f"Auto-detected attention implementation: {result}")
-    return result
 
 
 @dataclass
@@ -145,8 +134,10 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: str | None = None
-    """Override attention implementation. If None, auto-detected via detect_attn_implementation()."""
+    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    """Which attention implementation to use.
+    flash_attention_2: Requires flash-attn package (default)
+    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -262,7 +253,7 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation=model_config.attn_implementation or detect_attn_implementation(),
+        attn_implementation=model_config.attn_implementation,
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
