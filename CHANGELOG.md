@@ -17,6 +17,9 @@ All notable changes to this project will be documented in this file.
 - OLMo-core GRPO actor with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1398).
 
 ### Fixed
+- Use `setup_zero_stage3_hooks()` for DeepSpeed 0.18+ compat in `add_hooks` (https://github.com/allenai/open-instruct/pull/1566).
+- Remove the runtime `temperature` field from GRPO `ExperimentConfig` and pass streaming temperature explicitly, avoiding W&B config collisions with `StreamingDataLoaderConfig.temperature` (https://github.com/allenai/open-instruct/pull/1561).
+- Log `val/tis_ratio` and `val/tis_clipfrac` in `grpo_fast` so truncated importance sampling diagnostics are visible during GRPO training (https://github.com/allenai/open-instruct/pull/1558).
 - Fix SP double-shift bug: keep both `labels` and `shift_labels` in batch so `ForCausalLMLoss` uses pre-shifted labels (https://github.com/allenai/open-instruct/pull/1549).
 - Fix `total_batch_size` logging to account for sequence parallelism (SP ranks share data, not independent) (https://github.com/allenai/open-instruct/pull/1542).
 - Got Olmo-core GRPO running in single-gpu mode and added a grpo.py debug script (https://github.com/allenai/open-instruct/pull/1543).
@@ -28,6 +31,8 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Switch back to CUDA 12.8.1, pin `flash-attn-3` to a direct x86_64 wheel URL to avoid flat-index drift to aarch64-only releases (https://github.com/allenai/open-instruct/pull/1560).
+- Added other configs to wandb logging so all hyperparams are visible, set beaker name with RUN_NAME for grpo_fast.py (https://github.com/allenai/open-instruct/pull/1554).
 - Updated vLLM to 0.17.1 and torch to 2.10+.
 - Log `optim/grad_norm` in `grpo_fast`, including non-finite DeepSpeed values (`nan`/`inf`) when they occur (https://github.com/allenai/open-instruct/pull/1540).
 - Update GRPO/DPO defaults to match Olmo 3 experiments (`async_steps=8`, `advantage_normalization_type=mean_std`, `inflight_updates=True`, `clip_higher=0.28`, `truncated_importance_sampling_ratio_cap=10.0`) and remove redundant flags from training scripts (https://github.com/allenai/open-instruct/pull/1547).
