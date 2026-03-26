@@ -84,6 +84,18 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
+def get_vllm_runtime_env_vars(vllm_attention_backend: str | None = None) -> dict[str, str]:
+    env_vars = {
+        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+    }
+    resolved_attention_backend = vllm_attention_backend or os.environ.get("VLLM_ATTENTION_BACKEND")
+    if resolved_attention_backend:
+        env_vars["VLLM_ATTENTION_BACKEND"] = resolved_attention_backend
+    return env_vars
+
+
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
@@ -1232,6 +1244,7 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
+    vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1276,13 +1289,7 @@ def create_vllm_engines(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={
-                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
-                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
-                    }
-                ),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars=get_vllm_runtime_env_vars(vllm_attention_backend)),
             )
             .remote(
                 model=pretrain,

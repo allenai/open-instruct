@@ -394,7 +394,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_2"
+                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_3"
             ),
         )
 
@@ -563,7 +563,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation="flash_attention_3" if args.use_flash_attn else "eager",
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -578,7 +578,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation="flash_attention_3" if args.use_flash_attn else "eager",
                 # liger-kernel specific args
                 fused_linear_cross_entropy=True,
             )
@@ -591,7 +591,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation="flash_attention_3" if args.use_flash_attn else "eager",
             )
     else:
         logger.info("Training new model from scratch")
