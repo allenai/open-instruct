@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - OLMo-core GRPO actor with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1398).
 
 ### Fixed
+- Remove stale `VLLM_ATTENTION_BACKEND` from `DEFAULT_ENV_VARS`; vLLM 0.18+ auto-detects attention backends (https://github.com/allenai/open-instruct/pull/1564).
 - Remove the runtime `temperature` field from GRPO `ExperimentConfig` and pass streaming temperature explicitly, avoiding W&B config collisions with `StreamingDataLoaderConfig.temperature` (https://github.com/allenai/open-instruct/pull/1561).
 - Log `val/tis_ratio` and `val/tis_clipfrac` in `grpo_fast` so truncated importance sampling diagnostics are visible during GRPO training (https://github.com/allenai/open-instruct/pull/1558).
 - Fix SP double-shift bug: keep both `labels` and `shift_labels` in batch so `ForCausalLMLoss` uses pre-shifted labels (https://github.com/allenai/open-instruct/pull/1549).
