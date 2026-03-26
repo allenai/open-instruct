@@ -2,31 +2,34 @@
 
 set -euo pipefail
 
-CHECKPOINT_ROOT="${CHECKPOINT_ROOT:-/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen3_4b_base_dapo_20260304_165842_checkpoints}"
-STEP_START="${STEP_START:-100}"
-STEP_END="${STEP_END:-2000}"
-STEP_INCREMENT="${STEP_INCREMENT:-100}"
+HF_REPO_ID="${HF_REPO_ID:-hbx/JustRL-DeepSeek-1.5B}"
+STEP_START="${STEP_START:-200}"
+STEP_END="${STEP_END:-4200}"
+STEP_INCREMENT="${STEP_INCREMENT:-200}"
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_20260304_165842_eval_temp1.0_topp0.95}"
-RUN_NAME="${RUN_NAME:-qwen3_4b_base_dapo_20260304_165842_eval_temp1.0_topp0.95}"
+EXP_NAME="${EXP_NAME:-deepseek1.5b_aime_brumo_eval}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+WANDB_GROUP_NAME="${WANDB_GROUP_NAME:-${EXP_NAME}}"
 
 # Keep uv cache writable in restricted environments.
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
 
 for step in $(seq "${STEP_START}" "${STEP_INCREMENT}" "${STEP_END}"); do
-    checkpoint_path="${CHECKPOINT_ROOT}/step_${step}"
-    if [[ ! -d "${checkpoint_path}" ]]; then
-        echo "Skipping missing checkpoint: ${checkpoint_path}"
-        continue
-    fi
+    revision=$(printf "step_%04d" "${step}")
+    echo "Launching eval for ${HF_REPO_ID} revision ${revision}"
 
-    echo "Launching eval for ${checkpoint_path}"
-    bash scripts/train/qwen/qwen3_4b_dapo_eval.sh \
-        --model_name_or_path "${checkpoint_path}" \
-        --eval_top_p 0.95 \
-        --eval_temperature 1.0 \
+        # --model_revision "${revision}" \
+        #
+    NUM_GPUS=4 bash scripts/train/qwen/qwen3_4b_dapo_math.sh \
+        --model_name_or_path "${HF_REPO_ID}" \
         --exp_name "${EXP_NAME}" \
-        --run_name "${RUN_NAME}" \
-        --eval_only_set_checkpoint "${step}"
+        --run_name "${RUN_NAME}_step_${step}" \
+        --wandb_group_name "${WANDB_GROUP_NAME}" \
+        --eval_only \
+        --eval_only_set_checkpoint "${step}" \
+        --eval_response_length 32000 \
+        --eval_temperature 0.7 \
+        --eval_top_p 0.9 \
+        "$@"
 done

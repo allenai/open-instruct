@@ -3,6 +3,8 @@
 EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
+NUM_GPUS="${NUM_GPUS:-8}"
+
 MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
 BEAKER_IMAGE="michaeln/open_instruct"
 
@@ -29,8 +31,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 8 \
+    --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \
 uv run open_instruct/grpo_fast.py \

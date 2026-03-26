@@ -26,7 +26,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
     -- \
