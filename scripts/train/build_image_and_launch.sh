@@ -68,5 +68,6 @@ fi
 echo "Installing dependencies with uv..."
 uv sync
 
+echo "built $beaker_user/$image_name"
 # Run the provided script with the image name and all remaining arguments
-BEAKER_IMAGE="$beaker_user/$image_name" "$@"
+BEAKER_IMAGE="$beaker_user/$image_name" $@
