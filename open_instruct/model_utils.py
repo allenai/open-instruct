@@ -134,9 +134,9 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    attn_implementation: Literal["flash_attention_3", "sdpa"] = "flash_attention_3"
     """Which attention implementation to use.
-    flash_attention_2: Requires flash-attn package (default)
+    flash_attention_3: Requires flash-attn package (default)
     sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
@@ -608,7 +608,7 @@ def add_hooks(model: "DeepSpeedEngine") -> None:
         optimizer_offload = model.optimizer.parameter_offload
     elif model.optimizer is not None:
         optimizer_offload = model.optimizer
-    optimizer_offload._register_hooks_recursively(optimizer_offload.module)
+    optimizer_offload.setup_zero_stage3_hooks()
 
 
 @contextmanager
