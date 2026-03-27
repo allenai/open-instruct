@@ -30,6 +30,7 @@ maybe_update_beaker_description()
 class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
     """Integration test for FSDP2 weight broadcast with real vLLM engine on single GPU."""
 
+    @unittest.skip("FSDP2 single-GPU broadcast has zero-storage params; needs multi-GPU")
     def test_broadcast_olmo_core_fsdp2_weights_to_vllm(self):
         """Test broadcasting OLMo-core FSDP2 model weights to a real vLLM engine."""
         tokenizer_name = "Qwen/Qwen3-0.6B"
