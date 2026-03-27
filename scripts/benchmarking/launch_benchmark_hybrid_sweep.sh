@@ -8,11 +8,11 @@ fi
 
 image_name="$1"
 model_name_or_path="allenai/Olmo-Hybrid-Instruct-DPO-7B"
-response_length=16384
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 
+for response_length in 1024 4096 8192 16384 32768; do
 for enforce_eager in "true" "false"; do
     eager_flag=""
     eager_desc="no-enforce-eager"
@@ -24,7 +24,7 @@ for enforce_eager in "true" "false"; do
     echo "Launching: response_length=$response_length, $eager_desc"
 
     uv run python mason.py \
-        --cluster ai2/jupiter \
+        --cluster ai2/saturn \
         --non_resumable \
         --image "$image_name" \
         --description "Hybrid benchmark: response_length=$response_length, $eager_desc, commit=$git_hash, branch=$git_branch" \
@@ -69,6 +69,7 @@ for enforce_eager in "true" "false"; do
 
     echo "Launched: response_length=$response_length, $eager_desc"
     echo "----------------------------------------"
+done
 done
 
 echo ""
