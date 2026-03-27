@@ -13,15 +13,13 @@ Usage:
 """
 
 import argparse
+import asyncio
 import gc
-import os
 
-os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
-
-import torch  # noqa: E402
-from vllm import LLM  # noqa: E402
-from vllm.v1.core import kv_cache_utils  # noqa: E402
-from vllm.v1.kv_cache_interface import MambaSpec  # noqa: E402
+import torch
+from vllm import LLM
+from vllm.v1.core import kv_cache_utils
+from vllm.v1.kv_cache_interface import MambaSpec
 
 MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
 MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
@@ -39,10 +37,11 @@ def profile_model(model_path, args, sequence_lengths):
         enforce_eager=True,
     )
 
-    engine_core = llm.llm_engine.engine_core.engine_core
-    vllm_config = engine_core.vllm_config
+    engine = llm.llm_engine
+    vllm_config = engine.vllm_config
 
-    kv_cache_specs = engine_core.model_executor.collective_rpc("get_kv_cache_spec")
+    result = asyncio.run(engine.collective_rpc("get_kv_cache_spec"))
+    kv_cache_specs = result
 
     gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
     total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
