@@ -1110,7 +1110,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
-            top_k = request_body.pop("top_k", -1)
+            top_k = params_dict.pop("top_k", -1)
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
