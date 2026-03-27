@@ -451,7 +451,7 @@ def run_benchmark(
             # Collect all results for this batch (one per prompt) using non-blocking polling
             num_prompts = streaming_config.num_unique_prompts_rollout
             batch_results = []
-            batch_deadline = time.time() + max(1200, args.response_length * 0.5)
+            batch_deadline = time.time() + max(1200, streaming_config.response_length * 0.5)
             while len(batch_results) < num_prompts:
                 try:
                     result = inference_results_Q.get(timeout=1.0)
