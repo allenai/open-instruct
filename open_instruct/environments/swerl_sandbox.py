@@ -278,7 +278,7 @@ class SWERLSandboxEnv(RLEnvironment):
 
         output = _truncate(output) or "(no output)"
 
-        return StepResult(result=output, metadata={"exit_code": result.exit_code})
+        return StepResult(result=str(output), metadata={"exit_code": result.exit_code})
 
     # ------------------------------------------------------------------
     # submit (test execution)
