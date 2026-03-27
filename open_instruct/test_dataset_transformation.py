@@ -9,24 +9,20 @@ import unittest
 import open_instruct.dataset_transformation
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "test_data")
-_TOKENIZER_SRC_DIR = os.path.join(TEST_DATA_DIR, "tokenizer")
-_TOKENIZER_TEMP_DIR = None
 
 
 def _get_tokenizer_path():
-    global _TOKENIZER_TEMP_DIR
-    if _TOKENIZER_TEMP_DIR is not None:
-        return _TOKENIZER_TEMP_DIR
-    _TOKENIZER_TEMP_DIR = tempfile.mkdtemp(prefix="test_tokenizer_")
-    for name in os.listdir(_TOKENIZER_SRC_DIR):
-        src = os.path.join(_TOKENIZER_SRC_DIR, name)
+    src_dir = os.path.join(os.path.dirname(__file__), "test_data", "tokenizer")
+    dst_dir = tempfile.mkdtemp(prefix="test_tokenizer_")
+    for name in os.listdir(src_dir):
+        src = os.path.join(src_dir, name)
         if name.endswith(".gz"):
-            dst = os.path.join(_TOKENIZER_TEMP_DIR, name[:-3])
+            dst = os.path.join(dst_dir, name[:-3])
             with gzip.open(src, "rb") as f_in, open(dst, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
         else:
-            shutil.copy2(src, _TOKENIZER_TEMP_DIR)
-    return _TOKENIZER_TEMP_DIR
+            shutil.copy2(src, dst_dir)
+    return dst_dir
 
 
 TOKENIZER_PATH = _get_tokenizer_path()
