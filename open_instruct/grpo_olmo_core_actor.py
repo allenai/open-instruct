@@ -110,7 +110,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        assert self.attn_implementation is not None
         self.model_config = olmo_core_utils.get_transformer_config(
             self.model_name_or_path,
             vocab_size,

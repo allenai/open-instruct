@@ -45,7 +45,12 @@ from open_instruct.utils import retry_on_exception
 logger = logger_utils.setup_logger(__name__)
 
 
-_HF_TO_OLMO_CORE_ATTN = {"flash_attention_3": "flash_3", "flash_attention_2": "flash_2", "sdpa": "torch"}
+_HF_TO_OLMO_CORE_ATTN = {
+    "flash_attention_3": "flash_3",
+    "flash_attention_2": "flash_2",
+    "sdpa": "torch",
+    "eager": "torch",
+}
 
 
 @functools.lru_cache(maxsize=1)
