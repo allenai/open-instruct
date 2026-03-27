@@ -16,18 +16,18 @@ import argparse
 import gc
 
 import torch
-from vllm import LLM
+import vllm
+from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
-from vllm.v1.kv_cache_interface import MambaSpec
 
-MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
-MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
+kv_cache_interface.MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
+kv_cache_interface.MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 
 def profile_model(model_path, args, sequence_lengths):
     max_seq_len = max(sequence_lengths)
 
-    llm = LLM(
+    llm = vllm.LLM(
         model=model_path,
         max_model_len=max_seq_len,
         tensor_parallel_size=args.tensor_parallel_size,
@@ -49,8 +49,6 @@ def profile_model(model_path, args, sequence_lengths):
     kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
         vllm_config, kv_cache_groups, available_memory
     )
-
-    original_max_model_len = vllm_config.model_config.max_model_len
 
     print("\n" + "=" * 60)
     print(f"Model: {model_path}")
@@ -76,8 +74,6 @@ def profile_model(model_path, args, sequence_lengths):
         print(f"  max_model_len={seq_len:>6}: max_concurrency = {max_concurrency:.2f}x")
 
     print("=" * 60)
-
-    vllm_config.model_config.max_model_len = original_max_model_len
 
     del llm
     gc.collect()
