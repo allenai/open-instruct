@@ -241,6 +241,7 @@ def main(
         vllm_config=vllm_config,
         data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
+        attn_implementation=model_config.attn_implementation or "flash_attention_3",
     )
     logger.info("======== Policy group created =========")
 

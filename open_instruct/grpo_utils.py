@@ -70,9 +70,6 @@ class ExperimentConfig:
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
-    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa", "eager"] | None = None
-    """Which attention implementation to use.
-    If None, auto-detects the best available implementation."""
 
     # Algorithm
     num_epochs: int = 1
@@ -197,8 +194,6 @@ class ExperimentConfig:
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
     def __post_init__(self):
-        if self.attn_implementation is None:
-            self.attn_implementation = model_utils.detect_attn_implementation()
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
