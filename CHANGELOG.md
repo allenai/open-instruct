@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Added
+- Add hybrid model (Olmo-Hybrid) support: MambaSpec monkey-patch for vLLM dtype serialization, `trust_remote_code` pass-through to vLLM engines, `get_text_config()` for multimodal model support, dependency upgrades (vllm>=0.18.0, transformers>=5.3.0), `return_dict=False` for transformers 5.x compat, and hybrid test/production training scripts (https://github.com/allenai/open-instruct/pull/1425).
 - Add Ulysses sequence parallelism support to SFT training via `--sequence_parallel_size`, using HF Accelerate's `ParallelismConfig` with the DeepSpeed Ulysses SP backend. Enables training with much longer context lengths by sharding sequences across GPUs. Includes SP-aware loss aggregation, batch collation (padding to divisible seq len, index column removal), LR scheduler correction, and a two-node integration test script (https://github.com/allenai/open-instruct/pull/1539).
 - Added a GRPO implementation that uses OLMo-core with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1389).
 - Add the Qwen 3 4B DAPO math 32k training launch script under `scripts/train/qwen/` (https://github.com/allenai/open-instruct/pull/1536).
