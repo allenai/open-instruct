@@ -13,7 +13,6 @@ Usage:
 """
 
 import argparse
-import asyncio
 import gc
 
 import torch
@@ -40,8 +39,7 @@ def profile_model(model_path, args, sequence_lengths):
     engine = llm.llm_engine
     vllm_config = engine.vllm_config
 
-    result = asyncio.run(engine.collective_rpc("get_kv_cache_spec"))
-    kv_cache_specs = result
+    kv_cache_specs = engine.collective_rpc("get_kv_cache_spec")
 
     gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
     total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
