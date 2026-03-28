@@ -20,3 +20,15 @@ quality-check: ## *fail* if any rewrite was needed
 	uv run ruff check --exit-non-zero-on-fix $(check_dirs)
 	uv run ty check
 	uv run python -m compileall -qq $(check_dirs)
+
+docker:
+	# rsync -a --delete ../oe-eval-internal/ oe-eval-internal/
+	DOCKER_BUILDKIT=1 docker build -f Dockerfile \
+		--build-arg UV_CACHE_DIR=$(UV_CACHE_DIR) \
+		--build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" \
+		--build-arg GIT_BRANCH="$$(git rev-parse --abbrev-ref HEAD)" \
+		-t open_instruct .
+	# if you are internally at AI2, you can create an image like this:
+	$(eval beaker_user := $(shell beaker account whoami --format json | jq -r '.[0].name'))
+	beaker image rename $(beaker_user)/open_instruct ""
+	beaker image create open_instruct -n open_instruct -w ai2/$(beaker_user)

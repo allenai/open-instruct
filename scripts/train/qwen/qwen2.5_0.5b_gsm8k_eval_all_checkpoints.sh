@@ -1,0 +1,39 @@
+#!/bin/bash
+
+set -euo pipefail
+
+CHECKPOINT_ROOT="${CHECKPOINT_ROOT:-/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen25_05b_it_gsm8k_checkpoints}"
+STEP_START="${STEP_START:-100}"
+STEP_END="${STEP_END:-1000}"
+STEP_INCREMENT="${STEP_INCREMENT:-100}"
+
+EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_eval_$(date +%Y%m%d_%H%M%S)}"
+WANDB_GROUP_NAME="${WANDB_GROUP_NAME:-${EXP_NAME}}"
+LOCAL_EVALS="${LOCAL_EVALS:-}"
+LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-}"
+
+# Keep uv cache writable in restricted environments.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
+
+for step in $(seq "${STEP_START}" "${STEP_INCREMENT}" "${STEP_END}"); do
+    checkpoint_path="${CHECKPOINT_ROOT}/step_${step}"
+    if [[ ! -d "${checkpoint_path}" ]]; then
+        echo "Skipping missing checkpoint: ${checkpoint_path}"
+        continue
+    fi
+
+    echo "Launching eval for ${checkpoint_path}"
+    NUM_GPUS=2 \
+    LOCAL_EVALS="${LOCAL_EVALS}" \
+    LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS}" \
+    bash scripts/train/qwen/qwen2.5_0.5b_gsm8k_buckets.sh \
+        --model_name_or_path "${checkpoint_path}" \
+        --exp_name "${EXP_NAME}" \
+        --run_name "${RUN_NAME}_step_${step}" \
+        --wandb_group_name "${WANDB_GROUP_NAME}" \
+        --eval_only \
+        --eval_only_set_checkpoint "${step}" \
+        "$@"
+done

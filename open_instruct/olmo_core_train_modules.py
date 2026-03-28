@@ -341,7 +341,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         This method implements the GRPO training algorithm with:
         - Multi-epoch PPO-style training
-        - DAPO/CISPO loss variants
+        - DAPO/CISPO/TVPO loss variants
         - KL penalty computation
         - Importance sampling with clipping
         """
@@ -395,6 +395,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
             ),
         }
+        if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+            loss_stats_B["tv_divergence_avg"] = torch.zeros(num_samples, device=self.device)
+            loss_stats_B["tv_divergence_max"] = torch.zeros(num_samples, device=self.device)
 
         num_steps = 0
         local_step = 0
@@ -416,16 +419,24 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 old_logprobs = old_logprobs_BT[sample_idx]
                 advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
+                tv_divergence = None
 
                 log_ratio = new_logprobs - old_logprobs
                 ratio = torch.exp(log_ratio)
+                if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                    vllm_logprobs = data_BT.vllm_logprobs[sample_idx].to(new_logprobs.device)
+                    vllm_logprobs = vllm_logprobs[:, 1:]
+                    old_probs = torch.exp(torch.where(response_mask, old_logprobs, torch.zeros_like(old_logprobs)))
+                    vllm_probs = torch.exp(torch.where(response_mask, vllm_logprobs, torch.zeros_like(vllm_logprobs)))
+                    tv_divergence = 0.5 * torch.abs(old_probs - vllm_probs)
 
-                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                pg_loss, clip_mask, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
+                    tv_divergence=tv_divergence,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
@@ -438,7 +449,10 @@ class GRPOTrainModule(TransformerTrainModule):
                 with torch.no_grad():
                     loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
                     loss_stats_B["kl"][sample_idx] = masked_mean(kl, response_mask)
-                    loss_stats_B["clip_frac"][sample_idx] = (pg_losses2 > pg_losses).float().mean()
+                    loss_stats_B["clip_frac"][sample_idx] = masked_mean(clip_mask.float(), response_mask)
+                    if tv_divergence is not None:
+                        loss_stats_B["tv_divergence_avg"][sample_idx] = masked_mean(tv_divergence, response_mask)
+                        loss_stats_B["tv_divergence_max"][sample_idx] = tv_divergence[response_mask].max()
                     if entropy is not None:
                         loss_stats_B["entropy"][sample_idx] = entropy[response_mask].mean()
 
@@ -464,6 +478,11 @@ class GRPOTrainModule(TransformerTrainModule):
             local_total_tokens = local_token_counts.sum()
 
             local_sums_list = [local_total_tokens, local_pg_loss_sum, local_kl_sum, local_clip_frac_sum]
+            local_tv_max = None
+            if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                local_tv_avg_sum = (loss_stats_B["tv_divergence_avg"] * local_token_counts).sum()
+                local_tv_max = loss_stats_B["tv_divergence_max"].max()
+                local_sums_list.append(local_tv_avg_sum)
             if self.grpo_config.record_entropy:
                 local_entropy_sum = (loss_stats_B["entropy"] * local_token_counts).sum()
                 local_sums_list.append(local_entropy_sum)
@@ -478,8 +497,18 @@ class GRPOTrainModule(TransformerTrainModule):
             self.record_metric(
                 "train/clip_frac", (global_clip_frac_sum / global_total_tokens).item(), reduce_type=None
             )
+            cursor = 4
+            if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                global_tv_avg_sum = local_sums[cursor]
+                cursor += 1
+                global_tv_max = local_tv_max
+                dist.all_reduce(global_tv_max, op=dist.ReduceOp.MAX, group=self.trainer.dp_process_group)
+                self.record_metric(
+                    "train/tv_divergence_avg", (global_tv_avg_sum / global_total_tokens).item(), reduce_type=None
+                )
+                self.record_metric("train/tv_divergence_max", global_tv_max.item(), reduce_type=None)
             if self.grpo_config.record_entropy:
-                global_entropy_sum = local_sums[4]
+                global_entropy_sum = local_sums[cursor]
                 self.record_metric(
                     "train/entropy", (global_entropy_sum / global_total_tokens).item(), reduce_type=None
                 )

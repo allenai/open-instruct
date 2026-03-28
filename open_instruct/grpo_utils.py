@@ -1,4 +1,5 @@
 import enum
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Literal
@@ -21,6 +22,7 @@ TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": t
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
+    tvpo = "tvpo"
 
 
 @dataclass
@@ -101,7 +103,7 @@ class ExperimentConfig:
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
-    """Whether to use DAPO or CISPO loss function."""
+    """Whether to use DAPO, CISPO, or TVPO loss function."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -164,6 +166,8 @@ class ExperimentConfig:
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
+    warn_if_low_disk_space: bool = False
+    """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None
     """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
@@ -192,6 +196,22 @@ class ExperimentConfig:
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for pass@k metrics."""
+    eval_only: bool = False
+    """Whether to run one local evaluation round and exit without training."""
+    eval_only_set_checkpoint: int | None = None
+    """Optional checkpoint step to use as eval-only logging step."""
+    eval_temperature: float | None = None
+    """Optional eval-only temperature override. If None, uses training temperature."""
+    eval_top_p: float | None = None
+    """Optional eval-only top_p override. If None, uses training top_p."""
+    eval_top_k: int | None = None
+    """Optional eval-only top_k override. If None, uses training top_k."""
+    eval_response_length: int | None = None
+    """Optional eval-only max response length override. If None, uses training response_length."""
+    eval_timeout_minutes: int | None = 120
+    """Timeout in minutes for final local eval result collection. Defaults to 2 hours."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
@@ -203,6 +223,8 @@ class ExperimentConfig:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.loss_fn == GRPOLossType.tvpo and not self.use_vllm_logprobs:
+            raise ValueError("Must use `loss_fn=tvpo` with `use_vllm_logprobs=True`.")
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
@@ -245,6 +267,39 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.eval_temperature is not None and self.eval_temperature < 0.0:
+            raise ValueError(f"`eval_temperature` must be >= 0.0, got {self.eval_temperature}")
+        if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
+            raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.eval_top_k is not None and self.eval_top_k != -1 and self.eval_top_k < 1:
+            raise ValueError(f"`eval_top_k` must be -1 or >= 1, got {self.eval_top_k}")
+        if self.eval_response_length is not None and self.eval_response_length < 1:
+            raise ValueError(f"`eval_response_length` must be >= 1, got {self.eval_response_length}")
+        if self.eval_timeout_minutes is not None and self.eval_timeout_minutes < 1:
+            raise ValueError(f"`eval_timeout_minutes` must be >= 1, got {self.eval_timeout_minutes}")
+        if self.eval_pass_at_k < 1:
+            raise ValueError(f"`eval_pass_at_k` must be >= 1, got {self.eval_pass_at_k}")
+        if self.eval_pass_at_k & (self.eval_pass_at_k - 1) != 0:
+            raise ValueError(f"`eval_pass_at_k` must be a power of 2, got {self.eval_pass_at_k}")
+        if self.eval_only_set_checkpoint is not None and self.eval_only_set_checkpoint < 1:
+            raise ValueError(
+                f"`eval_only_set_checkpoint` must be >= 1 when provided, got {self.eval_only_set_checkpoint}"
+            )
+
+
+def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
+    """Estimate pass@k for one prompt."""
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
+    if not (0 <= num_correct <= num_samples):
+        raise ValueError(
+            f"num_correct must satisfy 0 <= num_correct <= num_samples, got {num_correct} with {num_samples}."
+        )
+    if not (1 <= k <= num_samples):
+        raise ValueError(f"k must satisfy 1 <= k <= num_samples, got {k} with {num_samples}.")
+    if num_samples - num_correct < k:
+        return 1.0
+    return 1.0 - (math.comb(num_samples - num_correct, k) / math.comb(num_samples, k))
 
 
 def compute_grpo_loss(
@@ -254,23 +309,27 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: ExperimentConfig,
     tis_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    tv_divergence: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        pg_loss = torch.max(pg_losses, pg_losses2)
+        clip_mask = pg_losses2 > pg_losses
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
-        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-        pg_losses2 = pg_losses
+        pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
+        clip_mask = torch.zeros_like(pg_loss, dtype=torch.bool)
+    elif config.loss_fn == GRPOLossType.tvpo:
+        clip_mask = (tv_divergence > config.clip_higher) * (((ratio.detach() - 1) * advantages) > 0)
+        clipped_ratio = torch.where(clip_mask, torch.ones_like(ratio), ratio)
+        pg_loss = -advantages * clipped_ratio
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
     if tis_weights is not None:
-        pg_losses = pg_losses * tis_weights
-        pg_losses2 = pg_losses2 * tis_weights
-
-    pg_loss_max = torch.max(pg_losses, pg_losses2)
+        pg_loss = pg_loss * tis_weights
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
@@ -280,9 +339,9 @@ def compute_grpo_loss(
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
     else:
-        kl = torch.zeros_like(pg_loss_max)
+        kl = torch.zeros_like(pg_loss)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
+    return pg_loss, clip_mask, kl
 
 
 def forward_for_logprobs(

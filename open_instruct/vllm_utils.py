@@ -101,7 +101,7 @@ MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
-SHOULD_STOP_TIMEOUT_S = 0.1
+SHOULD_STOP_TIMEOUT_S = 1.0
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
@@ -136,6 +136,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
 class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
+    top_k: int = 0
     max_tokens: int = 256
     min_tokens: int = 0
     n: int = 1
@@ -374,6 +375,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
+        model_step=metadata.get("model_step"),
     )
     return result, metadata["is_eval"]
 
@@ -465,12 +467,36 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    poll_timeout_s = 0.1
     while True:
+        has_pending_eval = actor.eval_prompt_queue is not None and actor.eval_prompt_queue.qsize() > 0
+
+        # Strict eval priority: when eval work is pending, stop admitting new train requests
+        # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
+        if has_pending_eval and len(actor.active_tasks) > 0:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
+
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        request = actor.prompt_queue.get()
+        # Prioritize eval requests so local evals don't starve behind train backlog.
+        # Use timed gets so this worker doesn't block forever on train queue when eval
+        # items arrive later (e.g., final-step eval after training prompts are drained).
+        request = None
+        if has_pending_eval and actor.eval_prompt_queue is not None:
+            try:
+                request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            try:
+                request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            continue
         add_request(actor, request)
 
 
@@ -482,6 +508,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "index": request.index,
         "prompt_id": request.prompt_id,
+        "model_step": actor.current_model_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
@@ -533,25 +560,29 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
-    outputs = actor.request_outputs[base_request_id]["outputs"]
-    ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
+    try:
+        outputs = actor.request_outputs[base_request_id]["outputs"]
+        ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
-    current_time = time.perf_counter()
-    result, is_eval = process_completed_request(
-        base_request_id,
-        ordered_outs,
-        current_time,
-        actor.request_outputs[base_request_id]["use_tools"],
-        actor.request_metadata,
-    )
+        current_time = time.perf_counter()
+        result, is_eval = process_completed_request(
+            base_request_id,
+            ordered_outs,
+            current_time,
+            actor.request_outputs[base_request_id]["use_tools"],
+            actor.request_metadata,
+        )
 
-    actor.request_outputs.pop(base_request_id)
-    actor.request_metadata.pop(base_request_id, None)
-
-    dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
-    results_queue = actor.eval_results_queue if is_eval else actor.results_queue
-    results_queue.put(result)
+        dataset = actor.eval_dataset if is_eval else actor.train_dataset
+        result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+        results_queue = actor.eval_results_queue if is_eval else actor.results_queue
+        results_queue.put(result)
+    except Exception:
+        logger.exception("Failed to finalize completed request %s", base_request_id)
+        raise
+    finally:
+        actor.request_outputs.pop(base_request_id, None)
+        actor.request_metadata.pop(base_request_id, None)
 
 
 async def compute_rewards(
@@ -593,6 +624,7 @@ class LLMRayActor:
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
+        eval_prompt_queue: ray_queue.Queue | None = None,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
@@ -615,7 +647,7 @@ class LLMRayActor:
             train_dataset,
             eval_dataset,
         )
-        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_queues(prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -649,6 +681,7 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.current_model_step: int = 0
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -658,9 +691,10 @@ class LLMRayActor:
         self.reward_fn = reward_config.build() if reward_config else None
         self.tool_parser: ToolParser  # Set in _init_tool_parser
 
-    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+    def _init_queues(self, prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
+        self.eval_prompt_queue = eval_prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
@@ -792,6 +826,8 @@ class LLMRayActor:
                 self._last_should_stop_update = time.perf_counter()
             else:
                 ray.cancel(should_stop_ref)
+                # Fail open to avoid deadlock from stale cached True value.
+                self._should_stop_value = False
         return self._should_stop_value
 
     def process_from_queue(self) -> None:
@@ -863,6 +899,20 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
+
+    def set_model_step(self, model_step: int) -> None:
+        self.current_model_step = model_step
+
+    def wait_for_no_active_tasks(self, timeout_s: float = 600.0) -> None:
+        start_time = time.perf_counter()
+        while len(self.active_tasks) > 0:
+            self.check_background_threads()
+            if time.perf_counter() - start_time > timeout_s:
+                raise RuntimeError(
+                    f"Timed out waiting for active vLLM tasks to drain after {timeout_s}s. "
+                    f"Remaining active tasks: {len(self.active_tasks)}"
+                )
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
@@ -1060,6 +1110,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            top_k = params_dict.pop("top_k", -1)
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
@@ -1069,6 +1120,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     "include_stop_str_in_output": True,
                     "skip_special_tokens": False,
                     "min_tokens": min_tokens,
+                    "top_k": top_k,
                 },
                 **params_dict,
             )
@@ -1249,6 +1301,7 @@ def create_vllm_engines(
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
+    eval_prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
@@ -1328,6 +1381,7 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
+                eval_prompt_queue=eval_prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
