@@ -17,6 +17,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import os
 import queue
@@ -465,12 +466,34 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    poll_timeout_s = 0.1
     while True:
+        has_pending_eval = actor.eval_prompt_queue.qsize() > 0
+
+        # Strict eval priority: when eval work is pending, stop admitting new train requests
+        # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
+        if has_pending_eval and len(actor.active_tasks) > 0:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
+
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        request = actor.prompt_queue.get()
+        # Prioritize eval requests so local evals don't starve behind train backlog.
+        # Use timed gets so this worker doesn't block forever on train queue when eval
+        # items arrive later (e.g., final-step eval after training prompts are drained).
+        request = None
+        if has_pending_eval:
+            with contextlib.suppress(queue.Empty):
+                request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
+
+        if request is None:
+            with contextlib.suppress(queue.Empty):
+                request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+
+        if request is None:
+            continue
         add_request(actor, request)
 
 
@@ -593,6 +616,7 @@ class LLMRayActor:
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
+        eval_prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
@@ -615,7 +639,7 @@ class LLMRayActor:
             train_dataset,
             eval_dataset,
         )
-        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_queues(prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -658,9 +682,10 @@ class LLMRayActor:
         self.reward_fn = reward_config.build() if reward_config else None
         self.tool_parser: ToolParser  # Set in _init_tool_parser
 
-    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+    def _init_queues(self, prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
+        self.eval_prompt_queue = eval_prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
@@ -1249,6 +1274,7 @@ def create_vllm_engines(
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
+    eval_prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
@@ -1259,6 +1285,10 @@ def create_vllm_engines(
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
+    if eval_prompt_queue is None:
+        raise ValueError(
+            "eval_prompt_queue is required (use ray_queue.Queue() when no local eval prompts are enqueued)."
+        )
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
     # Using "ray" executor causes placement group context loss in vLLM v1's
@@ -1328,6 +1358,7 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
+                eval_prompt_queue=eval_prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
