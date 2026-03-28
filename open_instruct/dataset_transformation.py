@@ -937,7 +937,8 @@ ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
-DATASET_CACHE_VERSION = "v6"
+# v8: sft_tulu_tokenize skips apply_chat_template on prefixes with no user turn for strict templates (Qwen3.5+).
+DATASET_CACHE_VERSION = "v8"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1102,6 +1103,44 @@ def sft_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
+def _tokenizer_rejects_system_only_chat_prefix(tokenizer: PreTrainedTokenizer) -> bool:
+    """True if ``apply_chat_template`` cannot render a system-only prefix (e.g. Qwen3.5 chat template)."""
+    if hasattr(tokenizer, "_open_instruct_rejects_system_only_chat_prefix"):
+        return tokenizer._open_instruct_rejects_system_only_chat_prefix
+    try:
+        tokenizer.apply_chat_template(
+            [{"role": "system", "content": "."}], tokenize=False, add_generation_prompt=False
+        )
+        tokenizer._open_instruct_rejects_system_only_chat_prefix = False
+    except Exception:
+        tokenizer._open_instruct_rejects_system_only_chat_prefix = True
+    return tokenizer._open_instruct_rejects_system_only_chat_prefix
+
+
+def _prefix_token_length(
+    tokenizer: PreTrainedTokenizer,
+    messages: list[dict[str, Any]],
+    end: int,
+    max_seq_length: int,
+    add_generation_prompt: bool = False,
+) -> int:
+    """Token length of ``apply_chat_template(messages[:end], ...)``.shape[1]."""
+    return tokenizer.apply_chat_template(
+        conversation=messages[:end],
+        tokenize=True,
+        return_tensors="pt",
+        return_dict=False,
+        padding=False,
+        truncation=True,
+        max_length=max_seq_length,
+        add_generation_prompt=add_generation_prompt,
+    ).shape[1]
+
+
+def _has_user_turn(messages: list[dict[str, Any]]) -> bool:
+    return any(m.get("role") == "user" for m in messages)
+
+
 def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
@@ -1120,55 +1159,42 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
+
+    skip_no_user_prefixes = _tokenizer_rejects_system_only_chat_prefix(tokenizer)
+    seen_user = False
+
     # mask the non-assistant part for avoiding loss
     for message_idx, message in enumerate(messages):
         if message["role"] != "assistant":
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
+            # --- start index ---
+            if message_idx == 0 or (skip_no_user_prefixes and not seen_user):
                 message_start_idx = 0
             else:
-                message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
-                    tokenize=True,
-                    return_tensors="pt",
-                    return_dict=False,
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # next, we calculate the end index of this non-assistant message
+                message_start_idx = _prefix_token_length(tokenizer, messages, message_idx, max_seq_length)
+
+            if message.get("role") == "user":
+                seen_user = True
+
+            # If prefix messages[:message_idx+1] still has no user turn, defer masking
+            # to the next iteration — the range will be covered then with start = 0.
+            if skip_no_user_prefixes and not seen_user:
+                continue
+
+            # --- end index ---
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    return_dict=False,
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=True,
-                ).shape[1]
+                message_end_idx = _prefix_token_length(
+                    tokenizer, messages, message_idx + 1, max_seq_length, add_generation_prompt=True
+                )
             else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    return_dict=False,
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # set the label to -100 for the non-assistant part
+                message_end_idx = _prefix_token_length(tokenizer, messages, message_idx + 1, max_seq_length)
+
             labels[:, message_start_idx:message_end_idx] = -100
             if max_seq_length and message_end_idx >= max_seq_length:
                 break
+        else:
+            if message.get("role") == "user":
+                seen_user = True
+
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
@@ -1194,55 +1220,38 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
+
+    skip_no_user_prefixes = _tokenizer_rejects_system_only_chat_prefix(tokenizer)
+    seen_user = False
+
     # mask all turns but the last for avoiding loss
     for message_idx, _message in enumerate(messages):
         if message_idx < len(messages) - 1:
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
+            if message_idx == 0 or (skip_no_user_prefixes and not seen_user):
                 message_start_idx = 0
             else:
-                message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
-                    tokenize=True,
-                    return_tensors="pt",
-                    return_dict=False,
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # next, we calculate the end index of this non-assistant message
+                message_start_idx = _prefix_token_length(tokenizer, messages, message_idx, max_seq_length)
+
+            if messages[message_idx].get("role") == "user":
+                seen_user = True
+
+            if skip_no_user_prefixes and not seen_user:
+                continue
+
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    return_dict=False,
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=True,
-                ).shape[1]
+                message_end_idx = _prefix_token_length(
+                    tokenizer, messages, message_idx + 1, max_seq_length, add_generation_prompt=True
+                )
             else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    return_dict=False,
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # set the label to -100 for the non-assistant part
+                message_end_idx = _prefix_token_length(tokenizer, messages, message_idx + 1, max_seq_length)
+
             labels[:, message_start_idx:message_end_idx] = -100
             if max_seq_length and message_end_idx >= max_seq_length:
                 break
+        else:
+            if messages[message_idx].get("role") == "user":
+                seen_user = True
+
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()

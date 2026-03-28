@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from parameterized import parameterized
+from transformers import AutoTokenizer
 
 import open_instruct.dataset_transformation
 
@@ -18,6 +19,23 @@ HAS_CACHE = (
 GOLD_SFT = {"count": 9390, "hash": "87a737b6e1124a84335fc81f8e82b51372d20edadd03e40fc5d60e06683c0ac0"}
 GOLD_PREFERENCE = {"count": 2678, "hash": "14eec936b320768c0985866fd9d8033d0d960f20df431cc6c686b96b29d5413a"}
 GOLD_RLVR = {"count": 298, "hash": "2999bbb6d7b3f54d6fbffbeeb8bfa31c0efe2b1685def883e6e52914db9f1496"}
+
+
+class TestSftTuluQwenChatTemplate(unittest.TestCase):
+    """Strict chat templates (e.g. Qwen3.5) need a user turn in every apply_chat_template prefix."""
+
+    def test_sft_tulu_tokenize_system_user_assistant_qwen35(self):
+        tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-0.8B", trust_remote_code=True)
+        row = {
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello."},
+            ]
+        }
+        open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(row, tok, max_seq_length=512)
+        self.assertIn("input_ids", row)
+        self.assertGreater(len(row["input_ids"]), 0)
 
 
 class TestEnvConfigNormalization(unittest.TestCase):
