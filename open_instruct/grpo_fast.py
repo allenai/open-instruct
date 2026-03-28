@@ -496,6 +496,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
         self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
         self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+        self.local_metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum()
+        self.local_metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum()
         self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
         weighted_mean_ratio = self.local_metrics["val/ratio"]
         self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
@@ -575,11 +577,14 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
+        grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
                 "kl": torch.zeros(4, num_samples, device=device),
                 "kl_loss": torch.zeros(num_samples, device=device),
+                "tis_ratio": torch.zeros(num_samples, device=device),
+                "tis_clipfrac": torch.zeros(num_samples, device=device),
                 "pg_clipfrac": torch.zeros(num_samples, device=device),
                 "pg_loss": torch.zeros(num_samples, device=device),
                 "loss": torch.zeros(num_samples, device=device),
@@ -662,7 +667,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
                     # Apply truncated importance sampling if enabled
-                    tis_imp_ratio_BT = None
+                    tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
+                    clipped_tis_imp_ratio_BT = tis_imp_ratio_BT
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
@@ -680,8 +686,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         valid_mask_BT = response_mask_BT
                         # Initialize importance ratio to 1.0 (no effect) for all positions
-                        tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
-
                         if valid_mask_BT.any():
                             # Calculate logprob difference only for valid positions
                             logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
@@ -696,7 +700,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
                             )
                             # Apply cap
-                            tis_imp_ratio_BT = torch.clamp(
+                            clipped_tis_imp_ratio_BT = torch.clamp(
                                 tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                             )
 
@@ -706,7 +710,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_imp_ratio_BT,
+                        tis_weights=clipped_tis_imp_ratio_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -725,6 +729,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
+                        grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -733,6 +738,10 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
+                        loss_stats_B["tis_ratio"][i] = masked_mean(clipped_tis_imp_ratio_BT.float(), response_mask_BT)
+                        loss_stats_B["tis_clipfrac"][i] = masked_mean(
+                            (clipped_tis_imp_ratio_BT < tis_imp_ratio_BT).float(), response_mask_BT
+                        )
                         loss_stats_B["pg_clipfrac"][i] = masked_mean(
                             (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
                         )
@@ -745,6 +754,7 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -1052,12 +1062,19 @@ def setup_runtime_variables(
     return args
 
 
-def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(
+    args: grpo_utils.ExperimentConfig,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+):
     """Setup experiment tracking and seeds."""
     all_configs = {}
     if (beaker_config := maybe_get_beaker_config()) is not None:
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
+    all_configs.update(**asdict(vllm_config))
 
     wandb_url = None
     if args.with_tracking:
@@ -1065,6 +1082,7 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
+            group=args.wandb_group_name,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
@@ -1353,6 +1371,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        vllm_attention_backend=vllm_config.vllm_attention_backend,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -2209,7 +2228,6 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
-    utils.configure_hf_hub_retry()
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
@@ -2219,7 +2237,7 @@ def main(
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, streaming_config, vllm_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(
