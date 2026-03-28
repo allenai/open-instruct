@@ -13,10 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from open_instruct.finetune import FlatArguments
+import dataclasses
+
+from open_instruct.utils import ArgumentParserPlus, get_datasets
 
 # script for mixing and saving data
-from open_instruct.utils import ArgumentParserPlus, get_datasets
+
+
+@dataclasses.dataclass
+class MixDataArguments:
+    dataset_mixer: dict | None = None
+    dataset_config_name: str | None = None
+    dataset_mix_dir: str | None = None
+    save_to_hub: str | None = None
+
 
 # Run as module for local imports, e.g.:
 # python open_instruct/mix_data.py configs/train_configs/sft/tulu3_8b_preview_mix_v3.4.yaml --dataset_mix_dir=output/tmp/
@@ -25,9 +35,9 @@ from open_instruct.utils import ArgumentParserPlus, get_datasets
 
 
 def main() -> None:
-    parser = ArgumentParserPlus((FlatArguments,))  # type: ignore[arg-type]
-    (args,) = parser.parse()  # type: ignore[misc]
-    assert isinstance(args, FlatArguments)
+    parser = ArgumentParserPlus((MixDataArguments,))
+    (args,) = parser.parse()
+    assert isinstance(args, MixDataArguments)
 
     # assert that data_mixer is not none in config
     assert args.dataset_mixer is not None, "data_mixer is required in config"
