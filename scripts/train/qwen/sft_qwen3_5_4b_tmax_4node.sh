@@ -36,7 +36,6 @@ uv run python mason.py \
     --exp_name sft_qwen3_5_4b_tmax_4node \
     --model_name_or_path Qwen/Qwen3.5-4B \
     --tokenizer_name Qwen/Qwen3.5-4B \
-    --use_flash_attn \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
