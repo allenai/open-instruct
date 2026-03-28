@@ -16,7 +16,7 @@ We ran training for the 1B model in SFT on 1 node of 8 NVIDIA H100 GPUs.
 The command used internally is:
 ```
 python mason.py \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -133,7 +133,7 @@ For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_in
 Example with DeepSpeed Stage 2:
 ```
 python mason.py \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -226,6 +226,8 @@ done
 ```
 
 ## RLVR
+
+> **Note**: These commands use the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py) script, which has since been removed. The experiments were run at commit [`745bf58d321c`](https://github.com/allenai/open-instruct/tree/745bf58d321c). They are preserved here for historical reference.
 
 ### 1B
 

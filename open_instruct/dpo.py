@@ -13,13 +13,13 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import transformers
+from olmo_core import optim as olmo_optim
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
@@ -110,11 +110,11 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
     if args.lr_scheduler_type == "cosine":
-        scheduler = CosWithWarmup(warmup_steps=warmup_steps)
+        scheduler = olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
     elif args.lr_scheduler_type == "linear":
-        scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+        scheduler = olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
     else:
-        scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
+        scheduler = olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
     return scheduler
 
 
@@ -124,7 +124,7 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-    if slack_webhook_url:
+    if args.send_slack_alerts and slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(
             name=args.run_name or args.exp_name, webhook_url=slack_webhook_url
         )
@@ -196,7 +196,6 @@ def _handle_post_training(
                 oe_eval_max_length=args.oe_eval_max_length,
                 wandb_url=wandb_url,
                 oe_eval_tasks=args.oe_eval_tasks,
-                gs_bucket_path=args.gs_bucket_path,
                 eval_workspace=args.eval_workspace,
                 eval_priority=args.eval_priority,
                 oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
@@ -321,7 +320,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        drop_last=True,
+        # We need to process every example to cache reference logprobs, so we can't drop the last batch.
+        drop_last=False,
         fs_local_rank=global_rank,
     )
 
@@ -348,7 +348,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     data_loader.reshuffle(epoch=0)
     num_training_steps = len(data_loader) * args.num_epochs
     effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
-    optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
+    if args.optimizer_type == "muon":
+        optim_config = olmo_optim.MuonConfig(
+            lr=args.learning_rate, weight_decay=args.weight_decay, **(args.optimizer_kwargs or {})
+        )
+    elif args.optimizer_type == "adamw":
+        optim_config = olmo_optim.AdamWConfig(
+            lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer
+        )
+    else:
+        raise ValueError(f"Unknown optimizer_type: {args.optimizer_type!r}. Must be 'adamw' or 'muon'.")
     scheduler = _setup_scheduler(args, effective_steps)
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     dp_config = transformer_config.TransformerDataParallelConfig(

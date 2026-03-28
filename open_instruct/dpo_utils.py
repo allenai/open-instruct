@@ -100,9 +100,9 @@ class TrackingConfig:
 class DPOConfig:
     """Configuration for DPO-specific hyperparameters."""
 
-    beta: float = 0.1
+    beta: float = 5.0
     """Beta parameter for DPO loss."""
-    loss_type: DPOLossType = DPOLossType.dpo
+    loss_type: DPOLossType = DPOLossType.dpo_norm
     """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
     gamma_beta_ratio: float = 0.3
     """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
@@ -122,15 +122,15 @@ class DPOConfig:
 class TrainingConfig:
     """Configuration for training hyperparameters."""
 
-    num_epochs: int = 2
+    num_epochs: int = 1
     """Total number of training epochs to perform."""
     per_device_train_batch_size: int = 8
     """Batch size per GPU/TPU core/CPU for training."""
     gradient_accumulation_steps: int = 1
     """Number of updates steps to accumulate before performing a backward/update pass."""
     learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    warmup_ratio: float = 0.03
+    """The initial learning rate for the optimizer."""
+    warmup_ratio: float = 0.1
     """Linear warmup over warmup_ratio fraction of total steps."""
     weight_decay: float = 0.0
     """Weight decay for AdamW if we apply some."""
@@ -156,6 +156,10 @@ class TrainingConfig:
     """Use paged optimizer from bitsandbytes."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW or not."""
+    optimizer_type: str = "adamw"
+    """Optimizer type: 'adamw' or 'muon'."""
+    optimizer_kwargs: dict | str = field(default_factory=dict)
+    """Extra kwargs passed to the optimizer config constructor (e.g. '{"mu": 0.95}' for Muon)."""
     tensor_parallel_degree: int = 1
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
@@ -318,11 +322,13 @@ class ExperimentConfig(
     Full arguments class for all fine-tuning jobs.
     """
 
-    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+    _VALID_DICT_FIELDS = ["additional_model_arguments", "optimizer_kwargs"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -431,6 +437,10 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
 
@@ -551,8 +561,7 @@ def build_reference_logprobs_cache(
                 f"Cannot write to cache directory {cache_path.parent}: {e}. "
                 f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
             ) from e
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
@@ -562,8 +571,7 @@ def build_reference_logprobs_cache(
     total_examples = 0
 
     with torch.no_grad():
-        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
+        for batch in (pbar := tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -574,6 +582,9 @@ def build_reference_logprobs_cache(
                 chosen_logps, rejected_logps, _ = forward_fn(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
+
+            if batch.get("is_padding", False):
+                continue
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
@@ -590,9 +601,8 @@ def build_reference_logprobs_cache(
                 }
             )
 
-    if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
 
     missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
     missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
@@ -618,8 +628,7 @@ def build_reference_logprobs_cache(
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     return cache
 
@@ -1118,7 +1127,9 @@ def separate_forward_olmo(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
-    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly.
+    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
+    correctly under TP+compile, then computes per-token log-probs on the local logits shard
+    to avoid materializing the full (S, vocab) tensor.
     Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
 
     Args:
@@ -1131,23 +1142,16 @@ def separate_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
-    chosen_batch = process_batch(batch, "chosen")
-    chosen_output = model(chosen_batch["input_ids"], labels=chosen_batch["labels"])
 
-    chosen_logps = _get_batch_logps(chosen_output.loss, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch
-    torch.cuda.empty_cache()
+    def _get_logps(branch: str) -> torch.Tensor:
+        branch_batch = process_batch(batch, branch)
+        output = model(branch_batch["input_ids"], labels=branch_batch["labels"])
+        logps = _get_batch_logps(output.loss, branch_batch["labels"], average_log_prob=average_log_prob)
+        del branch_batch
+        torch.cuda.empty_cache()
+        return logps
 
-    rejected_batch = process_batch(batch, "rejected")
-    rejected_output = model(rejected_batch["input_ids"], labels=rejected_batch["labels"])
-
-    rejected_logps = _get_batch_logps(
-        rejected_output.loss, rejected_batch["labels"], average_log_prob=average_log_prob
-    )
-    del rejected_batch
-    torch.cuda.empty_cache()
-
-    return chosen_logps, rejected_logps, None
+    return _get_logps("chosen"), _get_logps("rejected"), None
 
 
 @dataclass
@@ -1188,8 +1192,4 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
                 full_key = f"{prefix}{key}"
                 pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
                 result[full_key] = tensor_utils.pad_to_length(result[full_key], max_len, pad_value)
-        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
-        result["attention_mask"] = torch.cat(
-            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
-        )
         return result
