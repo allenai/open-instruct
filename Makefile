@@ -30,5 +30,5 @@ docker:
 		-t open_instruct .
 	# if you are internally at AI2, you can create an image like this:
 	$(eval beaker_user := $(shell beaker account whoami --format json | jq -r '.[0].name'))
-	beaker image rename $(beaker_user)/open_instruct ""
-	beaker image create open_instruct -n open_instruct -w ai2/$(beaker_user)
+	beaker image rename $(beaker_user)/open_instruct_test ""
+	beaker image create open_instruct_test -n open_instruct_test -w ai2/$(beaker_user)
