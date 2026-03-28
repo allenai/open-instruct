@@ -57,6 +57,7 @@ import threading
 import time
 from dataclasses import asdict
 from queue import Empty, Full, Queue
+from collections.abc import Callable
 from typing import Any
 
 import backoff
@@ -256,9 +257,9 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_config.attn_implementation,
-            use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -438,6 +439,24 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
+    def _get_vllm_name_mapper(self) -> Callable[[str], str] | None:
+        """Build a name mapper when vLLM loads a different architecture than training.
+
+        For example, Qwen3.5 training loads Qwen3_5ForCausalLM (params: model.*)
+        but vLLM loads Qwen3_5ForConditionalGeneration (params: language_model.model.*).
+        """
+        # Use the original HF config since the loaded model's config may strip architectures.
+        from transformers import AutoConfig
+
+        hf_config = AutoConfig.from_pretrained(self.model_config.model_name_or_path)
+        architectures = getattr(hf_config, "architectures", []) or []
+        # If the HF checkpoint architecture is ForConditionalGeneration but we
+        # loaded ForCausalLM via AutoModelForCausalLM, vLLM will wrap our params
+        # under a "language_model." prefix.
+        if any("ForConditionalGeneration" in arch for arch in architectures):
+            return lambda name: f"language_model.{name}"
+        return None
+
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
@@ -449,6 +468,7 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
+            name_mapper=self._get_vllm_name_mapper(),
         )
 
     def update_ref_policy(self):
