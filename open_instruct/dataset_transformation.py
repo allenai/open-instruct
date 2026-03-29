@@ -48,9 +48,9 @@ import hashlib
 import json
 import multiprocessing
 import os
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
-from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
