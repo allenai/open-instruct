@@ -40,7 +40,7 @@ dependencies = [
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
-
+    "flash-linear-attention>=0.4.2",
 ]
 
 [build-system]
