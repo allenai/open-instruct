@@ -392,9 +392,21 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_3"
+                sp_seq_length_is_variable=True,
+                sp_attn_implementation="flash_attention_3" if args.use_flash_attn else "sdpa",
             ),
         )
+        # Monkey-patch DeepSpeed Ulysses SP to make position_ids contiguous before
+        # all_gather. Models like Qwen3.5 create non-contiguous position_ids internally
+        # (via expand + slice) which causes ValueError in NCCL all_gather.
+        _orig_usp_forward = UlyssesSPAttentionHF.forward
+
+        def _patched_usp_forward(self, query, key, value, *args, **kwargs):
+            if "position_ids" in kwargs and not kwargs["position_ids"].is_contiguous():
+                kwargs["position_ids"] = kwargs["position_ids"].contiguous()
+            return _orig_usp_forward(self, query, key, value, *args, **kwargs)
+
+        UlyssesSPAttentionHF.forward = _patched_usp_forward
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
@@ -815,9 +827,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_total_tokens_this_log_period += tokens_in_batch
             local_pred_tokens += pred_tokens_in_batch
             local_pred_tokens_this_log_period += pred_tokens_in_batch
-
-            if "position_ids" in batch:
-                batch["position_ids"] = batch["position_ids"].contiguous()
 
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
