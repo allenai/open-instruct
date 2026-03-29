@@ -816,6 +816,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens += pred_tokens_in_batch
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
+            if "position_ids" in batch:
+                batch["position_ids"] = batch["position_ids"].contiguous()
+
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
