@@ -1848,16 +1848,16 @@ wheels = [
 
 [[package]]
 name = "liger-kernel"
-version = "0.6.4"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "triton", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/21/517c24064fd4229040c00819d6d75375586338a603ca194c91897f414ff9/liger_kernel-0.6.4.tar.gz", hash = "sha256:302c9bb661a4ffb7bb716c5bff852f2449a3e8273be5ba9f4cc46ad06308af52", size = 3730057, upload-time = "2025-11-21T22:49:12.632Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/f8/a25ab6549dd80c5055e84f0ee9be6ecf4a7c85ade448110607f4807ab2ef/liger_kernel-0.7.0.tar.gz", hash = "sha256:48c25648974c7d07d47591117b94188d1059999b7fb652e89e8ba50b21183cb3", size = 3780796, upload-time = "2026-02-12T22:01:00.101Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/1a/12ef4b0310918ce3436c6dfdba60ccbbddd28c97a8260207a45a9976eaf7/liger_kernel-0.6.4-py3-none-any.whl", hash = "sha256:77b041f97cca2afaaef3b71f2e4d2978bf12b75c75f1de64ca557acfc4e3dc55", size = 230601, upload-time = "2025-11-21T22:49:11.312Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/c6/66c6a3c59b53f4cfbfa0c9e8c573c8843fb1d83cf3c2eb79e39109b76c17/liger_kernel-0.7.0-py3-none-any.whl", hash = "sha256:d2185d94362c069f508eb8aff5e7016c6669613265d5702733d674af4c616a56", size = 276512, upload-time = "2026-02-12T22:00:58.565Z" },
 ]
 
 [[package]]
@@ -2729,7 +2729,7 @@ requires-dist = [
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
-    { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.5.4" },
+    { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.7.0" },
     { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "mcp", specifier = ">=1.9.0" },
