@@ -112,14 +112,18 @@ class ExperimentConfig:
     # Reference: https://arxiv.org/abs/2504.05118
     use_value_model: bool = False
     """Whether to use a learned value model for PPO-style training with GAE advantage estimation.
-    When True, advantages are computed using GAE with value model predictions instead of 
+    When True, advantages are computed using GAE with value model predictions instead of
     group-normalized rewards (GRPO style). This enables standard PPO training."""
     value_model_name_or_path: str | None = None
-    """Optional path to a separate value model. If None, the value model shares the same 
+    """Optional path to a separate value model. If None, the value model shares the same
     base architecture as the policy but with a separate value head."""
     init_value_from_rm: bool = False
     """If True, load value_model_name_or_path as a reward model (AutoModelForSequenceClassification)
     and use its trained score head as the value head, instead of randomly initializing."""
+    init_value_from_pretrained_checkpoint: str | None = None
+    """Path to a pretrained value model checkpoint directory containing value_model.bin.
+    Loads the backbone from value_model_name_or_path (or model_name_or_path), replaces
+    the LM head with a value head, then loads the full state dict from the checkpoint."""
     value_loss_coef: float = 0.5
     """Coefficient for the value function loss in the total loss."""
     value_learning_rate: float | None = None

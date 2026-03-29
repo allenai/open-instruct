@@ -435,6 +435,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         if args.init_value_from_rm:
             from transformers import AutoModelForSequenceClassification
+
             rm = AutoModelForSequenceClassification.from_pretrained(
                 value_model_path,
                 revision=value_revision,
@@ -454,7 +455,12 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             # Copy backbone weights from RM to value model
             rm_backbone = getattr(rm, rm.base_model_prefix)
-            vm_backbone = getattr(self.value_model, self.value_model.config.model_type if hasattr(self.value_model, self.value_model.config.model_type) else "model")
+            vm_backbone = getattr(
+                self.value_model,
+                self.value_model.config.model_type
+                if hasattr(self.value_model, self.value_model.config.model_type)
+                else "model",
+            )
             vm_backbone.load_state_dict(rm_backbone.state_dict())
             # Use RM's trained score head as the value head
             hidden_size = rm.config.hidden_size
@@ -480,6 +486,13 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
             self.value_model.lm_head = value_head
             logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
+
+        # Load pretrained value model checkpoint (backbone + value head) if specified
+        if args.init_value_from_pretrained_checkpoint:
+            pretrained_path = os.path.join(args.init_value_from_pretrained_checkpoint, "value_model.bin")
+            state_dict = torch.load(pretrained_path, map_location="cpu", weights_only=True)
+            self.value_model.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded pretrained value model from {pretrained_path}")
 
         # Restore HfDeepSpeedConfig
         _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
@@ -1423,6 +1436,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if num_samples > 0:
                     all_response_values = []
                     from collections import defaultdict
+
                     position_values = defaultdict(list)
                     for i in range(num_samples):
                         mask = data_BT.response_masks[i][:, 1:].cpu().float()
@@ -1445,7 +1459,9 @@ class PolicyTrainerRayProcess(RayProcess):
                                     for pos, v in enumerate(resp_vals.tolist()):
                                         position_values[pos].append(v)
                                     start = end
-                    self._value_per_token_array = np.array(all_response_values) if all_response_values else np.array([])
+                    self._value_per_token_array = (
+                        np.array(all_response_values) if all_response_values else np.array([])
+                    )
                     if position_values:
                         max_pos = max(position_values.keys()) + 1
                         variance_by_position = np.zeros(max_pos)
@@ -1459,9 +1475,11 @@ class PolicyTrainerRayProcess(RayProcess):
                                 count_by_position[pos] = len(vals_at_pos)
                         self._value_variance_by_position = variance_by_position
                         self._value_mean_by_position = mean_by_position
-                        self.local_metrics["value/mean_position_variance"] = float(np.mean(
-                            [v for v in variance_by_position if v > 0]
-                        )) if any(v > 0 for v in variance_by_position) else 0.0
+                        self.local_metrics["value/mean_position_variance"] = (
+                            float(np.mean([v for v in variance_by_position if v > 0]))
+                            if any(v > 0 for v in variance_by_position)
+                            else 0.0
+                        )
 
                 # (2) Mean value for correct vs incorrect rollouts + per-token curves
                 if num_samples > 0 and data_BT.rewards is not None and data_BT.dones is not None:
@@ -1539,19 +1557,42 @@ class PolicyTrainerRayProcess(RayProcess):
                     if incorrect_values:
                         self.local_metrics["value/incorrect_rollout_mean"] = float(np.mean(incorrect_values))
                     if correct_values and incorrect_values:
-                        self.local_metrics["value/correct_vs_incorrect_gap"] = (
-                            float(np.mean(correct_values)) - float(np.mean(incorrect_values))
+                        self.local_metrics["value/correct_vs_incorrect_gap"] = float(np.mean(correct_values)) - float(
+                            np.mean(incorrect_values)
                         )
                     # Log per-position value curves (absolute position, capped at 200)
-                    max_abs_pos = max(max(correct_by_position.keys(), default=0), max(incorrect_by_position.keys(), default=0)) + 1
+                    max_abs_pos = (
+                        max(max(correct_by_position.keys(), default=0), max(incorrect_by_position.keys(), default=0))
+                        + 1
+                    )
                     if max_abs_pos > 0:
-                        correct_curve = np.array([float(np.mean(correct_by_position[p])) if correct_by_position[p] else float('nan') for p in range(max_abs_pos)])
-                        incorrect_curve = np.array([float(np.mean(incorrect_by_position[p])) if incorrect_by_position[p] else float('nan') for p in range(max_abs_pos)])
+                        correct_curve = np.array(
+                            [
+                                float(np.mean(correct_by_position[p])) if correct_by_position[p] else float("nan")
+                                for p in range(max_abs_pos)
+                            ]
+                        )
+                        incorrect_curve = np.array(
+                            [
+                                float(np.mean(incorrect_by_position[p])) if incorrect_by_position[p] else float("nan")
+                                for p in range(max_abs_pos)
+                            ]
+                        )
                         self._value_correct_by_position = correct_curve
                         self._value_incorrect_by_position = incorrect_curve
                     # Log per-normalized-position value curves (percentile bins)
-                    correct_pct_curve = np.array([float(np.mean(correct_by_pct[p])) if correct_by_pct[p] else float('nan') for p in range(num_pct_bins)])
-                    incorrect_pct_curve = np.array([float(np.mean(incorrect_by_pct[p])) if incorrect_by_pct[p] else float('nan') for p in range(num_pct_bins)])
+                    correct_pct_curve = np.array(
+                        [
+                            float(np.mean(correct_by_pct[p])) if correct_by_pct[p] else float("nan")
+                            for p in range(num_pct_bins)
+                        ]
+                    )
+                    incorrect_pct_curve = np.array(
+                        [
+                            float(np.mean(incorrect_by_pct[p])) if incorrect_by_pct[p] else float("nan")
+                            for p in range(num_pct_bins)
+                        ]
+                    )
                     self._value_correct_by_pct = correct_pct_curve
                     self._value_incorrect_by_pct = incorrect_pct_curve
                     # Log advantage stats split by correctness
@@ -1563,8 +1604,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics["value/advantage_incorrect_std"] = float(np.std(incorrect_advantages))
                     # Log per-normalized-position advantage curves
                     if has_gae:
-                        correct_adv_curve = np.array([float(np.mean(correct_adv_by_pct[p])) if correct_adv_by_pct[p] else float('nan') for p in range(num_pct_bins)])
-                        incorrect_adv_curve = np.array([float(np.mean(incorrect_adv_by_pct[p])) if incorrect_adv_by_pct[p] else float('nan') for p in range(num_pct_bins)])
+                        correct_adv_curve = np.array(
+                            [
+                                float(np.mean(correct_adv_by_pct[p])) if correct_adv_by_pct[p] else float("nan")
+                                for p in range(num_pct_bins)
+                            ]
+                        )
+                        incorrect_adv_curve = np.array(
+                            [
+                                float(np.mean(incorrect_adv_by_pct[p])) if incorrect_adv_by_pct[p] else float("nan")
+                                for p in range(num_pct_bins)
+                            ]
+                        )
                         self._advantage_correct_by_pct = correct_adv_curve
                         self._advantage_incorrect_by_pct = incorrect_adv_curve
 
@@ -1578,7 +1629,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             for p in self.value_model.parameters():
                                 if p.grad is not None and hasattr(p.grad, "data"):
                                     total_norm += p.grad.data.float().norm(2).item() ** 2
-                            self.local_metrics["value/gradient_norm"] = float(total_norm ** 0.5)
+                            self.local_metrics["value/gradient_norm"] = float(total_norm**0.5)
                     except Exception:
                         pass
 
