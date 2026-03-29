@@ -508,7 +508,6 @@ def _create_server_args(model_path: str, has_chat_template: bool) -> argparse.Na
     cli_args = ["--model", model_path]
     if not has_chat_template:
         cli_args.extend(["--chat-template", FALLBACK_CHAT_TEMPLATE])
-    cli_args.extend(["--language-model-only"])
     args = parser.parse_args(cli_args)
     args.disable_fastapi_docs = True
     return args

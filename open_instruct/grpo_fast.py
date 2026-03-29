@@ -271,12 +271,7 @@ class PolicyTrainerRayProcess(RayProcess):
             attn_implementation=model_config.attn_implementation,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
-        # When HF loads a VLM (e.g. Qwen3.5) as AutoModelForCausalLM, parameter names
-        # are "model.layers.*". But vLLM loads the full VLM architecture where those
-        # params are under "language_model.model.layers.*". Build a name mapper to
-        # bridge this mismatch.
         self._vllm_name_mapper = _build_vlm_name_mapper(model_config.model_name_or_path)
-        # following HF trainer in setting use_cache directly on config
         self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()

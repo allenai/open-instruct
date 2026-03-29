@@ -1121,14 +1121,23 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     input_ids = input_ids_result
     labels = input_ids.clone()
     # mask the non-assistant part for avoiding loss
+    deferred_from_zero = False
     for message_idx, message in enumerate(messages):
         if message["role"] != "assistant":
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
+            # Some chat templates (e.g. Qwen3.5) crash when apply_chat_template
+            # receives a prefix with only system/tool turns and no user turn.
+            # Defer masking until the prefix contains a user turn, then mask
+            # everything from position 0 in one shot.
+            if not any(m["role"] == "user" for m in messages[: message_idx + 1]):
+                deferred_from_zero = True
+                continue
+
+            if message_idx == 0 or deferred_from_zero:
                 message_start_idx = 0
+                deferred_from_zero = False
             else:
                 message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
+                    conversation=messages[:message_idx],
                     tokenize=True,
                     return_tensors="pt",
                     return_dict=False,
@@ -1137,11 +1146,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                     max_length=max_seq_length,
                     add_generation_prompt=False,
                 ).shape[1]
-            # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
                 message_end_idx = tokenizer.apply_chat_template(
                     conversation=messages[: message_idx + 1],
                     tokenize=True,
@@ -1153,8 +1158,6 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                     add_generation_prompt=True,
                 ).shape[1]
             else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
                 message_end_idx = tokenizer.apply_chat_template(
                     conversation=messages[: message_idx + 1],
                     tokenize=True,
@@ -1165,7 +1168,6 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                     max_length=max_seq_length,
                     add_generation_prompt=False,
                 ).shape[1]
-            # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
             if max_seq_length and message_end_idx >= max_seq_length:
                 break
@@ -1195,14 +1197,19 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     input_ids = input_ids_result
     labels = input_ids.clone()
     # mask all turns but the last for avoiding loss
+    deferred_from_zero = False
     for message_idx, _message in enumerate(messages):
         if message_idx < len(messages) - 1:
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
+            if not any(m["role"] == "user" for m in messages[: message_idx + 1]):
+                deferred_from_zero = True
+                continue
+
+            if message_idx == 0 or deferred_from_zero:
                 message_start_idx = 0
+                deferred_from_zero = False
             else:
                 message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
+                    conversation=messages[:message_idx],
                     tokenize=True,
                     return_tensors="pt",
                     return_dict=False,
@@ -1211,11 +1218,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                     max_length=max_seq_length,
                     add_generation_prompt=False,
                 ).shape[1]
-            # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
                 message_end_idx = tokenizer.apply_chat_template(
                     conversation=messages[: message_idx + 1],
                     tokenize=True,
@@ -1227,8 +1230,6 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                     add_generation_prompt=True,
                 ).shape[1]
             else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
                 message_end_idx = tokenizer.apply_chat_template(
                     conversation=messages[: message_idx + 1],
                     tokenize=True,
@@ -1239,7 +1240,6 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                     max_length=max_seq_length,
                     add_generation_prompt=False,
                 ).shape[1]
-            # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
             if max_seq_length and message_end_idx >= max_seq_length:
                 break

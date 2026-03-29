@@ -17,7 +17,7 @@ uv run --active open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-0.6B \
+    --model_name_or_path Qwen/Qwen3.5-0.8B \
     --system_prompt_override_file scripts/train/qwen/math_system_prompt.txt \
     --apply_verifiable_reward true \
     --learning_rate 1e-6 \
@@ -31,6 +31,7 @@ uv run --active open_instruct/grpo_fast.py \
     --local_eval_every 4 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.4 \
+    --attn_implementation sdpa \
     --vllm_enforce_eager \
     --single_gpu_mode \
     --push_to_hub false $@
