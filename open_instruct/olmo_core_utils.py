@@ -14,6 +14,7 @@ from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.train.callbacks import CheckpointerCallback
 
 from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -137,10 +138,21 @@ class CheckpointConfig:
     """The output directory where the model predictions and checkpoints will be written."""
     checkpointing_steps: int | str = 500
     """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
+    ephemeral_save_interval: int | None = None
+    """Temporary checkpoint cadence for OLMo-core trainers. Must be lower than checkpointing_steps when set."""
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
     """If the training should continue from a checkpoint folder."""
+
+
+def build_checkpointer_callback(
+    checkpointing_steps: int | str, ephemeral_save_interval: int | None, save_async: bool = True
+) -> CheckpointerCallback:
+    """Construct a CheckpointerCallback with shared Open Instruct defaults."""
+    return CheckpointerCallback(
+        save_interval=int(checkpointing_steps), ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
+    )
 
 
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {

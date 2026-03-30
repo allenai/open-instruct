@@ -37,12 +37,7 @@ from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
 from olmo_core.train import Duration, TrainerConfig, prepare_training_environment, teardown_training_environment
-from olmo_core.train.callbacks import (
-    CheckpointerCallback,
-    ConfigSaverCallback,
-    GarbageCollectorCallback,
-    GPUMemoryMonitorCallback,
-)
+from olmo_core.train.callbacks import ConfigSaverCallback, GarbageCollectorCallback, GPUMemoryMonitorCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.checkpoint import CheckpointerConfig
 from olmo_core.train.train_module import (
@@ -72,7 +67,6 @@ class SFTArguments:
     dataset: olmo_core_utils.DatasetConfig
     logging: olmo_core_utils.LoggingConfig
     checkpoint: olmo_core_utils.CheckpointConfig
-    ephemeral_save_interval: int = _DEFAULT_EPHEMERAL_SAVE_INTERVAL
 
 
 def main(args: SFTArguments, tc: TokenizerConfig) -> None:
@@ -192,7 +186,6 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         **dataclasses.asdict(args.dataset),
         **dataclasses.asdict(args.logging),
         **dataclasses.asdict(args.checkpoint),
-        "ephemeral_save_interval": args.ephemeral_save_interval,
         "global_batch_size_sequences": global_batch_size_seqs,
         "world_size": world_size,
     }
@@ -201,10 +194,8 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         "gpu_monitor": GPUMemoryMonitorCallback(),
         "config_saver": ConfigSaverCallback(_config=json_config),
         "garbage_collector": GarbageCollectorCallback(),
-        "checkpointer": CheckpointerCallback(
-            save_interval=int(args.checkpoint.checkpointing_steps),
-            ephemeral_save_interval=args.ephemeral_save_interval,
-            save_async=True,
+        "checkpointer": olmo_core_utils.build_checkpointer_callback(
+            args.checkpoint.checkpointing_steps, args.checkpoint.ephemeral_save_interval
         ),
         "beaker": BeakerCallbackV2(config=json_config),
     }
@@ -235,11 +226,6 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     teardown_training_environment()
 
 
-@dataclasses.dataclass
-class _SFTExtra:
-    ephemeral_save_interval: int = _DEFAULT_EPHEMERAL_SAVE_INTERVAL
-
-
 if __name__ == "__main__":
     parser = utils.ArgumentParserPlus(
         (  # ty: ignore[invalid-argument-type]
@@ -249,12 +235,12 @@ if __name__ == "__main__":
             olmo_core_utils.DatasetConfig,
             olmo_core_utils.LoggingConfig,
             olmo_core_utils.CheckpointConfig,
-            _SFTExtra,
             TokenizerConfig,
         )
     )
     parser.set_defaults(
         exp_name="sft",
+        ephemeral_save_interval=_DEFAULT_EPHEMERAL_SAVE_INTERVAL,
         num_epochs=3,
         learning_rate=8e-5,
         warmup_ratio=0.03,
@@ -262,14 +248,8 @@ if __name__ == "__main__":
         transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
         target_columns=list(TOKENIZED_SFT_DATASET_KEYS),
     )
-    tracking, model, training, dataset, logging_cfg, checkpoint, sft_extra, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
+    tracking, model, training, dataset, logging_cfg, checkpoint, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     args = SFTArguments(
-        tracking=tracking,
-        model=model,
-        training=training,
-        dataset=dataset,
-        logging=logging_cfg,
-        checkpoint=checkpoint,
-        ephemeral_save_interval=sft_extra.ephemeral_save_interval,
+        tracking=tracking, model=model, training=training, dataset=dataset, logging=logging_cfg, checkpoint=checkpoint
     )
     main(args, tc)

@@ -19,7 +19,7 @@ from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
+from olmo_core.train.callbacks import ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
@@ -79,8 +79,9 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
             entity=args.wandb_entity,
             config=json_config,
         )
-    checkpointing_steps = int(args.checkpointing_steps)
-    trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
+        args.checkpointing_steps, args.ephemeral_save_interval
+    )
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
