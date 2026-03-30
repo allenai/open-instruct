@@ -14,6 +14,7 @@ Each task has its own files on disk at ``{task_data_dir}/{task_id}/``:
 import contextlib
 import io
 import os
+import subprocess
 import tarfile
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -103,8 +104,6 @@ class SWERLSandboxEnv(RLEnvironment):
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
         if self._task_data_hf_repo and not self._task_data_dir:
-            import subprocess
-
             logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
             repo_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
             # Extract tarball if present and not already extracted
