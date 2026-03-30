@@ -57,20 +57,34 @@ _HF_TO_OLMO_CORE_ATTN = {
 }
 
 
-def _gpu_compute_major() -> int | None:
-    if not torch.cuda.is_available():
-        return None
-    major, _ = torch.cuda.get_device_capability()
-    return major
-
-
 def _is_flash_attn_4_available() -> bool:
     return importlib.util.find_spec("flash_attn.cute") is not None
 
 
+def _is_blackwell_gpu() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability()
+    return major >= 10
+
+
+def _is_hopper_gpu() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability()
+    return major == 9
+
+
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> AttnImplementation:
-    result = "flash_attention_2" if transformers.utils.is_flash_attn_2_available() else "sdpa"
+    if _is_flash_attn_4_available() and _is_blackwell_gpu():
+        result: AttnImplementation = "flash_attention_4"
+    elif transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
+        result = "flash_attention_3"
+    elif transformers.utils.is_flash_attn_2_available():
+        result = "flash_attention_2"
+    else:
+        result = "sdpa"
     logger.info(f"Auto-detected attention implementation: {result}")
     return result
 
