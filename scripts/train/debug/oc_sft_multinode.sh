@@ -17,8 +17,12 @@ uv run python mason.py \
     --gpus 8 \
     --non_resumable \
     --no_auto_dataset_cache \
-    -- \
-    torchrun --nproc_per_node=8 \
+    -- torchrun \
+    --nnodes=2 \
+    --node_rank=\$BEAKER_REPLICA_RANK \
+    --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
+    --master_port=29400 \
+    --nproc_per_node=8 \
     open_instruct/olmo_core_finetune.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --max_seq_length 32768 \
