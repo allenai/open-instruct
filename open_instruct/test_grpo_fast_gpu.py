@@ -114,9 +114,10 @@ class TestGeneration(TestGrpoFastBase):
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         param_prompt_Q = ray_queue.Queue(maxsize=100)
+        eval_prompt_Q = ray_queue.Queue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
+        self._ray_queues.extend([param_prompt_Q, eval_prompt_Q, inference_results_Q, eval_results_Q])
 
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, logprobs=1)
@@ -146,6 +147,7 @@ class TestGeneration(TestGrpoFastBase):
             single_gpu_mode=True,
             pg=pg,
             prompt_queue=param_prompt_Q,
+            eval_prompt_queue=eval_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             pools=pools or {},
@@ -233,9 +235,11 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
 
         param_prompt_Q = ray_queue.Queue(maxsize=1)
+        eval_prompt_Q = ray_queue.Queue(maxsize=1)
         inference_results_Q = ray_queue.Queue(maxsize=1)
+        eval_results_Q = ray_queue.Queue(maxsize=1)
 
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+        self._ray_queues.extend([param_prompt_Q, eval_prompt_Q, inference_results_Q, eval_results_Q])
 
         train_dataset = datasets.Dataset.from_dict(
             {"ground_truth": [["Paris"]], "dataset": ["test"], "prompt": [test_prompt], "index": [0]}
@@ -254,7 +258,9 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             max_model_len=2048,
             vllm_gpu_memory_utilization=0.5,
             prompt_queue=param_prompt_Q,
+            eval_prompt_queue=eval_prompt_Q,
             results_queue=inference_results_Q,
+            eval_results_queue=eval_results_Q,
             reward_config=reward_config,
             train_dataset=train_dataset,
         )
