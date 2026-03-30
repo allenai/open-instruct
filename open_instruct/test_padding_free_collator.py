@@ -81,7 +81,7 @@ def _get_fa2_model_and_cfg(model_name: str, vocab_size: int, dtype: torch.dtype)
         **{
             **model_kwargs,
             "dtype": dtype,
-            "attn_implementation": model_utils.olmo_core_attn_to_hf(model_utils.detect_attn_implementation()),
+            "attn_implementation": model_utils.detect_hf_attn_implementation(),
             "vocab_size": vocab_size,
         }
     )

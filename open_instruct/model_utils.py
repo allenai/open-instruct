@@ -52,11 +52,17 @@ _OLMO_CORE_TO_HF_ATTN: dict[AttentionBackendName, str] = {
     AttentionBackendName.flash_3: "flash_attention_3",
     AttentionBackendName.flash_2: "flash_attention_2",
     AttentionBackendName.torch: "sdpa",
+    AttentionBackendName.te: "sdpa",
 }
 
 
 def olmo_core_attn_to_hf(backend: AttentionBackendName) -> str:
     return _OLMO_CORE_TO_HF_ATTN[backend]
+
+
+@functools.lru_cache(maxsize=1)
+def detect_hf_attn_implementation() -> str:
+    return olmo_core_attn_to_hf(detect_attn_implementation())
 
 
 def _is_flash_attn_4_available() -> bool:

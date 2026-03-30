@@ -25,7 +25,7 @@ from olmo_core.train.train_module.transformer import (
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, olmo_core_utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, vllm_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -57,7 +57,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: str = "flash_3",
+        attn_implementation: model_utils.AttentionBackendName = model_utils.AttentionBackendName.flash_3,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.local_world_size = local_world_size
@@ -327,7 +327,7 @@ class OLMoCoreModelGroup:
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: str = "flash_3",
+        attn_implementation: model_utils.AttentionBackendName = model_utils.AttentionBackendName.flash_3,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
