@@ -407,9 +407,7 @@ def compute_logprobs(
                     )
 
                     response_mask_BT = data_BT.response_masks[i].to(single_logprobs.device)
-                    single_logprobs = torch.masked_fill(
-                        single_logprobs, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB
-                    )
+                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
                     logprobs_BT.append(single_logprobs)
                 continue
 
