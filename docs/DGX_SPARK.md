@@ -33,7 +33,6 @@ uv run python -m accelerate.commands.launch \
     --num_processes 1 \
     open_instruct/finetune.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     ...
 ```
 
@@ -44,7 +43,6 @@ uv run python -m accelerate.commands.launch \
 ```bash
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
-    --attn_implementation sdpa \
     --vllm_enforce_eager \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
@@ -53,7 +51,6 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python open_instruct/grpo_fast.py \
 ```
 
 **Required flags for DGX Spark single-GPU:**
-- `--attn_implementation sdpa` - Use PyTorch SDPA instead of flash-attn
 - `--vllm_enforce_eager` - Disable CUDA graphs (more compatible)
 - `--vllm_sync_backend gloo` - Use Gloo instead of NCCL (supports same-GPU ranks)
 - `--vllm_gpu_memory_utilization 0.3` - Lower memory since sharing GPU
