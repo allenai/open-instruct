@@ -1,23 +1,35 @@
 import gc
+import gzip
 import hashlib
 import os
 import shutil
 import tempfile
 import unittest
 
-from parameterized import parameterized
-
 import open_instruct.dataset_transformation
 
-HAS_CACHE = (
-    "HF_HOME" in os.environ
-    or "HF_DATASETS_CACHE" in os.environ
-    or os.path.exists(os.path.expanduser("~/.cache/huggingface/datasets"))
-)
+TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "test_data")
 
-GOLD_SFT = {"count": 9390, "hash": "87a737b6e1124a84335fc81f8e82b51372d20edadd03e40fc5d60e06683c0ac0"}
-GOLD_PREFERENCE = {"count": 2678, "hash": "14eec936b320768c0985866fd9d8033d0d960f20df431cc6c686b96b29d5413a"}
-GOLD_RLVR = {"count": 298, "hash": "2999bbb6d7b3f54d6fbffbeeb8bfa31c0efe2b1685def883e6e52914db9f1496"}
+
+def _get_tokenizer_path():
+    src_dir = os.path.join(os.path.dirname(__file__), "test_data", "tokenizer")
+    dst_dir = tempfile.mkdtemp(prefix="test_tokenizer_")
+    for name in os.listdir(src_dir):
+        src = os.path.join(src_dir, name)
+        if name.endswith(".gz"):
+            dst = os.path.join(dst_dir, name[:-3])
+            with gzip.open(src, "rb") as f_in, open(dst, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        else:
+            shutil.copy2(src, dst_dir)
+    return dst_dir
+
+
+TOKENIZER_PATH = _get_tokenizer_path()
+
+GOLD_SFT = {"count": 100, "hash": "3e745ff9615c9b0e3d8efe74f3f96cde01ac6a720535f0b4ef7175ebb2d1d6cf"}
+GOLD_PREFERENCE = {"count": 97, "hash": "415d8c34ac25cf04d798f27a88c90df38826f71a404e5345563635778bdf9bb3"}
+GOLD_RLVR = {"count": 100, "hash": "9ebada598693087c4cd4804d474fbbe07f41a7dffb38104ddee4e93ba0bfd3b1"}
 
 
 class TestEnvConfigNormalization(unittest.TestCase):
@@ -39,52 +51,16 @@ class TestEnvConfigNormalization(unittest.TestCase):
         )
 
 
-class TestTokenizerEquality(unittest.TestCase):
-    @parameterized.expand(
-        [("olmo", "allenai/OLMo-2-1124-7B", "allenai/OLMo-2-1124-7B-SFT", "allenai/OLMo-2-1124-7B-DPO", True)]
-    )
-    def test_sft_dpo_same_tokenizer(self, name, base_model, sft_model, dpo_model, add_bos):
-        base_to_sft_tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path=base_model, tokenizer_revision="main", chat_template_name="tulu", add_bos=add_bos
-        )
-        sft_to_dpo_tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path=sft_model, tokenizer_revision="main", chat_template_name="tulu", add_bos=add_bos
-        )
-        dpo_to_rl_tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path=dpo_model, tokenizer_revision="main", chat_template_name="tulu", add_bos=add_bos
-        )
-
-        self._assert_tokenizers_equal(base_to_sft_tc, sft_to_dpo_tc)
-        self._assert_tokenizers_equal(sft_to_dpo_tc, dpo_to_rl_tc)
-        self._assert_tokenizers_equal(base_to_sft_tc, dpo_to_rl_tc)
-
-    def _assert_tokenizers_equal(self, tc1, tc2):
-        tok1 = tc1.tokenizer
-        tok2 = tc2.tokenizer
-        self.assertEqual(tok1.vocab_size, tok2.vocab_size, "Vocab size should be the same")
-        self.assertEqual(tok1.model_max_length, tok2.model_max_length, "Model max length should be the same")
-        self.assertEqual(tok1.is_fast, tok2.is_fast, "is_fast should be the same")
-        self.assertEqual(tok1.padding_side, tok2.padding_side, "padding_side should be the same")
-        self.assertEqual(tok1.truncation_side, tok2.truncation_side, "truncation_side should be the same")
-        self.assertEqual(
-            tok1.clean_up_tokenization_spaces,
-            tok2.clean_up_tokenization_spaces,
-            "clean_up_tokenization_spaces should be the same",
-        )
-        self.assertEqual(
-            tok1.added_tokens_decoder, tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
-        )
-
-
 class TestConfigHash(unittest.TestCase):
     def test_config_hash_different(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="Qwen/Qwen3-0.6B", tokenizer_revision="main", chat_template_name="tulu"
+            tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
         )
 
+        sft_data = os.path.join(TEST_DATA_DIR, "sft_sample.jsonl")
         dcs1 = [
             open_instruct.dataset_transformation.DatasetConfig(
-                dataset_name="allenai/tulu-3-sft-personas-algebra",
+                dataset_name=sft_data,
                 dataset_split="train",
                 dataset_revision="main",
                 transform_fn=["sft_tokenize_v1"],
@@ -94,7 +70,7 @@ class TestConfigHash(unittest.TestCase):
 
         dcs2 = [
             open_instruct.dataset_transformation.DatasetConfig(
-                dataset_name="allenai/tulu-3-sft-personas-algebra",
+                dataset_name=sft_data,
                 dataset_split="train",
                 dataset_revision="main",
                 transform_fn=["sft_tokenize_mask_out_prompt_v1"],
@@ -142,14 +118,14 @@ class TestCachedDataset(unittest.TestCase):
 
     def test_get_cached_dataset_tulu_sft(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
+            tokenizer_name_or_path=TOKENIZER_PATH,
             tokenizer_revision="main",
             use_fast=True,
             chat_template_name="tulu",
             add_bos=False,
         )
-        dataset_mixer_list = ["allenai/tulu-3-sft-mixture", "1.0"]
-        dataset_mixer_list_splits = ["train[:1%]"]
+        dataset_mixer_list = [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"]
+        dataset_mixer_list_splits = ["train"]
         dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
 
         transform_fn_args = [{"max_seq_length": 4096}, {}]
@@ -171,14 +147,14 @@ class TestCachedDataset(unittest.TestCase):
 
     def test_get_cached_dataset_tulu_preference(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
+            tokenizer_name_or_path=TOKENIZER_PATH,
             tokenizer_revision="main",
             use_fast=False,
             chat_template_name="tulu",
             add_bos=False,
         )
-        dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
-        dataset_mixer_list_splits = ["train[:1%]"]
+        dataset_mixer_list = [os.path.join(TEST_DATA_DIR, "preference_sample.jsonl"), "1.0"]
+        dataset_mixer_list_splits = ["train"]
         dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
         transform_fn_args = [{"max_seq_length": 2048}, {}]
         dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
@@ -199,14 +175,14 @@ class TestCachedDataset(unittest.TestCase):
 
     def test_get_cached_dataset_tulu_rlvr(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO",
+            tokenizer_name_or_path=TOKENIZER_PATH,
             tokenizer_revision="main",
             use_fast=False,
             chat_template_name="tulu",
             add_bos=False,
         )
-        dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
-        dataset_mixer_list_splits = ["train[:1%]"]
+        dataset_mixer_list = [os.path.join(TEST_DATA_DIR, "rlvr_sample.jsonl"), "1.0"]
+        dataset_mixer_list_splits = ["train"]
         dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"]
         transform_fn_args = [{}, {"max_prompt_token_length": 2048}]
         dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(

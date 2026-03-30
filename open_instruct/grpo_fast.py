@@ -545,6 +545,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
+        grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, token_counts_per_sample, device)
@@ -611,7 +612,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    tis_imp_ratio_BT = grpo_utils.compute_tis_weights(
+                    tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
                         old_logprob_BT,
                         vllm_logprobs_BT,
                         response_mask_BT,
@@ -624,7 +625,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_imp_ratio_BT,
+                        tis_weights=tis_clamped_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -643,6 +644,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
+                        grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
@@ -657,11 +659,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         entropy_BT,
                         self.args,
+                        tis_clamped=tis_clamped_BT,
+                        tis_unclamped=tis_unclamped_BT,
                     )
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -969,12 +974,19 @@ def setup_runtime_variables(
     return args
 
 
-def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(
+    args: grpo_utils.ExperimentConfig,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+):
     """Setup experiment tracking and seeds."""
     all_configs = {}
     if (beaker_config := maybe_get_beaker_config()) is not None:
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
+    all_configs.update(**asdict(vllm_config))
 
     wandb_url = None
     if args.with_tracking:
@@ -982,6 +994,7 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
+            group=args.wandb_group_name,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
@@ -1270,6 +1283,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        vllm_attention_backend=vllm_config.vllm_attention_backend,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -2126,7 +2140,6 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
-    utils.configure_hf_hub_retry()
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
@@ -2136,7 +2149,7 @@ def main(
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, streaming_config, vllm_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(

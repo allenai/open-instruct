@@ -107,8 +107,6 @@ class ExperimentConfig:
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
-    temperature: float = field(default=1.0, init=False)
-    """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -143,6 +141,8 @@ class ExperimentConfig:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
+    wandb_group_name: str | None = None
+    """Optional W&B group name used to group related runs together."""
     wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
@@ -257,19 +257,19 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
 
 def compute_tis_weights(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
-) -> torch.Tensor | None:
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     """Compute truncated importance sampling weights: clamp(π_old / π_vllm, max=cap).
 
-    Returns None when cap <= 0 (disabled).
+    Returns (clamped, unclamped) tuple, both None when cap <= 0 (disabled).
     """
     if cap <= 0:
-        return None
-    tis_weights = torch.ones_like(old_logprob)
+        return None, None
+    unclamped = torch.ones_like(old_logprob)
     logprob_diff = old_logprob - vllm_logprobs
     logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
-    tis_weights = torch.where(response_mask, torch.exp(logprob_diff), tis_weights)
-    tis_weights = torch.clamp(tis_weights, max=cap)
-    return tis_weights
+    unclamped = torch.where(response_mask, torch.exp(logprob_diff), unclamped)
+    clamped = torch.clamp(unclamped, max=cap)
+    return clamped, unclamped
 
 
 def resolve_old_logprob(
@@ -466,6 +466,8 @@ def create_loss_stats(num_samples: int, token_counts: torch.Tensor, device: torc
     return {
         "kl": torch.zeros(4, num_samples, device=device),
         "kl_loss": torch.zeros(num_samples, device=device),
+        "tis_ratio": torch.zeros(num_samples, device=device),
+        "tis_clipfrac": torch.zeros(num_samples, device=device),
         "pg_clipfrac": torch.zeros(num_samples, device=device),
         "pg_loss": torch.zeros(num_samples, device=device),
         "loss": torch.zeros(num_samples, device=device),
@@ -488,6 +490,8 @@ def populate_sample_loss_stats(
     ref_logprobs: torch.Tensor | None,
     entropy: torch.Tensor | None,
     config: ExperimentConfig,
+    tis_clamped: torch.Tensor | None = None,
+    tis_unclamped: torch.Tensor | None = None,
 ) -> None:
     with torch.no_grad():
         if config.load_ref_policy and ref_logprobs is not None:
@@ -495,6 +499,11 @@ def populate_sample_loss_stats(
             kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
             loss_stats_B["kl"][:, sample_idx] = masked_mean(kl_4BT, response_mask).float()
             loss_stats_B["kl_loss"][sample_idx] = loss_stats_B["kl"][config.kl_estimator, sample_idx] * config.beta
+        if tis_clamped is not None and tis_unclamped is not None:
+            loss_stats_B["tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
+            loss_stats_B["tis_clipfrac"][sample_idx] = masked_mean(
+                (tis_clamped < tis_unclamped).float(), response_mask
+            )
         loss_stats_B["pg_clipfrac"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
         loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss"][sample_idx] = loss
@@ -518,6 +527,8 @@ def compute_metrics_from_loss_stats(
     metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum().item()
     metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum().item()
     metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum().item()
+    metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum().item()
+    metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum().item()
     metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum().item()
     weighted_mean_ratio = metrics["val/ratio"]
     metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum().item()

@@ -285,6 +285,7 @@ class GRPOTrainModule(TransformerTrainModule):
         sample_microbatch_size: int,
         max_sequence_length: int,
         grpo_config: grpo_utils.ExperimentConfig,
+        temperature: float,
         tokenizer: PreTrainedTokenizer,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
@@ -310,6 +311,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         self.sample_microbatch_size = sample_microbatch_size
         self.grpo_config = grpo_config
+        self.temperature = temperature
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
 
@@ -354,12 +356,22 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.ref_policy,
                     data_BT,
                     self.pad_token_id,
-                    self.grpo_config.temperature,
+                    self.temperature,
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
                 )
             else:
                 ref_logprobs_BT = None
+
+        with torch.no_grad():
+            old_logprobs_BT = grpo_utils.compute_logprobs(
+                self.model,
+                data_BT,
+                self.pad_token_id,
+                self.temperature,
+                use_grad=False,
+                batch_size=3 * self.rank_microbatch_size,
+            )
 
         num_samples = len(data_BT.query_responses)
         num_mini_batches = self.grpo_config.num_mini_batches
@@ -416,7 +428,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     data_BT.attention_masks[sample_idx],
                     data_BT.position_ids[sample_idx],
                     self.pad_token_id,
-                    self.grpo_config.temperature,
+                    self.temperature,
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
@@ -440,7 +452,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
-                tis_weights = grpo_utils.compute_tis_weights(
+                tis_clamped, tis_unclamped = grpo_utils.compute_tis_weights(
                     old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
                 )
 
@@ -450,7 +462,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
-                    tis_weights=tis_weights,
+                    tis_weights=tis_clamped,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
@@ -473,6 +485,8 @@ class GRPOTrainModule(TransformerTrainModule):
                     ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     entropy,
                     self.grpo_config,
+                    tis_clamped=tis_clamped,
+                    tis_unclamped=tis_unclamped,
                 )
 
                 num_steps += 1

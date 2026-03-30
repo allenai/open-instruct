@@ -388,16 +388,11 @@ class VLLMConfig:
     vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
+    vllm_attention_backend: str | None = None
     vllm_sync_backend: str = "nccl"
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0
-
-    def __post_init__(self):
-        if os.environ.get("VLLM_USE_V1") == "0":
-            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
-            if self.vllm_enable_prefix_caching:
-                raise ValueError("Prefix caching is currently not supported for v0.")
 
 
 @dataclass
