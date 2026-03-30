@@ -36,7 +36,6 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | | `--run_name` | Unique run name (for W&B) | `None` |
 | | `--seed` | Random seed for initialization and dataset shuffling | `42` |
 | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
-| | `--attn_backend` | Attention backend: `flash_2`, `flash_3`, `auto` | `auto` |
 | | `--model_revision` | Specific model version (branch, tag, or commit) | `None` |
 | | `--config_name` | Pretrained config name or path if different from model | `None` |
 | **DPO Algorithm** | `--beta` | Beta parameter for DPO loss | `0.1` |
@@ -112,7 +111,7 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | | `--use_qlora` | Use qLoRA (initializes model in quantized form) | `False` |
 | | `--dpo_use_paged_optimizer` | Use paged optimizer from bitsandbytes | `False` |
 
-**Flags not applicable** (ignored by `dpo_tune_cache.py`): `--attn_backend`, `--tensor_parallel_degree`, `--context_parallel_degree`, `--fsdp_shard_degree`, `--fsdp_num_replicas`, `--compile_model`.
+**Flags not applicable** (ignored by `dpo_tune_cache.py`): `--tensor_parallel_degree`, `--context_parallel_degree`, `--fsdp_shard_degree`, `--fsdp_num_replicas`, `--compile_model`.
 
 Implementation details:
 

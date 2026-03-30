@@ -18,7 +18,6 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
-from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
@@ -91,15 +90,10 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
 
-    attn_backend = args.attn_backend
-    if attn_backend == "auto":
-        device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
-        is_h100 = "h100" in device_name or "h800" in device_name
-        attn_backend = "flash_3" if (is_h100 and has_flash_attn_3()) else "flash_2"
-        logger.info(f"Auto-detected attn_backend={attn_backend} for device: {device_name}")
-
     model_config = olmo_core_utils.get_transformer_config(
-        config_name_for_lookup, vocab_size, attn_backend=attn_backend
+        config_name_for_lookup,
+        vocab_size,
+        attn_backend=model_utils.hf_attn_to_olmo_core_backend(args.attn_implementation),
     )
     model = model_config.build(init_device="cpu")
 

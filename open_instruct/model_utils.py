@@ -15,6 +15,7 @@
 
 
 import asyncio
+import functools
 import itertools
 import pathlib
 import tempfile
@@ -42,6 +43,37 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+_HF_TO_OLMO_CORE_ATTN = {
+    "flash_attention_3": "flash_3",
+    "flash_attention_2": "flash_2",
+    "sdpa": "torch",
+    "eager": "torch",
+}
+
+
+def _is_hopper_gpu() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability()
+    return major == 9
+
+
+@functools.lru_cache(maxsize=1)
+def detect_attn_implementation() -> str:
+    if transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
+        result = "flash_attention_3"
+    elif transformers.utils.is_flash_attn_2_available():
+        result = "flash_attention_2"
+    else:
+        result = "sdpa"
+    logger.info(f"Auto-detected attention implementation: {result}")
+    return result
+
+
+def hf_attn_to_olmo_core_backend(hf_attn: str) -> str:
+    return _HF_TO_OLMO_CORE_ATTN[hf_attn]
 
 
 @dataclass
@@ -134,10 +166,9 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa", "eager"] | None = None
     """Which attention implementation to use.
-    flash_attention_2: Requires flash-attn package (default)
-    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
+    If None, auto-detects the best available implementation."""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -170,6 +201,9 @@ class ModelConfig:
     """use nested quantization"""
 
     def __post_init__(self):
+        if self.attn_implementation is None:
+            self.attn_implementation = detect_attn_implementation()
+
         # `use_cache=True` is incompatible with gradient checkpointing.
         # https://github.com/huggingface/transformers/blob/d6751d91c8f58cdeb35af6adae182d7dc90aa883/src/transformers/models/llama/modeling_llama.py#L945
         if self.gradient_checkpointing:
@@ -608,7 +642,7 @@ def add_hooks(model: "DeepSpeedEngine") -> None:
         optimizer_offload = model.optimizer.parameter_offload
     elif model.optimizer is not None:
         optimizer_offload = model.optimizer
-    optimizer_offload._register_hooks_recursively(optimizer_offload.module)
+    optimizer_offload.setup_zero_stage3_hooks()
 
 
 @contextmanager

@@ -32,7 +32,6 @@ accelerate launch \
     --model_name_or_path meta-llama/Llama-3.1-8B \
     --tokenizer_name meta-llama/Llama-3.1-8B \
     --use_slow_tokenizer \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --preprocessing_num_workers 128 \
     --per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
@@ -96,7 +95,6 @@ accelerate launch \
     --model_name_or_path meta-llama/Llama-3.1-70B \
     --tokenizer_name meta-llama/Llama-3.1-70B \
     --use_slow_tokenizer \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --preprocessing_num_workers 128 \
     --per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
@@ -138,7 +136,6 @@ accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf open_instruct/dpo_tune.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
-    --use_flash_attn \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
@@ -194,7 +191,6 @@ accelerate launch \
     --deepspeed_multinode_launcher standard open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-70B-SFT \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-70B-SFT \
-    --use_flash_attn \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
@@ -246,7 +242,6 @@ accelerate launch --mixed_precision bf16 \
     --deepspeed_multinode_launcher standard open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-405B-SFT \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-70B-SFT \
-    --use_flash_attn \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size 1 \
