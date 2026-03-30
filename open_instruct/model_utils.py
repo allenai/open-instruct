@@ -70,15 +70,7 @@ def _is_flash_attn_4_available() -> bool:
 
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> AttnImplementation:
-    major = _gpu_compute_major()
-    if major is not None and major >= 10 and _is_flash_attn_4_available():
-        result = "flash_attention_4"
-    elif major is not None and major == 9 and transformers.utils.is_flash_attn_3_available():
-        result = "flash_attention_3"
-    elif transformers.utils.is_flash_attn_2_available():
-        result = "flash_attention_2"
-    else:
-        result = "sdpa"
+    result = "flash_attention_2" if transformers.utils.is_flash_attn_2_available() else "sdpa"
     logger.info(f"Auto-detected attention implementation: {result}")
     return result
 
