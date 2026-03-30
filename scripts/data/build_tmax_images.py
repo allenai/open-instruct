@@ -44,7 +44,15 @@ def container_def_to_dockerfile(container_def: str) -> str:
 
     post_script = "\n".join(post_commands).strip()
 
-    return f"FROM {base_image}\nENV DEBIAN_FRONTEND=noninteractive\nRUN {post_script}\nWORKDIR /workspace\n"
+    # Write post commands as a script and execute it, since multi-line RUN
+    # with raw shell commands breaks Dockerfile parsing.
+    return (
+        f"FROM {base_image}\n"
+        f"ENV DEBIAN_FRONTEND=noninteractive\n"
+        f"COPY setup.sh /tmp/setup.sh\n"
+        f"RUN chmod +x /tmp/setup.sh && /tmp/setup.sh\n"
+        f"WORKDIR /workspace\n"
+    ), post_script
 
 
 def main():
@@ -74,17 +82,18 @@ def main():
 
     for row in ds:
         task_id = row["task_id"]
-        dockerfile_content = container_def_to_dockerfile(row["container_def"])
-        content_hash = hashlib.sha256(dockerfile_content.encode()).hexdigest()[:12]
+        dockerfile_content, setup_script = container_def_to_dockerfile(row["container_def"])
+        combined = dockerfile_content + setup_script
+        content_hash = hashlib.sha256(combined.encode()).hexdigest()[:12]
 
         hash_to_tasks.setdefault(content_hash, []).append(task_id)
         if content_hash not in hash_to_dockerfile:
-            hash_to_dockerfile[content_hash] = dockerfile_content
+            hash_to_dockerfile[content_hash] = (dockerfile_content, setup_script)
 
     logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
 
     # Build and push each unique image
-    for content_hash, dockerfile_content in hash_to_dockerfile.items():
+    for content_hash, (dockerfile_content, setup_script) in hash_to_dockerfile.items():
         image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
         tasks = hash_to_tasks[content_hash]
 
@@ -96,11 +105,17 @@ def main():
 
         logger.info(f"Building {image_tag} for {len(tasks)} tasks...")
         try:
-            image, build_logs = client.images.build(
-                fileobj=io.BytesIO(dockerfile_content.encode()),
-                tag=image_tag,
-                rm=True,
-            )
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with open(os.path.join(tmpdir, "Dockerfile"), "w") as f:
+                    f.write(dockerfile_content)
+                with open(os.path.join(tmpdir, "setup.sh"), "w") as f:
+                    f.write(setup_script)
+
+                image, build_logs = client.images.build(
+                    path=tmpdir,
+                    tag=image_tag,
+                    rm=True,
+                )
             logger.info(f"Built {image_tag}")
 
             logger.info(f"Pushing {image_tag}...")
