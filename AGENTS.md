@@ -35,6 +35,13 @@
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 - Experiment launch scripts that call `mason.py` must include `--no_auto_dataset_cache` (before the `--` separator) because vllm is not installed locally on macOS. Without this flag, mason.py tries to cache the dataset locally which fails on the `import vllm` in `data_loader.py`.
 - The `oe-eval-internal` directory is required in the Docker image for experiments that use `--try_launch_beaker_eval_jobs_on_weka`. If it's missing (e.g. in a fresh clone or worktree), clone it with: `git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal`.
+- When updating PR bodies with experiment results, use the "Runs:" format (numbered list with Beaker links):
+  ```
+  Runs:
+
+  1. Description: [Beaker](https://beaker.org/ex/EXPERIMENT_ID)
+  2. Description: [Beaker](https://beaker.org/ex/EXPERIMENT_ID)
+  ```
 
 # Naming conventions
 - Models OLMo and OLMo 2 (versions <=2) use the "OLMo" capitalization style.
