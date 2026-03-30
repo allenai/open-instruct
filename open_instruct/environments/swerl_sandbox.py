@@ -103,8 +103,20 @@ class SWERLSandboxEnv(RLEnvironment):
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
         if self._task_data_hf_repo and not self._task_data_dir:
+            import subprocess
+
             logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
-            self._task_data_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
+            repo_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
+            # Extract tarball if present and not already extracted
+            tarball = os.path.join(repo_dir, "task-data.tar.gz")
+            if os.path.isfile(tarball):
+                # Check if already extracted by looking for any task directory
+                entries = os.listdir(repo_dir)
+                has_task_dirs = any(e.startswith("task_") for e in entries)
+                if not has_task_dirs:
+                    logger.info(f"Extracting {tarball}...")
+                    subprocess.run(["tar", "-xzf", tarball, "-C", repo_dir], check=True)
+            self._task_data_dir = repo_dir
             logger.info(f"Task data cached at {self._task_data_dir}")
 
     @classmethod
