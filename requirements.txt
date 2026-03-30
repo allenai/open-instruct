@@ -262,7 +262,7 @@ filelock==3.20.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   torch
     #   virtualenv
     #   vllm
-flash-attn==2.8.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
 flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
