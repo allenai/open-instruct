@@ -16,6 +16,7 @@
 
 import asyncio
 import functools
+import importlib.util
 import itertools
 import pathlib
 import tempfile
@@ -45,7 +46,10 @@ from open_instruct.utils import retry_on_exception
 logger = logger_utils.setup_logger(__name__)
 
 
+AttnImplementation = Literal["flash_attention_4", "flash_attention_3", "flash_attention_2", "sdpa", "eager"]
+
 _HF_TO_OLMO_CORE_ATTN = {
+    "flash_attention_4": "flash_4",
     "flash_attention_3": "flash_3",
     "flash_attention_2": "flash_2",
     "sdpa": "torch",
@@ -53,16 +57,23 @@ _HF_TO_OLMO_CORE_ATTN = {
 }
 
 
-def _is_hopper_gpu() -> bool:
+def _gpu_compute_major() -> int | None:
     if not torch.cuda.is_available():
-        return False
+        return None
     major, _ = torch.cuda.get_device_capability()
-    return major == 9
+    return major
+
+
+def _is_flash_attn_4_available() -> bool:
+    return importlib.util.find_spec("flash_attn.cute") is not None
 
 
 @functools.lru_cache(maxsize=1)
-def detect_attn_implementation() -> str:
-    if transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
+def detect_attn_implementation() -> AttnImplementation:
+    major = _gpu_compute_major()
+    if major is not None and major >= 10 and _is_flash_attn_4_available():
+        result = "flash_attention_4"
+    elif major is not None and major == 9 and transformers.utils.is_flash_attn_3_available():
         result = "flash_attention_3"
     elif transformers.utils.is_flash_attn_2_available():
         result = "flash_attention_2"
@@ -166,7 +177,7 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa", "eager"] | None = None
+    attn_implementation: AttnImplementation | None = None
     """Which attention implementation to use.
     If None, auto-detects the best available implementation."""
     use_cache: bool | None = None
