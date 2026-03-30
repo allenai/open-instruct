@@ -58,7 +58,7 @@ This repository uses [Git LFS](https://git-lfs.com/) to store large test data fi
 2. Run `git lfs install` (one-time setup per machine).
 3. Clone the repository normally. LFS files are fetched automatically.
 
-If you cloned before installing Git LFS, run `git lfs pull` to download the LFS objects.
+If you cloned the repository before installing Git LFS, you will have pointer files instead of the actual data. To fix this, first install the Git LFS client, then run `git lfs install` followed by `git lfs pull` in your repository to download the data.
 
 ### Adding new test data to LFS
 
