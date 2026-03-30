@@ -31,9 +31,9 @@ uv run python mason.py \
     --gradient_accumulation_steps 4 \
     --learning_rate 8e-5 \
     --warmup_ratio 0.03 \
-    --num_train_epochs 2 \
+    --num_epochs 2 \
     --logging_steps 1 \
-    --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
+    --mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --seed 123 \
     --compile_model true \
     --with_tracking \

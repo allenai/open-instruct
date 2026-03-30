@@ -119,8 +119,8 @@ class DPOConfig:
 
 
 @dataclass
-class TrainingConfig:
-    """Configuration for training hyperparameters."""
+class BaseTrainingConfig:
+    """Shared training hyperparameters used by SFT, DPO, and other OLMo-core trainers."""
 
     num_epochs: int = 1
     """Total number of training epochs to perform."""
@@ -150,6 +150,14 @@ class TrainingConfig:
     typically faster; lower values use less memory and are typically slower, so use the highest
     value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
     """
+    compile_model: bool = True
+    """Whether to apply torch.compile to model blocks."""
+
+
+@dataclass
+class TrainingConfig(BaseTrainingConfig):
+    """DPO-specific training configuration extending BaseTrainingConfig."""
+
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
@@ -166,8 +174,6 @@ class TrainingConfig:
     """Context parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
-    compile_model: bool = True
-    """Whether to apply torch.compile to model blocks."""
     fsdp_shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
     fsdp_num_replicas: int | None = None
@@ -198,6 +204,8 @@ class DatasetConfig:
     """Immediately exit after caching the dataset"""
     config_hash: str | None = None
     """The hash of the dataset configuration."""
+    hf_entity: str | None = None
+    """The user or org name for dataset caching on the Hugging Face Hub."""
 
 
 @dataclass
@@ -236,8 +244,6 @@ class HubConfig:
 
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: str | None = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub"""
     hf_repo_revision: str | None = None
@@ -288,6 +294,8 @@ class ModelConfig:
 
     model_name_or_path: str | None = None
     """The model checkpoint for weights initialization."""
+    config_name: str | None = None
+    """Pretrained config name or path if not the same as model_name."""
     use_flash_attn: bool = True
     """Whether to use flash attention in the model training"""
     attn_backend: str = "auto"
@@ -329,9 +337,6 @@ class ExperimentConfig(
     """By default the output directory will be randomized"""
     send_slack_alerts: bool = False
     """Whether to send Slack alerts on training failures"""
-    config_name: str | None = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
     additional_model_arguments: dict | str | None = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )

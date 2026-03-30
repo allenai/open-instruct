@@ -12,13 +12,11 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-import transformers
 from olmo_core import optim as olmo_optim
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
-from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
@@ -50,60 +48,6 @@ def export_to_hf(
         olmo_core_utils.save_state_dict_as_hf(
             model_config, state_dict, save_dir, original_model_name_or_path, tokenizer
         )
-
-
-def _load_dataset_distributed(
-    args: dpo_utils.ExperimentConfig,
-    tc: dataset_transformation.TokenizerConfig,
-    transform_fn_args: list[dict],
-    is_main_process: bool,
-):
-    """Load dataset with distributed coordination."""
-
-    def _load():
-        return dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
-        )
-
-    if is_main_process:
-        dataset = _load()
-    if distributed_utils.is_distributed():
-        dist.barrier()
-    if not is_main_process:
-        dataset = _load()
-    return dataset
-
-
-def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
-    """Build OLMo-core model architecture (weights loaded after parallelization)."""
-    hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
-    vocab_size = hf_config.vocab_size
-    logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
-
-    attn_backend = args.attn_backend
-    if attn_backend == "auto":
-        device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
-        is_h100 = "h100" in device_name or "h800" in device_name
-        attn_backend = "flash_3" if (is_h100 and has_flash_attn_3()) else "flash_2"
-        logger.info(f"Auto-detected attn_backend={attn_backend} for device: {device_name}")
-
-    model_config = olmo_core_utils.get_transformer_config(
-        config_name_for_lookup, vocab_size, attn_backend=attn_backend
-    )
-    model = model_config.build(init_device="cpu")
-
-    return model, model_config
 
 
 def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
@@ -224,14 +168,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
 
-    tc.tokenizer_name_or_path = (
-        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    )
-    tokenizer = tc.tokenizer
-
-    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
-    if utils.is_beaker_job():
-        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, tc)
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
@@ -239,19 +176,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
-        dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
-        )
+        olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process=True)
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
@@ -262,7 +187,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dp_rank = global_rank // tp_degree
     is_main_process = global_rank == 0
 
-    dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
+    dataset = olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
 
@@ -280,7 +205,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = _setup_model(args, device)
+    model, model_config = olmo_core_utils.setup_model(args.model_name_or_path, args.config_name, args.attn_backend)
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
