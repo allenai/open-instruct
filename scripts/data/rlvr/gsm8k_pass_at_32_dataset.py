@@ -66,6 +66,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def normalize_gsm8k_ground_truth(ground_truth: str | list[str]) -> str:
+    if isinstance(ground_truth, list):
+        if not ground_truth:
+            raise ValueError("ground_truth list is empty")
+        return str(ground_truth[0])
+    return str(ground_truth)
+
+
 def build_prompts(ds: Dataset, model_name: str, chat_template_name: str) -> list[str]:
     if chat_template_name not in CHAT_TEMPLATES:
         raise ValueError(f"Unknown chat template: {chat_template_name}")
@@ -244,9 +252,10 @@ def main() -> None:
 
     logger.info("Scoring completions and building output rows")
     for sample, completions in zip(ds, completions_by_prompt):
+        label = normalize_gsm8k_ground_truth(sample["ground_truth"])
         pass_count = 0
         for completion in completions:
-            score = verifier(tokenized_prediction=[], prediction=completion, label=str(sample["ground_truth"])).score
+            score = verifier(tokenized_prediction=[], prediction=completion, label=label).score
             pass_count += int(score)
 
         rows.append(

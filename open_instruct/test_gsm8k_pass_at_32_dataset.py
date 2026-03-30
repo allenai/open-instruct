@@ -16,3 +16,8 @@ def test_parse_args_accepts_num_engines_aliases(monkeypatch):
 def test_split_evenly_balances_prompt_shards():
     chunks = gsm8k_pass_at_32_dataset._split_evenly(["p0", "p1", "p2", "p3", "p4"], 3)
     assert chunks == [(0, ["p0", "p1"]), (2, ["p2", "p3"]), (4, ["p4"])]
+
+
+def test_normalize_gsm8k_ground_truth_unwraps_singleton_lists():
+    assert gsm8k_pass_at_32_dataset.normalize_gsm8k_ground_truth(["72"]) == "72"
+    assert gsm8k_pass_at_32_dataset.normalize_gsm8k_ground_truth("72") == "72"
