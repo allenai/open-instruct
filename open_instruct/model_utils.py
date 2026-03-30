@@ -16,13 +16,14 @@
 
 import asyncio
 import functools
+import importlib.util
 import itertools
 import pathlib
 import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Union
 
 import deepspeed
 import pandas as pd
@@ -32,6 +33,7 @@ from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
+from olmo_core.nn.attention import AttentionBackendName
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
@@ -45,35 +47,51 @@ from open_instruct.utils import retry_on_exception
 logger = logger_utils.setup_logger(__name__)
 
 
-_HF_TO_OLMO_CORE_ATTN = {
-    "flash_attention_3": "flash_3",
-    "flash_attention_2": "flash_2",
-    "sdpa": "torch",
-    "eager": "torch",
+_OLMO_CORE_TO_HF_ATTN: dict[AttentionBackendName, str] = {
+    AttentionBackendName.flash_4: "flash_attention_4",
+    AttentionBackendName.flash_3: "flash_attention_3",
+    AttentionBackendName.flash_2: "flash_attention_2",
+    AttentionBackendName.torch: "sdpa",
+    AttentionBackendName.te: "sdpa",
 }
 
 
-def _is_hopper_gpu() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    major, _ = torch.cuda.get_device_capability()
-    return major == 9
+def olmo_core_attn_to_hf(backend: AttentionBackendName) -> str:
+    return _OLMO_CORE_TO_HF_ATTN[backend]
 
 
 @functools.lru_cache(maxsize=1)
-def detect_attn_implementation() -> str:
-    if transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
-        result = "flash_attention_3"
+def detect_hf_attn_implementation() -> str:
+    return olmo_core_attn_to_hf(detect_attn_implementation())
+
+
+def _is_flash_attn_4_available() -> bool:
+    return importlib.util.find_spec("flash_attn.cute") is not None
+
+
+@functools.lru_cache(maxsize=1)
+def _gpu_compute_major() -> int | None:
+    """Return the CUDA compute capability major version (e.g. 9=Hopper, 10=Blackwell)."""
+    if not torch.cuda.is_available():
+        return None
+    major, _ = torch.cuda.get_device_capability()
+    return major
+
+
+@functools.lru_cache(maxsize=1)
+def detect_attn_implementation() -> AttentionBackendName:
+    if not torch.cuda.is_available():
+        result = AttentionBackendName.torch
     elif transformers.utils.is_flash_attn_2_available():
-        result = "flash_attention_2"
+        result = AttentionBackendName.flash_2
+    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:  # Blackwell+
+        result = AttentionBackendName.flash_4
+    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() == 9:  # Hopper
+        result = AttentionBackendName.flash_3
     else:
-        result = "sdpa"
+        result = AttentionBackendName.torch
     logger.info(f"Auto-detected attention implementation: {result}")
     return result
-
-
-def hf_attn_to_olmo_core_backend(hf_attn: str) -> str:
-    return _HF_TO_OLMO_CORE_ATTN[hf_attn]
 
 
 @dataclass
@@ -166,7 +184,7 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa", "eager"] | None = None
+    attn_implementation: AttentionBackendName | None = None
     """Which attention implementation to use.
     If None, auto-detects the best available implementation."""
     use_cache: bool | None = None
@@ -287,7 +305,7 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation=model_config.attn_implementation,
+        attn_implementation=olmo_core_attn_to_hf(model_config.attn_implementation),
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )

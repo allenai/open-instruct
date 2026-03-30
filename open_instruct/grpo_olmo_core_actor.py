@@ -57,7 +57,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: str = "flash_attention_3",
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.local_world_size = local_world_size
@@ -111,9 +111,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
         self.model_config = olmo_core_utils.get_transformer_config(
-            self.model_name_or_path,
-            vocab_size,
-            attn_backend=model_utils.hf_attn_to_olmo_core_backend(self.attn_implementation),
+            self.model_name_or_path, vocab_size, attn_backend=self.attn_implementation
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model = self.model_config.build(init_device="cpu")
@@ -329,7 +327,7 @@ class OLMoCoreModelGroup:
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: str = "flash_attention_3",
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
