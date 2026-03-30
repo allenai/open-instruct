@@ -32,6 +32,7 @@ uv run python mason.py \
     --learning_rate 8e-5 \
     --warmup_ratio 0.03 \
     --num_epochs 2 \
+    --ephemeral_save_interval 100 \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --seed 123 \
