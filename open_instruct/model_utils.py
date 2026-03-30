@@ -53,9 +53,16 @@ _HF_TO_OLMO_CORE_ATTN = {
 }
 
 
+def _is_hopper_gpu() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability()
+    return major == 9
+
+
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> str:
-    if transformers.utils.is_flash_attn_3_available():
+    if transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
         result = "flash_attention_3"
     elif transformers.utils.is_flash_attn_2_available():
         result = "flash_attention_2"
