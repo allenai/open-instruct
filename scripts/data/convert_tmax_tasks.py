@@ -98,7 +98,7 @@ def convert(input_dataset: str, output_dataset: str, output_tarball: str, split:
                 ],
                 "ground_truth": task_id,
                 "dataset": "passthrough",
-                "env_config": {"env_name": "swerl_sandbox", "task_id": task_id},
+                "env_config": {"env_name": "swerl_sandbox", "task_id": task_id, "image": image},
                 "source": "tmax_skill_taxonomy",
             })
 
