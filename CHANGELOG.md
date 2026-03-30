@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Refactor flash attention configuration: make `attn_implementation` configurable with auto-detect default, remove `use_flash_attn`/`attn_backend` flags, and unify attention backend detection across DPO, GRPO, and olmo-core models (https://github.com/allenai/open-instruct/pull/1563).
+- Fix GPU test deadlock and make dataset transformation tests fully offline with local fixtures (https://github.com/allenai/open-instruct/pull/1563).
+- Remove stale `VLLM_ATTENTION_BACKEND` from `DEFAULT_ENV_VARS`; vLLM 0.18+ auto-detects attention backends (https://github.com/allenai/open-instruct/pull/1564).
 - Use `setup_zero_stage3_hooks()` for DeepSpeed 0.18+ compat in `add_hooks` (https://github.com/allenai/open-instruct/pull/1566).
 - Remove the runtime `temperature` field from GRPO `ExperimentConfig` and pass streaming temperature explicitly, avoiding W&B config collisions with `StreamingDataLoaderConfig.temperature` (https://github.com/allenai/open-instruct/pull/1561).
 - Log `val/tis_ratio` and `val/tis_clipfrac` in `grpo_fast` so truncated importance sampling diagnostics are visible during GRPO training (https://github.com/allenai/open-instruct/pull/1558).
