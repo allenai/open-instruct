@@ -145,14 +145,13 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         shard_degree=dp_shard_degree,
     )
 
-    ac_config = (
-        TransformerActivationCheckpointingConfig(
+    if args.training.activation_memory_budget < 1.0 and args.training.compile_model:
+        ac_config = TransformerActivationCheckpointingConfig(
             mode=TransformerActivationCheckpointingMode.budget,
             activation_memory_budget=args.training.activation_memory_budget,
         )
-        if args.training.activation_memory_budget < 1.0 and args.training.compile_model
-        else None
-    )
+    else:
+        ac_config = None
 
     train_module_config = TransformerTrainModuleConfig(
         rank_microbatch_size=rank_microbatch_size,
@@ -179,25 +178,16 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         max_duration = Duration.epochs(args.training.num_epochs)
 
     run_name = args.tracking.run_name or f"sft-{os.path.basename(args.model.model_name_or_path)}"
-    json_config: dict[str, Any] = {
-        **dataclasses.asdict(args.tracking),
-        **dataclasses.asdict(args.model),
-        **dataclasses.asdict(args.training),
-        **dataclasses.asdict(args.dataset),
-        **dataclasses.asdict(args.logging),
-        **dataclasses.asdict(args.checkpoint),
-        "global_batch_size_sequences": global_batch_size_seqs,
-        "world_size": world_size,
-    }
+    config_dict = dataclasses.asdict(args)
 
     trainer_callbacks: dict[str, Any] = {
         "gpu_monitor": GPUMemoryMonitorCallback(),
-        "config_saver": ConfigSaverCallback(_config=json_config),
+        "config_saver": ConfigSaverCallback(_config=config_dict),
         "garbage_collector": GarbageCollectorCallback(),
         "checkpointer": olmo_core_utils.build_checkpointer_callback(
             args.checkpoint.checkpointing_steps, args.checkpoint.ephemeral_save_interval
         ),
-        "beaker": BeakerCallbackV2(config=json_config),
+        "beaker": BeakerCallbackV2(config=config_dict),
     }
 
     if args.logging.with_tracking and args.logging.wandb_project:
@@ -205,7 +195,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
             name=run_name,
             entity=args.logging.wandb_entity or "ai2-llm",
             project=args.logging.wandb_project,
-            config=json_config,
+            config=config_dict,
             enabled=True,
             cancel_check_interval=10,
         )
