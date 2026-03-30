@@ -57,7 +57,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: model_utils.AttentionBackendName = model_utils.AttentionBackendName.flash_3,
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.local_world_size = local_world_size
@@ -327,7 +327,7 @@ class OLMoCoreModelGroup:
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: model_utils.AttentionBackendName = model_utils.AttentionBackendName.flash_3,
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
