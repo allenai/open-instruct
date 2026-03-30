@@ -17,6 +17,7 @@ uv run python mason.py \
     --gpus 8 \
     --non_resumable \
     --no_auto_dataset_cache \
+    --env OLMO_SHARED_FS=1 \
     -- torchrun \
     --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
