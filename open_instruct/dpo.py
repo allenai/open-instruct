@@ -217,6 +217,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
 
+    # DPO's ExperimentConfig uses inheritance, not composition, so args satisfies both
+    # ModelConfig and DatasetConfig. TODO(finbarrtimbers): refactor to use composition.
     tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, args, tc)
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
