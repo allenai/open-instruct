@@ -4,20 +4,9 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
-MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
-BEAKER_IMAGE="michaeln/open_instruct"
-
-DATASETS="hamishivi/DAPO-Math-17k-Processed_filtered 1.0"
-DATASET_SPLITS="train"
-
-LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0"
-LOCAL_EVAL_SPLITS="train"
-
-# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="michaeln/open_instruct"
-
-CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres ai2/titan}"
+CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
@@ -52,14 +41,14 @@ uv run open_instruct/grpo_fast.py \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
-    --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits $DATASET_SPLITS \
-    --dataset_mixer_eval_list $LOCAL_EVALS \
-    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
+    --dataset_mixer_list "hamishivi/DAPO-Math-17k-Processed_filtered 1.0" \
+    --dataset_mixer_list_splits "train" \
+    --dataset_mixer_eval_list "mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0" \
+    --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
-    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --model_name_or_path "Qwen/Qwen3-4B-Base" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \

@@ -31,6 +31,9 @@ dependencies = [
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
+    # "flashinfer-python; platform_system == 'Linux'",
+    # "flashinfer-cubin; platform_system == 'Linux'",
+    # "flashinfer-jit-cache; platform_system == 'Linux'",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     # The flat FA3 wheel index can publish a newer aarch64-only build than the latest x86_64 build.
     # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
@@ -62,6 +65,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "002958a8f15a" }
+flashinfer-jit-cache = [{ index = "flashinfer-cu128", marker = "platform_system == 'Linux'" }]
 flash-attn = [
   # Prefer the prebuilt FlashAttention 2 wheel that matches this repo's Linux x86_64 CUDA 12.8 / PyTorch 2.10 setup.
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
@@ -84,6 +88,11 @@ explicit = true
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "flashinfer-cu128"
+url = "https://flashinfer.ai/whl/cu128"
 explicit = true
 
 [project.optional-dependencies]
