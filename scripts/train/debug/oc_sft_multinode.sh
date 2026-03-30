@@ -36,4 +36,5 @@ uv run python mason.py \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --seed 123 \
     --compile_model true \
-    --with_tracking
+    --with_tracking \
+    --output_dir \$CHECKPOINT_OUTPUT_DIR
