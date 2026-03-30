@@ -331,6 +331,7 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        super().__post_init__()
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."

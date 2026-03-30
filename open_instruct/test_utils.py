@@ -604,6 +604,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             num_key_value_heads=8,
             head_dim=128,
         )
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
@@ -631,6 +632,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
     def test_from_hf_config_defaults(self):
         config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -665,6 +667,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             num_key_value_heads=8,
             head_dim=128,
         )
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -678,6 +681,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
     def test_from_hf_config_cpu_only(self):
         config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),

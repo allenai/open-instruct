@@ -58,7 +58,6 @@ uv run python mason.py \
     --loss_type dpo_norm \
     --beta 5 \
     --packing \
-    --use_flash_attn \
     --activation_memory_budget 0.5 \
     --chat_template_name olmo123 \
     --with_tracking

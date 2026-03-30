@@ -231,6 +231,7 @@ def main(
     pg = placement_group(bundles, strategy="SPREAD")
     utils.ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
+    assert model_config.attn_implementation is not None
     policy_group = OLMoCoreModelGroup(
         pg=pg,
         num_gpus_per_node=args.num_learners_per_node,
@@ -241,6 +242,7 @@ def main(
         vllm_config=vllm_config,
         data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
+        attn_implementation=model_config.attn_implementation,
     )
     logger.info("======== Policy group created =========")
 

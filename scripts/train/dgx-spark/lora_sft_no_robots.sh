@@ -4,7 +4,6 @@
 # Usage: ./scripts/train/dgx-spark/lora_sft_no_robots.sh
 #
 # DGX Spark notes:
-#   - SDPA is faster than flash attention on Blackwell (--use_flash_attn false)
 #   - LoRA enables longer context (2048) with reasonable memory usage
 
 set -e
@@ -21,7 +20,6 @@ uv run python -m accelerate.commands.launch \
     --exp_name spark_lora_sft_qwen3_no_robots \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     --use_lora \
     --lora_rank 64 \
     --lora_alpha 16 \

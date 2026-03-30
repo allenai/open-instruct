@@ -59,6 +59,7 @@ from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
+from vllm.v1.kv_cache_interface import MambaSpec
 
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
@@ -76,6 +77,27 @@ from open_instruct.environments.tools.parsers import ToolParser, create_tool_par
 from open_instruct.ground_truth_utils import RewardConfig
 
 logger = logger_utils.setup_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
+#
+# vLLM's MambaSpec.dtypes field is typed as tuple[torch.dtype] (fixed-length,
+# exactly 1 element). Hybrid models like Olmo-Hybrid-Instruct-DPO-7B have
+# Mamba layers with 2 state tensors of different dtypes, producing a 2-element
+# tuple. When the EngineCore subprocess serializes collective_rpc results back
+# to the client via msgspec, the fixed-length tuple type is enforced and the
+# deserialization fails:
+#   msgspec.ValidationError: Expected `array` of length 1, got 2 - at `$.dtypes`
+#
+# The client-side decoder (in serial_utils._convert_result) dynamically imports
+# MambaSpec and calls msgspec.convert(data, MambaSpec), which checks the live
+# type annotations. By widening dtypes to tuple[torch.dtype, ...] (variable-
+# length), msgspec accepts any number of dtypes during deserialization.
+#
+# Upstream fix: change dtypes annotation in vllm/v1/kv_cache_interface.py.
+# ---------------------------------------------------------------------------
+MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
+MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -115,6 +137,7 @@ class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
     max_tokens: int = 256
+    min_tokens: int = 0
     n: int = 1
     stop: list[str] | None = None
     seed: int | None = None
@@ -579,7 +602,6 @@ class LLMRayActor:
         eval_dataset=None,
         **kwargs,
     ):
-        utils.configure_hf_hub_retry()
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
@@ -1036,6 +1058,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 break
 
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            params_dict = dataclasses.asdict(current_sampling_params)
+            min_tokens = params_dict.pop("min_tokens", 0)
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
@@ -1044,8 +1068,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     "cache_salt": base_request_id,
                     "include_stop_str_in_output": True,
                     "skip_special_tokens": False,
+                    "min_tokens": min_tokens,
                 },
-                **dataclasses.asdict(current_sampling_params),
+                **params_dict,
             )
 
             output = api_response.choices[0]
@@ -1231,7 +1256,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
-    vllm_dtype: str = "bfloat16",
+    trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
@@ -1293,7 +1318,7 @@ def create_vllm_engines(
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
-                dtype=vllm_dtype,
+                dtype="bfloat16",
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
@@ -1317,6 +1342,7 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
             )
         )

@@ -25,7 +25,7 @@ from olmo_core.train.train_module.transformer import (
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, olmo_core_utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, vllm_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -57,6 +57,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.local_world_size = local_world_size
@@ -67,6 +68,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
         self.data_prep_actor_name = data_prep_actor_name
+        self.attn_implementation = attn_implementation
 
         self.ref_policy = None
         self.vllm_engines = None
@@ -108,7 +110,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        self.model_config = olmo_core_utils.get_transformer_config(self.model_name_or_path, vocab_size)
+        self.model_config = olmo_core_utils.get_transformer_config(
+            self.model_name_or_path, vocab_size, attn_backend=self.attn_implementation
+        )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model = self.model_config.build(init_device="cpu")
 
@@ -323,6 +327,7 @@ class OLMoCoreModelGroup:
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
@@ -349,6 +354,7 @@ class OLMoCoreModelGroup:
             "vllm_config": vllm_config,
             "data_prep_actor_name": data_prep_actor_name,
             "tokenizer": tokenizer,
+            "attn_implementation": attn_implementation,
         }
 
         node_idx, local_rank, local_world_size = get_node_info(0, num_gpus_per_node)

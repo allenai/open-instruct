@@ -22,7 +22,6 @@ uv run python mason.py \
     --exp_name "dpo-cache-multinode-checkpoint-test-$(date +%s)" \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \

@@ -172,15 +172,13 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
-def get_transformer_config(
-    model_name_or_config: str, vocab_size: int, attn_backend: str | None = None
-) -> TransformerConfig:
+def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_backend: str) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name or config name.
 
     Args:
         model_name_or_config: HuggingFace model name, path, or direct config name (e.g., 'olmo3_7B').
         vocab_size: Vocabulary size for the model.
-        attn_backend: Attention backend name (e.g., 'flash_2', 'flash_3'). If None, uses default.
+        attn_backend: Attention backend name (e.g., 'flash_2', 'flash_3', 'torch').
 
     Returns:
         TransformerConfig for the specified model.
@@ -202,10 +200,9 @@ def get_transformer_config(
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
-    kwargs: dict = {"vocab_size": vocab_size}
-    if attn_backend is not None:
-        kwargs["attn_backend"] = AttentionBackendName(attn_backend)
-    return getattr(TransformerConfig, config_name)(**kwargs)
+    return getattr(TransformerConfig, config_name)(
+        vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend)
+    )
 
 
 def resolve_attn_backend(attn_backend: str) -> str:
