@@ -3,8 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 
+### Fixed
+- Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
+
 ### Added
 - Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, SDPA fallback for head_dim=256 (FA3 incompatible), Ulysses SP contiguous position_ids fix, liger-kernel bump to 0.7.0, and pre-download model on rank 0 to avoid HF cache race conditions (https://github.com/allenai/open-instruct/pull/1568).
+- Adds support for flash attention 4, and changes attention implementation to FA2 (https://github.com/allenai/open-instruct/pull/1569).
+- Add Git LFS documentation to README.md and CONTRIBUTING.md (https://github.com/allenai/open-instruct/pull/1570).
+- Auto-detect attention implementation from model config, removing `use_flash_attn` and `attn_backend` flags; add `flash-attn` v2 fallback for Blackwell GPU support (https://github.com/allenai/open-instruct/pull/1567).
 - Add hybrid model (Olmo-Hybrid) support: MambaSpec monkey-patch for vLLM dtype serialization, `trust_remote_code` pass-through to vLLM engines, `get_text_config()` for multimodal model support, dependency upgrades (vllm>=0.18.0, transformers>=5.3.0), `return_dict=False` for transformers 5.x compat, and hybrid test/production training scripts (https://github.com/allenai/open-instruct/pull/1425).
 - Add Ulysses sequence parallelism support to SFT training via `--sequence_parallel_size`, using HF Accelerate's `ParallelismConfig` with the DeepSpeed Ulysses SP backend. Enables training with much longer context lengths by sharding sequences across GPUs. Includes SP-aware loss aggregation, batch collation (padding to divisible seq len, index column removal), LR scheduler correction, and a two-node integration test script (https://github.com/allenai/open-instruct/pull/1539).
 - Added a GRPO implementation that uses OLMo-core with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1389).
@@ -19,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - OLMo-core GRPO actor with Ray-distributed FSDP2 training (https://github.com/allenai/open-instruct/pull/1398).
 
 ### Fixed
+- Refactor flash attention configuration: make `attn_implementation` configurable with auto-detect default, remove `use_flash_attn`/`attn_backend` flags, and unify attention backend detection across DPO, GRPO, and olmo-core models (https://github.com/allenai/open-instruct/pull/1563).
 - Fix GPU test deadlock and make dataset transformation tests fully offline with local fixtures (https://github.com/allenai/open-instruct/pull/1563).
 - Remove stale `VLLM_ATTENTION_BACKEND` from `DEFAULT_ENV_VARS`; vLLM 0.18+ auto-detects attention backends (https://github.com/allenai/open-instruct/pull/1564).
 - Use `setup_zero_stage3_hooks()` for DeepSpeed 0.18+ compat in `add_hooks` (https://github.com/allenai/open-instruct/pull/1566).
@@ -35,6 +42,7 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Extract shared GRPO metric helpers into `grpo_utils.py` and align `grpo.py` metrics with `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1552).
 - Add a configurable vLLM attention backend option and switch remaining `flash_attention_2` defaults/references to `flash_attention_3` (https://github.com/allenai/open-instruct/pull/1559).
 - Switch back to CUDA 12.8.1, pin `flash-attn-3` to a direct x86_64 wheel URL to avoid flat-index drift to aarch64-only releases (https://github.com/allenai/open-instruct/pull/1560).
 - Added other configs to wandb logging so all hyperparams are visible, set beaker name with RUN_NAME for grpo_fast.py (https://github.com/allenai/open-instruct/pull/1554).

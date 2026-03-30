@@ -220,6 +220,7 @@ einops==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     # via
     #   deepspeed
     #   fla-core
+    #   flash-attn
     #   flash-attn-3
     #   flashinfer-python
     #   vllm
@@ -264,6 +265,8 @@ filelock==3.20.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   vllm
 fla-core==0.4.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via flash-linear-attention
+flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via open-instruct
 flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
 flash-linear-attention==0.4.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -442,7 +445,7 @@ lark==1.2.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (pl
     #   vllm
 lazy-object-proxy==1.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via openapi-spec-validator
-liger-kernel==0.6.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+liger-kernel==0.7.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via open-instruct
 litellm==1.75.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -1162,6 +1165,7 @@ torch==2.10.0+cu128 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   compressed-tensors
     #   deepspeed
     #   fla-core
+    #   flash-attn
     #   flash-attn-3
     #   flashinfer-python
     #   liger-kernel
