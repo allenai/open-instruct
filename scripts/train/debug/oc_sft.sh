@@ -16,6 +16,7 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --gpus 1 \
     --non_resumable \
+    --no-host-networking \
     --no_auto_dataset_cache \
     -- \
     torchrun --nproc_per_node=1 \
