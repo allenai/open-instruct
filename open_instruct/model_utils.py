@@ -69,27 +69,24 @@ def _is_flash_attn_4_available() -> bool:
     return importlib.util.find_spec("flash_attn.cute") is not None
 
 
-def _is_blackwell_gpu() -> bool:
+@functools.lru_cache(maxsize=1)
+def _gpu_compute_major() -> int | None:
+    """Return the CUDA compute capability major version (e.g. 9=Hopper, 10=Blackwell)."""
     if not torch.cuda.is_available():
-        return False
+        return None
     major, _ = torch.cuda.get_device_capability()
-    return major >= 10
-
-
-def _is_hopper_gpu() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    major, _ = torch.cuda.get_device_capability()
-    return major == 9
+    return major
 
 
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> AttentionBackendName:
-    if transformers.utils.is_flash_attn_2_available():
+    if not torch.cuda.is_available():
+        result = AttentionBackendName.torch
+    elif transformers.utils.is_flash_attn_2_available():
         result = AttentionBackendName.flash_2
-    elif _is_flash_attn_4_available() and _is_blackwell_gpu():
+    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:  # Blackwell+
         result = AttentionBackendName.flash_4
-    elif transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
+    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() == 9:  # Hopper
         result = AttentionBackendName.flash_3
     else:
         result = AttentionBackendName.torch
