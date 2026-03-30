@@ -292,7 +292,7 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
-    attn_implementation: model_utils.AttnImplementation | None = None
+    attn_implementation: model_utils.AttentionBackendName | None = None
     """Which attention implementation to use.
     If None, auto-detects the best available implementation."""
 

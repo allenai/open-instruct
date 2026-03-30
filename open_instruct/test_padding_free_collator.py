@@ -15,6 +15,7 @@ from transformers import (
     LlamaForCausalLM,
 )
 
+from open_instruct import model_utils
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.olmo_core_train_modules import DPOLMHead
@@ -77,7 +78,12 @@ def _get_fa2_model_and_cfg(model_name: str, vocab_size: int, dtype: torch.dtype)
     model_cfg = MODEL_CFGS[model_name]
     model_kwargs = MODEL_KWARGS[model_name]
     cfg = model_cfg(
-        **{**model_kwargs, "dtype": dtype, "attn_implementation": "flash_attention_3", "vocab_size": vocab_size}
+        **{
+            **model_kwargs,
+            "dtype": dtype,
+            "attn_implementation": model_utils.olmo_core_attn_to_hf(model_utils.detect_attn_implementation()),
+            "vocab_size": vocab_size,
+        }
     )
     model = model_cls(cfg).to("cuda", dtype=dtype)
     return model, cfg
