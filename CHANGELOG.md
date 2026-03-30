@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Fixed
+- Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
+
 ### Added
 - Adds support for flash attention 4, and changes attention implementation to FA2 (https://github.com/allenai/open-instruct/pull/1569).
 - Add Git LFS documentation to README.md and CONTRIBUTING.md (https://github.com/allenai/open-instruct/pull/1570).
