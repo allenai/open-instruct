@@ -31,7 +31,6 @@ uv run python mason.py \
     --lr_scheduler_type linear \
     --weight_decay 0.0 \
     --logging_steps 1 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --chat_template_name olmo_thinker \
     --with_tracking \

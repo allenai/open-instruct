@@ -48,6 +48,22 @@ GPU_TESTS=bypass
 
 **Warning**: Use this sparingly. Only bypass GPU tests when you are confident the changes cannot affect GPU-related code paths. When in doubt, let the tests run.
 
+## Git LFS
+
+This repository uses [Git LFS](https://git-lfs.com/) to store large test data files. The tracked files are defined in `.gitattributes`. Run `git lfs ls-files` to see the current set.
+
+### Setup
+
+1. Install Git LFS: https://git-lfs.com/
+2. Run `git lfs install` (one-time setup per machine).
+3. Clone the repository normally. LFS files are fetched automatically.
+
+If you cloned the repository before installing Git LFS, you will have pointer files instead of the actual data. To fix this, first install the Git LFS client, then run `git lfs install` followed by `git lfs pull` in your repository to download the data.
+
+### Adding new test data to LFS
+
+Track new large or binary test data files with `git lfs track "path/to/file"` and commit the updated `.gitattributes`. CI is configured to fetch LFS objects automatically, so no workflow changes are needed.
+
 ## Running Tests
 
 **Unit tests**: `uv run pytest` runs the tests in `tests/` (test_environments.py, test_generic_sandbox.py, test_merge_models.py).
