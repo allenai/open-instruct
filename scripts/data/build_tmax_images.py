@@ -65,7 +65,7 @@ def main():
     if args.max_tasks:
         ds = ds.select(range(min(args.max_tasks, len(ds))))
 
-    client = docker_sdk.from_env()
+    client = None if args.dry_run else docker_sdk.from_env()
 
     # Deduplicate by container_def hash
     hash_to_tasks: dict[str, list[str]] = {}
