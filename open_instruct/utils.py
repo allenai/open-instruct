@@ -1066,6 +1066,7 @@ def maybe_update_beaker_description(
     total_steps: int | None = None,
     start_time: float | None = None,
     wandb_url: str | None = None,
+    progress_label: str = "step",
     original_descriptions: dict[str, str] = {},  # noqa: B006
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
@@ -1075,6 +1076,7 @@ def maybe_update_beaker_description(
         total_steps: Total number of training steps (for progress tracking)
         start_time: Training start time (from time.time()) (for progress tracking)
         wandb_url: Optional wandb URL to include
+        progress_label: Label used for the progress counter (for example, "step" or "eval")
         original_descriptions: Cache of original descriptions for progress updates
     """
     if not is_beaker_job():
@@ -1138,7 +1140,9 @@ def maybe_update_beaker_description(
                 time_str = "calculating..."
             time_label = "eta"
 
-        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
+        progress_bar = (
+            f"[{progress_pct:.1f}% complete ({progress_label} {current_step}/{total_steps}), {time_label} {time_str}]"
+        )
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     try:
@@ -2526,7 +2530,7 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
 
 
 def send_slack_message(message: str) -> None:
-    """Sends a message to a Slack webhook if configured.
+    """Sends a Slack alert using email or a webhook if configured.
 
     Args:
         message: Message body to send to Slack.
@@ -2535,11 +2539,11 @@ def send_slack_message(message: str) -> None:
     if not slack_webhook_url:
         logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
-
     beaker_url = get_beaker_experiment_url()
     beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+    full_message = f"{message}{beaker_suffix}"
 
-    payload = {"text": f"{message}{beaker_suffix}"}
+    payload = {"text": full_message}
     try:
         response = requests.post(slack_webhook_url, json=payload)
         if not response.ok:

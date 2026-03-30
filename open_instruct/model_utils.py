@@ -134,7 +134,7 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_3", "sdpa"] = "flash_attention_3"
+    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa"] = "flash_attention_3"
     """Which attention implementation to use.
     flash_attention_3: Requires flash-attn package (default)
     sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
@@ -402,6 +402,17 @@ async def apply_verifiable_reward(
     async_tasks = []
     task_metadata = []
 
+    def resolve_reward_function(dataset_name: str) -> VerifierFunction | None:
+        dataset_key = dataset_name.lower()
+        reward_func = reward_fn_mapping.get(dataset_key)
+        if reward_func is not None:
+            return reward_func
+        if dataset_key.startswith("gsm8k"):
+            return reward_fn_mapping.get("gsm8k")
+        if dataset_key.startswith("math"):
+            return reward_fn_mapping.get("math")
+        return None
+
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
         zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
@@ -414,7 +425,7 @@ async def apply_verifiable_reward(
 
         # Create async tasks for each ground truth/dataset pair
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = reward_fn_mapping.get(ds.lower())
+            reward_func = resolve_reward_function(ds)
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue

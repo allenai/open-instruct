@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import unittest
+from queue import Queue
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -14,7 +15,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import rl_utils, utils
+from open_instruct import grpo_fast, grpo_utils, rl_utils, utils
 from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -22,6 +23,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
+from open_instruct.environments.tools.utils import EnvsConfig
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -697,6 +699,86 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         self.assertEqual(total_responses, num_prompts * num_samples)
 
 
+class TestAccumulateInferenceBatchesProgress(unittest.TestCase):
+    """Lightweight tests for accumulate_inference_batches progress reporting."""
+
+    def test_progress_callback_updates_once_per_prompt_result(self):
+        """Test that progress callbacks are invoked once per accumulated prompt result."""
+        num_prompts = 3
+        num_samples_per_prompt = 2
+        inference_results_Q = Queue()
+
+        mock_dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [f"query_{i}" for i in range(num_prompts)],
+                GROUND_TRUTHS_KEY: [f"truth_{i}" for i in range(num_prompts)],
+                VERIFIER_SOURCE_KEY: [f"dataset_{i}" for i in range(num_prompts)],
+                RAW_PROMPT_KEY: [f"rawquery_{i}" for i in range(num_prompts)],
+                "index": list(range(num_prompts)),
+            }
+        )
+
+        for i in range(num_prompts):
+            inference_results_Q.put(
+                GenerationResult(
+                    responses=[[1, 2, 3] for _ in range(num_samples_per_prompt)],
+                    finish_reasons=["stop"] * num_samples_per_prompt,
+                    masks=[[1, 1, 1] for _ in range(num_samples_per_prompt)],
+                    request_info=RequestInfo(
+                        num_calls=[0] * num_samples_per_prompt,
+                        timeouts=[0] * num_samples_per_prompt,
+                        tool_errors=[""] * num_samples_per_prompt,
+                        tool_outputs=[""] * num_samples_per_prompt,
+                        tool_runtimes=[0.0] * num_samples_per_prompt,
+                        tool_calleds=[False] * num_samples_per_prompt,
+                    ),
+                    index=i,
+                    prompt_id=f"0_{i}",
+                    start_time=time.perf_counter(),
+                    token_statistics=TokenStatistics(
+                        num_prompt_tokens=10, num_response_tokens=3 * num_samples_per_prompt, generation_time=0.1
+                    ),
+                    logprobs=[[0.0, 0.0, 0.0] for _ in range(num_samples_per_prompt)],
+                    reward_scores=[i / num_samples_per_prompt for i in range(num_samples_per_prompt)],
+                    reward_metrics={"time/reward": 0.0},
+                )
+            )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = utils.ModelDims(
+            num_layers=32,
+            hidden_size=4096,
+            intermediate_size=11008,
+            vocab_size=32000,
+            num_attn_heads=32,
+            head_dim=128,
+            num_kv_heads=32,
+            device_name="h100",
+        )
+        tokenizer = Mock()
+        tokenizer.eos_token_id = 0
+        tokenizer.batch_decode.return_value = ["response"] * num_samples_per_prompt
+        progress_callback = MagicMock()
+
+        data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            progress_callback=progress_callback,
+            show_progress_bar=False,
+        )
+
+        self.assertEqual(progress_callback.call_count, num_prompts)
+        self.assertEqual(
+            [call.args for call in progress_callback.call_args_list],
+            [(1, num_prompts), (2, num_prompts), (3, num_prompts)],
+        )
+
+
 class TestAccumulateInferenceBatches(TestGrpoFastBase):
     """Test accumulate_inference_batches function."""
 
@@ -814,6 +896,18 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
+
+
+class TestSetupRuntimeVariables(unittest.TestCase):
+    def test_eval_only_aligns_response_length_with_eval_response_length(self):
+        args = grpo_utils.ExperimentConfig(eval_only=True, eval_response_length=1024, push_to_hub=False, save_freq=-1)
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(
+            response_length=256, pack_length=2048, dataset_mixer_eval_list=["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"]
+        )
+
+        grpo_fast.setup_runtime_variables(args, streaming_config, EnvsConfig())
+
+        self.assertEqual(streaming_config.response_length, 1024)
 
 
 if __name__ == "__main__":

@@ -173,7 +173,6 @@ class ActorManager:
                 "generation_tokens": token_stats.num_response_tokens,
             }
         )
-
         self._generation_batch_history.append(token_stats.generation_time)
 
     def report_training_step_time(self, duration: float):

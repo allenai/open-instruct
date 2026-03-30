@@ -1,0 +1,26 @@
+version: v2
+budget: ai2/oe-adapt
+description: "vLLM server for CompassVerifier-3B on Jupiter"
+tasks:
+  - name: "vllm-job"
+    image:
+      beaker: michaeln/open_instruct
+    hostNetworking: true
+    command: ["/bin/sh", "-c"]
+    arguments:
+      [
+        "VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 uv run python -m vllm.entrypoints.openai.api_server \
+            --model opencompass/CompassVerifier-3B \
+            --port 8001 \
+            --tensor-parallel-size 2 \
+            --max-model-len 32768 \
+            --trust-remote-code"
+      ]
+    constraints:
+      cluster:
+        - ai2/jupiter
+    resources:
+      gpuCount: 2
+    context:
+      priority: high
+      preemptible: False

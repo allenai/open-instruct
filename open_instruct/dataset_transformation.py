@@ -1482,6 +1482,7 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: str | None = None,
+    user_prompt_transform: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
@@ -1490,13 +1491,20 @@ def rlvr_tokenize_v3(
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
     if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
         prompt = prompt[:-1]
-    # override the system prompt if we have a new one provided.
     if system_prompt_override:
         if prompt[0]["role"] == "system":
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
+
+    if user_prompt_transform:
+        for message in reversed(prompt):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content") or ""
+            message["content"] = user_prompt_transform.format(prompt=content)
+            break
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
@@ -1506,10 +1514,6 @@ def rlvr_tokenize_v3(
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    # Get the raw values from the source keys
-    ground_truths_val = row[ground_truths_key]
-    verifier_source_val = row[verifier_source_key]
-
     # Get the raw values from the source keys
     ground_truths_val = row[ground_truths_key]
     verifier_source_val = row[verifier_source_key]
@@ -1706,6 +1710,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+    chat_template = getattr(tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()[:16]
+    tokenizer_files_hash = json.dumps(tc.tokenizer_files_hash, sort_keys=True)
 
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
@@ -1737,7 +1748,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}".encode()
+            (
+                f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:"
+                f"{tc_json}:{tc.chat_template_name}:{tc.get_tokenizer_fn}:{tokenizer_files_hash}:{chat_template_hash}"
+            ).encode()
         ).hexdigest()[:16]
 
         # perform the transformation

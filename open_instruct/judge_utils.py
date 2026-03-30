@@ -131,6 +131,32 @@ For the above question, please verify if the student's answer is equivalent to t
 Do not solve the question by yourself; just check if the student's answer is equivalent to the ground truth answer.
 If the student's answer is correct, output \"Final Decision: Yes\". If the student's answer is incorrect, output Final Decision: No. Assistant:"""
 
+compass_verifier_template = """
+Please as a grading expert, judge whether the final answers given by the candidates below are consistent with the standard answers, that is, whether the candidates answered correctly.
+Here are some evaluation criteria:
+1. Please refer to the given standard answer. You don't need to re-generate the answer to the question because the standard answer has been given. You only need to judge whether the candidate's answer is consistent with the standard answer according to the form of the question. THE STANDARD ANSWER IS ALWAYS CORRECT AND THE QUESTION IS PERFECTLY VALID. NEVER QUESTION THEM.
+2. ONLY compare the FINAL ANSWER - COMPLETELY IGNORE any potential errors in the REASONING PROCESSES.
+3. Some answers may be expressed in different ways, such as some answers may be a mathematical expression, some answers may be a textual description, as long as the meaning expressed is the same. Before making a judgment, please understand the question and the standard answer first, and then judge whether the candidate's answer is correct.
+4. Some answers may consist of multiple items, such as multiple-choice questions, multiple-select questions, fill-in-the-blank questions, etc. Regardless of the question type, the final answer will be considered correct as long as it matches the standard answer, regardless of whether the reasoning process is correct. For multiple-select questions and multi-blank fill-in-the-blank questions, all corresponding options or blanks must be answered correctly and match the standard answer exactly to be deemed correct.
+5. If the prediction is given with \\boxed{{}}, please ignore the \\boxed{{}} and only judge whether the candidate's answer is consistent with the standard answer.
+6. If the candidate's answer is invalid (e.g., incomplete (cut off mid-response), lots of unnormal repetitive content, or irrelevant to the question, saying it can't answer the question because some irresistible factors, like ethical issues, no enough information, etc.), select option C (INVALID).Please judge whether the following answers are consistent with the standard answer based on the above criteria. Grade the predicted answer of this new question as one of:
+A: CORRECT
+B: INCORRECT
+C: INVALID
+Just return the letters "A", "B", or "C", with no text around it.
+Here is your task. Simply reply with either CORRECT, INCORRECT, or INVALID. Don't apologize or correct yourself if there was a mistake; we are just trying to grade the answer.
+<Original Question Begin>:
+{question}
+<Original Question End>
+<Standard Answer Begin>:
+{gold_answer}
+<Standard Answer End>
+<Candidate's Answer Begin>:
+{llm_response}
+<Candidate's Answer End>
+Judging the correctness of the candidate's answer:
+"""
+
 # TODO: just a copy (need to be updated)
 creative_writing_template = """
 ### Task Description
@@ -204,6 +230,32 @@ def extract_score_web_instruct(score_str: str) -> "tuple[str, float]":
     return score_str, 0.0
 
 
+def extract_score_compass_verifier(score_str: str) -> "tuple[str, float]":
+    """Extractor for CompassVerifier's A/B/C judgments."""
+    cleaned = score_str.strip()
+
+    boxed_matches = re.findall(r"boxed\{([A-C])\}", cleaned, flags=re.IGNORECASE)
+    if boxed_matches:
+        return score_str, 1.0 if boxed_matches[-1].upper() == "A" else 0.0
+
+    if cleaned.upper() in {"A", "B", "C"}:
+        return score_str, 1.0 if cleaned.upper() == "A" else 0.0
+
+    final_judgment = cleaned.split("Final Judgment:")[-1]
+    letter_matches = re.findall(r"\b([A-C])\b", final_judgment, flags=re.IGNORECASE)
+    if letter_matches:
+        return score_str, 1.0 if letter_matches[-1].upper() == "A" else 0.0
+
+    lowered = cleaned.lower()
+    if "incorrect" in lowered or "invalid" in lowered or "incomplete" in lowered or "refusal" in lowered:
+        return score_str, 0.0
+    if "correct" in lowered:
+        return score_str, 1.0
+
+    logger.warning(f"Could not parse CompassVerifier score from: {score_str}, defaulting to 0.0")
+    return score_str, 0.0
+
+
 def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
     """Extractor based on json score with fallback"""
     try:
@@ -256,6 +308,7 @@ JUDGE_PROMPT_MAP = {
     "creative_writing": creative_writing_template,
     "refusal": refusal_template,
     "web_instruct_general_verifier": web_instruct_general_verifier_template,
+    "compass_verifier": compass_verifier_template,
 }
 
 EXTRACTOR_MAP = {
@@ -267,4 +320,17 @@ EXTRACTOR_MAP = {
     "creative_writing": extract_json_score_with_fallback,
     "refusal": extract_json_score_with_fallback,
     "web_instruct_general_verifier": extract_score_web_instruct,
+    "compass_verifier": extract_score_compass_verifier,
+}
+
+REQUIRED_OUTPUT_SUFFIX_MAP = {
+    "quality": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "quality_rubric": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "quality_ref": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "safety": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "factuality": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "creative_writing": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "refusal": 'Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}',
+    "web_instruct_general_verifier": None,
+    "compass_verifier": None,
 }

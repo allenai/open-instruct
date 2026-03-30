@@ -1,4 +1,7 @@
 #!/bin/bash
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1
+export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_USE_V1=1
 set -euo pipefail
 
 export TORCH_COMPILE_DISABLE=1

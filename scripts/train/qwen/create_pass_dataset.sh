@@ -1,0 +1,39 @@
+#!/bin/bash
+set -euo pipefail
+
+EXP_NAME="${EXP_NAME:-qwen25_05b_create_pass_dataset}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+
+uv run mason.py \
+    --task_name ${EXP_NAME} \
+    --cluster ai2/neptune \
+    --workspace ai2/oe-adapt-code \
+    --priority high \
+    --pure_docker_mode \
+    --image ${BEAKER_IMAGE} \
+    --preemptible \
+    --num_nodes 1 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --gpus 8 \
+    --budget ai2/oe-adapt \
+    -- \
+uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
+  --dataset ai2-adapt-dev/rlvr_gsm8k_zs \
+  --split train \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --chat-template qwen_instruct_user_boxed_math \
+  --num-samples 1024 \
+  --max-tokens 4096 \
+  --top-p 1.0 \
+  --num_engines 8 \
+  --tensor-parallel-size 1 \
+  --push-to-hub mnoukhov/gsm8k-platinum-qwen2.5-0.5b-instruct-1024samples-userprompt-topp0.95 \
+  --save-local-dir /weka/oe-adapt-default/allennlp/deletable_rollouts/michaeln/ \
+\&\& uv run scripts/data/rlvr/create_gsm8k_pass_rate_buckets.py \
+  --input-dataset mnoukhov/gsm8k-platinum-qwen2.5-0.5b-instruct-1024samples-userprompt-topp0.95 \
+  --split test \
+  --num-per-bucket 8 \
+  --k 8 \
+  --buckets 0% 5% 10% 25% \
+  --output-dataset mnoukhov/gsm8k-qwen2.5-0.5b-instruct-buckets \
+  --push-layout all

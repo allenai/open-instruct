@@ -48,4 +48,5 @@ python mason.py \
     --save_freq 40 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \
-    --with_tracking
+    --with_tracking \
+    --send_slack_alerts
