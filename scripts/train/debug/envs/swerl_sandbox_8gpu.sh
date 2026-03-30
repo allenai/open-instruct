@@ -64,6 +64,7 @@ uv run python mason.py \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-combined", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 128 \
     --max_steps 100 \
+    --verification_reward 1.0 \
     --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
