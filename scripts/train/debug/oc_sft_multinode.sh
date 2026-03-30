@@ -26,7 +26,7 @@ uv run python mason.py \
     --nproc_per_node=8 \
     open_instruct/olmo_core_finetune.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
-    --max_seq_length 32768 \
+    --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 8e-5 \
