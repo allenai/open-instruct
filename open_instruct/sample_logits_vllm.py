@@ -110,6 +110,8 @@ def process_prompt_logprobs(prompt_logprobs: FlatLogprobs, k: int) -> tuple[torc
         end_idx = prompt_logprobs.end_indices[pos_id]
         for i in range(start_idx, end_idx):
             rank = prompt_logprobs.ranks[i]
+            # vLLM rank is int or None, so we guard against None in the conditional
+            # We do not break on rank > k because we are not traversing in rank order
             if rank is None or rank > k:
                 continue
             seq_ids.append(seq_id)
@@ -117,7 +119,8 @@ def process_prompt_logprobs(prompt_logprobs: FlatLogprobs, k: int) -> tuple[torc
             token_ids_to_copy.append(prompt_logprobs.token_ids[i])
             logprobs_to_copy.append(prompt_logprobs.logprobs[i])
 
-    if seq_ids:
+    # This can be empty if all candidate entries had rank=None or rank>k.
+    if token_ids_to_copy:
         seq_idx_tensor = torch.tensor(seq_ids, dtype=torch.long)
         rank_idx_tensor = torch.tensor(rank_ids, dtype=torch.long)
         top_indices[seq_idx_tensor, rank_idx_tensor] = torch.tensor(token_ids_to_copy, dtype=top_indices.dtype)
@@ -135,15 +138,16 @@ def load_and_validate_compression_config(
 
     tok_vocab = tokenizer.get_vocab()
     tok_vocab_size = max(len(tok_vocab) + 1, max(tok_vocab.values()))
-    if cfg.d != tok_vocab_size:
-        if auto_vocab_size:
-            cfg.d = tok_vocab_size
-            logger.warning(f"Auto-set compressor vocab size to {tok_vocab_size}.")
-        elif cfg.d < tok_vocab_size:
-            logger.error(f"Compression vocab size too small: {cfg.d} < {tok_vocab_size}.")
-            sys.exit(-1)
-        elif abs(cfg.d - tok_vocab_size) > 32:
-            logger.warning(f"Compression vocab size ({cfg.d}) is larger than tokenizer size ({tok_vocab_size}).")
+    if cfg.d == tok_vocab_size:
+        return cfg
+    if auto_vocab_size:
+        cfg.d = tok_vocab_size
+        logger.warning(f"Auto-set compressor vocab size to {tok_vocab_size}.")
+    elif cfg.d < tok_vocab_size:
+        logger.error(f"Compression vocab size too small: {cfg.d} < {tok_vocab_size}.")
+        sys.exit(-1)
+    elif abs(cfg.d - tok_vocab_size) > 32:
+        logger.warning(f"Compression vocab size ({cfg.d}) is larger than tokenizer size ({tok_vocab_size}).")
     return cfg
 
 
@@ -240,7 +244,7 @@ def run_sampling_loop(
 
             # Convert HF dataset rows into vLLM prompt_token_ids payloads.
             prompts = [
-                {"prompt_token_ids": x.tolist() if hasattr(x, "tolist") else list(x)}
+                {"prompt_token_ids": x.tolist() if isinstance(x, torch.Tensor) else list(x)}
                 for x in batch_slice[INPUT_IDS_KEY]
             ]
             outputs = llm.generate(prompts, sampling_params=sampling_params)
@@ -257,6 +261,8 @@ def run_sampling_loop(
                         k,
                     )
                 )
+            # Keep only a bounded number of pending writes
+            # Otherwise generation can outpace writes and consume too much memory
             while len(futures) > num_unique_prompts * 2:
                 futures.pop(0).result()
         for future in futures:
