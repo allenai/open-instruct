@@ -77,12 +77,12 @@ def _is_hopper_gpu() -> bool:
 
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> AttnImplementation:
-    if _is_flash_attn_4_available() and _is_blackwell_gpu():
-        result: AttnImplementation = "flash_attention_4"
+    if transformers.utils.is_flash_attn_2_available():
+        result: AttnImplementation = "flash_attention_2"
+    elif _is_flash_attn_4_available() and _is_blackwell_gpu():
+        result = "flash_attention_4"
     elif transformers.utils.is_flash_attn_3_available() and _is_hopper_gpu():
         result = "flash_attention_3"
-    elif transformers.utils.is_flash_attn_2_available():
-        result = "flash_attention_2"
     else:
         result = "sdpa"
     logger.info(f"Auto-detected attention implementation: {result}")
