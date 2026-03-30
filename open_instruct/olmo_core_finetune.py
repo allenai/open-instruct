@@ -25,8 +25,8 @@ Usage:
         --num_epochs 3
 """
 
+import dataclasses
 import os
-from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -53,7 +53,7 @@ from olmo_core.train.train_module import (
 )
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import dpo_utils, logger_utils, olmo_core_utils, utils
+from open_instruct import logger_utils, olmo_core_utils, utils
 from open_instruct.dataset_transformation import TOKENIZED_SFT_DATASET_KEYS, TokenizerConfig, visualize_token
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
@@ -61,94 +61,87 @@ from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 logger = logger_utils.setup_logger(__name__)
 
 
-@dataclass
-class SFTArguments(
-    dpo_utils.TrackingConfig,
-    dpo_utils.ModelConfig,
-    dpo_utils.BaseTrainingConfig,
-    dpo_utils.DatasetConfig,
-    dpo_utils.LoggingConfig,
-    dpo_utils.CheckpointConfig,
-):
-    num_epochs: int = 3
-    per_device_train_batch_size: int = 1
-    learning_rate: float = 8e-5
-    warmup_ratio: float = 0.03
-    max_seq_length: int = 4096
-    mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture", "1.0"])
-    transform_fn: list[str] = field(
-        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
-    )
-    target_columns: list[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
-    wandb_project: str | None = None
+_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
 
-    ephemeral_save_interval: int = field(default=500, metadata={"help": "Ephemeral checkpoint interval."})
+
+@dataclasses.dataclass
+class SFTArguments:
+    tracking: olmo_core_utils.TrackingConfig
+    model: olmo_core_utils.ModelConfig
+    training: olmo_core_utils.BaseTrainingConfig
+    dataset: olmo_core_utils.DatasetConfig
+    logging: olmo_core_utils.LoggingConfig
+    checkpoint: olmo_core_utils.CheckpointConfig
+    ephemeral_save_interval: int = _DEFAULT_EPHEMERAL_SAVE_INTERVAL
 
 
 def main(args: SFTArguments, tc: TokenizerConfig) -> None:
-    assert args.model_name_or_path is not None, "model_name_or_path is required"
-    assert args.logging_steps is not None, "logging_steps is required"
-    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, tc)
+    assert args.model.model_name_or_path is not None, "model_name_or_path is required"
+    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
 
-    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
 
-    if args.cache_dataset_only:
-        olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process=True)
+    if args.dataset.cache_dataset_only:
+        olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process=True)
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
-    prepare_training_environment(seed=args.seed)
+    prepare_training_environment(seed=args.tracking.seed)
 
     global_rank = get_rank() if is_distributed() else 0
     is_main_process = global_rank == 0
     world_size = get_world_size() if is_distributed() else 1
-    dataset = olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
-    dataset = dataset.shuffle(seed=args.seed)
+    dataset = olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process)
+    dataset = dataset.shuffle(seed=args.tracking.seed)
     dataset.set_format(type="pt")
 
     logger_utils.setup_logger(rank=global_rank)
 
     if is_main_process:
         visualize_token(dataset[0]["input_ids"], tokenizer)
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(args.checkpoint.output_dir, exist_ok=True)
     if is_distributed():
         dist.barrier()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = olmo_core_utils.setup_model(args.model_name_or_path, args.config_name, args.attn_backend)
+    model, model_config = olmo_core_utils.setup_model(
+        args.model.model_name_or_path, args.model.config_name, args.model.attn_backend
+    )
 
-    rank_batch_size_seqs = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
     global_batch_size_seqs = rank_batch_size_seqs * world_size
 
     collator = TensorDataCollatorWithFlattening(
         return_position_ids=True,
         return_flash_attn_kwargs=True,
-        max_seq_length=rank_batch_size_seqs * args.max_seq_length,
+        max_seq_length=rank_batch_size_seqs * args.training.max_seq_length,
     )
 
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size_seqs,
-        seed=args.seed,
+        seed=args.tracking.seed,
         dp_rank=global_rank,
         dp_world_size=world_size,
-        work_dir=args.output_dir,
+        work_dir=args.checkpoint.output_dir,
         collator=collator,
         device=device,
         drop_last=True,
         fs_local_rank=global_rank,
-        max_seq_length=args.max_seq_length,
+        max_seq_length=args.training.max_seq_length,
     )
-    num_training_steps = len(data_loader) * args.num_epochs
-    effective_steps = args.max_train_steps if args.max_train_steps is not None else num_training_steps
+    num_training_steps = len(data_loader) * args.training.num_epochs
+    effective_steps = (
+        args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
+    )
     logger.info(
-        f"Total training steps: {effective_steps} (data_loader len={len(data_loader)}, epochs={args.num_epochs})"
+        f"Total training steps: {effective_steps} (data_loader len={len(data_loader)}, epochs={args.training.num_epochs})"
     )
 
-    scheduler = LinearWithWarmup(warmup_steps=int(effective_steps * args.warmup_ratio), alpha_f=0.0)
+    scheduler = LinearWithWarmup(warmup_steps=int(effective_steps * args.training.warmup_ratio), alpha_f=0.0)
 
-    rank_microbatch_size = rank_batch_size_seqs * args.max_seq_length
+    rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
     dp_shard_degree = min(world_size, torch.cuda.device_count() if torch.cuda.is_available() else 1)
 
     dp_config = TransformerDataParallelConfig(
@@ -160,18 +153,19 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     ac_config = (
         TransformerActivationCheckpointingConfig(
-            mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=args.activation_memory_budget
+            mode=TransformerActivationCheckpointingMode.budget,
+            activation_memory_budget=args.training.activation_memory_budget,
         )
-        if args.activation_memory_budget < 1.0 and args.compile_model
+        if args.training.activation_memory_budget < 1.0 and args.training.compile_model
         else None
     )
 
     train_module_config = TransformerTrainModuleConfig(
         rank_microbatch_size=rank_microbatch_size,
-        max_sequence_length=args.max_seq_length,
+        max_sequence_length=args.training.max_seq_length,
         z_loss_multiplier=None,
-        compile_model=args.compile_model,
-        optim=SkipStepAdamWConfig(lr=args.learning_rate, weight_decay=0.0, betas=(0.9, 0.95), compile=False),
+        compile_model=args.training.compile_model,
+        optim=SkipStepAdamWConfig(lr=args.training.learning_rate, weight_decay=0.0, betas=(0.9, 0.95), compile=False),
         dp_config=dp_config,
         ac_config=ac_config,
         scheduler=scheduler,
@@ -182,25 +176,25 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
-    load_hf_model(args.model_name_or_path, sd, work_dir=args.output_dir)
+    load_hf_model(args.model.model_name_or_path, sd, work_dir=args.checkpoint.output_dir)
     train_module.model.load_state_dict(sd)
 
-    if args.max_train_steps is not None:
-        max_duration = Duration.steps(args.max_train_steps)
+    if args.training.max_train_steps is not None:
+        max_duration = Duration.steps(args.training.max_train_steps)
     else:
-        max_duration = Duration.epochs(args.num_epochs)
+        max_duration = Duration.epochs(args.training.num_epochs)
 
-    run_name = args.run_name or f"sft-{os.path.basename(args.model_name_or_path)}"
+    run_name = args.tracking.run_name or f"sft-{os.path.basename(args.model.model_name_or_path)}"
     json_config: dict[str, Any] = {
-        "model_name_or_path": args.model_name_or_path,
-        "mixer_list": args.mixer_list,
-        "max_seq_length": args.max_seq_length,
-        "learning_rate": args.learning_rate,
-        "num_epochs": args.num_epochs,
-        "per_device_train_batch_size": args.per_device_train_batch_size,
+        **dataclasses.asdict(args.tracking),
+        **dataclasses.asdict(args.model),
+        **dataclasses.asdict(args.training),
+        **dataclasses.asdict(args.dataset),
+        **dataclasses.asdict(args.logging),
+        **dataclasses.asdict(args.checkpoint),
+        "ephemeral_save_interval": args.ephemeral_save_interval,
         "global_batch_size_sequences": global_batch_size_seqs,
         "world_size": world_size,
-        "seed": args.seed,
     }
 
     trainer_callbacks: dict[str, Any] = {
@@ -208,27 +202,27 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         "config_saver": ConfigSaverCallback(_config=json_config),
         "garbage_collector": GarbageCollectorCallback(),
         "checkpointer": CheckpointerCallback(
-            save_interval=int(args.checkpointing_steps),
+            save_interval=int(args.checkpoint.checkpointing_steps),
             ephemeral_save_interval=args.ephemeral_save_interval,
             save_async=True,
         ),
         "beaker": BeakerCallbackV2(config=json_config),
     }
 
-    if args.with_tracking and args.wandb_project:
+    if args.logging.with_tracking and args.logging.wandb_project:
         trainer_callbacks["wandb"] = WandBCallback(
             name=run_name,
-            entity=args.wandb_entity or "ai2-llm",
-            project=args.wandb_project,
+            entity=args.logging.wandb_entity or "ai2-llm",
+            project=args.logging.wandb_project,
             config=json_config,
             enabled=True,
             cancel_check_interval=10,
         )
 
     trainer = TrainerConfig(
-        save_folder=args.output_dir,
+        save_folder=args.checkpoint.output_dir,
         max_duration=max_duration,
-        metrics_collect_interval=args.logging_steps,
+        metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
         save_overwrite=True,
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
@@ -241,7 +235,41 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     teardown_training_environment()
 
 
+@dataclasses.dataclass
+class _SFTExtra:
+    ephemeral_save_interval: int = _DEFAULT_EPHEMERAL_SAVE_INTERVAL
+
+
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus((SFTArguments, TokenizerConfig))  # ty: ignore[invalid-argument-type]
-    args, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
+    parser = utils.ArgumentParserPlus(
+        (  # ty: ignore[invalid-argument-type]
+            olmo_core_utils.TrackingConfig,
+            olmo_core_utils.ModelConfig,
+            olmo_core_utils.BaseTrainingConfig,
+            olmo_core_utils.DatasetConfig,
+            olmo_core_utils.LoggingConfig,
+            olmo_core_utils.CheckpointConfig,
+            _SFTExtra,
+            TokenizerConfig,
+        )
+    )
+    parser.set_defaults(
+        exp_name="sft",
+        num_epochs=3,
+        learning_rate=8e-5,
+        warmup_ratio=0.03,
+        mixer_list=["allenai/tulu-3-sft-olmo-2-mixture", "1.0"],
+        transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+        target_columns=list(TOKENIZED_SFT_DATASET_KEYS),
+    )
+    tracking, model, training, dataset, logging_cfg, checkpoint, sft_extra, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
+    args = SFTArguments(
+        tracking=tracking,
+        model=model,
+        training=training,
+        dataset=dataset,
+        logging=logging_cfg,
+        checkpoint=checkpoint,
+        ephemeral_save_interval=sft_extra.ephemeral_save_interval,
+    )
     main(args, tc)

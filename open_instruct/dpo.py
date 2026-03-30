@@ -168,7 +168,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
 
-    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, tc)
+    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, args, tc)
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
