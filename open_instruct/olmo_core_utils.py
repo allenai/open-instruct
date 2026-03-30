@@ -14,7 +14,7 @@ from olmo_core.distributed.utils import is_distributed
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import save_hf_model
-from olmo_core.nn.transformer import TransformerConfig
+from olmo_core.nn.transformer import Transformer, TransformerConfig
 
 from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -86,7 +86,7 @@ def resolve_attn_backend(attn_backend: str) -> str:
 
 def setup_model(
     model_name_or_path: str, config_name: str | None, attn_backend: str
-) -> tuple[torch.nn.Module, TransformerConfig]:
+) -> tuple[Transformer, TransformerConfig]:
     hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")

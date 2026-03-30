@@ -86,6 +86,8 @@ class SFTArguments(
 
 
 def main(args: SFTArguments, tc: TokenizerConfig) -> None:
+    assert args.model_name_or_path is not None, "model_name_or_path is required"
+    assert args.logging_steps is not None, "logging_steps is required"
     tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, tc)
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
@@ -240,6 +242,6 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus((SFTArguments, TokenizerConfig))
-    args, tc = parser.parse()
+    parser = utils.ArgumentParserPlus((SFTArguments, TokenizerConfig))  # ty: ignore[invalid-argument-type]
+    args, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     main(args, tc)
