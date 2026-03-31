@@ -102,25 +102,26 @@ MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 # ---------------------------------------------------------------------------
 # Monkey-patch: transformers 5.4+ rope validation with Qwen3.5
 #
-# The @strict decorator on Qwen3_5TextConfig runs validate_rope during
-# __post_init__. When vLLM constructs or deserializes the config,
-# ignore_keys_at_rope_validation can arrive as a list (JSON has no set
-# type), causing "list | set" TypeErrors or StrictDataclass validation
-# failures. Patch validate_rope to normalise ignore_keys to a set.
+# When vLLM deserializes a config from JSON, ignore_keys_at_rope_validation
+# arrives as a list (JSON has no set type). _check_received_keys then does
+# `received_keys -= ignore_keys` which is `set -= list` → TypeError.
+# The @strict decorator captures validators at class decoration time, so
+# patching validate_rope on PreTrainedConfig is too late. Instead, patch
+# _check_received_keys to normalise ignore_keys to a set.
 # ---------------------------------------------------------------------------
 import transformers  # noqa: E402
 
-_original_validate_rope = transformers.PreTrainedConfig.validate_rope
+_original_check_received_keys = transformers.PreTrainedConfig._check_received_keys
 
 
-def _patched_validate_rope(self):
-    ignore = getattr(self, "ignore_keys_at_rope_validation", None)
-    if isinstance(ignore, list):
-        self.ignore_keys_at_rope_validation = set(ignore)
-    return _original_validate_rope(self)
+@staticmethod
+def _patched_check_received_keys(rope_type, received_keys, required_keys, optional_keys=None, ignore_keys=None):
+    if ignore_keys is not None and not isinstance(ignore_keys, set):
+        ignore_keys = set(ignore_keys)
+    return _original_check_received_keys(rope_type, received_keys, required_keys, optional_keys, ignore_keys)
 
 
-transformers.PreTrainedConfig.validate_rope = _patched_validate_rope
+transformers.PreTrainedConfig._check_received_keys = _patched_check_received_keys
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
