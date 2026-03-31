@@ -51,7 +51,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         master_port: int | None,
         local_world_size: int,
         model_name_or_path: str,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
@@ -99,9 +99,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         backend = "cpu:gloo,cuda:nccl"
         logger.info(f"[Rank {self.rank}] Calling train.prepare_training_environment...")
-        train.prepare_training_environment(
-            seed=self.grpo_config.seed, backend=backend, timeout=timedelta(minutes=self.grpo_config.backend_timeout)
-        )
+        train.prepare_training_environment(seed=self.grpo_config.seed, backend=backend)
         logger.info(f"[Rank {self.rank}] train.prepare_training_environment completed")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -323,7 +321,7 @@ class OLMoCoreModelGroup:
         pg,
         num_gpus_per_node: list[int],
         model_name_or_path: str,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,

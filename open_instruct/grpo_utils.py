@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 
 from open_instruct import data_types, logger_utils, model_utils
-from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
@@ -25,7 +24,7 @@ class GRPOLossType(enum.StrEnum):
 
 
 @dataclass
-class ExperimentConfig:
+class GRPOExperimentConfig:
     # Experiment
     exp_name: str = "grpo"
     """The name of this experiment"""
@@ -248,65 +247,12 @@ class ExperimentConfig:
             )
 
 
-def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
-    """Set non-response positions to INVALID_LOGPROB and replace NaNs."""
-    vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
-    vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
-    return vllm_logprobs
-
-
-def compute_tis_weights(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
-) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """Compute truncated importance sampling weights: clamp(π_old / π_vllm, max=cap).
-
-    Returns (clamped, unclamped) tuple, both None when cap <= 0 (disabled).
-    """
-    if cap <= 0:
-        return None, None
-    unclamped = torch.ones_like(old_logprob)
-    logprob_diff = old_logprob - vllm_logprobs
-    logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
-    unclamped = torch.where(response_mask, torch.exp(logprob_diff), unclamped)
-    clamped = torch.clamp(unclamped, max=cap)
-    return clamped, unclamped
-
-
-def resolve_old_logprob(
-    old_logprobs_cache: list[torch.Tensor | None],
-    sample_idx: int,
-    epoch_idx: int,
-    num_mini_batches: int,
-    use_vllm_logprobs: bool,
-    vllm_logprobs: torch.Tensor,
-    new_logprobs: torch.Tensor,
-) -> torch.Tensor:
-    """Return the old (baseline) logprobs for a sample.
-
-    With multiple mini-batches, old logprobs are pre-computed and cached.
-    With a single mini-batch, they are lazily set on the first epoch from
-    either vllm logprobs or the current policy's detached logprobs.
-    """
-    if num_mini_batches > 1:
-        result = old_logprobs_cache[sample_idx]
-    else:
-        with torch.no_grad():
-            if epoch_idx == 0:
-                if use_vllm_logprobs:
-                    old_logprobs_cache[sample_idx] = vllm_logprobs
-                else:
-                    old_logprobs_cache[sample_idx] = new_logprobs.detach()
-            result = old_logprobs_cache[sample_idx]
-    assert result is not None
-    return result
-
-
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
-    config: ExperimentConfig,
+    config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
@@ -407,7 +353,9 @@ def compute_logprobs(
                     )
 
                     response_mask_BT = data_BT.response_masks[i].to(single_logprobs.device)
-                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
+                    single_logprobs = torch.masked_fill(
+                        single_logprobs, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB
+                    )
                     logprobs_BT.append(single_logprobs)
                 continue
 
@@ -430,7 +378,7 @@ def compute_logprobs(
 
             for i, logprob_BT in zip(batch_indices, split_logprobs):
                 response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
-                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:].bool())
+                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
                 logprobs_BT.append(logprob_BT)
 
     return logprobs_BT
@@ -460,79 +408,3 @@ def calculate_token_counts(
         accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
 
     return accumulation_counts
-
-
-def create_loss_stats(num_samples: int, token_counts: torch.Tensor, device: torch.device) -> dict[str, torch.Tensor]:
-    return {
-        "kl": torch.zeros(4, num_samples, device=device),
-        "kl_loss": torch.zeros(num_samples, device=device),
-        "tis_ratio": torch.zeros(num_samples, device=device),
-        "tis_clipfrac": torch.zeros(num_samples, device=device),
-        "pg_clipfrac": torch.zeros(num_samples, device=device),
-        "pg_loss": torch.zeros(num_samples, device=device),
-        "loss": torch.zeros(num_samples, device=device),
-        "ratio": torch.zeros(num_samples, device=device),
-        "entropy": torch.zeros(num_samples, device=device),
-        "token_count": token_counts,
-    }
-
-
-def populate_sample_loss_stats(
-    loss_stats_B: dict[str, torch.Tensor],
-    sample_idx: int,
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
-    pg_loss: torch.Tensor,
-    ratio: torch.Tensor,
-    loss: torch.Tensor,
-    response_mask: torch.Tensor,
-    new_logprobs: torch.Tensor,
-    ref_logprobs: torch.Tensor | None,
-    entropy: torch.Tensor | None,
-    config: ExperimentConfig,
-    tis_clamped: torch.Tensor | None = None,
-    tis_unclamped: torch.Tensor | None = None,
-) -> None:
-    with torch.no_grad():
-        if config.load_ref_policy and ref_logprobs is not None:
-            ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
-            kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
-            loss_stats_B["kl"][:, sample_idx] = masked_mean(kl_4BT, response_mask).float()
-            loss_stats_B["kl_loss"][sample_idx] = loss_stats_B["kl"][config.kl_estimator, sample_idx] * config.beta
-        if tis_clamped is not None and tis_unclamped is not None:
-            loss_stats_B["tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
-            loss_stats_B["tis_clipfrac"][sample_idx] = masked_mean(
-                (tis_clamped < tis_unclamped).float(), response_mask
-            )
-        loss_stats_B["pg_clipfrac"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
-        loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
-        loss_stats_B["loss"][sample_idx] = loss
-        loss_stats_B["ratio"][sample_idx] = masked_mean(ratio, response_mask)
-        if entropy is not None:
-            loss_stats_B["entropy"][sample_idx] = masked_mean(entropy, response_mask).float()
-
-
-def compute_metrics_from_loss_stats(
-    loss_stats_B: dict[str, torch.Tensor], config: ExperimentConfig
-) -> dict[str, float]:
-    token_counts = loss_stats_B["token_count"]
-    total_tokens = token_counts.sum()
-    weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
-
-    metrics: dict[str, float] = {}
-    if config.load_ref_policy:
-        for j in range(4):
-            metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum().item()
-        metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum().item()
-    metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum().item()
-    metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum().item()
-    metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum().item()
-    metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum().item()
-    metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum().item()
-    metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum().item()
-    weighted_mean_ratio = metrics["val/ratio"]
-    metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum().item()
-    if config.record_entropy:
-        metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum().item()
-    metrics["_token_count"] = total_tokens.item()
-    return metrics
