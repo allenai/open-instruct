@@ -207,7 +207,7 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
 def setup_model(
     model_name_or_path: str, config_name: str | None, attn_implementation: AttentionBackendName
 ) -> tuple[Transformer, TransformerConfig]:
-    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     model_config = get_transformer_config(
