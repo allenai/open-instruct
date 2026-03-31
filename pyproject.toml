@@ -26,7 +26,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
-    "transformers>=5.3.0",
+    "transformers>=5.4.0",
     "vllm>=0.18.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
@@ -101,7 +101,7 @@ preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
 override-dependencies = [
-    "transformers>=5.3.0",
+    "transformers>=5.4.0",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
