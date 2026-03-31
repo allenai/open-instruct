@@ -33,4 +33,4 @@ uv run --active open_instruct/grpo.py \
     --vllm_gpu_memory_utilization 0.4 \
     --vllm_enforce_eager \
     --single_gpu_mode \
-    --push_to_hub false $@
+    --push_to_hub false "$@"
