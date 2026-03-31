@@ -53,7 +53,7 @@ def export_to_hf(
 
 
 def _load_dataset_distributed(
-    args: dpo_utils.ExperimentConfig,
+    args: dpo_utils.DPOExperimentConfig,
     tc: dataset_transformation.TokenizerConfig,
     transform_fn_args: list[dict],
     is_main_process: bool,
@@ -84,7 +84,7 @@ def _load_dataset_distributed(
     return dataset
 
 
-def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
+def _setup_model(args: dpo_utils.DPOExperimentConfig, device: torch.device):
     """Build OLMo-core model architecture (weights loaded after parallelization)."""
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
@@ -99,7 +99,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     return model, model_config
 
 
-def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
+def _setup_scheduler(args: dpo_utils.DPOExperimentConfig, num_training_steps: int):
     """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
     if args.lr_scheduler_type == "cosine":
@@ -111,7 +111,7 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     return scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
+def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -147,7 +147,7 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
 
 
 def _handle_post_training(
-    args: dpo_utils.ExperimentConfig,
+    args: dpo_utils.DPOExperimentConfig,
     model,
     model_config,
     tokenizer,
@@ -199,7 +199,7 @@ def _handle_post_training(
         model_utils.push_folder_to_hub(hf_model_path, args.hf_repo_id, args.hf_repo_revision)
 
 
-def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
+def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
     if args.model_name_or_path is None:
         raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
@@ -218,7 +218,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
 
-    # DPO's ExperimentConfig uses inheritance, not composition, so args satisfies both
+    # DPO's DPOExperimentConfig uses inheritance, not composition, so args satisfies both
     # ModelConfig and DatasetConfig. TODO(finbarrtimbers): refactor to use composition.
     tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, args, tc)
 
@@ -425,6 +425,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 if __name__ == "__main__":
     from open_instruct.utils import ArgumentParserPlus
 
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, dataset_transformation.TokenizerConfig))
     args, tc = parser.parse()
     main(args, tc)

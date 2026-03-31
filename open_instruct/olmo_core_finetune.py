@@ -62,7 +62,7 @@ _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
 
 @dataclasses.dataclass
 class SFTArguments:
-    tracking: olmo_core_utils.TrackingConfig
+    tracking: olmo_core_utils.ExperimentConfig
     model: olmo_core_utils.ModelConfig
     training: olmo_core_utils.TrainingConfig
     dataset: olmo_core_utils.DatasetConfig
@@ -222,7 +222,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
 if __name__ == "__main__":
     parser = utils.ArgumentParserPlus(
         (  # ty: ignore[invalid-argument-type]
-            olmo_core_utils.TrackingConfig,
+            olmo_core_utils.ExperimentConfig,
             olmo_core_utils.ModelConfig,
             olmo_core_utils.TrainingConfig,
             olmo_core_utils.DatasetConfig,

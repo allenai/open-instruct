@@ -22,8 +22,8 @@ logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
-class TrackingConfig:
-    """Base configuration for experiment tracking."""
+class ExperimentConfig:
+    """Base configuration for experiment identity and metadata."""
 
     exp_name: str = "experiment"
     """The name of this experiment"""

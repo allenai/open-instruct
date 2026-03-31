@@ -48,9 +48,9 @@ from open_instruct.dataset_transformation import (
 from open_instruct.olmo_core_utils import (
     CheckpointConfig,
     DatasetConfig,
+    ExperimentConfig,
     LoggingConfig,
     ModelConfig,
-    TrackingConfig,
     TrainingConfig,
 )
 from open_instruct.padding_free_collator import calculate_per_token_logps
@@ -198,8 +198,8 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 @dataclass
-class ExperimentConfig(
-    TrackingConfig,
+class DPOExperimentConfig(
+    ExperimentConfig,
     ModelConfig,
     DPOConfig,
     DPOTrainingConfig,
@@ -364,11 +364,11 @@ class ExperimentConfig(
                 raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-FlatArguments = ExperimentConfig
+FlatArguments = DPOExperimentConfig
 
 
-def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) -> str:
-    """Compute deterministic hash for reference logprobs cache from ExperimentConfig."""
+def compute_reference_cache_hash(args: DPOExperimentConfig, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from DPOExperimentConfig."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
         args.mixer_list, args.mixer_list_splits, args.transform_fn, transform_fn_args, args.target_columns
