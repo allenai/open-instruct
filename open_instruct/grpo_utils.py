@@ -25,7 +25,7 @@ class GRPOLossType(enum.StrEnum):
 
 
 @dataclass
-class ExperimentConfig:
+class GRPOExperimentConfig:
     # Experiment
     exp_name: str = "grpo"
     """The name of this experiment"""
@@ -306,7 +306,7 @@ def compute_grpo_loss(
     ratio: torch.Tensor,
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
-    config: ExperimentConfig,
+    config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:

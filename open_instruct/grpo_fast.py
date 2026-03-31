@@ -144,7 +144,7 @@ class PolicyTrainerRayProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
-        args: grpo_utils.ExperimentConfig,
+        args: grpo_utils.GRPOExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -170,7 +170,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def from_pretrained(
         self,
-        args: grpo_utils.ExperimentConfig,
+        args: grpo_utils.GRPOExperimentConfig,
         model_config: ModelConfig,
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
@@ -832,7 +832,7 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
-        args: grpo_utils.ExperimentConfig,
+        args: grpo_utils.GRPOExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -937,10 +937,10 @@ def validate_configs(
 
 
 def setup_runtime_variables(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     tools_config: EnvsConfig,
-) -> grpo_utils.ExperimentConfig:
+) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
@@ -975,7 +975,7 @@ def setup_runtime_variables(
 
 
 def setup_experiment_tracking(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1019,7 +1019,7 @@ def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | 
 
 
 def setup_datasets(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1168,7 +1168,7 @@ def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.A
 
 
 def create_model_and_optimizer(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     beaker_config: BeakerRuntimeConfig,
@@ -1330,7 +1330,7 @@ def create_model_and_optimizer(
 
 
 def create_generation_configs(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
 ):
@@ -1349,7 +1349,7 @@ def create_generation_configs(
 
 
 def weight_sync_thread(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
@@ -1423,7 +1423,7 @@ def weight_sync_thread(
 
 
 def one_training_step(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
@@ -1549,7 +1549,7 @@ def one_training_step(
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def maybe_save_checkpoint(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     training_step: int,
     policy_group: ModelGroup,
     chat_template_name: str,
@@ -1583,7 +1583,7 @@ def maybe_save_checkpoint(
 
 
 def maybe_evaluate(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
@@ -1669,7 +1669,7 @@ def maybe_evaluate(
 
 
 def save_final_model(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     training_step: int,
@@ -2133,7 +2133,7 @@ def initialize_tools_and_envs(
 
 
 def main(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -2338,7 +2338,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParserPlus(
         (
-            grpo_utils.ExperimentConfig,
+            grpo_utils.GRPOExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
@@ -2349,7 +2349,7 @@ if __name__ == "__main__":
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
         parser.parse_args_into_dataclasses()
     )
-    assert isinstance(args, grpo_utils.ExperimentConfig)
+    assert isinstance(args, grpo_utils.GRPOExperimentConfig)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)

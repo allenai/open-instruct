@@ -87,12 +87,13 @@ class HFDataLoader(data_loader.DataLoaderBase):
         device: torch.device | None = None,
         drop_last: bool = True,
         fs_local_rank: int | None = None,
+        max_seq_length: int = 1,
     ) -> None:
         """Initialize the HFDataLoader.
 
         Args:
             dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
-            batch_size: The global batch size.
+            batch_size: The global batch size (in sequences).
             seed: Random seed for shuffling.
             dp_rank: The rank of the current process in the distributed setup.
             dp_world_size: Total number of data-parallel processes in the distributed setup.
@@ -104,6 +105,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
+            max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
+                to the trainer for batch-size validation.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
@@ -112,7 +115,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         super().__init__(
             work_dir=work_dir,
-            global_batch_size=batch_size,
+            global_batch_size=batch_size * max_seq_length,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
