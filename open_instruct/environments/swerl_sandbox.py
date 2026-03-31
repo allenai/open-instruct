@@ -106,17 +106,18 @@ class SWERLSandboxEnv(RLEnvironment):
         if self._task_data_hf_repo and not self._task_data_dir:
             logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
             repo_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
-            # Extract tarball if present and not already extracted
+            # Extract tarball if present — HF cache is read-only so extract elsewhere
             tarball = os.path.join(repo_dir, "task-data.tar.gz")
             if os.path.isfile(tarball):
-                # Check if already extracted by looking for any task directory
-                entries = os.listdir(repo_dir)
-                has_task_dirs = any(e.startswith("task_") for e in entries)
-                if not has_task_dirs:
-                    logger.info(f"Extracting {tarball}...")
-                    subprocess.run(["tar", "-xzf", tarball, "-C", repo_dir], check=True)
-            self._task_data_dir = repo_dir
-            logger.info(f"Task data cached at {self._task_data_dir}")
+                extract_dir = tarball + ".extracted"
+                if not os.path.isdir(extract_dir):
+                    logger.info(f"Extracting {tarball} to {extract_dir}...")
+                    os.makedirs(extract_dir, exist_ok=True)
+                    subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
+                self._task_data_dir = extract_dir
+            else:
+                self._task_data_dir = repo_dir
+            logger.info(f"Task data at {self._task_data_dir}")
 
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
