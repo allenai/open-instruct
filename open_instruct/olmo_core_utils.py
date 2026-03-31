@@ -244,6 +244,10 @@ def load_dataset_distributed(
             dataset_skip_cache=args.skip_cache,
         )
 
+    # Rank 0 loads and caches the dataset to disk first. The barrier ensures
+    # the cache is fully written before other ranks call _load(), which then
+    # reads from the disk cache instead of all racing to download/process in
+    # parallel.
     if is_main_process:
         dataset = _load()
     if is_distributed():
