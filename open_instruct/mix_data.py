@@ -33,7 +33,7 @@ class MixDataArguments:
 
 
 def main() -> None:
-    parser = ArgumentParserPlus((MixDataArguments,))  # ty: ignore[invalid-argument-type]
+    parser = ArgumentParserPlus((MixDataArguments,))  # type: ignore[arg-type]
     args = parser.parse(allow_extra_keys=True)
     assert isinstance(args, MixDataArguments)
 
