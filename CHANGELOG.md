@@ -3,10 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 
+### Changed
+- Decouple `mix_data.py` from `finetune.py` by replacing `FlatArguments` import with a lightweight `MixDataArguments` dataclass (https://github.com/allenai/open-instruct/pull/1573).
+
+### Deprecated
+- Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
+
 ### Fixed
+- Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add a vLLM-based teacher logit sampling pipeline for offline distillation, including `sample_logits_vllm.py`, distillkit sampling writer utilities, and a launch script for generating compressed parquet shards (https://github.com/allenai/open-instruct/pull/1534).
+- Add user-focused documentation for tool use training, RL environments, parser selection, and rollout configuration (https://github.com/allenai/open-instruct/pull/1546).
 - Adds support for flash attention 4, and changes attention implementation to FA2 (https://github.com/allenai/open-instruct/pull/1569).
 - Add Git LFS documentation to README.md and CONTRIBUTING.md (https://github.com/allenai/open-instruct/pull/1570).
 - Auto-detect attention implementation from model config, removing `use_flash_attn` and `attn_backend` flags; add `flash-attn` v2 fallback for Blackwell GPU support (https://github.com/allenai/open-instruct/pull/1567).
