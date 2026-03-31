@@ -1287,6 +1287,10 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
+    if streaming_config.apply_evolving_rubric_reward and vllm_engines:
+        ray.get(_data_prep_actor.set_vllm_engines.remote(vllm_engines))
+        logger.info("======== ✅ vLLM engines registered with DataPreparationActor for evolving rubrics =========")
+
     if vllm_engines:
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
