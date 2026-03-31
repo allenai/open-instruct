@@ -47,7 +47,6 @@ python open_instruct/finetune.py \
     --model_name_or_path EleutherAI/pythia-14m \
     --tokenizer_name EleutherAI/pythia-14m \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
-    --use_flash_attn False \
     --with_tracking --report_to wandb
 ```
 
@@ -64,7 +63,6 @@ python mason.py \
     --model_name_or_path EleutherAI/pythia-14m \
     --tokenizer_name EleutherAI/pythia-14m \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
-    --use_flash_attn False \
     --with_tracking --report_to wandb
 ```
 

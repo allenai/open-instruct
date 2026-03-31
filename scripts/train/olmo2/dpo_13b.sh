@@ -33,7 +33,6 @@ python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --with_tracking \
     --seed 8

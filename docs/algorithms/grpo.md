@@ -6,8 +6,78 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 ## Implemented Variants
 
-- `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing).
-- `grpo_vllm_thread_ray_gtrl.py` is a more vanilla GRPO implementation, using vLLM and Ray.
+- `grpo.py` is the recommended GRPO implementation, built on OLMo-core's native training infrastructure (FSDP). It uses Ray for distributed training with vLLM inference.
+- `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing) with DeepSpeed.
+
+
+## `grpo.py` (OLMo-core)
+
+### Debug Scripts
+
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/single_gpu_grpo.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_grpo.sh` |
+| `scripts/train/debug/multi_node_grpo.sh` | 2 nodes (16 GPUs), Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/multi_node_grpo.sh` |
+| `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` | 2 nodes, tools, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh` |
+
+### Olmo 3 Scripts
+
+| Script | Scale | Description | Launch |
+|--------|-------|-------------|--------|
+| `scripts/train/olmo3/7b_instruct_rl.sh` | 8 nodes (64 GPUs) | Olmo 3 7B Instruct GRPO with multi-task reasoning datasets | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_rl.sh` |
+| `scripts/train/olmo3/7b_think_rl.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Think GRPO with pipeline RL | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_think_rl.sh` |
+| `scripts/train/olmo3/32b_instruct_rl.sh` | 12 nodes (96 GPUs) | Olmo 3 32B Instruct GRPO | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_instruct_rl.sh` |
+| `scripts/train/olmo3/32b_think_rl.sh` | 28 nodes (224 GPUs) | Olmo 3 32B Think GRPO | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_think_rl.sh` |
+| `scripts/train/olmo3/7b_rlzero_math.sh` | 9 nodes (72 GPUs) | Olmo 3 7B RL-Zero for math | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_math.sh` |
+| `scripts/train/olmo3/7b_rlzero_code.sh` | 5 nodes (40 GPUs) | Olmo 3 7B RL-Zero for code | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_code.sh` |
+| `scripts/train/olmo3/7b_rlzero_general.sh` | 5 nodes (40 GPUs) | Olmo 3 7B RL-Zero for general tasks | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_general.sh` |
+| `scripts/train/olmo3/7b_rlzero_instruction_following.sh` | 5 nodes (40 GPUs) | Olmo 3 7B RL-Zero for instruction following | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_instruction_following.sh` |
+| `scripts/train/olmo3/7b_rlzero_mix.sh` | 4 nodes (32 GPUs) | Olmo 3 7B RL-Zero mixed (code, IF, general) | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_rlzero_mix.sh` |
+
+### Key Flags
+
+Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the same flags.
+
+| Group | Flag | Description | Default |
+|-------|------|-------------|---------|
+| **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
+| | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
+| | `--per_device_train_batch_size` | Forward batch size per device | `1` |
+| | `--total_episodes` | Total number of episodes in dataset | `100000` |
+| | `--num_epochs` | Number of epochs to train | `1` |
+| | `--num_mini_batches` | Mini-batches to split a batch into | `1` |
+| | `--seed` | Random seed | `1` |
+| **GRPO Algorithm** | `--beta` | KL coefficient for RLHF objective | `0.05` |
+| | `--clip_lower` | Lower clip range | `0.2` |
+| | `--clip_higher` | Higher clip range (see DAPO) | `0.2` |
+| | `--loss_fn` | Loss function: `dapo` or `cispo` | `dapo` |
+| | `--load_ref_policy` | Load and use reference policy for KL | `True` |
+| **Rollout / Sampling** | `--num_unique_prompts_rollout` | Unique prompts per rollout | `16` |
+| | `--num_samples_per_prompt_rollout` | Samples per prompt in rollout | `4` |
+| | `--temperature` | Sampling temperature | `0.7` |
+| | `--max_prompt_token_length` | Max tokens for prompts | `256` |
+| | `--response_length` | Token length for responses | `256` |
+| | `--pack_length` | Total pack length for packing | `512` |
+| | `--async_steps` | Number of async generation steps | `1` |
+| | `--active_sampling` | Enable active sampling | `False` |
+| **Reward** | `--apply_verifiable_reward` | Apply verifiable reward | `True` |
+| | `--verification_reward` | Verification reward value | `10.0` |
+| | `--apply_r1_style_format_reward` | Apply R1-style format reward | `False` |
+| **Infrastructure** | `--deepspeed_stage` | DeepSpeed stage (0, 2, or 3) | `0` |
+| | `--sequence_parallel_size` | Sequence parallel size across GPUs | `1` |
+| | `--num_learners_per_node` | GPUs per node for training | `[1]` |
+| | `--single_gpu_mode` | Collocate vLLM and actor on same node | `False` |
+| **vLLM** | `--vllm_num_engines` | Number of vLLM engines | `1` |
+| | `--vllm_tensor_parallel_size` | Tensor parallelism size | `1` |
+| | `--vllm_gpu_memory_utilization` | GPU memory utilization ratio | `0.9` |
+| **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+| | `--gradient_checkpointing` | Use gradient checkpointing | `False` |
+| | `--chat_template_name` | Chat template to use | `None` |
+| **Saving** | `--output_dir` | Output directory for checkpoints | `output` |
+| | `--save_freq` | Save every N train steps | `200` |
+| | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+
+---
 
 
 
@@ -35,16 +105,15 @@ Now imagine there are cases where the model generates a really long response (8k
 
 ![](grpo/additive_format_reward.png)
 
-### Debug (Single GPU)
+### Debug Scripts
 
-You can run the script in a single GPU mode to debug the training process.
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/grpo_fast.sh` | 1 GPU, local | `bash scripts/train/debug/grpo_fast.sh` |
+| `scripts/train/debug/grpo_fast_3_gpu.sh` | 3 GPUs (2 train, 1 inference), local | `bash scripts/train/debug/grpo_fast_3_gpu.sh` |
+| `scripts/train/debug/grpo_integration_test.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/grpo_integration_test.sh` |
 
-```bash
-# single GPU
-bash scripts/train/debug/grpo_fast.sh
-# 3 GPU: 2 for training, 1 for inference (a more realistic setting for async training)
-bash scripts/train/debug/grpo_fast_3_gpu.sh
-```
+`grpo_fast.py` accepts the same flags as `grpo.py`. See the [Key Flags table above](#key-flags).
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
 
@@ -56,7 +125,7 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 
 ???+ info
 
-    Here the `grpo_fast.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than `grpo_vllm_thread_ray_gtrl.py` which uses 2 nodes (12 GPUs for training and 4 GPUs for inference).
+    Here the `grpo_fast.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than the legacy `grpo_vllm_thread_ray_gtrl.py` which used 2 nodes (12 GPUs for training and 4 GPUs for inference).
 
 
 ![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo_fast.png)
@@ -175,39 +244,16 @@ bash scripts/train/olmo2/grpo_fast_13b_zero.sh
 
 ### Training Metrics
 
-See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general metrics. `grpo_fast.py` includes the following additional metrics:
+`grpo_fast.py` includes the following additional metrics beyond the standard training metrics:
 
 
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
 * `other/packed_ratio`: The ratio of the packed sequences vs the total number of sequences. The lower the ratio, the more efficiently we have packed the sequences. E.g., if we have 100 sequences and the ratio is 0.1, it means we only have to do 10% of the forward passes than if we didn't pack.
 
 
-## `grpo_vllm_thread_ray_gtrl.py`
-
-
-This implementation has the following features:
-
-- Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
-- Uses vLLM and Ray to parallelize the training process, based on how [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF) does it
-
-
-### Debug (Single GPU)
-
-You can run the script in a single GPU mode to debug the training process.
-
-```bash
-bash scripts/train/debug/grpo.sh
-```
-
-
-
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (2 Nodes)
 
-You can reproduce our `allenai/Llama-3.1-Tulu-3.1-8B` model by running the following command:
-
-```bash
-bash scripts/train/tulu3/grpo_8b.sh
-```
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py) script, which has since been removed. The experiments were run at commit [`745bf58d321c`](https://github.com/allenai/open-instruct/tree/745bf58d321c). They are preserved here for historical reference. See the [original launch script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/tulu3/grpo_8b.sh) for the launch command.
 
 ![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo.png)
 ![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo-time.png)
@@ -234,11 +280,7 @@ bash scripts/train/tulu3/grpo_8b.sh
 
 ### Reproduce `allenai/OLMo-2-1124-7B-Instruct` but better (2 Nodes)
 
-You can reproduce our `allenai/OLMo-2-1124-7B-Instruct` model by running the following command:
-
-```bash
-bash scripts/train/olmo2/grpo_7b.sh
-```
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. See the [deleted script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/olmo2/grpo_7b.sh) for the original launch command.
 
 ![grpo_olmo2_7b](grpo/olmo2_7b_grpo.png)
 ![grpo_olmo2_7b_time](grpo/olmo2_7b_grpo-time.png)
@@ -265,11 +307,7 @@ bash scripts/train/olmo2/grpo_7b.sh
 
 ### (🧪 Experimental) Qwen 2.5 7B Zero-style
 
-Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), which is simply a zero-shot version of the RLVR MATH dataset. The training is done starting from a base model, similar to how [DeepSeek R1](https://arxiv.org/abs/2501.12948) does it.
-
-```bash
-bash scripts/train/qwen/grpo_7b.sh
-```
+These results were produced with the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py), which has since been removed. See the [deleted script](https://github.com/allenai/open-instruct/blob/745bf58d321c/scripts/train/qwen/grpo_7b.sh) for the original launch command. Training was done on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs) starting from a base model, similar to [DeepSeek R1](https://arxiv.org/abs/2501.12948).
 
 ![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_zero.png)
 ![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)

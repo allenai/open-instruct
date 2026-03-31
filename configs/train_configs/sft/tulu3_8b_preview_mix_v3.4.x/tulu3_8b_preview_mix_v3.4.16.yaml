@@ -1,6 +1,5 @@
 model_name_or_path: meta-llama/Meta-Llama-3-8B
 model_revision: main
-use_flash_attn: true
 tokenizer_name: meta-llama/Meta-Llama-3-8B
 use_slow_tokenizer: true
 dataset_mixer:
