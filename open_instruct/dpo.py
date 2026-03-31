@@ -8,7 +8,7 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -18,9 +18,10 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
+from olmo_core.train.callbacks import ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
@@ -52,7 +53,7 @@ def export_to_hf(
 
 
 def _load_dataset_distributed(
-    args: dpo_utils.ExperimentConfig,
+    args: dpo_utils.DPOExperimentConfig,
     tc: dataset_transformation.TokenizerConfig,
     transform_fn_args: list[dict],
     is_main_process: bool,
@@ -83,7 +84,7 @@ def _load_dataset_distributed(
     return dataset
 
 
-def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
+def _setup_model(args: dpo_utils.DPOExperimentConfig, device: torch.device):
     """Build OLMo-core model architecture (weights loaded after parallelization)."""
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
@@ -98,7 +99,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     return model, model_config
 
 
-def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
+def _setup_scheduler(args: dpo_utils.DPOExperimentConfig, num_training_steps: int):
     """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
     if args.lr_scheduler_type == "cosine":
@@ -110,7 +111,7 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     return scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
+def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -127,8 +128,9 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
             entity=args.wandb_entity,
             config=json_config,
         )
-    checkpointing_steps = int(args.checkpointing_steps)
-    trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
+        args.checkpointing_steps, args.ephemeral_save_interval
+    )
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
@@ -145,7 +147,7 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
 
 
 def _handle_post_training(
-    args: dpo_utils.ExperimentConfig,
+    args: dpo_utils.DPOExperimentConfig,
     model,
     model_config,
     tokenizer,
@@ -197,7 +199,7 @@ def _handle_post_training(
         model_utils.push_folder_to_hub(hf_model_path, args.hf_repo_id, args.hf_repo_revision)
 
 
-def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
+def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
     if args.model_name_or_path is None:
         raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
@@ -216,14 +218,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
 
-    tc.tokenizer_name_or_path = (
-        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    )
-    tokenizer = tc.tokenizer
-
-    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
-    if utils.is_beaker_job():
-        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    # DPO's DPOExperimentConfig uses inheritance, not composition, so args satisfies both
+    # ModelConfig and DatasetConfig. TODO(finbarrtimbers): refactor to use composition.
+    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args, args, tc)
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
@@ -231,19 +228,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
-        dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
-        )
+        olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process=True)
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
@@ -254,7 +239,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dp_rank = global_rank // tp_degree
     is_main_process = global_rank == 0
 
-    dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
+    dataset = olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
 
@@ -272,7 +257,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = _setup_model(args, device)
+    model, model_config = olmo_core_utils.setup_model(
+        args.model_name_or_path, args.config_name, cast(AttentionBackendName, args.attn_implementation)
+    )
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
@@ -438,6 +425,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 if __name__ == "__main__":
     from open_instruct.utils import ArgumentParserPlus
 
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, dataset_transformation.TokenizerConfig))
     args, tc = parser.parse()
     main(args, tc)
