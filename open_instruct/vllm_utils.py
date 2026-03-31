@@ -99,6 +99,29 @@ logger = logger_utils.setup_logger(__name__)
 MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
 MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
+# ---------------------------------------------------------------------------
+# Monkey-patch: transformers 5.4+ rope validation with Qwen3.5
+#
+# The @strict decorator on Qwen3_5TextConfig runs validate_rope during
+# __post_init__. When vLLM constructs or deserializes the config,
+# ignore_keys_at_rope_validation can arrive as a list (JSON has no set
+# type), causing "list | set" TypeErrors or StrictDataclass validation
+# failures. Patch validate_rope to normalise ignore_keys to a set.
+# ---------------------------------------------------------------------------
+import transformers  # noqa: E402
+
+_original_validate_rope = transformers.PreTrainedConfig.validate_rope
+
+
+def _patched_validate_rope(self):
+    ignore = getattr(self, "ignore_keys_at_rope_validation", None)
+    if isinstance(ignore, list):
+        self.ignore_keys_at_rope_validation = set(ignore)
+    return _original_validate_rope(self)
+
+
+transformers.PreTrainedConfig.validate_rope = _patched_validate_rope
+
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
