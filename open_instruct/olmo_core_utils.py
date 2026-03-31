@@ -135,7 +135,7 @@ class CheckpointConfig:
 
     output_dir: str = "output/"
     """The output directory where the model predictions and checkpoints will be written."""
-    checkpointing_steps: int | str = 500
+    checkpointing_steps: int = 500
     """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
     ephemeral_save_interval: int | None = None
     """Temporary checkpoint cadence for OLMo-core trainers. Must be lower than checkpointing_steps when set."""
@@ -146,11 +146,11 @@ class CheckpointConfig:
 
 
 def build_checkpointer_callback(
-    checkpointing_steps: int | str, ephemeral_save_interval: int | None, save_async: bool = True
+    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
     return CheckpointerCallback(
-        save_interval=int(checkpointing_steps), ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
+        save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
     )
 
 
