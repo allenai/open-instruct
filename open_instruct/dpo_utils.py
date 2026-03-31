@@ -322,12 +322,6 @@ class ExperimentConfig(
     """The priority of auto-launched evaluation jobs"""
 
     @property
-    def attn_implementation(self) -> model_utils.AttentionBackendName:
-        if self.attn_backend == "auto":
-            return model_utils.detect_attn_implementation()
-        return model_utils.AttentionBackendName(self.attn_backend)
-
-    @property
     def forward_fn(self) -> Callable:
         fn = concatenated_forward if self.concatenated_forward else separate_forward
         if self.packing:
@@ -337,6 +331,7 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        ModelConfig.__post_init__(self)
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."

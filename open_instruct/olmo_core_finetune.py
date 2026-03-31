@@ -27,13 +27,14 @@ Usage:
 
 import dataclasses
 import os
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
 from olmo_core.train import Duration, TrainerConfig, prepare_training_environment, teardown_training_environment
@@ -100,7 +101,9 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = olmo_core_utils.setup_model(
-        args.model.model_name_or_path, args.model.config_name, args.model.attn_backend
+        args.model.model_name_or_path,
+        args.model.config_name,
+        cast(AttentionBackendName, args.model.attn_implementation),
     )
 
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps

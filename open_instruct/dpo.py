@@ -8,7 +8,7 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -18,6 +18,7 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import ProfilerCallback
@@ -256,7 +257,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = olmo_core_utils.setup_model(args.model_name_or_path, args.config_name, args.attn_backend)
+    model, model_config = olmo_core_utils.setup_model(
+        args.model_name_or_path, args.config_name, cast(AttentionBackendName, args.attn_implementation)
+    )
 
     if args.packing:
         logger.info("Using packing/padding-free collation")

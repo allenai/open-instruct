@@ -11,12 +11,11 @@ import torch.distributed as dist
 import transformers
 from olmo_core.distributed.utils import is_distributed
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.train.callbacks import CheckpointerCallback
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -42,14 +41,14 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     config_name: str | None = None
     """Pretrained config name or path if not the same as model_name."""
-    use_flash_attn: bool = True
-    """Whether to use flash attention in the model training"""
-    attn_backend: str = "auto"
-    """Attention backend for OLMo-core models. Options: flash_2, flash_3, auto."""
+    attn_implementation: AttentionBackendName | None = None
+    """Which attention implementation to use. If None, auto-detects the best available."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    low_cpu_mem_usage: bool = False
-    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+
+    def __post_init__(self):
+        if self.attn_implementation is None:
+            self.attn_implementation = model_utils.detect_attn_implementation()
 
 
 @dataclass
@@ -205,23 +204,15 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
-def resolve_attn_backend(attn_backend: str) -> str:
-    if attn_backend == "auto":
-        device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
-        is_h100 = "h100" in device_name or "h800" in device_name
-        attn_backend = "flash_3" if (is_h100 and has_flash_attn_3()) else "flash_2"
-        logger.info(f"Auto-detected attn_backend={attn_backend} for device: {device_name}")
-    return attn_backend
-
-
 def setup_model(
-    model_name_or_path: str, config_name: str | None, attn_backend: str
+    model_name_or_path: str, config_name: str | None, attn_implementation: AttentionBackendName
 ) -> tuple[Transformer, TransformerConfig]:
     hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    resolved_backend = resolve_attn_backend(attn_backend)
-    model_config = get_transformer_config(config_name or model_name_or_path, vocab_size, attn_backend=resolved_backend)
+    model_config = get_transformer_config(
+        config_name or model_name_or_path, vocab_size, attn_backend=attn_implementation
+    )
     model = model_config.build(init_device="cpu")
     return model, model_config
 
