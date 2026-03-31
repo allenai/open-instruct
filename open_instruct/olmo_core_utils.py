@@ -52,7 +52,7 @@ class ModelConfig:
 
 
 @dataclass
-class BaseTrainingConfig:
+class TrainingConfig:
     """Shared training hyperparameters used by SFT, DPO, and other OLMo-core trainers."""
 
     num_epochs: int = 1

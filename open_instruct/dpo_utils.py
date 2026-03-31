@@ -46,12 +46,12 @@ from open_instruct.dataset_transformation import (
     load_dataset_configs,
 )
 from open_instruct.olmo_core_utils import (
-    BaseTrainingConfig,
     CheckpointConfig,
     DatasetConfig,
     LoggingConfig,
     ModelConfig,
     TrackingConfig,
+    TrainingConfig,
 )
 from open_instruct.padding_free_collator import calculate_per_token_logps
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
@@ -115,8 +115,8 @@ class DPOConfig:
 
 
 @dataclass
-class TrainingConfig(BaseTrainingConfig):
-    """DPO-specific training configuration extending BaseTrainingConfig."""
+class DPOTrainingConfig(TrainingConfig):
+    """DPO-specific training configuration extending TrainingConfig."""
 
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
@@ -202,7 +202,7 @@ class ExperimentConfig(
     TrackingConfig,
     ModelConfig,
     DPOConfig,
-    TrainingConfig,
+    DPOTrainingConfig,
     DatasetConfig,
     LoRAConfig,
     LoggingConfig,

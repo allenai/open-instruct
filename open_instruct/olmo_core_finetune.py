@@ -64,7 +64,7 @@ _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
 class SFTArguments:
     tracking: olmo_core_utils.TrackingConfig
     model: olmo_core_utils.ModelConfig
-    training: olmo_core_utils.BaseTrainingConfig
+    training: olmo_core_utils.TrainingConfig
     dataset: olmo_core_utils.DatasetConfig
     logging: olmo_core_utils.LoggingConfig
     checkpoint: olmo_core_utils.CheckpointConfig
@@ -224,7 +224,7 @@ if __name__ == "__main__":
         (  # ty: ignore[invalid-argument-type]
             olmo_core_utils.TrackingConfig,
             olmo_core_utils.ModelConfig,
-            olmo_core_utils.BaseTrainingConfig,
+            olmo_core_utils.TrainingConfig,
             olmo_core_utils.DatasetConfig,
             olmo_core_utils.LoggingConfig,
             olmo_core_utils.CheckpointConfig,
