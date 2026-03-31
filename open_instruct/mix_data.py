@@ -36,7 +36,7 @@ class MixDataArguments:
 
 def main() -> None:
     parser = ArgumentParserPlus((MixDataArguments,))  # type: ignore[arg-type]
-    (args,) = parser.parse()  # type: ignore[misc]
+    (args,) = parser.parse(allow_extra_keys=True)  # type: ignore[misc]
     assert isinstance(args, MixDataArguments)
 
     # assert that data_mixer is not none in config
