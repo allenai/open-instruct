@@ -215,6 +215,7 @@ include = [
     "open_instruct/distillkit/compression/config.py",
     "open_instruct/distillkit/compression/monotonic_logprobs.py",
     "open_instruct/distillkit/sample_common.py",
+    "open_instruct/rubrics/evolving_rubric_step.py",
     "open_instruct/rubrics/metrics.py",
     "open_instruct/rubrics/prompts.py",
     "open_instruct/rubrics/rubric_utils.py",
