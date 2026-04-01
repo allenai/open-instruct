@@ -1270,7 +1270,7 @@ class DataPreparationActor:
 
             # For PPO with value model: also pack raw rewards
             # Rewards are placed at the last token of each response (end-of-sequence reward)
-            if self.config.use_value_model:
+            if self.config.use_value_model or self.config.use_generative_value_model:
                 lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
                 lookup_rewards[1:] = scores
                 # Create packed rewards - only place reward at the last token of each sequence
