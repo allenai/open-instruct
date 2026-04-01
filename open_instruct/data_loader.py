@@ -14,6 +14,7 @@
 
 import logging
 import os
+import random
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -329,6 +330,10 @@ class StreamingDataLoaderConfig:
     use_value_model: bool = field(default=False, init=False)
     """When True, pass raw rewards to the trainer for GAE computation with value model.
     Advantages will still be computed for logging but won't be used for training."""
+    gt_conditioning_template: str = field(default="answer_prefix", init=False)
+    """Synced from ExperimentConfig for building sibling rollout context."""
+    rollout_context_num_siblings: int = field(default=4, init=False)
+    """Synced from ExperimentConfig. Number of sibling rollouts for 'rollout_context' template."""
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -965,6 +970,9 @@ def prepare_collated_data_for_workers(
         per_device_packed_ground_truths = None
         if packed_sequences.ground_truths is not None:
             per_device_packed_ground_truths = packed_sequences.ground_truths[B * i : B * (i + 1)]
+        per_device_packed_sibling_rollouts = None
+        if packed_sequences.sibling_rollouts is not None:
+            per_device_packed_sibling_rollouts = packed_sequences.sibling_rollouts[B * i : B * (i + 1)]
         if include_rewards:
             assert packed_sequences.rewards is not None, "rewards must be set when include_rewards=True"
             assert packed_sequences.dones is not None, "dones must be set when include_rewards=True"
@@ -982,6 +990,7 @@ def prepare_collated_data_for_workers(
         collated_rewards = [] if include_rewards else None
         collated_dones = [] if include_rewards else None
         collated_ground_truths = [] if per_device_packed_ground_truths is not None else None
+        collated_sibling_rollouts = [] if per_device_packed_sibling_rollouts is not None else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1006,13 +1015,11 @@ def prepare_collated_data_for_workers(
                 collated_rewards.append(
                     collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0, pin_memory)
                 )
-                collated_dones.append(
-                    collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory)
-                )
+                collated_dones.append(collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory))
             if per_device_packed_ground_truths is not None:
-                collated_ground_truths.append(
-                    [per_device_packed_ground_truths[idx] for idx in micro_range]
-                )
+                collated_ground_truths.append([per_device_packed_ground_truths[idx] for idx in micro_range])
+            if per_device_packed_sibling_rollouts is not None:
+                collated_sibling_rollouts.append([per_device_packed_sibling_rollouts[idx] for idx in micro_range])
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1024,6 +1031,7 @@ def prepare_collated_data_for_workers(
                 rewards=collated_rewards,
                 dones=collated_dones,
                 ground_truths=collated_ground_truths if collated_ground_truths else None,
+                sibling_rollouts=collated_sibling_rollouts if collated_sibling_rollouts else None,
             )
         )
     return collated_data
@@ -1289,12 +1297,38 @@ class DataPreparationActor:
                     gt_list = []
                     for idx in unique_indices:
                         gt = lookup_ground_truths[idx] if idx < len(lookup_ground_truths) else ""
-                        # Ground truths may be wrapped in a list (e.g., ["42"]). Unwrap to string.
                         if isinstance(gt, list):
                             gt = gt[0] if len(gt) > 0 else ""
                         gt_list.append(str(gt))
                     packed_ground_truths.append(gt_list)
                 packed_sequences.ground_truths = packed_ground_truths
+
+            # Build sibling rollout info for 'rollout_context' value model template
+            if (
+                self.config.gt_conditioning_template == "rollout_context"
+                and batch.decoded_responses is not None
+                and packed_sequences.dones is not None
+            ):
+                n_per_prompt = self.config.num_samples_per_prompt_rollout
+                num_siblings = self.config.rollout_context_num_siblings
+                packed_sibling_rollouts: list[list[list[tuple[str, bool]]]] = []
+                for dones in packed_sequences.dones:
+                    unique_indices = sorted(set(int(d) for d in dones.tolist() if d > 0))
+                    pack_siblings: list[list[tuple[str, bool]]] = []
+                    for idx in unique_indices:
+                        sample_idx = idx - 1  # dones are 1-indexed
+                        group_start = (sample_idx // n_per_prompt) * n_per_prompt
+                        group_end = min(group_start + n_per_prompt, len(batch.decoded_responses))
+                        group_indices = [j for j in range(group_start, group_end) if j != sample_idx]
+                        chosen = random.sample(group_indices, min(num_siblings, len(group_indices)))
+                        siblings: list[tuple[str, bool]] = []
+                        for j in chosen:
+                            text = batch.decoded_responses[j] if j < len(batch.decoded_responses) else ""
+                            is_correct = scores[j] > 0 if j < len(scores) else False
+                            siblings.append((text, bool(is_correct)))
+                        pack_siblings.append(siblings)
+                    packed_sibling_rollouts.append(pack_siblings)
+                packed_sequences.sibling_rollouts = packed_sibling_rollouts
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences,
