@@ -330,6 +330,8 @@ class StreamingDataLoaderConfig:
     use_value_model: bool = field(default=False, init=False)
     """When True, pass raw rewards to the trainer for GAE computation with value model.
     Advantages will still be computed for logging but won't be used for training."""
+    use_generative_value_model: bool = field(default=False, init=False)
+    """When True, pass raw rewards for generative value model GAE computation."""
     gt_conditioning_template: str = field(default="answer_prefix", init=False)
     """Synced from ExperimentConfig for building sibling rollout context."""
     rollout_context_num_siblings: int = field(default=4, init=False)
@@ -1335,7 +1337,7 @@ class DataPreparationActor:
                 self.dp_world_size,
                 self.per_device_train_batch_size,
                 self.tokenizer.pad_token_id,
-                include_rewards=self.config.use_value_model,
+                include_rewards=self.config.use_value_model or self.config.use_generative_value_model,
             )
 
             if len(result.responses) == 0:

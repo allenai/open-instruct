@@ -1,10 +1,10 @@
 #!/bin/bash
-# Qwen3-4B-Base PPO with generative value model
-# Uses a separate LM that reasons about correctness probability at each chunk boundary
-# Trained with MSE reward loss + REINFORCE on generated reasoning
+# Qwen3-4B-Base generative value model pretraining (1000 steps)
+# Trains only the generative value model via REINFORCE (reward = 1 - |pred - outcome|)
+# Policy LR=0 so the policy is frozen — only the generative value model learns
 # 1 node (8 GPUs): 4 learner + 4 vLLM engines, 32 prompts x 16 rollouts
 DDMM=$(date +"%d%m")
-exp_name=vip_ppo_genvalue_${DDMM}_qwen3_4b_math
+exp_name=vip_genvalue_pretrain_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -34,7 +34,7 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
-    --learning_rate 1e-6 \
+    --learning_rate 0.0 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
@@ -65,16 +65,13 @@ uv run python mason.py \
     --loss_fn dapo \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
-    --load_ref_policy True \
-    --oe_eval_max_length 10240 \
-    --try_launch_beaker_eval_jobs_on_weka True \
-    --oe_eval_tasks aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero \
-    --oe_eval_gpu_multiplier 4 \
+    --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False \
     --use_generative_value_model \
     --value_learning_rate 5e-6 \
-    --generative_value_chunk_size 64 \
+    --gamma 1.0 \
+    --gae_lambda 0.95 \
+    --generative_value_chunk_size 512 \
     --generative_value_max_think_tokens 256 \
-    --generative_value_loss_coef 0.5 \
     --generative_value_reinforce_coef 0.1

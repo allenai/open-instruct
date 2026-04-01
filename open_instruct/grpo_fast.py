@@ -658,10 +658,12 @@ class PolicyTrainerRayProcess(RayProcess):
         """Build the prompt for the generative value model at a chunk boundary."""
         return (
             f"You will be incrementally given a response to the question: {question_text}\n"
-            f"At each <value_think> tag, reason about the probability the model gets the answer "
-            f"right given its reasoning so far, and that the final answer is {gt_answer}. "
-            f"When you have an answer, output {{score: X}} where X is between 0 and 1.\n"
-            f"{partial_response_text}\n<value_think>"
+            f"The correct answer is: {gt_answer}\n"
+            f"At each <value_think> tag, reason about the probability the response will reach "
+            f"the correct answer given its reasoning so far, then output your estimate.\n"
+            f"Format: reason briefly, then output exactly {{score: X}} where X is between 0 and 1.\n"
+            f"Example: The approach looks correct so far... {{score: 0.75}}\n"
+            f"\n{partial_response_text}\n<value_think>"
         )
 
     def _parse_generative_value_score(self, text: str) -> float | None:
@@ -676,13 +678,16 @@ class PolicyTrainerRayProcess(RayProcess):
 
     @torch.no_grad()
     def _generate_from_generative_value_model(
-        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, max_new_tokens: int
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, max_new_tokens: int, temperature: float = 0.7
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Autoregressive generation from the generative value model.
+        """Generate from the generative value model using HF generate() with KV cache.
+
+        Uses temperature sampling (not greedy) so REINFORCE has non-zero gradient variance.
+        Stops at EOS or </value_think> closing tag.
 
         Returns:
-            generated_ids: Full sequence (input + generated), shape (batch, input_len + gen_len)
-            gen_mask: Boolean mask over generated tokens, shape (batch, input_len + gen_len)
+            full_ids: Full sequence (input + generated), shape (batch, input_len + max_gen_len), padded
+            gen_mask: Boolean mask over generated tokens, shape (batch, input_len + max_gen_len)
         """
         model = (
             self.generative_value_model.module
@@ -690,73 +695,101 @@ class PolicyTrainerRayProcess(RayProcess):
             else self.generative_value_model
         )
         model.eval()
-        batch_size = input_ids.shape[0]
-        device = input_ids.device
 
-        current_ids = input_ids
-        current_attn = attention_mask
-        gen_lengths = torch.zeros(batch_size, dtype=torch.long, device=device)
-        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
-        eos_id = self.tokenizer.eos_token_id
+        # Temporarily enable KV cache for efficient autoregressive generation
+        model.config.use_cache = True
 
-        all_generated = []
-        for _step in range(max_new_tokens):
-            outputs = model(input_ids=current_ids, attention_mask=current_attn, return_dict=True)
-            next_logits = outputs.logits[:, -1, :]
-            next_token = next_logits.argmax(dim=-1)  # Greedy decoding
-            next_token = next_token.masked_fill(finished, self.pad_token_id)
-            all_generated.append(next_token)
+        # Build stop criteria: EOS + </value_think>
+        stop_token_ids = [self.tokenizer.eos_token_id]
+        # Add </value_think> as a stop sequence if it's a single token
+        if len(self._value_think_close_ids) == 1:
+            stop_token_ids.append(self._value_think_close_ids[0])
 
-            finished = finished | (next_token == eos_id)
-            gen_lengths = gen_lengths + (~finished).long()
-            if finished.all():
-                break
+        # Use HF generate() which handles KV cache efficiently
+        output_ids = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=temperature > 0,
+            temperature=temperature if temperature > 0 else None,
+            eos_token_id=stop_token_ids,
+            pad_token_id=self.pad_token_id,
+        )
 
-            current_ids = torch.cat([current_ids, next_token.unsqueeze(1)], dim=1)
-            current_attn = torch.cat([current_attn, (~finished).long().unsqueeze(1)], dim=1)
-
+        model.config.use_cache = False
         model.train()
 
-        if all_generated:
-            generated_tokens = torch.stack(all_generated, dim=1)
-            full_ids = torch.cat([input_ids, generated_tokens], dim=1)
-            gen_mask = torch.zeros(full_ids.shape, dtype=torch.bool, device=device)
-            gen_mask[:, input_ids.shape[1] :] = True
+        # Build gen_mask: True for generated tokens, False for prompt and padding
+        prompt_len = input_ids.shape[1]
+        batch_size = input_ids.shape[0]
+        device = input_ids.device
+        gen_mask = torch.zeros(output_ids.shape, dtype=torch.bool, device=device)
+        for b in range(batch_size):
+            # Find where generation ends (first pad token after prompt, or end of sequence)
+            gen_tokens = output_ids[b, prompt_len:]
+            gen_len = (gen_tokens != self.pad_token_id).sum().item()
+            gen_mask[b, prompt_len : prompt_len + gen_len] = True
+
+        # Handle multi-token </value_think> stop: check and truncate if needed
+        if len(self._value_think_close_ids) > 1:
+            close_tag = self._value_think_close_ids
             for b in range(batch_size):
-                if gen_lengths[b] < generated_tokens.shape[1]:
-                    gen_mask[b, input_ids.shape[1] + gen_lengths[b] :] = False
-        else:
-            full_ids = input_ids
-            gen_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+                gen_tokens = output_ids[b, prompt_len:].tolist()
+                # Search for the close tag in generated tokens
+                for t in range(len(gen_tokens) - len(close_tag) + 1):
+                    if gen_tokens[t : t + len(close_tag)] == close_tag:
+                        # Truncate gen_mask after the close tag
+                        gen_end = prompt_len + t + len(close_tag)
+                        gen_mask[b, gen_end:] = False
+                        break
 
-        return full_ids, gen_mask
+        return output_ids, gen_mask
 
-    def _train_generative_value_model(
-        self, data_BT: data_types.CollatedBatchData, num_samples: int, training_step: int
-    ) -> None:
-        """Train the generative value model using chunked prompting with MSE + REINFORCE."""
+    def _compute_generative_values(
+        self, data_BT: data_types.CollatedBatchData, num_samples: int
+    ) -> tuple[list[torch.Tensor], list[dict]]:
+        """Generate value predictions at chunk boundaries and produce per-token value tensors for GAE.
+
+        For each sub-sequence in the batch:
+        1. Split response into chunks of generative_value_chunk_size tokens
+        2. At each chunk boundary, generate reasoning + {score: X}
+        3. Fill a values tensor where each token gets the value predicted at its chunk boundary
+
+        Returns:
+            values_BT: List of value tensors, shape (batch_size, seq_len - 1), compatible with GAE
+            gen_data: List of generation data dicts for REINFORCE training
+        """
         chunk_size = self.args.generative_value_chunk_size
         max_think_tokens = self.args.generative_value_max_think_tokens
         device = next(self.generative_value_model.parameters()).device
 
-        all_prompts: list[dict] = []
+        values_BT: list[torch.Tensor] = []
+        all_gen_data: list[dict] = []
 
         for i in range(num_samples):
             if data_BT.dones is None or data_BT.rewards is None:
+                values_BT.append(torch.zeros_like(data_BT.response_masks[i][:, 1:], dtype=torch.float32))
                 continue
+
             dones = data_BT.dones[i]
             rewards = data_BT.rewards[i]
             query_response = data_BT.query_responses[i]
             response_mask = data_BT.response_masks[i]
             gt_list = data_BT.ground_truths[i] if data_BT.ground_truths is not None else None
 
-            for b in range(query_response.shape[0]):
+            batch_size, seq_len = query_response.shape
+            # Values tensor matches shifted convention (seq_len - 1)
+            values = torch.zeros(batch_size, seq_len - 1, device=device, dtype=torch.float32)
+
+            for b in range(batch_size):
                 eos_positions = (dones[b] > 0).nonzero(as_tuple=True)[0]
                 start = 0
                 gt_idx = 0
+
                 for eos_pos in eos_positions:
                     end = eos_pos.item() + 1
                     reward = rewards[b, eos_pos].item()
+                    actual_outcome = 1.0 if reward > 0 else 0.0
                     seq_tokens = query_response[b, start:end]
                     resp_mask = response_mask[b, start:end]
 
@@ -776,114 +809,156 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     resp_len = len(response_tokens)
                     num_chunks = max(1, (resp_len + chunk_size - 1) // chunk_size)
+
+                    # Collect all chunk prompts for this sub-sequence
+                    chunk_prompts = []
+                    chunk_boundaries = []  # (chunk_start_in_seq, chunk_end_in_seq) in the values tensor
                     for c in range(num_chunks):
-                        chunk_end = min((c + 1) * chunk_size, resp_len)
-                        partial_tokens = response_tokens[:chunk_end]
+                        chunk_end_tok = min((c + 1) * chunk_size, resp_len)
+                        partial_tokens = response_tokens[:chunk_end_tok]
                         partial_text = self.tokenizer.decode(partial_tokens, skip_special_tokens=True)
                         prompt_text = self._build_generative_value_prompt(question_text, gt_answer, partial_text)
-                        all_prompts.append({"prompt_text": prompt_text, "actual_reward": 1.0 if reward > 0 else 0.0})
+                        chunk_prompts.append(prompt_text)
+
+                        # Map chunk to positions in the shifted values tensor
+                        # Response starts at (start + resp_start) in the original sequence
+                        # In the shifted tensor (seq_len - 1), position p corresponds to predicting value at p+1
+                        chunk_start_seq = start + resp_start + c * chunk_size
+                        chunk_end_seq = start + resp_start + chunk_end_tok
+                        # Shift by -1 for the input-shifted convention
+                        v_start = max(0, chunk_start_seq - 1)
+                        v_end = min(seq_len - 1, chunk_end_seq - 1)
+                        chunk_boundaries.append((v_start, v_end))
+
+                    # Batch generate for all chunks of this sub-sequence
+                    if chunk_prompts:
+                        tokenized = self.tokenizer(
+                            chunk_prompts, return_tensors="pt", padding=True, truncation=True, max_length=2048
+                        ).to(device)
+                        input_ids = tokenized["input_ids"]
+                        attn_mask = tokenized["attention_mask"]
+                        prompt_len = input_ids.shape[1]
+
+                        full_ids, gen_mask = self._generate_from_generative_value_model(
+                            input_ids, attn_mask, max_think_tokens
+                        )
+
+                        generated_texts = self.tokenizer.batch_decode(
+                            full_ids[:, prompt_len:], skip_special_tokens=True
+                        )
+
+                        for c, (text, (v_start, v_end)) in enumerate(zip(generated_texts, chunk_boundaries)):
+                            score = self._parse_generative_value_score(text)
+                            pred_value = max(0.0, min(1.0, score)) if score is not None else 0.5
+
+                            # Fill values tensor: each token in this chunk gets this value
+                            values[b, v_start:v_end] = pred_value
+
+                            # Store generation data for REINFORCE training
+                            all_gen_data.append(
+                                {
+                                    "full_ids": full_ids[c : c + 1],
+                                    "gen_mask": gen_mask[c : c + 1],
+                                    "prompt_len": prompt_len,
+                                    "predicted_score": pred_value,
+                                    "actual_outcome": actual_outcome,
+                                    "parsed": score is not None,
+                                }
+                            )
 
                     start = end
                     gt_idx += 1
 
-        if not all_prompts:
+            values_BT.append(values)
+
+        return values_BT, all_gen_data
+
+    def _train_generative_value_model_reinforce(self, gen_data: list[dict]) -> None:
+        """Train the generative value model with REINFORCE using stored generation data.
+
+        Reward for each generation: 1 - |predicted_score - actual_outcome|
+        (1.0 = perfect prediction, 0.0 = maximally wrong)
+        Rewards are baselined (mean-subtracted) for variance reduction.
+        """
+        if not gen_data:
             return
 
-        # Process in batches to avoid OOM
-        max_batch = min(len(all_prompts), self.args.per_device_train_batch_size * 2)
-        prompt_indices = list(range(len(all_prompts)))
-        random.shuffle(prompt_indices)
-        prompt_indices = prompt_indices[:max_batch]
+        device = next(self.generative_value_model.parameters()).device
 
-        total_mse_loss = 0.0
+        # Subsample if too many
+        max_samples = self.args.per_device_train_batch_size * 4
+        if len(gen_data) > max_samples:
+            gen_data = random.sample(gen_data, max_samples)
+
+        # Compute rewards: 1 - |pred - actual| (higher = better prediction)
+        rewards = torch.tensor(
+            [1.0 - abs(d["predicted_score"] - d["actual_outcome"]) for d in gen_data],
+            device=device,
+            dtype=torch.float32,
+        )
+        # Baseline for variance reduction
+        reward_baseline = rewards.mean()
+        baselined_rewards = rewards - reward_baseline
+
         total_reinforce_loss = 0.0
-        num_scored = 0
+        total_mse = 0.0
+        num_parsed = sum(1 for d in gen_data if d["parsed"])
 
-        for batch_start in range(0, len(prompt_indices), self.args.per_device_train_batch_size):
-            batch_indices = prompt_indices[batch_start : batch_start + self.args.per_device_train_batch_size]
-            batch_prompts = [all_prompts[idx] for idx in batch_indices]
-            batch_rewards = torch.tensor(
-                [p["actual_reward"] for p in batch_prompts], device=device, dtype=torch.float32
+        # Process in mini-batches
+        indices = list(range(len(gen_data)))
+        random.shuffle(indices)
+        for batch_start in range(0, len(indices), self.args.per_device_train_batch_size):
+            batch_idx = indices[batch_start : batch_start + self.args.per_device_train_batch_size]
+
+            # Pad and stack sequences for this mini-batch
+            batch_full_ids = [gen_data[j]["full_ids"].squeeze(0) for j in batch_idx]
+            batch_gen_masks = [gen_data[j]["gen_mask"].squeeze(0) for j in batch_idx]
+            batch_rewards = baselined_rewards[batch_idx]
+
+            max_len = max(ids.shape[0] for ids in batch_full_ids)
+            padded_ids = torch.full(
+                (len(batch_idx), max_len), self.pad_token_id, device=device, dtype=batch_full_ids[0].dtype
+            )
+            padded_gen_mask = torch.zeros(len(batch_idx), max_len, device=device, dtype=torch.bool)
+            for j, (ids, gm) in enumerate(zip(batch_full_ids, batch_gen_masks)):
+                padded_ids[j, : ids.shape[0]] = ids
+                padded_gen_mask[j, : gm.shape[0]] = gm
+
+            # Forward pass with gradients
+            full_attn = (padded_ids != self.pad_token_id).long()
+            outputs = self.generative_value_model(
+                input_ids=padded_ids[:, :-1], attention_mask=full_attn[:, :-1], return_dict=True
+            )
+            logits = outputs.logits
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+            target_ids = padded_ids[:, 1:]
+            token_log_probs = log_probs.gather(2, target_ids.unsqueeze(-1)).squeeze(-1)
+
+            # Mask to generated tokens only
+            gen_token_mask = padded_gen_mask[:, 1:].float()
+            gen_token_mask[padded_ids[:, 1:] == self.pad_token_id] = 0
+
+            # REINFORCE: -log_prob * baselined_reward
+            broadcast_rewards = batch_rewards.detach().unsqueeze(1).expand_as(gen_token_mask)
+            per_token_loss = -token_log_probs * broadcast_rewards * gen_token_mask
+            reinforce_loss = self.args.generative_value_reinforce_coef * (
+                per_token_loss.sum() / gen_token_mask.sum().clamp(min=1)
             )
 
-            tokenized = self.tokenizer(
-                [p["prompt_text"] for p in batch_prompts],
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=2048,
-            ).to(device)
-            input_ids = tokenized["input_ids"]
-            attention_mask = tokenized["attention_mask"]
-            prompt_len = input_ids.shape[1]
+            self.generative_value_model.set_gradient_accumulation_boundary(True)
+            self.generative_value_model.backward(reinforce_loss)
+            self.generative_value_model.step()
 
-            # Generate reasoning + score
-            full_ids, gen_mask = self._generate_from_generative_value_model(
-                input_ids, attention_mask, max_think_tokens
-            )
+            total_reinforce_loss += reinforce_loss.item()
+            for j in batch_idx:
+                total_mse += (gen_data[j]["predicted_score"] - gen_data[j]["actual_outcome"]) ** 2
 
-            # Parse scores from generated text
-            generated_texts = self.tokenizer.batch_decode(full_ids[:, prompt_len:], skip_special_tokens=True)
-            predicted_scores = []
-            valid_mask = []
-            for text in generated_texts:
-                score = self._parse_generative_value_score(text)
-                if score is not None:
-                    predicted_scores.append(max(0.0, min(1.0, score)))
-                    valid_mask.append(True)
-                else:
-                    predicted_scores.append(0.5)
-                    valid_mask.append(False)
-
-            pred_tensor = torch.tensor(predicted_scores, device=device, dtype=torch.float32)
-            valid_tensor = torch.tensor(valid_mask, device=device, dtype=torch.bool)
-
-            if valid_tensor.any():
-                # MSE loss on predicted scores
-                mse_loss = (
-                    self.args.generative_value_loss_coef
-                    * ((pred_tensor[valid_tensor] - batch_rewards[valid_tensor]) ** 2).mean()
-                )
-
-                # REINFORCE: forward pass with gradients to get log_probs of generated tokens
-                full_attn = torch.ones_like(full_ids, dtype=torch.long)
-                full_attn[full_ids == self.pad_token_id] = 0
-                outputs = self.generative_value_model(
-                    input_ids=full_ids[:, :-1], attention_mask=full_attn[:, :-1], return_dict=True
-                )
-                logits = outputs.logits
-                log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-                target_ids = full_ids[:, 1:]
-                token_log_probs = log_probs.gather(2, target_ids.unsqueeze(-1)).squeeze(-1)
-
-                # Mask to only generated tokens (shifted by 1 for the log_prob alignment)
-                gen_token_mask = gen_mask[:, 1:].float()
-                gen_token_mask[full_ids[:, 1:] == self.pad_token_id] = 0
-
-                # REINFORCE reward: negative MSE error (better prediction = higher reward)
-                reinforce_rewards = -((pred_tensor.detach() - batch_rewards) ** 2)
-                reinforce_rewards = reinforce_rewards.unsqueeze(1).expand_as(gen_token_mask)
-
-                per_token_reinforce = -token_log_probs * reinforce_rewards * gen_token_mask
-                reinforce_loss = self.args.generative_value_reinforce_coef * (
-                    per_token_reinforce.sum() / gen_token_mask.sum().clamp(min=1)
-                )
-
-                combined_loss = mse_loss + reinforce_loss
-
-                self.generative_value_model.set_gradient_accumulation_boundary(True)
-                self.generative_value_model.backward(combined_loss)
-                self.generative_value_model.step()
-
-                total_mse_loss += mse_loss.item()
-                total_reinforce_loss += reinforce_loss.item()
-                num_scored += valid_tensor.sum().item()
-
-        if num_scored > 0:
-            self.local_metrics["gen_value/mse_loss"] = total_mse_loss
-            self.local_metrics["gen_value/reinforce_loss"] = total_reinforce_loss
-            self.local_metrics["gen_value/num_scored"] = num_scored
-            self.local_metrics["gen_value/parse_rate"] = num_scored / max(1, len(prompt_indices))
+        n = len(gen_data)
+        self.local_metrics["gen_value/reinforce_loss"] = total_reinforce_loss
+        self.local_metrics["gen_value/mse"] = total_mse / max(1, n)
+        self.local_metrics["gen_value/mean_reward"] = rewards.mean().item()
+        self.local_metrics["gen_value/num_chunks"] = n
+        self.local_metrics["gen_value/parse_rate"] = num_parsed / max(1, n)
 
     def forward_value(
         self,
@@ -948,11 +1023,11 @@ class PolicyTrainerRayProcess(RayProcess):
             values = values * shifted_resp_mask
         return values
 
-    def _build_sibling_rollout_prefix(
+    def _build_sibling_rollout_context(
         self, batch_idx: int, seg_idx: int, gt_text: str, sibling_rollouts: list[list[list[tuple[str, bool]]]] | None
     ) -> str:
-        """Build a prefix containing sibling rollouts with correctness labels for the 'rollout_context' template."""
-        parts = ["I have been provided some other examples of attempts at this question:\n"]
+        """Build conditioning text with sibling rollouts and correctness labels."""
+        parts = ["Here are some other attempts at this question:\n"]
         siblings: list[tuple[str, bool]] = []
         if (
             sibling_rollouts is not None
@@ -963,11 +1038,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         for r_idx, (text, is_correct) in enumerate(siblings, 1):
             label = "CORRECT" if is_correct else "INCORRECT"
-            parts.append(f"rollout {r_idx}:\n{text}\nThis was: {label}\n")
+            parts.append(f"Attempt {r_idx} ({label}):\n{text}\n")
 
-        parts.append(
-            f"Given the answer is {gt_text}, Let me compute the expected final return of the partial rollout: "
-        )
+        parts.append(f"Given the answer is {gt_text}, compute the expected accuracy of the current attempt: ")
         return "".join(parts)
 
     def _forward_value_with_gt(
@@ -979,14 +1052,17 @@ class PolicyTrainerRayProcess(RayProcess):
         ground_truths: list[list[str]],
         sibling_rollouts: list[list[list[tuple[str, bool]]]] | None = None,
     ) -> torch.Tensor:
-        """Forward pass with ground truth prefixes inserted at sub-sequence boundaries.
+        """Forward pass with ground truth conditioning inserted into sub-sequences.
 
-        For each batch element (packed sequence), inserts tokenized conditioning text
-        at the start of each sub-sequence. Runs the value model on the expanded sequence,
-        then extracts values at the original (non-prefix) positions.
+        For most templates, inserts conditioning text at the start of each sub-sequence (prefix).
+        For 'expected_accuracy', inserts between the prompt and response (postfix after prompt).
+        Runs the value model on the expanded sequence, then extracts values at the original
+        (non-conditioning) positions.
         """
         batch_size, orig_len = shifted_ids.shape
         device = shifted_ids.device
+        template = self.args.gt_conditioning_template
+        is_postfix = template in ("expected_accuracy", "rollout_context")
 
         expanded_ids_list = []
         expanded_attn_list = []
@@ -998,6 +1074,7 @@ class PolicyTrainerRayProcess(RayProcess):
             seq_ids = shifted_ids[b]
             seq_attn = shifted_attn[b]
             seq_pos = shifted_pos[b]
+            seq_resp = shifted_resp_mask[b]
 
             # Find sub-sequence boundaries: where position_ids resets to 0
             boundary_indices = [0]
@@ -1014,7 +1091,6 @@ class PolicyTrainerRayProcess(RayProcess):
             for seg_i, start in enumerate(boundary_indices):
                 end = boundary_indices[seg_i + 1] if seg_i + 1 < len(boundary_indices) else orig_len
 
-                # Insert ground truth prefix before this sub-sequence
                 if gt_idx < len(gt_list):
                     gt_text = gt_list[gt_idx]
                     gt_idx += 1
@@ -1022,38 +1098,72 @@ class PolicyTrainerRayProcess(RayProcess):
                     gt_text = ""
 
                 if gt_text:
-                    template = self.args.gt_conditioning_template
                     if template == "boxed_answer":
-                        prefix_text = f"The correct answer is \\boxed{{{gt_text}}}.\n"
+                        cond_text = f"The correct answer is \\boxed{{{gt_text}}}.\n"
                     elif template == "cot_spoiler":
-                        prefix_text = f"Therefore, the final answer is \\boxed{{{gt_text}}}.\nNow let me show my working for this problem:\n"
+                        cond_text = f"Therefore, the final answer is \\boxed{{{gt_text}}}.\nNow let me show my working for this problem:\n"
                     elif template == "expected_accuracy":
-                        prefix_text = f"Given the answer is {gt_text}, Let me compute the expected accuracy of the partial rollout: "
+                        cond_text = f"Given the answer is {gt_text}, Let me compute the expected accuracy of the partial rollout: "
                     elif template == "rollout_context":
-                        sibling_text = self._build_sibling_rollout_prefix(b, seg_i, gt_text, sibling_rollouts)
-                        prefix_text = sibling_text
+                        cond_text = self._build_sibling_rollout_context(b, seg_i, gt_text, sibling_rollouts)
                     else:
-                        prefix_text = f"Answer: {gt_text}\n"
-                    prefix_tokens = self.tokenizer.encode(prefix_text, add_special_tokens=False)
-                    prefix_len = len(prefix_tokens)
-                    prefix_ids = torch.tensor(prefix_tokens, device=device, dtype=seq_ids.dtype)
-                    prefix_attn = torch.ones(prefix_len, device=device, dtype=seq_attn.dtype)
-                    # Position IDs for prefix: start from 0 (will be part of the sub-sequence context)
-                    seg_pos = seq_pos[start:end]
-                    max_prefix_pos = prefix_len
-                    prefix_pos = torch.arange(prefix_len, device=device, dtype=seq_pos.dtype)
-                    # Shift the original segment's position IDs up by prefix_len
-                    adjusted_seg_pos = seg_pos + prefix_len
+                        cond_text = f"Answer: {gt_text}\n"
+                    cond_tokens = self.tokenizer.encode(cond_text, add_special_tokens=False)
+                    cond_len = len(cond_tokens)
+                    cond_ids = torch.tensor(cond_tokens, device=device, dtype=seq_ids.dtype)
+                    cond_attn = torch.ones(cond_len, device=device, dtype=seq_attn.dtype)
 
-                    new_ids_parts.append(prefix_ids)
-                    new_attn_parts.append(prefix_attn)
-                    new_pos_parts.append(prefix_pos)
-                    is_orig.extend([False] * prefix_len)
+                    seg_pos_orig = seq_pos[start:end]
 
-                    new_ids_parts.append(seq_ids[start:end])
-                    new_attn_parts.append(seq_attn[start:end])
-                    new_pos_parts.append(adjusted_seg_pos)
-                    is_orig.extend([True] * (end - start))
+                    if is_postfix:
+                        # Insert between prompt and response within this sub-sequence
+                        # Find where response starts in this segment
+                        seg_resp = seq_resp[start:end]
+                        resp_positions = (seg_resp > 0).nonzero(as_tuple=True)[0]
+                        resp_start_in_seg = resp_positions[0].item() if len(resp_positions) > 0 else end - start
+
+                        # Prompt part: [start, start + resp_start_in_seg)
+                        prompt_part = slice(start, start + resp_start_in_seg)
+                        resp_part = slice(start + resp_start_in_seg, end)
+
+                        # Prompt tokens (original positions unchanged)
+                        new_ids_parts.append(seq_ids[prompt_part])
+                        new_attn_parts.append(seq_attn[prompt_part])
+                        new_pos_parts.append(seg_pos_orig[:resp_start_in_seg])
+                        is_orig.extend([True] * resp_start_in_seg)
+
+                        # Conditioning tokens (positions continue from prompt)
+                        prompt_end_pos = seg_pos_orig[resp_start_in_seg - 1].item() + 1 if resp_start_in_seg > 0 else 0
+                        cond_pos = torch.arange(
+                            prompt_end_pos, prompt_end_pos + cond_len, device=device, dtype=seq_pos.dtype
+                        )
+                        new_ids_parts.append(cond_ids)
+                        new_attn_parts.append(cond_attn)
+                        new_pos_parts.append(cond_pos)
+                        is_orig.extend([False] * cond_len)
+
+                        # Response tokens (positions shifted up by cond_len)
+                        resp_len = end - start - resp_start_in_seg
+                        if resp_len > 0:
+                            adjusted_resp_pos = seg_pos_orig[resp_start_in_seg:] + cond_len
+                            new_ids_parts.append(seq_ids[resp_part])
+                            new_attn_parts.append(seq_attn[resp_part])
+                            new_pos_parts.append(adjusted_resp_pos)
+                            is_orig.extend([True] * resp_len)
+                    else:
+                        # Prefix mode: insert before the entire sub-sequence
+                        cond_pos = torch.arange(cond_len, device=device, dtype=seq_pos.dtype)
+                        adjusted_seg_pos = seg_pos_orig + cond_len
+
+                        new_ids_parts.append(cond_ids)
+                        new_attn_parts.append(cond_attn)
+                        new_pos_parts.append(cond_pos)
+                        is_orig.extend([False] * cond_len)
+
+                        new_ids_parts.append(seq_ids[start:end])
+                        new_attn_parts.append(seq_attn[start:end])
+                        new_pos_parts.append(adjusted_seg_pos)
+                        is_orig.extend([True] * (end - start))
                 else:
                     new_ids_parts.append(seq_ids[start:end])
                     new_attn_parts.append(seq_attn[start:end])
@@ -1629,8 +1739,36 @@ class PolicyTrainerRayProcess(RayProcess):
         old_values_BT: list[torch.Tensor] = []
         returns_BT: list[torch.Tensor] = []
         gae_advantages_BT: list[torch.Tensor] = []
+        gen_value_training_data: list[dict] = []  # For generative value REINFORCE
         policy_lambda_used: float = self.args.gae_lambda  # For logging
-        if self.args.use_value_model:
+
+        # Generative value model: generate values at chunk boundaries for GAE
+        if self.args.use_generative_value_model and self.generative_value_model is not None:
+            from open_instruct.rl_utils import calculate_advantages_packed
+
+            with Timer("Generative Value Model Computation", noop=self.rank != 0):
+                values_BT, gen_value_training_data = self._compute_generative_values(data_BT, num_samples)
+                old_values_BT = [v.clone() for v in values_BT]
+
+                # Compute GAE advantages using the generated values
+                for i in range(num_samples):
+                    shifted_rewards = data_BT.rewards[i][:, 1:]
+                    shifted_dones = data_BT.dones[i][:, 1:]
+                    shifted_response_masks = data_BT.response_masks[i][:, 1:].float()
+
+                    values_np = values_BT[i].cpu().numpy()
+                    rewards_np = shifted_rewards.cpu().numpy()
+                    dones_np = shifted_dones.cpu().numpy()
+                    response_masks_np = shifted_response_masks.cpu().numpy()
+
+                    advantages_np, returns_np = calculate_advantages_packed(
+                        values_np, rewards_np, self.args.gamma, self.args.gae_lambda, dones_np, response_masks_np
+                    )
+
+                    gae_advantages_BT.append(torch.tensor(advantages_np, device=device, dtype=torch.float32))
+                    returns_BT.append(torch.tensor(returns_np, device=device, dtype=torch.float32))
+
+        elif self.args.use_value_model:
             from open_instruct.rl_utils import calculate_advantages_packed, calculate_advantages_packed_vapo
 
             use_vapo_gae = self.args.decoupled_gae or self.args.length_adaptive_gae
@@ -1710,7 +1848,8 @@ class PolicyTrainerRayProcess(RayProcess):
             self.local_metrics["value/warmup"] = 1.0 if (is_value_warmup or is_value_rewarmup) else 0.0
 
         # Global advantage whitening across all workers (matching ppo_fast.py)
-        if self.args.use_value_model and self.args.whiten_advantages and len(gae_advantages_BT) > 0:
+        has_gae = (self.args.use_value_model or self.args.use_generative_value_model) and len(gae_advantages_BT) > 0
+        if has_gae and self.args.whiten_advantages:
             all_advs = torch.cat([a.flatten() for a in gae_advantages_BT])
             all_masks = torch.cat([data_BT.response_masks[i][:, 1:].flatten().float() for i in range(num_samples)])
             adv_sum = (all_advs * all_masks).sum()
@@ -2011,11 +2150,15 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.cuda.empty_cache()
 
         # ========================================================================
-        # Generative value model training (separate path)
+        # Generative value model REINFORCE training (uses data from value computation phase)
         # ========================================================================
-        if self.args.use_generative_value_model and self.generative_value_model is not None:
-            with Timer("[Training Processes] Generative value model training", noop=self.rank != 0):
-                self._train_generative_value_model(data_BT, num_samples, training_step)
+        if (
+            self.args.use_generative_value_model
+            and self.generative_value_model is not None
+            and gen_value_training_data
+        ):
+            with Timer("[Training Processes] Generative value model REINFORCE", noop=self.rank != 0):
+                self._train_generative_value_model_reinforce(gen_value_training_data)
             torch.cuda.empty_cache()
 
         # ========================================================================
@@ -2110,7 +2253,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     ratio_BT = torch.exp(logprobs_diff_BT)
 
                     # Use GAE advantages if using value model, otherwise use pre-computed group-normalized advantages
-                    if self.args.use_value_model:
+                    if self.args.use_value_model or (
+                        self.args.use_generative_value_model and len(gae_advantages_BT) > 0
+                    ):
                         advantages_for_loss = gae_advantages_BT[i]
                     else:
                         advantages_for_loss = data_BT.advantages[i][:, 1:]
@@ -2585,6 +2730,7 @@ def setup_runtime_variables(
         )
     # Sync value model settings from experiment config to streaming config
     streaming_config.use_value_model = args.use_value_model
+    streaming_config.use_generative_value_model = args.use_generative_value_model
     streaming_config.gt_conditioning_template = args.gt_conditioning_template
     streaming_config.rollout_context_num_siblings = args.rollout_context_num_siblings
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
