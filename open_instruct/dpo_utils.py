@@ -217,7 +217,6 @@ class DPOExperimentConfig(
     _VALID_DICT_FIELDS = ["additional_model_arguments", "optimizer_kwargs"]
 
     exp_name: str = "dpo"
-    mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"])
     transform_fn: list[str] = field(
         default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
     )
