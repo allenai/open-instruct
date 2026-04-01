@@ -518,6 +518,7 @@ class PolicyTrainerRayProcess(RayProcess):
         weighted_mean_ratio = self.local_metrics["val/ratio"]
         self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
         self.local_metrics["val/tv_divergence"] = (loss_stats_B["tv_divergence"] * weights).sum()
+        self.local_metrics["val/token_tv_divergence"] = (loss_stats_B["token_tv_divergence"] * weights).sum()
         if self.args.record_entropy:
             self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
 
@@ -629,6 +630,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 "entropy": torch.zeros(num_samples, device=device),
                 "token_count": token_counts_per_sample,
                 "tv_divergence": torch.zeros(num_samples, device=device),
+                "token_tv_divergence": torch.zeros(num_samples, device=device),
             }
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
@@ -707,7 +709,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Calculate TV divergence
                     token_tv_div_BT = torch.abs(ratio_BT.detach() - 1)
-                    tv_divergence_BT = 0.5 * masked_mean(token_tv_div_BT, response_mask_BT)
+                    token_tv_divergence_BT = 0.5 * masked_mean(token_tv_div_BT, response_mask_BT)
+                    sequence_logprob_diff_sum_BT = (logprobs_diff_BT.detach() * response_mask_BT).sum(dim=1)
+                    sequence_tv_divergence_BT = torch.abs(torch.exp(sequence_logprob_diff_sum_BT) - 1)
+                    tv_divergence_BT = 0.5 * torch.mean(sequence_tv_divergence_BT)
 
                     # Apply truncated importance sampling if enabled
                     tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
@@ -791,6 +796,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss_stats_B["loss"][i] = loss
                         loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
                         loss_stats_B["tv_divergence"][i] = tv_divergence_BT
+                        loss_stats_B["token_tv_divergence"][i] = token_tv_divergence_BT
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
