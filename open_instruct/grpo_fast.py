@@ -657,43 +657,23 @@ class PolicyTrainerRayProcess(RayProcess):
                         f"response_mask sum={response_mask_BT.sum()}"
                     )
 
-                    # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    # Apply truncated importance sampling if enabled
                     tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
                     clipped_tis_imp_ratio_BT = tis_imp_ratio_BT
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
-                        old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
-
-                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
-                            f"Old logprobs mask should match response mask. "
-                            f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_BT.sum()}"
-                        )
                         assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
                             f"vLLM logprobs mask should match response mask. "
                             f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
                             f"response_mask sum={response_mask_BT.sum()}"
                         )
 
-                        valid_mask_BT = response_mask_BT
-                        # Initialize importance ratio to 1.0 (no effect) for all positions
-                        if valid_mask_BT.any():
-                            # Calculate logprob difference only for valid positions
-                            logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
-                            # Clamp to prevent numerical overflow in exp
-                            logprob_diff_is_BT = torch.where(
-                                valid_mask_BT,
-                                logprob_diff_is_BT.clamp(-10.0, 10.0),
-                                torch.zeros_like(logprob_diff_is_BT),
-                            )
-                            # Compute importance ratio only for valid positions
+                        if response_mask_BT.any():
+                            logprob_diff_is_BT = (old_logprob_BT - vllm_logprobs_BT).clamp(-10.0, 10.0)
                             tis_imp_ratio_BT = torch.where(
-                                valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
+                                response_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
                             )
-                            # Apply cap
                             clipped_tis_imp_ratio_BT = torch.clamp(
                                 tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                             )
