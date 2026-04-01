@@ -113,6 +113,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
+        # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
             global_batch_size=batch_size * max_seq_length,

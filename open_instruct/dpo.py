@@ -12,7 +12,6 @@ from typing import Any, cast
 
 import torch
 import torch.distributed as dist
-import transformers
 from olmo_core import optim as olmo_optim
 from olmo_core import train
 from olmo_core.config import DType
@@ -52,53 +51,6 @@ def export_to_hf(
         )
 
 
-def _load_dataset_distributed(
-    args: dpo_utils.DPOExperimentConfig,
-    tc: dataset_transformation.TokenizerConfig,
-    transform_fn_args: list[dict],
-    is_main_process: bool,
-):
-    """Load dataset with distributed coordination."""
-
-    def _load():
-        return dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
-        )
-
-    if is_main_process:
-        dataset = _load()
-    if distributed_utils.is_distributed():
-        dist.barrier()
-    if not is_main_process:
-        dataset = _load()
-    return dataset
-
-
-def _setup_model(args: dpo_utils.DPOExperimentConfig, device: torch.device):
-    """Build OLMo-core model architecture (weights loaded after parallelization)."""
-    hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
-    vocab_size = hf_config.vocab_size
-    logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
-
-    model_config = olmo_core_utils.get_transformer_config(
-        config_name_for_lookup, vocab_size, attn_backend=args.attn_implementation
-    )
-    model = model_config.build(init_device="cpu")
-
-    return model, model_config
-
-
 def _setup_scheduler(args: dpo_utils.DPOExperimentConfig, num_training_steps: int):
     """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
@@ -129,7 +81,7 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
             config=json_config,
         )
     trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-        args.checkpointing_steps, args.ephemeral_save_interval
+        args.checkpointing_steps, args.ephemeral_save_interval, save_async=False
     )
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(

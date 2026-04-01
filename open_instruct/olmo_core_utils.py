@@ -45,6 +45,8 @@ class ModelConfig:
     """Which attention implementation to use. If None, auto-detects the best available."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
+    low_cpu_mem_usage: bool = False
+    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
 
     def __post_init__(self):
         if self.attn_implementation is None:
@@ -245,7 +247,7 @@ def load_dataset_distributed(
         dist.barrier()
     if not is_main_process:
         dataset = _load()
-    return dataset  # noqa: F821 -- always bound: either is_main_process or not
+    return dataset
 
 
 def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: DatasetConfig, tc: TokenizerConfig):
@@ -255,9 +257,7 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     tokenizer = tc.tokenizer
     dataset_config.local_cache_dir = os.path.abspath(dataset_config.local_cache_dir)
     if utils.is_beaker_job():
-        beaker_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-        if os.path.exists(beaker_cache_dir):
-            dataset_config.local_cache_dir = beaker_cache_dir
+        dataset_config.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     return tokenizer
 
 

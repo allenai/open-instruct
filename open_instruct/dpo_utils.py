@@ -364,9 +364,6 @@ class DPOExperimentConfig(
                 raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-FlatArguments = DPOExperimentConfig
-
-
 def compute_reference_cache_hash(args: DPOExperimentConfig, tc: TokenizerConfig) -> str:
     """Compute deterministic hash for reference logprobs cache from DPOExperimentConfig."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
