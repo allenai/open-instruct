@@ -422,7 +422,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
+                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool()
                 new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
 
                 vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
@@ -437,7 +437,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     new_logprobs,
                 )
 
-                advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
+                advantages = data_BT.advantages[sample_idx]
 
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
