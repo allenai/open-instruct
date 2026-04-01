@@ -529,11 +529,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
-                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
-                        vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
+                        vllm_old_logprob_BT = grpo_utils.mask_logprobs(
+                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
                         )
-                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
 
                         if self.args.use_vllm_logprobs:
                             old_logprobs_BT[i] = vllm_old_logprob_BT
@@ -577,10 +575,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
-                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
-                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
+                    local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
+                    vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
