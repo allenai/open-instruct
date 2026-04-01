@@ -72,7 +72,7 @@ class DockerBackend(SandboxBackend):
     def start(self) -> None:
         logger.info(f"Starting Docker container (image={self._image})")
         if self._client is None:
-            self._client = docker_sdk.from_env(timeout=120)
+            self._client = docker_sdk.from_env(timeout=300)
         self._container = self._client.containers.run(
             self._image,
             command="sleep infinity",
