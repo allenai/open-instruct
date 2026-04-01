@@ -45,6 +45,8 @@ class ModelConfig:
     """Which attention implementation to use. If None, auto-detects the best available."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
+    low_cpu_mem_usage: bool = False
+    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
 
     def __post_init__(self):
         if self.attn_implementation is None:
@@ -135,7 +137,7 @@ class CheckpointConfig:
 
     output_dir: str = "output/"
     """The output directory where the model predictions and checkpoints will be written."""
-    checkpointing_steps: int | str = 500
+    checkpointing_steps: int = 500
     """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
     ephemeral_save_interval: int | None = None
     """Temporary checkpoint cadence for OLMo-core trainers. Must be lower than checkpointing_steps when set."""
@@ -146,11 +148,11 @@ class CheckpointConfig:
 
 
 def build_checkpointer_callback(
-    checkpointing_steps: int | str, ephemeral_save_interval: int | None, save_async: bool = True
+    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
     return CheckpointerCallback(
-        save_interval=int(checkpointing_steps), ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
+        save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
     )
 
 
@@ -207,7 +209,7 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
 def setup_model(
     model_name_or_path: str, config_name: str | None, attn_implementation: AttentionBackendName
 ) -> tuple[Transformer, TransformerConfig]:
-    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     model_config = get_transformer_config(
@@ -245,7 +247,7 @@ def load_dataset_distributed(
         dist.barrier()
     if not is_main_process:
         dataset = _load()
-    return dataset  # noqa: F821 -- always bound: either is_main_process or not
+    return dataset
 
 
 def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: DatasetConfig, tc: TokenizerConfig):
@@ -255,9 +257,7 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     tokenizer = tc.tokenizer
     dataset_config.local_cache_dir = os.path.abspath(dataset_config.local_cache_dir)
     if utils.is_beaker_job():
-        beaker_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-        if os.path.exists(beaker_cache_dir):
-            dataset_config.local_cache_dir = beaker_cache_dir
+        dataset_config.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     return tokenizer
 
 
