@@ -1,13 +1,11 @@
-"""High-level orchestration for a single evolving-rubric step.
+"""High-level orchestration for evolving rubrics during GRPO training.
 
-This module is the only entry point that ``DataPreparationActor`` needs to
-import.  It bundles rubric generation, ground-truth updates, buffer
-filtering, cache saving, and metric collection so that the caller in
-``data_loader.py`` stays thin.
+``RubricManager`` is the only public class.  ``DataPreparationActor``
+imports it from ``open_instruct.rubrics`` and delegates all rubric
+state management to it.
 """
 
 import asyncio
-from dataclasses import dataclass
 from typing import Any
 
 import ray
@@ -24,105 +22,126 @@ from open_instruct.rubrics.rubric_utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
-@dataclass
-class EvolvingRubricConfig:
-    """Subset of StreamingDataLoaderConfig relevant to evolving rubrics."""
+class RubricManager:
+    """Manages evolving rubric state across training steps.
 
-    apply_evolving_rubric_reward: bool = False
-    num_samples_per_prompt_rollout: int = 4
-    max_active_rubrics: int = 5
-    cache_evolving_rubric_data_dir: str | None = None
+    Encapsulates the rubric buffer, config, and vLLM engine handles so
+    that callers only need a single import and two calls
+    (``__init__`` and ``run_step``).
+    """
 
-    @classmethod
-    def from_streaming_config(cls, cfg) -> "EvolvingRubricConfig":
-        return cls(
-            apply_evolving_rubric_reward=cfg.apply_evolving_rubric_reward,
-            num_samples_per_prompt_rollout=cfg.num_samples_per_prompt_rollout,
-            max_active_rubrics=cfg.max_active_rubrics,
-            cache_evolving_rubric_data_dir=cfg.cache_evolving_rubric_data_dir,
-        )
+    def __init__(self, streaming_config, ground_truths: list) -> None:
+        self._num_samples = streaming_config.num_samples_per_prompt_rollout
+        self._max_active = streaming_config.max_active_rubrics
+        self._cache_dir: str | None = streaming_config.cache_evolving_rubric_data_dir
+        self._buffer = initialize_rubric_buffer(ground_truths)
+        self._vllm_engines: list = []
+        logger.info(f"Initialized rubric buffer with {len(self._buffer)} unique queries")
+
+    def set_vllm_engines(self, engines: list) -> None:
+        """Register vLLM engine handles (called after engines are created)."""
+        self._vllm_engines = engines
+
+    def run_step(
+        self,
+        *,
+        decoded_responses: list[str],
+        ground_truths: list,
+        indices: list[int] | None,
+        step: int,
+    ) -> dict[str, Any]:
+        """Run one evolving-rubric cycle and return metrics."""
+        metrics: dict[str, Any] = {}
+        try:
+            metrics, self._buffer = _run_evolving_rubric_step(
+                decoded_responses=decoded_responses,
+                ground_truths=ground_truths,
+                indices=indices,
+                num_samples=self._num_samples,
+                max_active=self._max_active,
+                cache_dir=self._cache_dir,
+                rubric_buffer=self._buffer,
+                vllm_engines=self._vllm_engines,
+                step=step,
+            )
+        except Exception:
+            logger.exception("Error in evolving rubric step")
+        return metrics
 
 
-def init_rubric_buffer(ground_truths: list) -> dict[str, Any]:
-    """Thin wrapper so callers need only one import."""
-    return initialize_rubric_buffer(ground_truths)
+# ---------------------------------------------------------------------------
+# Internal helpers (not exported)
+# ---------------------------------------------------------------------------
 
 
-def run_evolving_rubric_step(
+def _run_evolving_rubric_step(
     *,
     decoded_responses: list[str],
     ground_truths: list,
     indices: list[int] | None,
-    config: EvolvingRubricConfig,
+    num_samples: int,
+    max_active: int,
+    cache_dir: str | None,
     rubric_buffer: dict[str, Any] | None,
     vllm_engines: list,
     step: int,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Run one evolving-rubric cycle: generate, update buffer, push overrides.
-
-    Returns ``(metrics_dict, updated_rubric_buffer)``.
-    """
     metrics: dict[str, Any] = {}
 
-    try:
-        loop = asyncio.new_event_loop()
-        all_evolving_rubrics, num_subsampled = loop.run_until_complete(
-            _generate_instance_wise_evolving_rubrics(
-                responses=decoded_responses,
-                ground_truths=ground_truths,
-                num_samples_per_prompt_rollout=config.num_samples_per_prompt_rollout,
-                rubric_buffer=rubric_buffer,
-            )
-        )
-        loop.close()
-
-        (
-            updated_ground_truths,
-            valid_rate,
-            avg_gt_rubrics,
-            avg_evolving_rubrics,
-            avg_active_buffer,
-            rubric_buffer,
-            skipped,
-        ) = update_ground_truths_with_evolving_rubrics(
+    loop = asyncio.new_event_loop()
+    all_evolving_rubrics, num_subsampled = loop.run_until_complete(
+        _generate_instance_wise_evolving_rubrics(
+            responses=decoded_responses,
             ground_truths=ground_truths,
-            all_evolving_rubrics=all_evolving_rubrics,
-            num_samples_per_prompt_rollout=config.num_samples_per_prompt_rollout,
+            num_samples_per_prompt_rollout=num_samples,
             rubric_buffer=rubric_buffer,
         )
+    )
+    loop.close()
 
-        if rubric_buffer is not None:
-            filter_rubric_buffer(rubric_buffer, {}, config.max_active_rubrics)
+    (
+        updated_ground_truths,
+        valid_rate,
+        avg_gt_rubrics,
+        avg_evolving_rubrics,
+        avg_active_buffer,
+        rubric_buffer,
+        skipped,
+    ) = update_ground_truths_with_evolving_rubrics(
+        ground_truths=ground_truths,
+        all_evolving_rubrics=all_evolving_rubrics,
+        num_samples_per_prompt_rollout=num_samples,
+        rubric_buffer=rubric_buffer,
+    )
 
-        _push_ground_truth_overrides(
-            updated_ground_truths, indices, config.num_samples_per_prompt_rollout, vllm_engines
+    if rubric_buffer is not None:
+        filter_rubric_buffer(rubric_buffer, {}, max_active)
+
+    _push_ground_truth_overrides(updated_ground_truths, indices, vllm_engines)
+
+    metrics.update(compute_rubric_count_metrics(avg_evolving_rubrics, avg_active_buffer))
+    metrics["evolving_rubrics/valid_rate"] = valid_rate
+    metrics["evolving_rubrics/avg_gt_rubrics"] = avg_gt_rubrics
+    metrics["evolving_rubrics/skipped"] = skipped
+
+    if cache_dir:
+        save_evolving_rubric_cache_safe(
+            cache_dir=cache_dir,
+            training_step=step,
+            decoded_responses=decoded_responses,
+            ground_truths=ground_truths,
+            all_evolving_rubrics=all_evolving_rubrics,
+            num_subsampled_answers_list=num_subsampled,
+            num_samples_per_prompt_rollout=num_samples,
+            use_full_responses=True,
+            answer_length_limit_in_words=None,
         )
 
-        metrics.update(compute_rubric_count_metrics(avg_evolving_rubrics, avg_active_buffer))
-        metrics["evolving_rubrics/valid_rate"] = valid_rate
-        metrics["evolving_rubrics/avg_gt_rubrics"] = avg_gt_rubrics
-        metrics["evolving_rubrics/skipped"] = skipped
-
-        if config.cache_evolving_rubric_data_dir:
-            save_evolving_rubric_cache_safe(
-                cache_dir=config.cache_evolving_rubric_data_dir,
-                training_step=step,
-                decoded_responses=decoded_responses,
-                ground_truths=ground_truths,
-                all_evolving_rubrics=all_evolving_rubrics,
-                num_subsampled_answers_list=num_subsampled,
-                num_samples_per_prompt_rollout=config.num_samples_per_prompt_rollout,
-                use_full_responses=True,
-                answer_length_limit_in_words=None,
-            )
-
-        logger.info(
-            f"Step {step}: evolving rubrics generated. "
-            f"valid_rate={valid_rate:.2f}, avg_new={avg_evolving_rubrics:.1f}, "
-            f"avg_active_buffer={avg_active_buffer:.1f}, skipped={skipped}"
-        )
-    except Exception:
-        logger.exception("Error in evolving rubric step")
+    logger.info(
+        f"Step {step}: evolving rubrics generated. "
+        f"valid_rate={valid_rate:.2f}, avg_new={avg_evolving_rubrics:.1f}, "
+        f"avg_active_buffer={avg_active_buffer:.1f}, skipped={skipped}"
+    )
 
     return metrics, rubric_buffer
 
@@ -130,7 +149,6 @@ def run_evolving_rubric_step(
 def _push_ground_truth_overrides(
     updated_ground_truths: list,
     indices: list[int] | None,
-    num_samples_per_prompt_rollout: int,
     vllm_engines: list,
 ) -> None:
     """Send updated ground truths to vLLM engines for future reward computation."""
@@ -146,6 +164,4 @@ def _push_ground_truth_overrides(
 
     if overrides:
         ray.get([engine.update_ground_truths.remote(overrides) for engine in vllm_engines])
-        logger.info(
-            f"Pushed {len(overrides)} ground truth overrides to {len(vllm_engines)} vLLM engines"
-        )
+        logger.info(f"Pushed {len(overrides)} ground truth overrides to {len(vllm_engines)} vLLM engines")

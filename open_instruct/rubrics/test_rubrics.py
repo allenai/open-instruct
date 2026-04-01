@@ -24,12 +24,8 @@ from unittest.mock import MagicMock, patch
 
 from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
 from open_instruct.model_utils import Batch
-from open_instruct.rubrics.evolving_rubric_step import (
-    EvolvingRubricConfig,
-    _push_ground_truth_overrides,
-    init_rubric_buffer,
-    run_evolving_rubric_step,
-)
+from open_instruct.rubrics import RubricManager
+from open_instruct.rubrics.evolving_rubric_step import _push_ground_truth_overrides
 from open_instruct.rubrics.metrics import (
     compute_rubric_count_metrics,
     compute_rubric_reward_metrics,
@@ -687,51 +683,41 @@ _FAKE_EVOLVING_RUBRICS = {
 }
 
 
-class TestInitRubricBufferStep(unittest.TestCase):
-    """Test ``init_rubric_buffer`` with rubric-formatted ground truths."""
+def _mock_streaming_config(num_samples=2, max_active=5, cache_dir=None):
+    """Create a mock streaming config for ``RubricManager``."""
+    cfg = MagicMock()
+    cfg.num_samples_per_prompt_rollout = num_samples
+    cfg.max_active_rubrics = max_active
+    cfg.cache_evolving_rubric_data_dir = cache_dir
+    return cfg
+
+
+class TestRubricManagerInit(unittest.TestCase):
+    """Test ``RubricManager`` initialization from ground truths."""
 
     def test_basic_init(self):
         """Test buffer initialises persistent rubrics from ground truths."""
         gts = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
-        buf = init_rubric_buffer(gts)
+        mgr = RubricManager(_mock_streaming_config(), gts)
 
-        self.assertEqual(len(buf), 2)
+        self.assertEqual(len(mgr._buffer), 2)
         for query, rubrics in _STEP_SAMPLE_QUERIES:
-            self.assertIn(query, buf)
-            entry = buf[query]
+            self.assertIn(query, mgr._buffer)
+            entry = mgr._buffer[query]
             self.assertEqual(len(entry["persistent_rubrics"]), len(rubrics))
             self.assertEqual(len(entry["active_rubrics"]), 0)
-            self.assertEqual(len(entry["inactive_rubrics"]), 0)
 
     def test_wrapped_in_list(self):
         """Ground truths from the dataset come wrapped in a list."""
         gts = [[_make_rubric_ground_truth(q, r)] for q, r in _STEP_SAMPLE_QUERIES]
-        buf = init_rubric_buffer(gts)
-        self.assertEqual(len(buf), 2)
+        mgr = RubricManager(_mock_streaming_config(), gts)
+        self.assertEqual(len(mgr._buffer), 2)
 
     def test_dedup_same_query(self):
         """Duplicate queries should produce a single buffer entry."""
         gts = [_make_rubric_ground_truth("Q1", [{"description": "d", "weight": 1.0}])] * 5
-        buf = init_rubric_buffer(gts)
-        self.assertEqual(len(buf), 1)
-
-
-class TestEvolvingRubricConfig(unittest.TestCase):
-    """Test ``EvolvingRubricConfig.from_streaming_config``."""
-
-    def test_from_streaming_config(self):
-        """Test config extraction from StreamingDataLoaderConfig."""
-        mock_cfg = MagicMock()
-        mock_cfg.apply_evolving_rubric_reward = True
-        mock_cfg.num_samples_per_prompt_rollout = 8
-        mock_cfg.max_active_rubrics = 3
-        mock_cfg.cache_evolving_rubric_data_dir = "/tmp/cache"
-
-        cfg = EvolvingRubricConfig.from_streaming_config(mock_cfg)
-        self.assertTrue(cfg.apply_evolving_rubric_reward)
-        self.assertEqual(cfg.num_samples_per_prompt_rollout, 8)
-        self.assertEqual(cfg.max_active_rubrics, 3)
-        self.assertEqual(cfg.cache_evolving_rubric_data_dir, "/tmp/cache")
+        mgr = RubricManager(_mock_streaming_config(), gts)
+        self.assertEqual(len(mgr._buffer), 1)
 
 
 class TestPushGroundTruthOverrides(unittest.TestCase):
@@ -739,12 +725,12 @@ class TestPushGroundTruthOverrides(unittest.TestCase):
 
     def test_no_engines_noop(self):
         """No engines → no crash, no-op."""
-        _push_ground_truth_overrides(["gt1", "gt2"], [0, 1], 1, [])
+        _push_ground_truth_overrides(["gt1", "gt2"], [0, 1], [])
 
     def test_no_indices_noop(self):
         """No indices → engine method never called."""
         engine = MagicMock()
-        _push_ground_truth_overrides(["gt1"], None, 1, [engine])
+        _push_ground_truth_overrides(["gt1"], None, [engine])
         engine.update_ground_truths.remote.assert_not_called()
 
     def test_deduplicates_indices(self):
@@ -765,7 +751,6 @@ class TestPushGroundTruthOverrides(unittest.TestCase):
             _push_ground_truth_overrides(
                 updated_ground_truths=["gt_a", "gt_a", "gt_b", "gt_b"],
                 indices=[0, 0, 1, 1],
-                num_samples_per_prompt_rollout=2,
                 vllm_engines=[FakeEngine()],
             )
 
@@ -774,8 +759,8 @@ class TestPushGroundTruthOverrides(unittest.TestCase):
         self.assertEqual(overrides_seen[1], "gt_b")
 
 
-class TestRunEvolvingRubricStepMocked(unittest.TestCase):
-    """E2E test of ``run_evolving_rubric_step`` with mocked LLM calls."""
+class TestRubricManagerRunStepMocked(unittest.TestCase):
+    """E2E test of ``RubricManager.run_step`` with mocked LLM calls."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -788,26 +773,18 @@ class TestRunEvolvingRubricStepMocked(unittest.TestCase):
             "Plants use sunlight via photosynthesis.",
         ]
         self.indices = [0, 0, 1, 1]
-        self.config = EvolvingRubricConfig(
-            apply_evolving_rubric_reward=True,
-            num_samples_per_prompt_rollout=self.num_samples,
-            max_active_rubrics=5,
-        )
         gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
-        self.rubric_buffer = init_rubric_buffer(gts_for_buffer)
+        self.mgr = RubricManager(_mock_streaming_config(num_samples=self.num_samples), gts_for_buffer)
 
     @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
-    def test_step_returns_metrics_and_updated_buffer(self, mock_generate):
+    def test_step_returns_metrics(self, mock_generate):
         """Test that a step returns expected metrics and updates the buffer."""
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
 
-        metrics, updated_buffer = run_evolving_rubric_step(
+        metrics = self.mgr.run_step(
             decoded_responses=self.decoded_responses,
             ground_truths=self.ground_truths,
             indices=self.indices,
-            config=self.config,
-            rubric_buffer=self.rubric_buffer,
-            vllm_engines=[],
             step=0,
         )
 
@@ -816,9 +793,8 @@ class TestRunEvolvingRubricStepMocked(unittest.TestCase):
         self.assertIn("evolving_rubrics/num_active_rubrics", metrics)
         self.assertGreater(metrics["evolving_rubrics/valid_rate"], 0)
 
-        self.assertIsNotNone(updated_buffer)
         for query, _ in _STEP_SAMPLE_QUERIES:
-            self.assertGreater(len(updated_buffer[query]["active_rubrics"]), 0)
+            self.assertGreater(len(self.mgr._buffer[query]["active_rubrics"]), 0)
 
     @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
     def test_step_with_cache_dir(self, mock_generate):
@@ -826,19 +802,14 @@ class TestRunEvolvingRubricStepMocked(unittest.TestCase):
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
         cache_dir = tempfile.mkdtemp()
         try:
-            config = EvolvingRubricConfig(
-                apply_evolving_rubric_reward=True,
-                num_samples_per_prompt_rollout=self.num_samples,
-                max_active_rubrics=5,
-                cache_evolving_rubric_data_dir=cache_dir,
+            gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
+            mgr = RubricManager(
+                _mock_streaming_config(num_samples=self.num_samples, cache_dir=cache_dir), gts_for_buffer
             )
-            run_evolving_rubric_step(
+            mgr.run_step(
                 decoded_responses=self.decoded_responses,
                 ground_truths=self.ground_truths,
                 indices=self.indices,
-                config=config,
-                rubric_buffer=self.rubric_buffer,
-                vllm_engines=[],
                 step=42,
             )
             cache_files = os.listdir(cache_dir)
@@ -852,13 +823,10 @@ class TestRunEvolvingRubricStepMocked(unittest.TestCase):
         """LLM generation can fail and return None for some prompts."""
         mock_generate.side_effect = [None, _FAKE_EVOLVING_RUBRICS]
 
-        metrics, updated_buffer = run_evolving_rubric_step(
+        metrics = self.mgr.run_step(
             decoded_responses=self.decoded_responses,
             ground_truths=self.ground_truths,
             indices=self.indices,
-            config=self.config,
-            rubric_buffer=self.rubric_buffer,
-            vllm_engines=[],
             step=0,
         )
 
@@ -870,31 +838,25 @@ class TestRunEvolvingRubricStepMocked(unittest.TestCase):
         """Active rubrics should accumulate across multiple steps."""
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
 
-        _, buf1 = run_evolving_rubric_step(
+        self.mgr.run_step(
             decoded_responses=self.decoded_responses,
             ground_truths=self.ground_truths,
             indices=self.indices,
-            config=self.config,
-            rubric_buffer=self.rubric_buffer,
-            vllm_engines=[],
             step=0,
         )
-        active_count_1 = len(buf1[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
+        active_count_1 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
 
         mock_generate.return_value = {
             "positive_rubrics": [{"description": "New rubric", "title": "New"}],
             "negative_rubrics": [],
         }
-        _, buf2 = run_evolving_rubric_step(
+        self.mgr.run_step(
             decoded_responses=self.decoded_responses,
             ground_truths=self.ground_truths,
             indices=self.indices,
-            config=self.config,
-            rubric_buffer=buf1,
-            vllm_engines=[],
             step=1,
         )
-        active_count_2 = len(buf2[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
+        active_count_2 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
 
         self.assertGreater(active_count_2, active_count_1)
 
@@ -953,7 +915,7 @@ class TestBatchIndicesFromModel(unittest.TestCase):
     not (os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_API_KEY")),
     "No API credentials available",
 )
-class TestRunEvolvingRubricStepWithAPI(unittest.TestCase):
+class TestRubricManagerWithAPI(unittest.TestCase):
     """Full E2E test with real LLM calls (requires API)."""
 
     def test_live_rubric_generation(self):
@@ -971,21 +933,12 @@ class TestRunEvolvingRubricStepWithAPI(unittest.TestCase):
         indices = [0, 0, 1, 1]
 
         gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
-        rubric_buffer = init_rubric_buffer(gts_for_buffer)
+        mgr = RubricManager(_mock_streaming_config(num_samples=num_samples), gts_for_buffer)
 
-        config = EvolvingRubricConfig(
-            apply_evolving_rubric_reward=True,
-            num_samples_per_prompt_rollout=num_samples,
-            max_active_rubrics=5,
-        )
-
-        metrics, updated_buffer = run_evolving_rubric_step(
+        metrics = mgr.run_step(
             decoded_responses=decoded_responses,
             ground_truths=ground_truths,
             indices=indices,
-            config=config,
-            rubric_buffer=rubric_buffer,
-            vllm_engines=[],
             step=0,
         )
 
@@ -993,8 +946,7 @@ class TestRunEvolvingRubricStepWithAPI(unittest.TestCase):
         self.assertIn("evolving_rubrics/num_new_rubrics", metrics)
         self.assertGreater(metrics["evolving_rubrics/valid_rate"], 0, "At least one rubric should be generated")
 
-        self.assertIsNotNone(updated_buffer)
-        total_active = sum(len(v["active_rubrics"]) for v in updated_buffer.values())
+        total_active = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
         self.assertGreater(total_active, 0, "Buffer should have active rubrics after generation")
 
     def test_live_two_step_buffer_growth(self):
@@ -1012,37 +964,14 @@ class TestRunEvolvingRubricStepWithAPI(unittest.TestCase):
         indices = [0, 0, 1, 1]
 
         gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
-        rubric_buffer = init_rubric_buffer(gts_for_buffer)
+        mgr = RubricManager(_mock_streaming_config(num_samples=num_samples, max_active=10), gts_for_buffer)
 
-        config = EvolvingRubricConfig(
-            apply_evolving_rubric_reward=True,
-            num_samples_per_prompt_rollout=num_samples,
-            max_active_rubrics=10,
-        )
+        mgr.run_step(decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0)
+        active_step0 = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
 
-        _, buf_step0 = run_evolving_rubric_step(
-            decoded_responses=decoded_responses,
-            ground_truths=ground_truths,
-            indices=indices,
-            config=config,
-            rubric_buffer=rubric_buffer,
-            vllm_engines=[],
-            step=0,
-        )
+        mgr.run_step(decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=1)
+        active_step1 = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
 
-        active_step0 = sum(len(v["active_rubrics"]) for v in buf_step0.values())
-
-        _, buf_step1 = run_evolving_rubric_step(
-            decoded_responses=decoded_responses,
-            ground_truths=ground_truths,
-            indices=indices,
-            config=config,
-            rubric_buffer=buf_step0,
-            vllm_engines=[],
-            step=1,
-        )
-
-        active_step1 = sum(len(v["active_rubrics"]) for v in buf_step1.values())
         self.assertGreaterEqual(active_step1, active_step0)
 
 

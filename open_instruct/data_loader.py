@@ -46,11 +46,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
-from open_instruct.rubrics.evolving_rubric_step import (
-    EvolvingRubricConfig,
-    init_rubric_buffer,
-    run_evolving_rubric_step,
-)
+from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
@@ -1170,15 +1166,10 @@ class DataPreparationActor:
         self.total_samples_written = 0
         self.metadata_saved = False
 
-        self.rubric_buffer: dict[str, Any] | None = None
-        self.evolving_rubric_config: EvolvingRubricConfig | None = None
+        self.rubric_manager: RubricManager | None = None
         if self.config.apply_evolving_rubric_reward:
-            self.evolving_rubric_config = EvolvingRubricConfig.from_streaming_config(self.config)
             all_ground_truths = [dataset[i][GROUND_TRUTHS_KEY] for i in range(len(dataset))]
-            self.rubric_buffer = init_rubric_buffer(all_ground_truths)
-            logger.info(
-                f"[DataPreparationActor] Initialized rubric buffer with {len(self.rubric_buffer)} unique queries"
-            )
+            self.rubric_manager = RubricManager(self.config, all_ground_truths)
 
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
@@ -1271,17 +1262,13 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
 
-            if self.evolving_rubric_config and batch.decoded_responses:
-                evolving_metrics, self.rubric_buffer = run_evolving_rubric_step(
+            if self.rubric_manager and batch.decoded_responses:
+                reward_metrics.update(self.rubric_manager.run_step(
                     decoded_responses=batch.decoded_responses,
                     ground_truths=batch.ground_truths,
                     indices=batch.indices,
-                    config=self.evolving_rubric_config,
-                    rubric_buffer=self.rubric_buffer,
-                    vllm_engines=self.vllm_engines,
                     step=step,
-                )
-                reward_metrics.update(evolving_metrics)
+                ))
 
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
@@ -1422,6 +1409,8 @@ class DataPreparationActor:
     def set_vllm_engines(self, vllm_engines: list) -> None:
         """Set vLLM engine handles after they've been created."""
         self.vllm_engines = vllm_engines
+        if self.rubric_manager:
+            self.rubric_manager.set_vllm_engines(vllm_engines)
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
