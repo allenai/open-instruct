@@ -607,9 +607,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         local_logprobs_BT,
                     )
 
+                    # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    tis_clamped, tis_unclamped = grpo_utils.compute_tis_weights(
+                    tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
                         old_logprob_BT,
                         vllm_logprobs_BT,
                         response_mask_BT,
@@ -622,7 +623,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_clamped,
+                        tis_weights=tis_clamped_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -656,8 +657,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         entropy_BT,
                         self.args,
-                        tis_clamped=tis_clamped,
-                        tis_unclamped=tis_unclamped,
+                        tis_clamped=tis_clamped_BT,
+                        tis_unclamped=tis_unclamped_BT,
                     )
 
             batch_metrics = batch_data["metrics"]
