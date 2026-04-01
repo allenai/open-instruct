@@ -137,11 +137,6 @@ WEIGHT_SYNC_TIMEOUT_S = 120.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
-def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
-    for i in range(len(tensors_list)):
-        tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
-
-
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
@@ -524,8 +519,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
-        for f in dataclasses.fields(data_BT):
-            to_device_inplace(getattr(data_BT, f.name), self.device)
+        data_BT = data_BT.to(self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
