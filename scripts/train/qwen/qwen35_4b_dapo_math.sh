@@ -79,4 +79,5 @@ source configs/beaker_configs/ray_node_setup.sh \
     --wandb_entity ai2-llm \
     --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME} \
     --keep_last_n_checkpoints -1 \
+    --save_traces \
     --push_to_hub False "$@"
