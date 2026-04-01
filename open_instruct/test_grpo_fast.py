@@ -3,7 +3,7 @@ import os
 import threading
 import time
 import unittest
-from queue import Queue
+from queue import Empty, Queue
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -186,6 +186,7 @@ class TestGrpoFastBase(unittest.TestCase):
             logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
             reward_scores=reward_scores,
             reward_metrics={"time/reward": 0.0},
+            model_step=0,
         )
 
     def create_mock_tokenizer_and_reward_fn(self):
@@ -781,6 +782,130 @@ class TestAccumulateInferenceBatchesProgress(unittest.TestCase):
 
 class TestAccumulateInferenceBatches(TestGrpoFastBase):
     """Test accumulate_inference_batches function."""
+
+    def test_active_sampling_never_give_up_one_requeues_same_zero_reward_prompt(self):
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
+
+        inference_results_Q = Queue(maxsize=2)
+        param_prompt_Q = Queue(maxsize=4)
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        inference_results_Q.put(
+            self.create_mock_result(
+                0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0] * num_samples_per_prompt
+            )
+        )
+        inference_results_Q.put(
+            self.create_mock_result(
+                1, "0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 1.0, 0.0, 1.0]
+            )
+        )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        class FakeIterDataLoader:
+            def __init__(self, examples):
+                self._examples = list(examples)
+                self._epoch = 7
+                self.next_calls = 0
+
+            def __next__(self):
+                self.next_calls += 1
+                return self._examples[self.next_calls - 1]
+
+        iter_dataloader = FakeIterDataLoader([mock_dataset[1]])
+
+        with unittest.mock.patch("open_instruct.data_loader.np.random.random", return_value=0.0):
+            _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(
+                inference_results_Q,
+                mock_generation_config,
+                num_prompts=1,
+                model_dims=mock_model_dims,
+                tokenizer=tokenizer,
+                dataset=mock_dataset,
+                base_env_config=EnvConfig(),
+                active_sampling=True,
+                filter_zero_std_samples=True,
+                never_give_up=1.0,
+                replenish_prompts=True,
+                iter_dataloader=iter_dataloader,
+                param_prompt_Q=param_prompt_Q,
+                max_possible_score=1.0,
+                show_progress_bar=False,
+            )
+
+        self.assertEqual(iter_dataloader.next_calls, 1)
+        self.assertEqual(batch_stats.filtered_prompts_zero, 1)
+
+        requeued_prompt = param_prompt_Q.get(timeout=1)
+        replacement_prompt = param_prompt_Q.get(timeout=1)
+        self.assertEqual(requeued_prompt.index, 0)
+        self.assertEqual(requeued_prompt.prompt_id, "7_0")
+        self.assertEqual(replacement_prompt.index, 1)
+        self.assertEqual(replacement_prompt.prompt_id, "7_1")
+
+    def test_active_sampling_never_give_up_zero_uses_next_prompt(self):
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
+
+        inference_results_Q = Queue(maxsize=2)
+        param_prompt_Q = Queue(maxsize=2)
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        inference_results_Q.put(
+            self.create_mock_result(
+                0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0] * num_samples_per_prompt
+            )
+        )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        class FakeIterDataLoader:
+            def __init__(self, examples):
+                self._examples = list(examples)
+                self._epoch = 7
+                self.next_calls = 0
+
+            def __next__(self):
+                self.next_calls += 1
+                return self._examples[self.next_calls - 1]
+
+        iter_dataloader = FakeIterDataLoader([mock_dataset[1]])
+
+        with self.assertRaises(Empty):
+            data_loader_lib.accumulate_inference_batches(
+                inference_results_Q,
+                mock_generation_config,
+                num_prompts=1,
+                model_dims=mock_model_dims,
+                tokenizer=tokenizer,
+                dataset=mock_dataset,
+                base_env_config=EnvConfig(),
+                active_sampling=True,
+                filter_zero_std_samples=True,
+                never_give_up=0.0,
+                replenish_prompts=True,
+                iter_dataloader=iter_dataloader,
+                param_prompt_Q=param_prompt_Q,
+                max_possible_score=1.0,
+                timeout=0.01,
+                show_progress_bar=False,
+                requeue_on_timeout=False,
+            )
+
+        self.assertEqual(iter_dataloader.next_calls, 1)
+        replacement_prompt = param_prompt_Q.get(timeout=1)
+        self.assertEqual(replacement_prompt.index, 1)
+        self.assertEqual(replacement_prompt.prompt_id, "7_1")
 
     def test_all_prompts_filtered_returns_none(self):
         """Test that accumulate_inference_batches returns None when all prompts are filtered."""

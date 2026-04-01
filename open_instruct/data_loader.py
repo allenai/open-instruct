@@ -430,6 +430,7 @@ class StreamingDataLoaderConfig:
     # GRPO sampling/filtering
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
+    never_give_up: float = 0.0
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
@@ -530,6 +531,10 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
+        if not 0.0 <= self.never_give_up <= 1.0:
+            raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
+        if self.never_give_up > 0.0 and not self.active_sampling:
+            raise ValueError("`never_give_up > 0.0` requires `active_sampling=True`.")
         if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
             raise ValueError(
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
@@ -778,6 +783,7 @@ def accumulate_inference_batches(
     timeout: float | None = None,
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
+    never_give_up: float = 0.0,
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: HFDataLoader | None = None,
@@ -863,19 +869,6 @@ def accumulate_inference_batches(
         raw_query = example[RAW_PROMPT_KEY]
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
-        if replenish_prompts:
-            assert iter_dataloader is not None
-            assert param_prompt_Q is not None
-            example = next(iter_dataloader)
-            add_prompt_to_generator(
-                example,
-                iter_dataloader._epoch,
-                param_prompt_Q,
-                generation_config,
-                is_eval=False,
-                base_env_config=base_env_config,
-            )
-
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
                 result.responses[i].append(tokenizer.eos_token_id)
@@ -902,6 +895,23 @@ def accumulate_inference_batches(
             )
 
         if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+            if replenish_prompts:
+                assert param_prompt_Q is not None
+                requeue_same_prompt = (
+                    active_sampling and result.reward_scores[0] == 0 and np.random.random() < never_give_up
+                )
+                replacement_example = example
+                if not requeue_same_prompt:
+                    assert iter_dataloader is not None
+                    replacement_example = next(iter_dataloader)
+                add_prompt_to_generator(
+                    replacement_example,
+                    iter_dataloader._epoch if iter_dataloader is not None else 0,
+                    param_prompt_Q,
+                    generation_config,
+                    is_eval=False,
+                    base_env_config=base_env_config,
+                )
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
@@ -921,6 +931,18 @@ def accumulate_inference_batches(
             )
             continue
         else:
+            if replenish_prompts:
+                assert iter_dataloader is not None
+                assert param_prompt_Q is not None
+                replacement_example = next(iter_dataloader)
+                add_prompt_to_generator(
+                    replacement_example,
+                    iter_dataloader._epoch,
+                    param_prompt_Q,
+                    generation_config,
+                    is_eval=False,
+                    base_env_config=base_env_config,
+                )
             num_prompts_sampled += 1
             progress_bar.update(1)
             if progress_callback is not None:
@@ -1294,6 +1316,7 @@ class DataPreparationActor:
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
+                never_give_up=self.config.never_give_up,
                 replenish_prompts=True,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 iter_dataloader=self.iter_dataloader,
