@@ -262,7 +262,7 @@ def compute_tis_weights(
 
     Returns (clamped, unclamped) tuple, both None when cap <= 0 (disabled).
     """
-    if cap <= 0:
+    if cap <= 0 or vllm_logprobs is None:
         return None, None
     unclamped = torch.ones_like(old_logprob)
     logprob_diff = old_logprob - vllm_logprobs

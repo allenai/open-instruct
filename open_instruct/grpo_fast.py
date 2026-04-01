@@ -108,7 +108,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
-    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
@@ -529,12 +528,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
-                        vllm_old_logprob_BT = grpo_utils.mask_logprobs(
-                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
-                        )
-
                         if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = vllm_old_logprob_BT
+                            old_logprobs_BT[i] = grpo_utils.mask_logprobs(
+                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
+                            )
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
@@ -600,45 +597,24 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     new_logprobs_BT = local_logprobs_BT
 
-                    # Cache the old logprobs
-                    if num_mini_batches > 1:
-                        old_logprob_BT = old_logprobs_BT[i]
-                    else:
-                        with torch.no_grad():
-                            if epoch_idx == 0:
-                                if self.args.use_vllm_logprobs:
-                                    old_logprobs_BT[i] = vllm_logprobs_BT
-                                else:
-                                    old_logprobs_BT[i] = local_logprobs_BT.detach()
-                            old_logprob_BT = old_logprobs_BT[i]
-
-                    old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
-                    assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
-                        f"Old logprobs mask should match response mask. "
-                        f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                        f"response_mask sum={response_mask_BT.sum()}"
+                    old_logprob_BT = grpo_utils.resolve_old_logprob(
+                        old_logprobs_BT,
+                        i,
+                        epoch_idx,
+                        num_mini_batches,
+                        self.args.use_vllm_logprobs,
+                        vllm_logprobs_BT,
+                        local_logprobs_BT,
                     )
 
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
-                    clipped_tis_imp_ratio_BT = tis_imp_ratio_BT
-                    if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
-                        vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
-                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
-                            f"vLLM logprobs mask should match response mask. "
-                            f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_BT.sum()}"
-                        )
-
-                        if response_mask_BT.any():
-                            logprob_diff_is_BT = (old_logprob_BT - vllm_logprobs_BT).clamp(-10.0, 10.0)
-                            tis_imp_ratio_BT = torch.where(
-                                response_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
-                            )
-                            clipped_tis_imp_ratio_BT = torch.clamp(
-                                tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
-                            )
+                    tis_clamped, tis_unclamped = grpo_utils.compute_tis_weights(
+                        old_logprob_BT,
+                        vllm_logprobs_BT,
+                        response_mask_BT,
+                        self.args.truncated_importance_sampling_ratio_cap,
+                    )
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -646,7 +622,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=clipped_tis_imp_ratio_BT,
+                        tis_weights=tis_clamped,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -680,8 +656,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         entropy_BT,
                         self.args,
-                        tis_clamped=clipped_tis_imp_ratio_BT,
-                        tis_unclamped=tis_imp_ratio_BT,
+                        tis_clamped=tis_clamped,
+                        tis_unclamped=tis_unclamped,
                     )
 
             batch_metrics = batch_data["metrics"]
