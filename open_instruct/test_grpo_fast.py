@@ -825,6 +825,57 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertIsNone(reward_metrics)
         self.assertIsNone(batch_stats)
 
+    def test_tracks_filtered_prompt_datasets(self):
+        num_prompts = 4
+        num_samples_per_prompt = 4
+
+        queries = [f"query_{i}" for i in range(num_prompts)]
+        ground_truths = [f"truth_{i}" for i in range(num_prompts)]
+        datasets = ["dataset/a", "dataset/a", "dataset b", "dataset b"]
+        raw_queries = [f"rawquery_{i}" for i in range(num_prompts)]
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+        self._ray_queues.append(inference_results_Q)
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        reward_scores_by_prompt = [
+            [0.0, 1.0, 0.0, 1.0],
+            [0.5, 0.5, 0.5, 0.5],
+            [0.0, 0.5, 1.0, 0.5],
+            [1.0, 1.0, 1.0, 1.0],
+        ]
+        for i, reward_scores in enumerate(reward_scores_by_prompt):
+            mock_result = self.create_mock_result(
+                i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt, reward_scores=reward_scores
+            )
+            inference_results_Q.put(mock_result)
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        result, batch, reward_metrics, batch_stats = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            filter_zero_std_samples=True,
+            max_possible_score=1.0,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIsNotNone(batch)
+        self.assertIsNotNone(reward_metrics)
+        self.assertIsNotNone(batch_stats)
+        self.assertEqual(batch_stats.prompt_datasets, ["dataset_a", "dataset_b"])
+        self.assertEqual(batch_stats.filtered_prompt_datasets, ["dataset_a", "dataset_b"])
+
 
 class TestDataPreparation(TestGrpoFastBase):
     """Test prepare_collated_data_for_workers function."""

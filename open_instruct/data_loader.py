@@ -682,6 +682,7 @@ class BatchStatistics:
     percent_solved_hist: np.ndarray
     prompt_indices: list[int]
     prompt_datasets: list[str]
+    filtered_prompt_datasets: list[str]
     no_resampled_prompts: int
     total_prompts: int
 
@@ -823,6 +824,7 @@ def accumulate_inference_batches(
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
+    filtered_prompt_datasets = []
     progress_bar = tqdm(total=num_prompts, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
     logger.info(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
@@ -907,6 +909,7 @@ def accumulate_inference_batches(
                     progress_callback(num_prompts_sampled, num_prompts)
 
             total_filtered_prompts += 1
+            filtered_prompt_datasets.append(prompt_dataset_key)
             if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
             elif result.reward_scores[0] == max_possible_score:
@@ -1058,6 +1061,7 @@ def accumulate_inference_batches(
         percent_solved_hist=np.array(all_percent_solved),
         prompt_indices=all_prompt_indices,
         prompt_datasets=all_prompt_datasets,
+        filtered_prompt_datasets=filtered_prompt_datasets,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
@@ -1200,6 +1204,9 @@ class DataPreparationActor:
         self.verbose = verbose
         self.dataset = dataset
         self.dataset_index_map = {dataset[i]["index"]: i for i in range(len(dataset))}
+        self.dataset_metric_names = sorted(
+            {_normalize_dataset_metric_key(dataset_name) for dataset_name in dataset[VERIFIER_SOURCE_KEY]}
+        )
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
@@ -1416,6 +1423,7 @@ class DataPreparationActor:
                 batch_metrics_dict = asdict(batch_stats)
                 # Keep dataset names as internal metadata for downstream metric aggregation.
                 prompt_datasets = batch_metrics_dict.pop("prompt_datasets", None)
+                filtered_prompt_datasets = batch_metrics_dict.pop("filtered_prompt_datasets", [])
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
@@ -1445,8 +1453,21 @@ class DataPreparationActor:
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
-                if prompt_datasets is not None:
-                    step_metrics["batch/prompt_datasets"] = prompt_datasets
+                step_metrics["batch/prompt_datasets"] = prompt_datasets
+                nonzero_prompts_by_dataset: dict[str, int] = {
+                    dataset_name: 0 for dataset_name in self.dataset_metric_names
+                }
+                for dataset_name in prompt_datasets:
+                    nonzero_prompts_by_dataset[dataset_name] += 1
+                filtered_prompts_by_dataset: dict[str, int] = {
+                    dataset_name: 0 for dataset_name in self.dataset_metric_names
+                }
+                for dataset_name in filtered_prompt_datasets:
+                    filtered_prompts_by_dataset[dataset_name] += 1
+                for dataset_name, count in nonzero_prompts_by_dataset.items():
+                    step_metrics[f"batch/nonzero_prompts/{dataset_name}"] = count
+                for dataset_name, count in filtered_prompts_by_dataset.items():
+                    step_metrics[f"batch/filtered_prompts/{dataset_name}"] = count
                 solve_rates = batch_stats.percent_solved_hist
                 if solve_rates.size > 0:
                     step_metrics["val/train_prompt_solve_rate_count"] = int(solve_rates.size)
