@@ -172,7 +172,24 @@ class ExperimentConfig:
     - 'answer_prefix': 'Answer: {gt}\n' (plain text, minimal)
     - 'boxed_answer': 'The correct answer is \\boxed{{{gt}}}.\n' (matches expected output format)
     - 'cot_spoiler': 'Therefore, the final answer is \\boxed{{{gt}}}.\nNow let me show my working for this problem:\n' (mimics end of successful CoT)
+    - 'expected_accuracy': 'Given the answer is {gt}, Let me compute the expected accuracy of the partial rollout: '
+    - 'rollout_context': Prepend sibling rollouts (with CORRECT/INCORRECT labels) + GT answer before the current rollout
     """
+    rollout_context_num_siblings: int = 4
+    """Number of sibling rollouts to include in the 'rollout_context' template."""
+
+    # Generative value model
+    use_generative_value_model: bool = False
+    """If True, use a generative value model that produces reasoning about correctness probability
+    at each chunk boundary, trained with MSE reward + REINFORCE."""
+    generative_value_chunk_size: int = 64
+    """Number of tokens per chunk for the generative value model."""
+    generative_value_max_think_tokens: int = 256
+    """Maximum number of tokens the generative value model can generate at each <value_think> tag."""
+    generative_value_loss_coef: float = 0.5
+    """Coefficient for the generative value model MSE loss."""
+    generative_value_reinforce_coef: float = 0.1
+    """Coefficient for the REINFORCE loss on the generative value model's reasoning."""
 
     # Ray
     single_gpu_mode: bool = False

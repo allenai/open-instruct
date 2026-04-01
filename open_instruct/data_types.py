@@ -113,6 +113,9 @@ class CollatedBatchData:
     # Per-packed-sequence ground truths for value model conditioning
     # Each element is a list of ground truth strings, one per sub-sequence in the pack
     ground_truths: list[list[str]] | None = None
+    # Per-packed-sequence sibling rollouts for 'rollout_context' value model template
+    # Shape: [num_micro_batches][num_packs_in_micro][num_sub_seqs][num_siblings] with (text, is_correct)
+    sibling_rollouts: list[list[list[list[tuple[str, bool]]]]] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
         return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})

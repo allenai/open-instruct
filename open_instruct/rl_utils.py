@@ -212,6 +212,9 @@ class PackedSequences(Generic[T]):
     """packed rewards (batch_size, pack_length)"""
     ground_truths: list[list[str]] | None = None
     """per-pack ground truths, one list of strings per packed sequence"""
+    sibling_rollouts: list[list[list[tuple[str, bool]]]] | None = None
+    """per-pack sibling rollouts for 'rollout_context' template.
+    Shape: [num_packs][num_sub_seqs_in_pack][num_siblings] where each sibling is (text, is_correct)."""
 
 
 def reset_position_ids(attention_mask):
@@ -431,18 +434,18 @@ def calculate_advantages_packed(
 
 def calculate_length_adaptive_lambda(response_length: int, alpha: float = 0.05) -> float:
     """Calculate length-adaptive lambda for GAE based on VAPO paper.
-    
+
     Formula: lambda = 1 - 1/(alpha * length)
-    
+
     This ensures that the sum of lambda coefficients is proportional to sequence length,
     providing better bias-variance tradeoff for sequences of varying lengths.
-    
+
     Reference: https://arxiv.org/abs/2504.05118 Section 4.2
-    
+
     Args:
         response_length: Length of the response sequence
         alpha: Hyperparameter controlling bias-variance tradeoff (default 0.05)
-        
+
     Returns:
         Lambda value for GAE computation
     """
@@ -465,13 +468,13 @@ def calculate_advantages_packed_vapo(
     length_adaptive_alpha: float = 0.05,
 ):
     """VAPO-style GAE with decoupled lambda for policy and critic.
-    
+
     Implements decoupled GAE from VAPO paper where:
     - Critic uses lambda=1.0 for unbiased Monte Carlo returns
     - Policy uses a smaller lambda (fixed or length-adaptive) for faster convergence
-    
+
     Reference: https://arxiv.org/abs/2504.05118 Section 4.1-4.2
-    
+
     Args:
         values: Value predictions, shape (batch, seq_len)
         rewards: Rewards, shape (batch, seq_len)
@@ -482,7 +485,7 @@ def calculate_advantages_packed_vapo(
         lam_critic: Lambda for critic GAE (typically 1.0)
         length_adaptive: If True, compute length-adaptive lambda for policy
         length_adaptive_alpha: Alpha parameter for length-adaptive lambda
-        
+
     Returns:
         Tuple of (policy_advantages, critic_returns, policy_lambda_used)
         - policy_advantages: Advantages for policy updates
@@ -492,7 +495,7 @@ def calculate_advantages_packed_vapo(
     response_masks = response_masks.clip(0, 1)
     dones = dones.clip(0, 1)
     gen_length = values.shape[1]
-    
+
     # Compute critic returns with lam_critic (typically 1.0 for unbiased MC returns)
     lastgaelam_critic = 0
     advantages_reversed_critic = []
@@ -505,7 +508,7 @@ def calculate_advantages_packed_vapo(
         advantages_reversed_critic.append(lastgaelam_critic)
     advantages_critic = np.stack(advantages_reversed_critic[::-1], axis=1)
     critic_returns = advantages_critic + values
-    
+
     # Compute per-sub-sequence lambda for length-adaptive GAE
     if length_adaptive:
         batch_size = values.shape[0]
@@ -523,7 +526,7 @@ def calculate_advantages_packed_vapo(
     else:
         lam_policy_arr = lam_policy
         avg_lam = lam_policy
-    
+
     # Compute policy advantages with per-sequence lambda
     lastgaelam_policy = 0
     advantages_reversed_policy = []
@@ -538,7 +541,7 @@ def calculate_advantages_packed_vapo(
             lastgaelam_policy = delta + gamma * lam_policy * lastgaelam_policy * nonterminal
         advantages_reversed_policy.append(lastgaelam_policy)
     policy_advantages = np.stack(advantages_reversed_policy[::-1], axis=1)
-    
+
     return policy_advantages, critic_returns, avg_lam
 
 
