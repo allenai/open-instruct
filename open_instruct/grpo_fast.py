@@ -100,7 +100,6 @@ from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, 
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
-    estimate_kl,
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
@@ -475,32 +474,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
-    def _compute_loss_metrics(
-        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
-    ) -> dict[str, float]:
-        """Compute weighted average metrics from per-batch loss statistics."""
-        token_counts = loss_stats_B["token_count"]
-        total_tokens = token_counts.sum()
-        # Zero weights when no tokens - all weighted sums become 0
-        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
-
-        if self.args.load_ref_policy:
-            for j in range(4):
-                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
-            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
-        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
-        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
-        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
-        self.local_metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum()
-        self.local_metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum()
-        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
-        weighted_mean_ratio = self.local_metrics["val/ratio"]
-        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
-        if self.args.record_entropy:
-            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
-
+    def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor]) -> None:
+        metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, self.args)
+        for k, v in metrics.items():
+            self.local_metrics[k] = v
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
-        self.local_metrics["_token_count"] = total_valid_tokens
 
     def step(self):
         """Execute one training step: fetch data from the dataloader and train on it.
@@ -569,23 +547,11 @@ class PolicyTrainerRayProcess(RayProcess):
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
         # This only needs to be done once since response_masks don't change across epochs
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
-        total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            loss_stats_B: dict[str, torch.Tensor] = {
-                "kl": torch.zeros(4, num_samples, device=device),
-                "kl_loss": torch.zeros(num_samples, device=device),
-                "tis_ratio": torch.zeros(num_samples, device=device),
-                "tis_clipfrac": torch.zeros(num_samples, device=device),
-                "pg_clipfrac": torch.zeros(num_samples, device=device),
-                "pg_loss": torch.zeros(num_samples, device=device),
-                "loss": torch.zeros(num_samples, device=device),
-                "ratio": torch.zeros(num_samples, device=device),
-                "entropy": torch.zeros(num_samples, device=device),
-                "token_count": token_counts_per_sample,
-            }
+            loss_stats_B = grpo_utils.create_loss_stats(num_samples, token_counts_per_sample, device)
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -705,29 +671,26 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                         grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
-                    with torch.no_grad():
-                        if self.args.load_ref_policy:
-                            # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprobs_BT[i]).clamp(-40.0, 40.0)
-                            kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
-                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
-                            loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
-                        loss_stats_B["tis_ratio"][i] = masked_mean(clipped_tis_imp_ratio_BT.float(), response_mask_BT)
-                        loss_stats_B["tis_clipfrac"][i] = masked_mean(
-                            (clipped_tis_imp_ratio_BT < tis_imp_ratio_BT).float(), response_mask_BT
-                        )
-                        loss_stats_B["pg_clipfrac"][i] = masked_mean(
-                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
-                        )
-                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
-                        loss_stats_B["loss"][i] = loss
-                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
-                        if self.args.record_entropy:
-                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
+                    grpo_utils.populate_sample_loss_stats(
+                        loss_stats_B,
+                        i,
+                        pg_losses_BT,
+                        pg_losses2_BT,
+                        pg_loss_max_BT,
+                        ratio_BT,
+                        loss,
+                        response_mask_BT,
+                        new_logprobs_BT,
+                        ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                        entropy_BT,
+                        self.args,
+                        tis_clamped=clipped_tis_imp_ratio_BT,
+                        tis_unclamped=tis_imp_ratio_BT,
+                    )
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
-                self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                self._compute_loss_metrics(loss_stats_B)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
