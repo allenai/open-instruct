@@ -40,7 +40,7 @@ uv run python mason.py \
   --description "Qwen3 SFT tokenization (10k)" \
   --no_auto_dataset_cache \
   --preemptible \
-  -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token "'<|endoftext|>'" \&\& python scripts/data/convert_sft_data_for_olmocore.py \
+  -- python scripts/data/convert_sft_data_for_olmocore.py \
       --dataset_mixer_list ${DATASET} 10000 \
       --tokenizer_name_or_path ${TOKENIZER_PATH} \
       --output_dir ${OUTPUT_BASE}/Dolci-Think-SFT-32B-qwen3-olmo-thinker-10k \
