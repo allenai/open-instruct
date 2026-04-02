@@ -129,6 +129,10 @@ class ExperimentConfig:
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    fsdp_shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    fsdp_num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
     queue_dashboard_port: int | None = None
@@ -224,6 +228,28 @@ class ExperimentConfig:
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+
+        total_learner_gpus = sum(self.num_learners_per_node)
+        if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
+            expected = self.fsdp_shard_degree * self.fsdp_num_replicas
+            if expected != total_learner_gpus:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) * fsdp_num_replicas ({self.fsdp_num_replicas}) "
+                    f"= {expected}, but total learner GPUs = {total_learner_gpus} "
+                    f"(from num_learners_per_node={self.num_learners_per_node}). These must match."
+                )
+        elif self.fsdp_shard_degree is not None:
+            if total_learner_gpus % self.fsdp_shard_degree != 0:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
+        elif self.fsdp_num_replicas is not None:
+            if total_learner_gpus % self.fsdp_num_replicas != 0:
+                raise ValueError(
+                    f"fsdp_num_replicas ({self.fsdp_num_replicas}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:

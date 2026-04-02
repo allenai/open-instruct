@@ -153,6 +153,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if not self.grpo_config.single_gpu_mode and self.world_size > 1:
             dp_config = TransformerDataParallelConfig(
                 name=DataParallelType.hsdp,
+                num_replicas=self.grpo_config.fsdp_num_replicas,
+                shard_degree=self.grpo_config.fsdp_shard_degree,
                 param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,

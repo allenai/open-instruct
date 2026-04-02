@@ -41,11 +41,22 @@ Both trainers use the `blocks` wrapping strategy, which wraps each Transformer b
 - **Communication overhead**: Fewer FSDP units means fewer all-gather/reduce-scatter operations.
 - **Memory efficiency**: Each block's parameters can be gathered and freed independently.
 
+## Sharding Flags
+
+Both DPO and GRPO expose the same HSDP sharding flags:
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--fsdp_shard_degree` | Number of GPUs per shard group | `None` (auto) |
+| `--fsdp_num_replicas` | Number of replica groups | `None` (auto) |
+
+GRPO additionally validates that the sharding configuration is consistent with the total number of learner GPUs (from `--num_learners_per_node`). If both flags are specified, their product must equal the total learner GPU count. If only one is specified, it must evenly divide the total.
+
 ## Per-Algorithm Configuration
 
 ### DPO
 
-DPO (`open_instruct/dpo.py`) provides the most explicit control over sharding:
+DPO (`open_instruct/dpo.py`):
 
 ```python
 dp_config = TransformerDataParallelConfig(
@@ -58,26 +69,26 @@ dp_config = TransformerDataParallelConfig(
 )
 ```
 
-**DPO-specific flags:**
+DPO also supports these additional parallelism flags:
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--fsdp_shard_degree` | Number of GPUs per shard group | `None` (auto) |
-| `--fsdp_num_replicas` | Number of replica groups | `None` (auto) |
 | `--tensor_parallel_degree` | Tensor parallelism degree | `1` (disabled) |
 | `--context_parallel_degree` | Context (sequence) parallelism degree | `1` (disabled) |
 
-DPO also supports **tensor parallelism** (splitting individual layers across GPUs), which can be combined with HSDP for very large models. Context parallelism (`--context_parallel_degree`) is not yet supported in DPO.
+DPO supports **tensor parallelism** (splitting individual layers across GPUs), which can be combined with HSDP for very large models. Context parallelism (`--context_parallel_degree`) is not yet supported in DPO.
 
 ### GRPO
 
-GRPO (`open_instruct/grpo_olmo_core_actor.py`) uses the same HSDP configuration but relies on auto-detection for shard degree and replicas:
+GRPO (`open_instruct/grpo_olmo_core_actor.py`):
 
 ```python
 dp_config = None
 if not single_gpu_mode and world_size > 1:
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
+        num_replicas=grpo_config.fsdp_num_replicas,  # None = auto
+        shard_degree=grpo_config.fsdp_shard_degree,   # None = auto
         param_dtype=olmo_core_dtype,       # bfloat16 or float32
         reduce_dtype=DType.float32,
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
@@ -86,7 +97,6 @@ if not single_gpu_mode and world_size > 1:
 
 Key differences from DPO:
 
-- **No explicit shard degree / replica flags.** GRPO always auto-detects.
 - **Single-GPU mode.** When `--single_gpu_mode` is set, `dp_config` is `None` and no sharding is applied. The model is instead cast to the target dtype directly.
 - **Ray actors.** GRPO uses Ray to coordinate distributed training, so `torch.distributed` is initialized within each Ray actor rather than at the script level.
 
@@ -96,7 +106,7 @@ DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The tab
 
 | Aspect | DPO | GRPO |
 |--------|-----|------|
-| Explicit shard degree / replicas | Yes | No (auto) |
+| Explicit shard degree / replicas | Yes | Yes |
 | Tensor parallelism | Yes | No |
 | Context parallelism | Not yet supported | No |
 | Activation checkpointing | Budget-mode | Gradient checkpointing flag |
