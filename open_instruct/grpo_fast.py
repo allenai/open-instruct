@@ -1023,24 +1023,44 @@ class PolicyTrainerRayProcess(RayProcess):
             values = values * shifted_resp_mask
         return values
 
+    _ROLLOUT_CONTEXT_MAX_TOKENS = 32768
+
     def _build_sibling_rollout_context(
         self, batch_idx: int, seg_idx: int, gt_text: str, sibling_rollouts: list[list[list[tuple[str, bool]]]] | None
     ) -> str:
-        """Build conditioning text with sibling rollouts and correctness labels."""
-        parts = ["Here are some other attempts at this question:\n"]
+        """Build conditioning text with sibling rollouts and correctness labels.
+
+        If the total token count exceeds _ROLLOUT_CONTEXT_MAX_TOKENS, siblings are
+        dropped (longest first) until it fits.
+        """
         siblings: list[tuple[str, bool]] = []
         if (
             sibling_rollouts is not None
             and batch_idx < len(sibling_rollouts)
             and seg_idx < len(sibling_rollouts[batch_idx])
         ):
-            siblings = sibling_rollouts[batch_idx][seg_idx]
+            siblings = list(sibling_rollouts[batch_idx][seg_idx])
 
+        suffix = f"Given the answer is {gt_text}, compute the expected accuracy of the current attempt: "
+        header = "Here are some other attempts at this question:\n"
+        # Estimate overhead tokens (header + suffix + labels)
+        overhead_tokens = len(self.tokenizer.encode(header + suffix, add_special_tokens=False)) + 20 * len(siblings)
+        budget = self._ROLLOUT_CONTEXT_MAX_TOKENS - overhead_tokens
+
+        # Tokenize each sibling and drop longest until under budget
+        sibling_token_counts = [len(self.tokenizer.encode(text, add_special_tokens=False)) for text, _ in siblings]
+        while siblings and sum(sibling_token_counts) > budget:
+            # Drop the longest sibling
+            longest_idx = max(range(len(sibling_token_counts)), key=lambda i: sibling_token_counts[i])
+            siblings.pop(longest_idx)
+            sibling_token_counts.pop(longest_idx)
+
+        parts = [header]
         for r_idx, (text, is_correct) in enumerate(siblings, 1):
             label = "CORRECT" if is_correct else "INCORRECT"
             parts.append(f"Attempt {r_idx} ({label}):\n{text}\n")
 
-        parts.append(f"Given the answer is {gt_text}, compute the expected accuracy of the current attempt: ")
+        parts.append(suffix)
         return "".join(parts)
 
     def _forward_value_with_gt(
