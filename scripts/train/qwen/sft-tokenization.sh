@@ -39,6 +39,7 @@ uv run python mason.py \
   --priority urgent \
   --description "Qwen3 SFT tokenization (10k)" \
   --no_auto_dataset_cache \
+  --preemptible \
   -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token '<|endoftext|>' \&\& python scripts/data/convert_sft_data_for_olmocore.py \
       --dataset_mixer_list ${DATASET} 10000 \
       --tokenizer_name_or_path ${TOKENIZER_PATH} \
@@ -60,6 +61,7 @@ uv run python mason.py \
   --priority urgent \
   --description "Qwen3 SFT tokenization (100k)" \
   --no_auto_dataset_cache \
+  --preemptible \
   -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token '<|endoftext|>' \&\& python scripts/data/convert_sft_data_for_olmocore.py \
       --dataset_mixer_list ${DATASET} 100000 \
       --tokenizer_name_or_path ${TOKENIZER_PATH} \
@@ -81,6 +83,7 @@ uv run python mason.py \
   --priority urgent \
   --description "Qwen3 SFT tokenization (full)" \
   --no_auto_dataset_cache \
+  --preemptible \
   -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token '<|endoftext|>' \&\& python scripts/data/convert_sft_data_for_olmocore.py \
       --dataset_mixer_list ${DATASET} 1.0 \
       --tokenizer_name_or_path ${TOKENIZER_PATH} \
