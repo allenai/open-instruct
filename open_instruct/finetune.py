@@ -531,13 +531,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.cache_dataset_only:
         return
 
-    # Pre-download model files on main process to avoid race conditions
-    # when multiple ranks on a shared filesystem all try to access the
-    # HF hub cache concurrently.
+    # Pre-download model files on rank 0, then force all ranks to load from
+    # local cache only. Without this, concurrent from_pretrained calls on a
+    # shared filesystem race on HF Hub API lookups and can fail with OSError
+    # ("does not appear to have a file named ...").
     model_path = args.config_name or args.model_name_or_path
     if model_path and accelerator.is_main_process:
         snapshot_download(model_path, revision=args.model_revision)
     accelerator.wait_for_everyone()
+    if model_path:
+        os.environ["HF_HUB_OFFLINE"] = "1"
 
     # Load pretrained model and tokenizer
     if args.config_name:
@@ -611,6 +614,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
+
+    # Re-enable network access now that model is loaded from cache.
+    os.environ.pop("HF_HUB_OFFLINE", None)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
