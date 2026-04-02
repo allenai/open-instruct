@@ -1023,15 +1023,15 @@ class PolicyTrainerRayProcess(RayProcess):
             values = values * shifted_resp_mask
         return values
 
-    _ROLLOUT_CONTEXT_MAX_TOKENS = 32768
+    _ROLLOUT_CONTEXT_MAX_TOKENS = 4096
 
     def _build_sibling_rollout_context(
         self, batch_idx: int, seg_idx: int, gt_text: str, sibling_rollouts: list[list[list[tuple[str, bool]]]] | None
     ) -> str:
         """Build conditioning text with sibling rollouts and correctness labels.
 
-        If the total token count exceeds _ROLLOUT_CONTEXT_MAX_TOKENS, siblings are
-        dropped (longest first) until it fits.
+        Each sibling is truncated to fit within _ROLLOUT_CONTEXT_MAX_TOKENS total.
+        If still over budget after truncation, siblings are dropped (longest first).
         """
         siblings: list[tuple[str, bool]] = []
         if (
@@ -1041,26 +1041,45 @@ class PolicyTrainerRayProcess(RayProcess):
         ):
             siblings = list(sibling_rollouts[batch_idx][seg_idx])
 
+        if not siblings:
+            return f"Given the answer is {gt_text}, compute the expected accuracy of the current attempt: "
+
         suffix = f"Given the answer is {gt_text}, compute the expected accuracy of the current attempt: "
         header = "Here are some other attempts at this question:\n"
-        # Estimate overhead tokens (header + suffix + labels)
         overhead_tokens = len(self.tokenizer.encode(header + suffix, add_special_tokens=False)) + 20 * len(siblings)
         budget = self._ROLLOUT_CONTEXT_MAX_TOKENS - overhead_tokens
 
-        # Tokenize each sibling and drop longest until under budget
-        sibling_token_counts = [len(self.tokenizer.encode(text, add_special_tokens=False)) for text, _ in siblings]
-        while siblings and sum(sibling_token_counts) > budget:
-            # Drop the longest sibling
+        # Truncate each sibling to at most budget // num_siblings tokens
+        max_per_sibling = max(128, budget // len(siblings))
+        truncated_siblings: list[tuple[str, bool]] = []
+        sibling_token_counts: list[int] = []
+        for text, is_correct in siblings:
+            tokens = self.tokenizer.encode(text, add_special_tokens=False)
+            if len(tokens) > max_per_sibling:
+                text = self.tokenizer.decode(tokens[:max_per_sibling], skip_special_tokens=True) + "..."
+                sibling_token_counts.append(max_per_sibling)
+            else:
+                sibling_token_counts.append(len(tokens))
+            truncated_siblings.append((text, is_correct))
+
+        # Drop longest siblings if still over budget
+        while truncated_siblings and sum(sibling_token_counts) > budget:
             longest_idx = max(range(len(sibling_token_counts)), key=lambda i: sibling_token_counts[i])
-            siblings.pop(longest_idx)
+            truncated_siblings.pop(longest_idx)
             sibling_token_counts.pop(longest_idx)
 
         parts = [header]
-        for r_idx, (text, is_correct) in enumerate(siblings, 1):
+        for r_idx, (text, is_correct) in enumerate(truncated_siblings, 1):
             label = "CORRECT" if is_correct else "INCORRECT"
             parts.append(f"Attempt {r_idx} ({label}):\n{text}\n")
 
         parts.append(suffix)
+
+        # Track how many siblings we actually included (for logging)
+        if not hasattr(self, "_rollout_context_sibling_counts"):
+            self._rollout_context_sibling_counts: list[int] = []
+        self._rollout_context_sibling_counts.append(len(truncated_siblings))
+
         return "".join(parts)
 
     def _forward_value_with_gt(
@@ -1866,6 +1885,14 @@ class PolicyTrainerRayProcess(RayProcess):
         # Log value warmup status
         if self.args.use_value_model and self.args.value_warmup_steps > 0:
             self.local_metrics["value/warmup"] = 1.0 if (is_value_warmup or is_value_rewarmup) else 0.0
+
+        # Log rollout context sibling counts
+        if hasattr(self, "_rollout_context_sibling_counts") and self._rollout_context_sibling_counts:
+            counts = self._rollout_context_sibling_counts
+            self.local_metrics["value/rollout_ctx_siblings_mean"] = sum(counts) / len(counts)
+            self.local_metrics["value/rollout_ctx_siblings_min"] = min(counts)
+            self.local_metrics["value/rollout_ctx_siblings_max"] = max(counts)
+            self._rollout_context_sibling_counts = []
 
         # Global advantage whitening across all workers (matching ppo_fast.py)
         has_gae = (self.args.use_value_model or self.args.use_generative_value_model) and len(gae_advantages_BT) > 0
