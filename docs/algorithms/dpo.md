@@ -93,6 +93,8 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | **Eval** | `--try_launch_beaker_eval_jobs` | Launch Beaker evaluation jobs after training | `True` |
 | | `--oe_eval_tasks` | Beaker evaluation tasks to launch | `None` |
 
+For details on how the parallelism flags interact, see [OLMo-core Sharding and Parallelism](olmo_core_sharding.md).
+
 ---
 
 ## `dpo_tune_cache.py` (Legacy)

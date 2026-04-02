@@ -50,7 +50,7 @@ OLMo-core SFT uses **CLI flags** (not YAML config files). Key options include:
 | `--dataset_path` | Path to the SFT dataset |
 | `--trainer.callbacks.wandb.enabled` | Enable W&B logging |
 
-See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for the full list of options.
+See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for the full list of options. For details on how sharding and parallelism work across all OLMo-core trainers, see the [OLMo-core Sharding and Parallelism](olmo_core_sharding.md) page.
 
 ### Olmo 3 SFT Scripts
 
