@@ -471,15 +471,17 @@ _SCALAR_LOSS_STAT_KEYS = [
     "objective/kl2_avg",
     "objective/kl3_avg",
     "policy/clipfrac_avg",
-    "policy/entropy_avg",
     "val/ratio",
     "val/tis_clipfrac",
     "val/tis_ratio",
 ]
 
 
-def create_loss_stats(num_samples: int, device: torch.device) -> dict[str, torch.Tensor]:
-    return {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bool = False) -> dict[str, torch.Tensor]:
+    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+    if record_entropy:
+        stats |= {"policy/entropy_avg": torch.zeros(num_samples, device=device)}
+    return stats
 
 
 def populate_sample_loss_stats(
@@ -526,7 +528,7 @@ def compute_metrics_from_loss_stats(
     weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
     metrics: dict[str, float] = {}
-    for key in _SCALAR_LOSS_STAT_KEYS:
+    for key in loss_stats_B:
         metrics[key] = (loss_stats_B[key] * weights).sum().item()
     metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
     return metrics

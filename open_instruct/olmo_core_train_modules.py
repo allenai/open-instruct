@@ -405,7 +405,9 @@ class GRPOTrainModule(TransformerTrainModule):
         token_counts = torch.tensor(
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
-        loss_stats_B = grpo_utils.create_loss_stats(num_samples, self.device)
+        loss_stats_B = grpo_utils.create_loss_stats(
+            num_samples, self.device, record_entropy=self.grpo_config.record_entropy
+        )
 
         num_steps = 0
         local_step = 0
