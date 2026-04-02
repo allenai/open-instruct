@@ -6,7 +6,7 @@ from typing import Literal
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -25,38 +25,17 @@ class GRPOLossType(enum.StrEnum):
 
 
 @dataclass
-class GRPOExperimentConfig:
-    # Experiment
-    exp_name: str = "grpo"
-    """The name of this experiment"""
-    seed: int = 1
-    """Seed of the experiment"""
-    run_name: str | None = None
-    """RUNTIME VALUE: A unique name of this run"""
-
+class GRPOExperimentConfig(
+    olmo_core_utils.ExperimentConfig,
+    olmo_core_utils.TrainingConfig,
+    olmo_core_utils.LoggingConfig,
+    olmo_core_utils.CheckpointConfig,
+):
     # Optimizer
-    learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    lr_scheduler_type: Literal[
-        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-    ] = "linear"
-    """Which scheduler to use"""
-    warm_up_steps: int = 0
-    """Number of warm up steps for the scheduler"""
-    warmup_ratio: float = 0.0
-    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
-    weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
-    max_grad_norm: float = 1.0
-    """Maximum gradient norm for gradient clipping."""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
-    """Whether to use fused optimizer"""
 
     # Batch sizes
-    per_device_train_batch_size: int = 1
-    """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
@@ -73,8 +52,6 @@ class GRPOExperimentConfig:
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
-    num_epochs: int = 1
-    """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
@@ -129,6 +106,10 @@ class GRPOExperimentConfig:
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    fsdp_shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    fsdp_num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
     queue_dashboard_port: int | None = None
@@ -137,14 +118,6 @@ class GRPOExperimentConfig:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_group_name: str | None = None
-    """Optional W&B group name used to group related runs together."""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: str | None = None
@@ -155,12 +128,8 @@ class GRPOExperimentConfig:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: str = "output"
-    """Where to save the model"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
@@ -224,6 +193,28 @@ class GRPOExperimentConfig:
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+
+        total_learner_gpus = sum(self.num_learners_per_node)
+        if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
+            expected = self.fsdp_shard_degree * self.fsdp_num_replicas
+            if expected != total_learner_gpus:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) * fsdp_num_replicas ({self.fsdp_num_replicas}) "
+                    f"= {expected}, but total learner GPUs = {total_learner_gpus} "
+                    f"(from num_learners_per_node={self.num_learners_per_node}). These must match."
+                )
+        elif self.fsdp_shard_degree is not None:
+            if total_learner_gpus % self.fsdp_shard_degree != 0:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
+        elif self.fsdp_num_replicas is not None:
+            if total_learner_gpus % self.fsdp_num_replicas != 0:
+                raise ValueError(
+                    f"fsdp_num_replicas ({self.fsdp_num_replicas}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
