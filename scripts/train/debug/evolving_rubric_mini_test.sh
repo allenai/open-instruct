@@ -62,7 +62,7 @@ echo "=============================================="
 
 uv run python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
-    --wandb_project_name rl-rag \
+    --wandb_project rl-rag \
     --beta 0.001 \
     --num_samples_per_prompt_rollout 4 \
     --num_unique_prompts_rollout 4 \

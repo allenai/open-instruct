@@ -301,7 +301,7 @@ def main(
             m.setup_callbacks.remote(
                 actor_manager=actor_manager,
                 with_tracking=args.with_tracking,
-                wandb_project=args.wandb_project_name,
+                wandb_project=args.wandb_project,
                 wandb_entity=args.wandb_entity,
                 run_name=args.run_name or args.exp_name,
                 json_config=json_config,

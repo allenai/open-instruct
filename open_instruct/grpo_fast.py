@@ -991,7 +991,7 @@ def setup_experiment_tracking(
     wandb_url = None
     if args.with_tracking:
         wandb.init(
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             entity=args.wandb_entity,
             config=all_configs,
             group=args.wandb_group_name,

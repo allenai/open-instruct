@@ -14,6 +14,10 @@ from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.train.callbacks import CheckpointerCallback
+from olmo_core.train.train_module.transformer import (
+    TransformerActivationCheckpointingConfig,
+    TransformerActivationCheckpointingMode,
+)
 
 from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -87,6 +91,16 @@ class TrainingConfig:
     """
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
+
+
+def build_ac_config(
+    activation_memory_budget: float, compile_model: bool
+) -> TransformerActivationCheckpointingConfig | None:
+    if activation_memory_budget < 1.0 and compile_model:
+        return TransformerActivationCheckpointingConfig(
+            mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget
+        )
+    return None
 
 
 @dataclass

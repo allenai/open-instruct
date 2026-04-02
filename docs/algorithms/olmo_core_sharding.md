@@ -14,6 +14,7 @@ DPO and GRPO share these defaults:
 | Wrapping strategy | `blocks` (each Transformer block is one FSDP unit) |
 | Parameter dtype | `bfloat16` |
 | Reduction dtype | `float32` |
+| Activation checkpointing | Budget-mode (when `activation_memory_budget < 1.0` and `compile_model`) |
 
 ## How HSDP Works
 
@@ -92,8 +93,7 @@ DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The tab
 | Aspect | DPO | GRPO |
 |--------|-----|------|
 | Tensor parallelism | Yes | No |
-| Context parallelism | Not yet supported | No |
-| Activation checkpointing | Budget-mode | Gradient checkpointing flag |
+| Context parallelism | No | No |
 | Training coordinator | `torch.distributed` | Ray actors |
 
 ## Choosing Parallelism Settings

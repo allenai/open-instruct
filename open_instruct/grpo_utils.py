@@ -6,7 +6,7 @@ from typing import Literal
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -25,38 +25,34 @@ class GRPOLossType(enum.StrEnum):
 
 
 @dataclass
-class ExperimentConfig:
-    # Experiment
+class ExperimentConfig(
+    olmo_core_utils.ExperimentConfig,
+    olmo_core_utils.TrainingConfig,
+    olmo_core_utils.LoggingConfig,
+    olmo_core_utils.CheckpointConfig,
+):
     exp_name: str = "grpo"
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
-    run_name: str | None = None
-    """RUNTIME VALUE: A unique name of this run"""
-
-    # Optimizer
-    learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    lr_scheduler_type: Literal[
-        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-    ] = "linear"
-    """Which scheduler to use"""
-    warm_up_steps: int = 0
-    """Number of warm up steps for the scheduler"""
     warmup_ratio: float = 0.0
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
-    weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
     max_grad_norm: float = 1.0
     """Maximum gradient norm for gradient clipping."""
+    per_device_train_batch_size: int = 1
+    """The forward batch size per device (local_micro_batch_size)"""
+    output_dir: str = "output"
+    """Where to save the model"""
+
+    # Optimizer
+    warm_up_steps: int = 0
+    """Number of warm up steps for the scheduler"""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
     fused_optimizer: bool = False
     """Whether to use fused optimizer"""
 
     # Batch sizes
-    per_device_train_batch_size: int = 1
-    """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
@@ -73,8 +69,6 @@ class ExperimentConfig:
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
-    num_epochs: int = 1
-    """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
@@ -141,14 +135,8 @@ class ExperimentConfig:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
     wandb_group_name: str | None = None
     """Optional W&B group name used to group related runs together."""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: str | None = None
@@ -159,12 +147,8 @@ class ExperimentConfig:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: str = "output"
-    """Where to save the model"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
