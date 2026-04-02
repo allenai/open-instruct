@@ -477,6 +477,7 @@ class PolicyTrainerRayProcess(RayProcess):
         metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
         for k, v in metrics.items():
             self.local_metrics[k] = v
+        self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
     def step(self):
