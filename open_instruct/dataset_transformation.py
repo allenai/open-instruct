@@ -1273,6 +1273,12 @@ def sft_tulu_tokenize_turn_truncate_v1(row: dict[str, Any], tokenizer: PreTraine
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
 
+    if not any(m["role"] == "user" for m in messages):
+        row[INPUT_IDS_KEY] = torch.tensor([], dtype=torch.long)
+        row[LABELS_KEY] = torch.tensor([], dtype=torch.long)
+        row[ATTENTION_MASK_KEY] = torch.tensor([], dtype=torch.long)
+        return row
+
     full_ids = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
@@ -1302,7 +1308,7 @@ def sft_tulu_tokenize_turn_truncate_v1(row: dict[str, Any], tokenizer: PreTraine
             ).shape[1]
             if end > max_seq_length:
                 break
-            if messages[k - 1]["role"] == "assistant":
+            if messages[k - 1]["role"] == "assistant" and any(m["role"] == "user" for m in messages[:k]):
                 last_valid_end = end
                 last_valid_k = k
         if last_valid_end is None:
