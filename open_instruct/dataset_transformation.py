@@ -1107,7 +1107,7 @@ def _mask_labels(
     labels: torch.Tensor,
     messages: list[dict[str, Any]],
     tokenizer: PreTrainedTokenizer,
-    max_seq_length: int,
+    max_seq_length: int | None,
     should_mask: Callable[[int, dict[str, Any], list[dict[str, Any]]], bool],
 ) -> None:
     """Mask spans in ``labels`` by setting them to -100.
@@ -1225,6 +1225,103 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
 
 def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
+
+
+def sft_tulu_tokenize_strict_length_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    """Tokenize without truncation; samples exceeding max_seq_length are later
+    removed by the paired filter ``sft_tulu_strict_length_filter_v1``."""
+    messages = row["messages"]
+    if len(messages) == 0:
+        raise ValueError("messages field is empty.")
+    input_ids_result = tokenizer.apply_chat_template(
+        conversation=messages,
+        tokenize=True,
+        return_tensors="pt",
+        return_dict=False,
+        padding=False,
+        truncation=False,
+        add_generation_prompt=False,
+    )
+    assert isinstance(input_ids_result, torch.Tensor)
+    input_ids = input_ids_result
+    labels = input_ids.clone()
+    _mask_labels(labels, messages, tokenizer, None, lambda idx, msg, _msgs: msg["role"] != "assistant")
+    attention_mask = torch.ones_like(input_ids)
+    row[INPUT_IDS_KEY] = input_ids.flatten()
+    row[LABELS_KEY] = labels.flatten()
+    row[ATTENTION_MASK_KEY] = attention_mask.flatten()
+    return row
+
+
+def sft_tulu_strict_length_filter_v1(
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None = None
+):
+    """Drop any sample longer than max_seq_length and require at least one label."""
+    if max_seq_length is not None and len(row[INPUT_IDS_KEY]) > max_seq_length:
+        return False
+    return any(x != -100 for x in row[LABELS_KEY])
+
+
+def sft_tulu_tokenize_turn_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    """Tokenize and truncate at turn boundaries only.
+
+    Instead of cutting mid-turn, we find the largest prefix of complete turns
+    that fits within max_seq_length. The last included turn must be an assistant
+    turn so there is something to train on.
+    """
+    messages = row["messages"]
+    if len(messages) == 0:
+        raise ValueError("messages field is empty.")
+
+    full_ids = tokenizer.apply_chat_template(
+        conversation=messages,
+        tokenize=True,
+        return_tensors="pt",
+        return_dict=False,
+        padding=False,
+        truncation=False,
+        add_generation_prompt=False,
+    )
+    assert isinstance(full_ids, torch.Tensor)
+
+    if full_ids.shape[1] <= max_seq_length:
+        input_ids = full_ids
+        kept_messages = messages
+    else:
+        last_valid_end = None
+        last_valid_k = None
+        for k in range(1, len(messages) + 1):
+            end = tokenizer.apply_chat_template(
+                conversation=messages[:k],
+                tokenize=True,
+                return_tensors="pt",
+                return_dict=False,
+                padding=False,
+                truncation=False,
+                add_generation_prompt=False,
+            ).shape[1]
+            if end > max_seq_length:
+                break
+            if messages[k - 1]["role"] == "assistant":
+                last_valid_end = end
+                last_valid_k = k
+        if last_valid_end is None:
+            input_ids = full_ids[:, :0]
+            kept_messages = []
+        else:
+            input_ids = full_ids[:, :last_valid_end]
+            kept_messages = messages[:last_valid_k]
+
+    labels = input_ids.clone()
+    if kept_messages:
+        _mask_labels(
+            labels, kept_messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant"
+        )
+    attention_mask = torch.ones_like(input_ids)
+    row[INPUT_IDS_KEY] = input_ids.flatten()
+    row[LABELS_KEY] = labels.flatten()
+    row[ATTENTION_MASK_KEY] = attention_mask.flatten()
+    return row
 
 
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -1533,6 +1630,9 @@ TRANSFORM_FNS = {
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
+    "sft_tulu_tokenize_strict_length_v1": (sft_tulu_tokenize_strict_length_v1, "map"),
+    "sft_tulu_strict_length_filter_v1": (sft_tulu_strict_length_filter_v1, "filter"),
+    "sft_tulu_tokenize_turn_truncate_v1": (sft_tulu_tokenize_turn_truncate_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
