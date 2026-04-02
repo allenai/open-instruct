@@ -531,16 +531,19 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.cache_dataset_only:
         return
 
-    # Pre-download model files on rank 0, then force all ranks to load from
-    # local cache only. Without this, concurrent from_pretrained calls on a
-    # shared filesystem race on HF Hub API lookups and can fail with OSError
-    # ("does not appear to have a file named ...").
+    # Pre-download model on rank 0, then resolve the local cache path on all
+    # ranks.  Passing the local directory to from_pretrained avoids all Hub API
+    # lookups and Xet blob resolution issues that cause OSError on multi-node.
     model_path = args.config_name or args.model_name_or_path
-    if model_path and accelerator.is_main_process:
-        snapshot_download(model_path, revision=args.model_revision)
-    accelerator.wait_for_everyone()
-    if model_path:
-        os.environ["HF_HUB_OFFLINE"] = "1"
+    if model_path and not os.path.isdir(model_path):
+        if accelerator.is_main_process:
+            snapshot_download(model_path, revision=args.model_revision)
+        accelerator.wait_for_everyone()
+        local_model_dir = snapshot_download(model_path, revision=args.model_revision, local_files_only=True)
+        if args.config_name:
+            args.config_name = local_model_dir
+        if args.model_name_or_path:
+            args.model_name_or_path = local_model_dir
 
     # Load pretrained model and tokenizer
     if args.config_name:
@@ -614,9 +617,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
-
-    # Re-enable network access now that model is loaded from cache.
-    os.environ.pop("HF_HUB_OFFLINE", None)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
