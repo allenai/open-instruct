@@ -257,7 +257,6 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.responses, [[7, 8]])
         self.assertEqual(result.token_statistics.generation_time, 1.5)
 
-
 class TestModelDimsFromVllmConfig(unittest.TestCase):
     def test_model_dims_from_vllm_config(self):
         expected_dims = ModelDims(

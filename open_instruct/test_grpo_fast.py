@@ -783,6 +783,16 @@ class TestAccumulateInferenceBatchesProgress(unittest.TestCase):
 class TestAccumulateInferenceBatches(TestGrpoFastBase):
     """Test accumulate_inference_batches function."""
 
+    def test_get_never_give_up_retry_suffix_increments_existing_suffix(self):
+        self.assertEqual(
+            data_loader_lib.get_never_give_up_retry_suffix("7_0", epoch_number=7, index=0),
+            "_1",
+        )
+        self.assertEqual(
+            data_loader_lib.get_never_give_up_retry_suffix("7_0_1", epoch_number=7, index=0),
+            "_2",
+        )
+
     def test_active_sampling_never_give_up_one_requeues_same_zero_reward_prompt(self):
         num_samples_per_prompt = 4
         queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
@@ -845,7 +855,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         requeued_prompt = param_prompt_Q.get(timeout=1)
         replacement_prompt = param_prompt_Q.get(timeout=1)
         self.assertEqual(requeued_prompt.index, 0)
-        self.assertEqual(requeued_prompt.prompt_id, "7_0")
+        self.assertEqual(requeued_prompt.prompt_id, "7_0_1")
         self.assertEqual(replacement_prompt.index, 1)
         self.assertEqual(replacement_prompt.prompt_id, "7_1")
 

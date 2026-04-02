@@ -751,6 +751,7 @@ def add_prompt_to_generator(
     generation_config,
     is_eval: bool,
     base_env_config: EnvConfig,
+    prompt_id_suffix: str | None = None,
 ) -> None:
     index = int(example["index"])
 
@@ -762,12 +763,22 @@ def add_prompt_to_generator(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             index=index,
-            prompt_id=f"{epoch_number}_{index}",
+            prompt_id=f"{epoch_number}_{index}{prompt_id_suffix or ''}",
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
         )
     )
+
+
+def get_never_give_up_retry_suffix(prompt_id: str | None, epoch_number: int, index: int) -> str:
+    """Return a numeric retry suffix for a never_give_up requeue."""
+    base_prompt_id = f"{epoch_number}_{index}"
+    if prompt_id is None or prompt_id == base_prompt_id:
+        return "_1"
+
+    retry_count = int(prompt_id.removeprefix(f"{base_prompt_id}_"))
+    return f"_{retry_count + 1}"
 
 
 def accumulate_inference_batches(
@@ -901,7 +912,12 @@ def accumulate_inference_batches(
                     active_sampling and result.reward_scores[0] == 0 and np.random.random() < never_give_up
                 )
                 replacement_example = example
-                if not requeue_same_prompt:
+                prompt_id_suffix = None
+                if requeue_same_prompt:
+                    prompt_id_suffix = get_never_give_up_retry_suffix(
+                        result.prompt_id, iter_dataloader._epoch if iter_dataloader is not None else 0, result.index
+                    )
+                else:
                     assert iter_dataloader is not None
                     replacement_example = next(iter_dataloader)
                 add_prompt_to_generator(
@@ -911,6 +927,7 @@ def accumulate_inference_batches(
                     generation_config,
                     is_eval=False,
                     base_env_config=base_env_config,
+                    prompt_id_suffix=prompt_id_suffix,
                 )
             if not active_sampling:
                 num_prompts_sampled += 1
