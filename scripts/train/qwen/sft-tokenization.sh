@@ -29,14 +29,14 @@ MAX_SEQ=32768
 # --- 10k subset ---
 echo "Launching 10k subset tokenization..."
 uv run python mason.py \
-  --cluster ai2/olmo-instruct \
+  --cluster ai2/saturn \
   --budget ai2/oe-adapt \
   --workspace ai2/olmo-instruct \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
   --no-host-networking \
   --gpus 8 \
-  --priority normal \
+  --priority urgent \
   --description "Qwen3 SFT tokenization (10k)" \
   --no_auto_dataset_cache \
   -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token '<|endoftext|>' \&\& python scripts/data/convert_sft_data_for_olmocore.py \
@@ -50,14 +50,14 @@ uv run python mason.py \
 # --- 100k subset ---
 echo "Launching 100k subset tokenization..."
 uv run python mason.py \
-  --cluster ai2/olmo-instruct \
+  --cluster ai2/saturn \
   --budget ai2/oe-adapt \
   --workspace ai2/olmo-instruct \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
   --no-host-networking \
   --gpus 8 \
-  --priority normal \
+  --priority urgent \
   --description "Qwen3 SFT tokenization (100k)" \
   --no_auto_dataset_cache \
   -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token '<|endoftext|>' \&\& python scripts/data/convert_sft_data_for_olmocore.py \
@@ -71,14 +71,14 @@ uv run python mason.py \
 # --- Full dataset ---
 echo "Launching full dataset tokenization..."
 uv run python mason.py \
-  --cluster ai2/olmo-instruct \
+  --cluster ai2/saturn \
   --budget ai2/oe-adapt \
   --workspace ai2/olmo-instruct \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
   --no-host-networking \
   --gpus 8 \
-  --priority normal \
+  --priority urgent \
   --description "Qwen3 SFT tokenization (full)" \
   --no_auto_dataset_cache \
   -- python scripts/data/prepare_modified_tokenizer.py --model Qwen/Qwen3-1.7B --save-dir ${TOKENIZER_PATH} --eos-token '<|endoftext|>' \&\& python scripts/data/convert_sft_data_for_olmocore.py \
