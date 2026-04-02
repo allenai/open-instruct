@@ -405,7 +405,7 @@ class GRPOTrainModule(TransformerTrainModule):
         token_counts = torch.tensor(
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
-        loss_stats_B = grpo_utils.create_loss_stats(num_samples, token_counts, self.device)
+        loss_stats_B = grpo_utils.create_loss_stats(num_samples, self.device)
 
         num_steps = 0
         local_step = 0
@@ -493,8 +493,8 @@ class GRPOTrainModule(TransformerTrainModule):
             self.zero_grads()
 
         if not dry_run and num_steps > 0:
-            local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, self.grpo_config)
-            local_tokens = local_metrics.pop("_token_count")
+            local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
+            local_tokens = token_counts.sum().item()
 
             keys = sorted(local_metrics.keys())
             values = [local_tokens] + [local_metrics[k] * local_tokens for k in keys]

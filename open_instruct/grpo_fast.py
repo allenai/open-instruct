@@ -473,10 +473,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
-    def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor]) -> None:
-        metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, self.args)
+    def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor) -> None:
+        metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
         for k, v in metrics.items():
             self.local_metrics[k] = v
+        self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
     def step(self):
@@ -546,7 +547,7 @@ class PolicyTrainerRayProcess(RayProcess):
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            loss_stats_B = grpo_utils.create_loss_stats(num_samples, token_counts_per_sample, device)
+            loss_stats_B = grpo_utils.create_loss_stats(num_samples, device)
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -663,7 +664,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
-                self._compute_loss_metrics(loss_stats_B)
+                self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
@@ -1484,7 +1485,6 @@ def one_training_step(
     # Average scalar metrics from each worker
     for k in metrics[0]:
         if k == "_token_count":
-            # Don't include internal token count in final metrics
             continue
         if k in token_weighted_metrics:
             # Token-weighted average

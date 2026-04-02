@@ -462,21 +462,24 @@ def calculate_token_counts(
     return accumulation_counts
 
 
-_SCALAR_LOSS_STAT_KEYS = ["kl_loss", "tis_ratio", "tis_clipfrac", "pg_clipfrac", "pg_loss", "loss", "ratio", "entropy"]
-
-_WEIGHTED_AVG_METRICS = [
-    ("loss/policy_avg", "pg_loss"),
-    ("loss/total_avg", "loss"),
-    ("policy/clipfrac_avg", "pg_clipfrac"),
-    ("val/tis_ratio", "tis_ratio"),
-    ("val/tis_clipfrac", "tis_clipfrac"),
-    ("val/ratio", "ratio"),
+_SCALAR_LOSS_STAT_KEYS = [
+    "loss/kl_avg",
+    "loss/policy_avg",
+    "loss/total_avg",
+    "objective/kl0_avg",
+    "objective/kl1_avg",
+    "objective/kl2_avg",
+    "objective/kl3_avg",
+    "policy/clipfrac_avg",
+    "policy/entropy_avg",
+    "val/ratio",
+    "val/tis_clipfrac",
+    "val/tis_ratio",
 ]
 
 
-def create_loss_stats(num_samples: int, token_counts: torch.Tensor, device: torch.device) -> dict[str, torch.Tensor]:
-    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
-    return stats | {"kl": torch.zeros(4, num_samples, device=device), "token_count": token_counts}
+def create_loss_stats(num_samples: int, device: torch.device) -> dict[str, torch.Tensor]:
+    return {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
 
 
 def populate_sample_loss_stats(
@@ -499,37 +502,31 @@ def populate_sample_loss_stats(
         if config.load_ref_policy and ref_logprobs is not None:
             ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
             kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
-            loss_stats_B["kl"][:, sample_idx] = masked_mean(kl_4BT, response_mask).float()
-            loss_stats_B["kl_loss"][sample_idx] = loss_stats_B["kl"][config.kl_estimator, sample_idx] * config.beta
+            kl_values = masked_mean(kl_4BT, response_mask).float()
+            for j in range(4):
+                loss_stats_B[f"objective/kl{j}_avg"][sample_idx] = kl_values[j]
+            loss_stats_B["loss/kl_avg"][sample_idx] = kl_values[config.kl_estimator] * config.beta
         if tis_clamped is not None and tis_unclamped is not None:
-            loss_stats_B["tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
-            loss_stats_B["tis_clipfrac"][sample_idx] = masked_mean(
+            loss_stats_B["val/tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
+            loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
                 (tis_clamped < tis_unclamped).float(), response_mask
             )
-        loss_stats_B["pg_clipfrac"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
-        loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
-        loss_stats_B["loss"][sample_idx] = loss
-        loss_stats_B["ratio"][sample_idx] = masked_mean(ratio, response_mask)
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
+        loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
+        loss_stats_B["loss/total_avg"][sample_idx] = loss
+        loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)
         if entropy is not None:
-            loss_stats_B["entropy"][sample_idx] = masked_mean(entropy, response_mask).float()
+            loss_stats_B["policy/entropy_avg"][sample_idx] = masked_mean(entropy, response_mask).float()
 
 
 def compute_metrics_from_loss_stats(
-    loss_stats_B: dict[str, torch.Tensor], config: GRPOExperimentConfig
+    loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor
 ) -> dict[str, float]:
-    token_counts = loss_stats_B["token_count"]
     total_tokens = token_counts.sum()
     weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
     metrics: dict[str, float] = {}
-    if config.load_ref_policy:
-        for j in range(4):
-            metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum().item()
-        metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum().item()
-    for metric_key, stat_key in _WEIGHTED_AVG_METRICS:
-        metrics[metric_key] = (loss_stats_B[stat_key] * weights).sum().item()
-    metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - metrics["val/ratio"]) ** 2).sum().item()
-    if config.record_entropy:
-        metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum().item()
-    metrics["_token_count"] = total_tokens.item()
+    for key in _SCALAR_LOSS_STAT_KEYS:
+        metrics[key] = (loss_stats_B[key] * weights).sum().item()
+    metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
     return metrics
