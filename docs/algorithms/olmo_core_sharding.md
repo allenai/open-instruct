@@ -1,12 +1,12 @@
 # OLMo-core Sharding and Parallelism
 
-All OLMo-core training implementations (DPO, GRPO, and SFT) use the same underlying parallelism primitives from OLMo-core. This page documents the shared architecture and per-algorithm differences.
+The DPO and GRPO trainers in open-instruct use OLMo-core's parallelism primitives for distributed training. SFT runs via a separate OLMo-core script and manages its own sharding. This page documents the shared architecture for DPO and GRPO, and notes where SFT differs.
 
 ## Overview
 
 OLMo-core uses **Hybrid Sharded Data Parallelism (HSDP)** via PyTorch's DTensor-based FSDP2. HSDP combines full sharding within a group of GPUs with replication across groups, balancing memory savings with communication efficiency.
 
-All three trainers share these defaults:
+DPO and GRPO share these defaults:
 
 | Setting | Value |
 |---------|-------|
@@ -88,21 +88,21 @@ Key differences from DPO:
 
 ### SFT
 
-SFT uses OLMo-core's native training infrastructure directly (see [SFT documentation](finetune.md)). The HSDP configuration is handled internally by OLMo-core's `Trainer` and follows the same pattern: HSDP with `blocks` wrapping, `bfloat16` parameters, and `float32` reductions.
-
-SFT does not expose `fsdp_shard_degree` or `fsdp_num_replicas` flags through open-instruct. Configuration is done via OLMo-core's CLI flags (e.g., `--launch.num_gpus`, `--num_nodes`).
+SFT runs via OLMo-core's own training script (`src/scripts/train/sft/OLMo-sft.py`) in a separate [OLMo-core](https://github.com/allenai/OLMo-core) clone (see [SFT documentation](finetune.md)). Sharding is configured entirely within OLMo-core and is not managed by open-instruct. See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for details on its parallelism settings.
 
 ## Comparison
 
-All three trainers share HSDP with `blocks` wrapping and `float32` reductions. The table below shows where they differ:
+DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The table below shows where they differ:
 
-| Aspect | DPO | GRPO | SFT |
-|--------|-----|------|-----|
-| Explicit shard degree / replicas | Yes | No (auto) | No (auto) |
-| Tensor parallelism | Yes | No | Via OLMo-core |
-| Context parallelism | Not yet supported | No | Via OLMo-core |
-| Activation checkpointing | Budget-mode | Gradient checkpointing flag | Via OLMo-core |
-| Training coordinator | `torch.distributed` | Ray actors | OLMo-core `Trainer` |
+| Aspect | DPO | GRPO |
+|--------|-----|------|
+| Explicit shard degree / replicas | Yes | No (auto) |
+| Tensor parallelism | Yes | No |
+| Context parallelism | Not yet supported | No |
+| Activation checkpointing | Budget-mode | Gradient checkpointing flag |
+| Training coordinator | `torch.distributed` | Ray actors |
+
+SFT sharding is managed entirely by OLMo-core; see the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for its parallelism settings.
 
 ## Choosing Parallelism Settings
 
@@ -116,7 +116,7 @@ For very large models (32B+), consider enabling tensor parallelism (`--tensor_pa
 
 ## FSDP-First Loading Pattern
 
-All three trainers follow the same model initialization sequence:
+DPO and GRPO follow the same model initialization sequence:
 
 1. Build the OLMo-core `Transformer` model on CPU.
 2. Create the `TrainModule`, which calls `parallelize_model()` internally. This applies FSDP sharding and reinitializes weights from scratch.
