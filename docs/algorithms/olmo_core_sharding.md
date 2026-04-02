@@ -63,7 +63,7 @@ dp_config = TransformerDataParallelConfig(
 | `--tensor_parallel_degree` | Tensor parallelism degree | `1` (disabled) |
 | `--context_parallel_degree` | Context (sequence) parallelism degree | `1` (disabled) |
 
-DPO also supports **tensor parallelism** (splitting individual layers across GPUs) and **context parallelism** (splitting sequences across GPUs), which can be combined with HSDP for very large models.
+DPO also supports **tensor parallelism** (splitting individual layers across GPUs), which can be combined with HSDP for very large models. Context parallelism (`--context_parallel_degree`) is not yet supported in DPO.
 
 ### GRPO
 
@@ -100,7 +100,7 @@ All three trainers share HSDP with `blocks` wrapping and `float32` reductions. T
 |--------|-----|------|-----|
 | Explicit shard degree / replicas | Yes | No (auto) | No (auto) |
 | Tensor parallelism | Yes | No | Via OLMo-core |
-| Context parallelism | Yes | No | Via OLMo-core |
+| Context parallelism | Not yet supported | No | Via OLMo-core |
 | Activation checkpointing | Budget-mode | Gradient checkpointing flag | Via OLMo-core |
 | Training coordinator | `torch.distributed` | Ray actors | OLMo-core `Trainer` |
 
@@ -122,4 +122,4 @@ All three trainers follow the same model initialization sequence:
 2. Create the `TrainModule`, which calls `parallelize_model()` internally. This applies FSDP sharding and reinitializes weights from scratch.
 3. Reload the HuggingFace checkpoint into the now-sharded model via `load_hf_model()`.
 
-This "FSDP-first" pattern ensures that FSDP metadata is set up before any real weights are loaded, avoiding the need to hold a full unsharded copy in memory. See `DPOTrainModule` in `open_instruct/olmo_core_train_modules.py` and `OlmoCoreActorModule.setup_model()` in `open_instruct/grpo_olmo_core_actor.py` for the DPO and GRPO implementations respectively.
+This "FSDP-first" pattern ensures that FSDP metadata is set up before any real weights are loaded, avoiding the need to hold a full unsharded copy in memory. See `DPOTrainModule` in `open_instruct/olmo_core_train_modules.py` and `PolicyTrainerOLMoCoreProcess.setup_model()` in `open_instruct/grpo_olmo_core_actor.py` for the DPO and GRPO implementations respectively.
