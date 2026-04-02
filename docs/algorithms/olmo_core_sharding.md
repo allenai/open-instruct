@@ -54,22 +54,22 @@ GRPO additionally validates that the sharding configuration is consistent with t
 
 ## Per-Algorithm Configuration
 
-### DPO
-
-DPO (`open_instruct/dpo.py`):
+Both DPO and GRPO create `TransformerDataParallelConfig` with the same structure:
 
 ```python
 dp_config = TransformerDataParallelConfig(
     name=DataParallelType.hsdp,
     num_replicas=args.fsdp_num_replicas,   # None = auto
     shard_degree=args.fsdp_shard_degree,   # None = auto
-    param_dtype=DType.bfloat16,
+    param_dtype=...,                       # bfloat16 (DPO) or configurable (GRPO)
     reduce_dtype=DType.float32,
     wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
 )
 ```
 
-DPO also supports these additional parallelism flags:
+### DPO
+
+DPO (`open_instruct/dpo.py`) additionally supports these parallelism flags:
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -80,22 +80,7 @@ DPO supports **tensor parallelism** (splitting individual layers across GPUs), w
 
 ### GRPO
 
-GRPO (`open_instruct/grpo_olmo_core_actor.py`):
-
-```python
-dp_config = None
-if not single_gpu_mode and world_size > 1:
-    dp_config = TransformerDataParallelConfig(
-        name=DataParallelType.hsdp,
-        num_replicas=grpo_config.fsdp_num_replicas,  # None = auto
-        shard_degree=grpo_config.fsdp_shard_degree,   # None = auto
-        param_dtype=olmo_core_dtype,       # bfloat16 or float32
-        reduce_dtype=DType.float32,
-        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
-    )
-```
-
-Key differences from DPO:
+GRPO (`open_instruct/grpo_olmo_core_actor.py`) differs from DPO in:
 
 - **Single-GPU mode.** When `--single_gpu_mode` is set, `dp_config` is `None` and no sharding is applied. The model is instead cast to the target dtype directly.
 - **Ray actors.** GRPO uses Ray to coordinate distributed training, so `torch.distributed` is initialized within each Ray actor rather than at the script level.
@@ -106,7 +91,6 @@ DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The tab
 
 | Aspect | DPO | GRPO |
 |--------|-----|------|
-| Explicit shard degree / replicas | Yes | Yes |
 | Tensor parallelism | Yes | No |
 | Context parallelism | Not yet supported | No |
 | Activation checkpointing | Budget-mode | Gradient checkpointing flag |
