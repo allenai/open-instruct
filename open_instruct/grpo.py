@@ -331,6 +331,7 @@ if __name__ == "__main__":
             EnvsConfig,
         ]
     )
+    parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
     args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
 
     main(args, tc, model_config, streaming_config, vllm_config, tools_config)  # type: ignore[arg-type]

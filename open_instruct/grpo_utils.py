@@ -31,19 +31,6 @@ class ExperimentConfig(
     olmo_core_utils.LoggingConfig,
     olmo_core_utils.CheckpointConfig,
 ):
-    exp_name: str = "grpo"
-    """The name of this experiment"""
-    seed: int = 1
-    """Seed of the experiment"""
-    warmup_ratio: float = 0.0
-    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
-    max_grad_norm: float = 1.0
-    """Maximum gradient norm for gradient clipping."""
-    per_device_train_batch_size: int = 1
-    """The forward batch size per device (local_micro_batch_size)"""
-    output_dir: str = "output"
-    """Where to save the model"""
-
     # Optimizer
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
