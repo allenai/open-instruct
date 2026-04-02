@@ -32,8 +32,6 @@ class ExperimentConfig(
     olmo_core_utils.CheckpointConfig,
 ):
     # Optimizer
-    warm_up_steps: int = 0
-    """Number of warm up steps for the scheduler"""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
     fused_optimizer: bool = False

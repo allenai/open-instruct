@@ -138,9 +138,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         num_scheduler_steps = (
             self.grpo_config.num_training_steps * self.grpo_config.num_epochs * self.grpo_config.num_mini_batches
         )
-        warmup_steps = self.grpo_config.warm_up_steps
-        if self.grpo_config.warmup_ratio > 0.0:
-            warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
+        warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
 
         if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
