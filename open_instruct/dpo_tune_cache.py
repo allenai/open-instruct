@@ -113,7 +113,7 @@ def build_deepspeed_config(
     return config
 
 
-def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
+def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -763,6 +763,6 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)
