@@ -1922,11 +1922,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     gae_advantages_BT.append(advantages)
                     returns_BT.append(returns)
 
-                if use_sae and self.rank == 0:
+                if use_sae:
                     log_thresh = np.log(self.args.sae_threshold + 1e-30)
                     total_resp_tokens = 0
                     total_boundaries = 0
-                    all_segment_lengths: list[int] = []
+                    all_segment_lengths: list[float] = []
                     for i in range(num_samples):
                         lp = data_BT.vllm_logprobs[i][:, 1:].cpu().float().numpy()
                         lp = np.nan_to_num(lp, nan=0.0)
@@ -1934,7 +1934,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         is_boundary = (lp < log_thresh) & (rm > 0)
                         total_boundaries += int(is_boundary.sum())
                         total_resp_tokens += int((rm > 0).sum())
-                        # Compute per-sub-sequence segment lengths
                         dones_i = data_BT.dones[i][:, 1:].cpu().numpy().clip(0, 1)
                         for b in range(rm.shape[0]):
                             eos_positions = np.where(dones_i[b] > 0)[0]
@@ -1947,12 +1946,12 @@ class PolicyTrainerRayProcess(RayProcess):
                                 if seq_resp_len > 0:
                                     all_segment_lengths.append(seq_resp_len / n_segs)
                                 start = end
-                    boundary_frac = float(total_boundaries / max(total_resp_tokens, 1))
-                    self.local_metrics["value/sae_boundary_frac"] = boundary_frac
+                    self.local_metrics["value/sae_boundary_frac"] = float(total_boundaries / max(total_resp_tokens, 1))
                     self.local_metrics["value/sae_num_boundaries"] = float(total_boundaries)
-                    if all_segment_lengths:
-                        self.local_metrics["value/sae_avg_segment_len"] = float(np.mean(all_segment_lengths))
-                        self.local_metrics["value/sae_median_segment_len"] = float(np.median(all_segment_lengths))
+                    avg_seg = float(np.mean(all_segment_lengths)) if all_segment_lengths else 0.0
+                    med_seg = float(np.median(all_segment_lengths)) if all_segment_lengths else 0.0
+                    self.local_metrics["value/sae_avg_segment_len"] = avg_seg
+                    self.local_metrics["value/sae_median_segment_len"] = med_seg
                 if use_vapo_gae:
                     self.local_metrics["value/policy_lambda"] = policy_lambda_used
 
