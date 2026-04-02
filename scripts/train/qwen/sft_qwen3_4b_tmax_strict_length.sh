@@ -2,7 +2,7 @@
 # SFT Qwen3-4B on tmax dataset with strict length filtering (drop samples > max_seq_length).
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-EXP_NAME="${EXP_NAME:-sft_qwen3_4b_tmax_strict_length}"
+EXP_NAME="${EXP_NAME:-sft_qwen35_4b_tmax_strict_length}"
 
 DATASETS="hamishivi/tmax-sft-full-20260317 1.0"
 DATASET_SPLITS="nvidia__Nemotron_Terminal_Corpus__dataset_adapters+nvidia__Nemotron_Terminal_Corpus__skill_based_easy+nvidia__Nemotron_Terminal_Corpus__skill_based_medium+nvidia__Nemotron_Terminal_Corpus__skill_based_mixed+open_thoughts__OpenThoughts_Agent_v1_SFT"
@@ -27,8 +27,8 @@ uv run python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name ${EXP_NAME} \
-    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --tokenizer_name Qwen/Qwen3-4B-Instruct-2507 \
+    --model_name_or_path Qwen/Qwen3.5-4B \
+    --tokenizer_name Qwen/Qwen3.5-4B \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits $DATASET_SPLITS \
     --dataset_transform_fn sft_tulu_tokenize_strict_length_v1 sft_tulu_strict_length_filter_v1 \

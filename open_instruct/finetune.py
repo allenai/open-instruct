@@ -390,8 +390,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True,
-                sp_attn_implementation="flash_attention_3" if args.use_flash_attn else "sdpa",
+                sp_seq_length_is_variable=True, sp_attn_implementation=model_utils.detect_hf_attn_implementation()
             ),
         )
         # Monkey-patch DeepSpeed Ulysses SP to make position_ids contiguous before
