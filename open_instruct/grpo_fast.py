@@ -830,41 +830,48 @@ class PolicyTrainerRayProcess(RayProcess):
                         v_end = min(seq_len - 1, chunk_end_seq - 1)
                         chunk_boundaries.append((v_start, v_end))
 
-                    # Batch generate for all chunks of this sub-sequence
+                    # Generate in sub-batches to avoid OOM on long responses with many chunks
+                    gen_batch_size = 8
                     if chunk_prompts:
-                        tokenized = self.tokenizer(
-                            chunk_prompts, return_tensors="pt", padding=True, truncation=True, max_length=2048
-                        ).to(device)
-                        input_ids = tokenized["input_ids"]
-                        attn_mask = tokenized["attention_mask"]
-                        prompt_len = input_ids.shape[1]
+                        for cb_start in range(0, len(chunk_prompts), gen_batch_size):
+                            cb_end = min(cb_start + gen_batch_size, len(chunk_prompts))
+                            sub_prompts = chunk_prompts[cb_start:cb_end]
+                            sub_boundaries = chunk_boundaries[cb_start:cb_end]
 
-                        full_ids, gen_mask = self._generate_from_generative_value_model(
-                            input_ids, attn_mask, max_think_tokens
-                        )
+                            tokenized = self.tokenizer(
+                                sub_prompts, return_tensors="pt", padding=True, truncation=True, max_length=2048
+                            ).to(device)
+                            input_ids = tokenized["input_ids"]
+                            attn_mask = tokenized["attention_mask"]
+                            prompt_len = input_ids.shape[1]
 
-                        generated_texts = self.tokenizer.batch_decode(
-                            full_ids[:, prompt_len:], skip_special_tokens=True
-                        )
-
-                        for c, (text, (v_start, v_end)) in enumerate(zip(generated_texts, chunk_boundaries)):
-                            score = self._parse_generative_value_score(text)
-                            pred_value = max(0.0, min(1.0, score)) if score is not None else 0.5
-
-                            # Fill values tensor: each token in this chunk gets this value
-                            values[b, v_start:v_end] = pred_value
-
-                            # Store generation data for REINFORCE training
-                            all_gen_data.append(
-                                {
-                                    "full_ids": full_ids[c : c + 1],
-                                    "gen_mask": gen_mask[c : c + 1],
-                                    "prompt_len": prompt_len,
-                                    "predicted_score": pred_value,
-                                    "actual_outcome": actual_outcome,
-                                    "parsed": score is not None,
-                                }
+                            full_ids, gen_mask = self._generate_from_generative_value_model(
+                                input_ids, attn_mask, max_think_tokens
                             )
+
+                            generated_texts = self.tokenizer.batch_decode(
+                                full_ids[:, prompt_len:], skip_special_tokens=True
+                            )
+
+                            for c, (text, (v_start, v_end)) in enumerate(zip(generated_texts, sub_boundaries)):
+                                score = self._parse_generative_value_score(text)
+                                pred_value = max(0.0, min(1.0, score)) if score is not None else 0.5
+
+                                values[b, v_start:v_end] = pred_value
+
+                                all_gen_data.append(
+                                    {
+                                        "full_ids": full_ids[c : c + 1].cpu(),
+                                        "gen_mask": gen_mask[c : c + 1].cpu(),
+                                        "prompt_len": prompt_len,
+                                        "predicted_score": pred_value,
+                                        "actual_outcome": actual_outcome,
+                                        "parsed": score is not None,
+                                    }
+                                )
+
+                            del full_ids, gen_mask, tokenized, input_ids, attn_mask
+                            torch.cuda.empty_cache()
 
                     start = end
                     gt_idx += 1
@@ -910,7 +917,7 @@ class PolicyTrainerRayProcess(RayProcess):
         for batch_start in range(0, len(indices), self.args.per_device_train_batch_size):
             batch_idx = indices[batch_start : batch_start + self.args.per_device_train_batch_size]
 
-            # Pad and stack sequences for this mini-batch
+            # Pad and stack sequences for this mini-batch (data may be on CPU)
             batch_full_ids = [gen_data[j]["full_ids"].squeeze(0) for j in batch_idx]
             batch_gen_masks = [gen_data[j]["gen_mask"].squeeze(0) for j in batch_idx]
             batch_rewards = baselined_rewards[batch_idx]
@@ -921,8 +928,8 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             padded_gen_mask = torch.zeros(len(batch_idx), max_len, device=device, dtype=torch.bool)
             for j, (ids, gm) in enumerate(zip(batch_full_ids, batch_gen_masks)):
-                padded_ids[j, : ids.shape[0]] = ids
-                padded_gen_mask[j, : gm.shape[0]] = gm
+                padded_ids[j, : ids.shape[0]] = ids.to(device)
+                padded_gen_mask[j, : gm.shape[0]] = gm.to(device)
 
             # Forward pass with gradients
             full_attn = (padded_ids != self.pad_token_id).long()
