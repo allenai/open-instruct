@@ -1083,9 +1083,9 @@ def maybe_update_beaker_description(
         workload = client.workload.get(experiment_id)
         # Then get the experiment spec from the workload
         spec = client.experiment.get_spec(workload)
-    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError, TypeError) as e:
         logger.warning(
-            f"Failed to get Beaker experiment with ID: {experiment_id}"
+            f"Failed to get Beaker experiment with ID: {experiment_id} ({e}). "
             "This might be fine if you are e.g. running in an interactive job."
         )
         return
