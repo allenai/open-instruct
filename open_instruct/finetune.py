@@ -531,12 +531,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.cache_dataset_only:
         return
 
-    # Pre-download model on rank 0, then resolve the local cache path on all
-    # ranks.  Passing the local directory to from_pretrained avoids all Hub API
-    # lookups and Xet blob resolution issues that cause OSError on multi-node.
+    # Pre-download model on the local-rank-0 process of each node, then resolve
+    # the cache path on all ranks.  Passing the local directory to from_pretrained
+    # avoids all Hub API lookups and Xet blob resolution issues that cause OSError
+    # on multi-node with shared or node-local caches.
     model_path = args.config_name or args.model_name_or_path
     if model_path and not os.path.isdir(model_path):
-        if accelerator.is_main_process:
+        if accelerator.local_process_index == 0:
             snapshot_download(model_path, revision=args.model_revision)
         accelerator.wait_for_everyone()
         local_model_dir = snapshot_download(model_path, revision=args.model_revision, local_files_only=True)
