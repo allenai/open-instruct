@@ -32,7 +32,7 @@ When `shard_degree` and `num_replicas` are both `None` (the default), OLMo-core 
 
 If only one of the two is specified, OLMo-core infers the other by dividing `dp_world_size` by the given value. Both values must evenly divide the data-parallel world size.
 
-See `DataParallelConfig.get_replicate_and_shard_degree()` in `olmo_core/distributed/parallel/data_parallel.py` for the implementation.
+See [`DataParallelConfig.get_replicate_and_shard_degree()`](https://github.com/allenai/OLMo-core/blob/main/src/olmo_core/distributed/parallel/data_parallel.py) for the implementation.
 
 ### Wrapping Strategy
 
