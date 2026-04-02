@@ -82,12 +82,12 @@ def _gpu_compute_major() -> int | None:
 def detect_attn_implementation() -> AttentionBackendName:
     if not torch.cuda.is_available():
         result = AttentionBackendName.torch
+    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:
+        result = AttentionBackendName.flash_4
+    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() >= 9:
+        result = AttentionBackendName.flash_3
     elif transformers.utils.is_flash_attn_2_available():
         result = AttentionBackendName.flash_2
-    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:  # Blackwell+
-        result = AttentionBackendName.flash_4
-    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() == 9:  # Hopper
-        result = AttentionBackendName.flash_3
     else:
         result = AttentionBackendName.torch
     logger.info(f"Auto-detected attention implementation: {result}")

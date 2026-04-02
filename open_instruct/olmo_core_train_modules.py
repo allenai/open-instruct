@@ -109,7 +109,7 @@ class DPOTrainModule(TransformerTrainModule):
         optim: OptimConfig,
         sample_microbatch_size: int,
         max_sequence_length: int,
-        dpo_config: dpo_utils.ExperimentConfig,
+        dpo_config: dpo_utils.DPOExperimentConfig,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
         cp_config: transformer_config.TransformerContextParallelConfig | None = None,

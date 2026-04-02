@@ -15,6 +15,7 @@
 # isort: off
 import contextlib
 import os
+import warnings
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -1043,6 +1044,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
 
 if __name__ == "__main__":
+    warnings.warn(
+        "finetune.py is deprecated. Use the OLMo-core SFT implementation instead: "
+        "https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft",
+        DeprecationWarning,
+        stacklevel=1,
+    )
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
