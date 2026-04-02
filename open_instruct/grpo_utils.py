@@ -178,6 +178,16 @@ class ExperimentConfig:
     rollout_context_num_siblings: int = 4
     """Number of sibling rollouts to include in the 'rollout_context' template."""
 
+    # Segmental Advantage Estimation (SAE)
+    # Reference: https://arxiv.org/abs/2601.07320
+    use_sae: bool = False
+    """If True, use Segmental Advantage Estimation instead of standard GAE.
+    SAE partitions responses into segments using low-probability tokens as boundaries,
+    then applies lambda discounting only at segment transitions (lambda=1 within segments)."""
+    sae_threshold: float = 0.2
+    """Probability threshold for SAE segment boundary detection.
+    Tokens with probability below this threshold are treated as segment boundaries."""
+
     # Generative value model
     use_generative_value_model: bool = False
     """If True, use a generative value model that produces reasoning about correctness probability
@@ -334,6 +344,17 @@ class ExperimentConfig:
                 raise ValueError(f"value_loss_coef must be >= 0, got {self.value_loss_coef}")
             if self.vf_clip_range < 0:
                 raise ValueError(f"vf_clip_range must be >= 0, got {self.vf_clip_range}")
+
+        # SAE validation
+        if self.use_sae:
+            if not self.use_value_model:
+                raise ValueError("SAE requires --use_value_model to be enabled.")
+            if self.sae_threshold <= 0 or self.sae_threshold >= 1:
+                raise ValueError(f"sae_threshold must be in (0, 1), got {self.sae_threshold}")
+            if self.length_adaptive_gae:
+                raise ValueError(
+                    "SAE is incompatible with length_adaptive_gae; SAE replaces per-token lambda control."
+                )
 
 
 def compute_grpo_loss(

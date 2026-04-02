@@ -1808,9 +1808,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     returns_BT.append(torch.tensor(returns_np, device=device, dtype=torch.float32))
 
         elif self.args.use_value_model:
-            from open_instruct.rl_utils import calculate_advantages_packed, calculate_advantages_packed_vapo
+            from open_instruct.rl_utils import (
+                calculate_advantages_packed,
+                calculate_advantages_packed_sae,
+                calculate_advantages_packed_sae_vapo,
+                calculate_advantages_packed_vapo,
+            )
 
             use_vapo_gae = self.args.decoupled_gae or self.args.length_adaptive_gae
+            use_sae = self.args.use_sae
 
             with Timer("Value Model Computation", noop=self.rank != 0):
                 for i in range(num_samples):
@@ -1852,7 +1858,44 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_masks_np = shifted_response_masks.cpu().numpy()
                         chunk_len = None
 
-                    if use_vapo_gae:
+                    if use_sae:
+                        shifted_logprobs = data_BT.vllm_logprobs[i][:, 1:]
+                        if self.splitter is not None:
+                            sp_group = self.splitter.sp_group
+                            sp_world_size = self.splitter.sp_world_size
+                            gathered = [torch.zeros_like(shifted_logprobs) for _ in range(sp_world_size)]
+                            torch.distributed.all_gather(gathered, shifted_logprobs.contiguous(), group=sp_group)
+                            full_logprobs = torch.cat(gathered, dim=-1)
+                            logprobs_np = full_logprobs.cpu().float().numpy()
+                        else:
+                            logprobs_np = shifted_logprobs.cpu().float().numpy()
+                        logprobs_np = np.nan_to_num(logprobs_np, nan=0.0)
+
+                        if use_vapo_gae:
+                            advantages_np, returns_np, sae_boundary_frac = calculate_advantages_packed_sae_vapo(
+                                values_np,
+                                rewards_np,
+                                self.args.gamma,
+                                dones_np,
+                                response_masks_np,
+                                logprobs_np,
+                                sae_threshold=self.args.sae_threshold,
+                                lam_policy=self.args.gae_lambda,
+                                lam_critic=1.0,
+                            )
+                            policy_lambda_used = sae_boundary_frac
+                        else:
+                            advantages_np, returns_np = calculate_advantages_packed_sae(
+                                values_np,
+                                rewards_np,
+                                self.args.gamma,
+                                self.args.gae_lambda,
+                                dones_np,
+                                response_masks_np,
+                                logprobs_np,
+                                sae_threshold=self.args.sae_threshold,
+                            )
+                    elif use_vapo_gae:
                         advantages_np, returns_np, policy_lambda_used = calculate_advantages_packed_vapo(
                             values_np,
                             rewards_np,
@@ -1879,6 +1922,37 @@ class PolicyTrainerRayProcess(RayProcess):
                     gae_advantages_BT.append(advantages)
                     returns_BT.append(returns)
 
+                if use_sae and self.rank == 0:
+                    log_thresh = np.log(self.args.sae_threshold + 1e-30)
+                    total_resp_tokens = 0
+                    total_boundaries = 0
+                    all_segment_lengths: list[int] = []
+                    for i in range(num_samples):
+                        lp = data_BT.vllm_logprobs[i][:, 1:].cpu().float().numpy()
+                        lp = np.nan_to_num(lp, nan=0.0)
+                        rm = data_BT.response_masks[i][:, 1:].cpu().float().numpy().clip(0, 1)
+                        is_boundary = (lp < log_thresh) & (rm > 0)
+                        total_boundaries += int(is_boundary.sum())
+                        total_resp_tokens += int((rm > 0).sum())
+                        # Compute per-sub-sequence segment lengths
+                        dones_i = data_BT.dones[i][:, 1:].cpu().numpy().clip(0, 1)
+                        for b in range(rm.shape[0]):
+                            eos_positions = np.where(dones_i[b] > 0)[0]
+                            start = 0
+                            for eos_pos in eos_positions:
+                                end = int(eos_pos) + 1
+                                seq_boundaries = np.where(is_boundary[b, start:end])[0]
+                                n_segs = len(seq_boundaries) + 1
+                                seq_resp_len = int(rm[b, start:end].sum())
+                                if seq_resp_len > 0:
+                                    all_segment_lengths.append(seq_resp_len / n_segs)
+                                start = end
+                    boundary_frac = float(total_boundaries / max(total_resp_tokens, 1))
+                    self.local_metrics["value/sae_boundary_frac"] = boundary_frac
+                    self.local_metrics["value/sae_num_boundaries"] = float(total_boundaries)
+                    if all_segment_lengths:
+                        self.local_metrics["value/sae_avg_segment_len"] = float(np.mean(all_segment_lengths))
+                        self.local_metrics["value/sae_median_segment_len"] = float(np.median(all_segment_lengths))
                 if use_vapo_gae:
                     self.local_metrics["value/policy_lambda"] = policy_lambda_used
 

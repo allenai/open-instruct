@@ -545,6 +545,144 @@ def calculate_advantages_packed_vapo(
     return policy_advantages, critic_returns, avg_lam
 
 
+def calculate_advantages_packed_sae(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    lam: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    logprobs: np.ndarray,
+    sae_threshold: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Segmental Advantage Estimation (SAE) for packed sequences.
+
+    Instead of applying lambda at every token (as in GAE), SAE applies lambda
+    only at segment boundaries identified by low-probability tokens. Within
+    segments, lambda=1 (no discounting), which reduces bias from unreliable
+    intermediate value predictions.
+
+    Reference: https://arxiv.org/abs/2601.07320
+
+    Args:
+        values: Value predictions, shape (batch, seq_len)
+        rewards: Rewards, shape (batch, seq_len)
+        gamma: Discount factor
+        lam: Lambda applied at segment boundaries
+        dones: Done flags for sequence boundaries, shape (batch, seq_len)
+        response_masks: Mask for response tokens, shape (batch, seq_len)
+        logprobs: Log probabilities from the policy, shape (batch, seq_len)
+        sae_threshold: Probability threshold p; tokens with prob < p are boundaries
+
+    Returns:
+        Tuple of (advantages, returns)
+    """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+    gen_length = values.shape[1]
+
+    log_threshold = np.log(sae_threshold + 1e-30)
+    is_boundary = logprobs < log_threshold
+    # Non-response positions are not boundaries
+    is_boundary = is_boundary & (response_masks > 0)
+
+    # Compute position-dependent lambda: 1 within segments, lam at boundaries
+    # lambda_SAE(t) depends on whether t+1 is a boundary
+    lambda_arr = np.ones_like(values)
+    if gen_length > 1:
+        lambda_arr[:, :-1] = np.where(is_boundary[:, 1:], lam, 1.0)
+    # Last position always uses lam (sequence end)
+    lambda_arr[:, -1] = lam
+
+    lastgaelam = 0
+    advantages_reversed = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        lastgaelam = delta + gamma * lambda_arr[:, t] * lastgaelam * nonterminal
+        advantages_reversed.append(lastgaelam)
+    advantages = np.stack(advantages_reversed[::-1], axis=1)
+    returns = advantages + values
+    return advantages, returns
+
+
+def calculate_advantages_packed_sae_vapo(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    logprobs: np.ndarray,
+    sae_threshold: float = 0.2,
+    lam_policy: float = 0.95,
+    lam_critic: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """SAE with decoupled lambda for VAPO-style training.
+
+    Critic uses lam_critic=1.0 (standard MC returns, no SAE segmentation).
+    Policy uses SAE-style position-dependent lambda at segment boundaries.
+
+    Args:
+        values: Value predictions, shape (batch, seq_len)
+        rewards: Rewards, shape (batch, seq_len)
+        gamma: Discount factor
+        dones: Done flags for sequence boundaries, shape (batch, seq_len)
+        response_masks: Mask for response tokens, shape (batch, seq_len)
+        logprobs: Log probabilities from the policy, shape (batch, seq_len)
+        sae_threshold: Probability threshold for boundary detection
+        lam_policy: Lambda applied at SAE segment boundaries for policy
+        lam_critic: Lambda for critic GAE (typically 1.0)
+
+    Returns:
+        Tuple of (policy_advantages, critic_returns, avg_boundary_fraction)
+    """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+    gen_length = values.shape[1]
+
+    # Critic returns: standard GAE with lam_critic (no SAE)
+    lastgaelam_critic = 0
+    advantages_reversed_critic = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        lastgaelam_critic = delta + gamma * lam_critic * lastgaelam_critic * nonterminal
+        advantages_reversed_critic.append(lastgaelam_critic)
+    advantages_critic = np.stack(advantages_reversed_critic[::-1], axis=1)
+    critic_returns = advantages_critic + values
+
+    # Policy advantages: SAE-style position-dependent lambda
+    log_threshold = np.log(sae_threshold + 1e-30)
+    is_boundary = logprobs < log_threshold
+    is_boundary = is_boundary & (response_masks > 0)
+
+    lambda_arr = np.ones_like(values)
+    if gen_length > 1:
+        lambda_arr[:, :-1] = np.where(is_boundary[:, 1:], lam_policy, 1.0)
+    lambda_arr[:, -1] = lam_policy
+
+    resp_tokens = (response_masks > 0).sum()
+    boundary_count = is_boundary.sum()
+    avg_boundary_frac = float(boundary_count / max(resp_tokens, 1))
+
+    lastgaelam_policy = 0
+    advantages_reversed_policy = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        lastgaelam_policy = delta + gamma * lambda_arr[:, t] * lastgaelam_policy * nonterminal
+        advantages_reversed_policy.append(lastgaelam_policy)
+    policy_advantages = np.stack(advantages_reversed_policy[::-1], axis=1)
+
+    return policy_advantages, critic_returns, avg_boundary_frac
+
+
 def masked_mean(
     values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:
