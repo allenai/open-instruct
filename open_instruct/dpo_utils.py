@@ -122,8 +122,6 @@ class DPOTrainingConfig(TrainingConfig):
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
     """Use paged optimizer from bitsandbytes."""
-    fused_optimizer: bool = True
-    """Whether to use fused AdamW or not."""
     optimizer_type: str = "adamw"
     """Optimizer type: 'adamw' or 'muon'."""
     optimizer_kwargs: dict | str = field(default_factory=dict)

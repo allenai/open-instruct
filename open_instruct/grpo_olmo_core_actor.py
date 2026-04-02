@@ -138,9 +138,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         num_scheduler_steps = (
             self.grpo_config.num_training_steps * self.grpo_config.num_epochs * self.grpo_config.num_mini_batches
         )
-        warmup_steps = self.grpo_config.warm_up_steps
-        if self.grpo_config.warmup_ratio > 0.0:
-            warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
+        warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
 
         if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
@@ -153,10 +151,16 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if not self.grpo_config.single_gpu_mode and self.world_size > 1:
             dp_config = TransformerDataParallelConfig(
                 name=DataParallelType.hsdp,
+                num_replicas=self.grpo_config.fsdp_num_replicas,
+                shard_degree=self.grpo_config.fsdp_shard_degree,
                 param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
+
+        ac_config = olmo_core_utils.build_ac_config(
+            self.grpo_config.activation_memory_budget, self.grpo_config.compile_model
+        )
 
         self.train_module = GRPOTrainModule(
             model=self.model,
@@ -168,6 +172,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             tokenizer=self.tokenizer,
             ref_policy=self.ref_policy,
             dp_config=dp_config,
+            ac_config=ac_config,
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
