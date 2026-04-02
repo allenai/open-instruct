@@ -1,6 +1,6 @@
 # OLMo-core Sharding and Parallelism
 
-The DPO and GRPO trainers in open-instruct use OLMo-core's parallelism primitives for distributed training. SFT runs via a separate OLMo-core script and manages its own sharding. This page documents the shared architecture for DPO and GRPO, and notes where SFT differs.
+The DPO and GRPO trainers in open-instruct use OLMo-core's parallelism primitives for distributed training. This page documents their shared sharding architecture and per-algorithm differences.
 
 ## Overview
 
@@ -32,7 +32,7 @@ When `shard_degree` and `num_replicas` are left as `None` (the default), OLMo-co
 
 ### Wrapping Strategy
 
-All trainers use the `blocks` wrapping strategy, which wraps each Transformer block as an individual FSDP unit. This provides a good balance between:
+Both trainers use the `blocks` wrapping strategy, which wraps each Transformer block as an individual FSDP unit. This provides a good balance between:
 
 - **Communication overhead**: Fewer FSDP units means fewer all-gather/reduce-scatter operations.
 - **Memory efficiency**: Each block's parameters can be gathered and freed independently.
@@ -86,10 +86,6 @@ Key differences from DPO:
 - **Single-GPU mode.** When `--single_gpu_mode` is set, `dp_config` is `None` and no sharding is applied. The model is instead cast to the target dtype directly.
 - **Ray actors.** GRPO uses Ray to coordinate distributed training, so `torch.distributed` is initialized within each Ray actor rather than at the script level.
 
-### SFT
-
-SFT runs via OLMo-core's own training script (`src/scripts/train/sft/OLMo-sft.py`) in a separate [OLMo-core](https://github.com/allenai/OLMo-core) clone (see [SFT documentation](finetune.md)). Sharding is configured entirely within OLMo-core and is not managed by open-instruct. See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for details on its parallelism settings.
-
 ## Comparison
 
 DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The table below shows where they differ:
@@ -102,8 +98,6 @@ DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The tab
 | Activation checkpointing | Budget-mode | Gradient checkpointing flag |
 | Training coordinator | `torch.distributed` | Ray actors |
 
-SFT sharding is managed entirely by OLMo-core; see the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for its parallelism settings.
-
 ## Choosing Parallelism Settings
 
 For most use cases, leaving `fsdp_shard_degree` and `fsdp_num_replicas` as `None` (auto-detect) works well. Manually tune these when:
@@ -112,7 +106,7 @@ For most use cases, leaving `fsdp_shard_degree` and `fsdp_num_replicas` as `None
 - **You're hitting OOM.** Increasing `shard_degree` (more GPUs per shard group) reduces per-GPU memory at the cost of more communication.
 - **You're scaling to many nodes.** For large clusters, explicitly setting `num_replicas` can prevent OLMo-core from choosing a suboptimal layout.
 
-For very large models (32B+), consider enabling tensor parallelism (`--tensor_parallel_degree`) in DPO, or using multi-node configurations in SFT, to keep per-GPU memory manageable.
+For very large models (32B+), consider enabling tensor parallelism (`--tensor_parallel_degree`) in DPO to keep per-GPU memory manageable.
 
 ## FSDP-First Loading Pattern
 
