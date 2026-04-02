@@ -34,8 +34,6 @@ class ExperimentConfig(
     # Optimizer
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
-    """Whether to use fused optimizer"""
 
     # Batch sizes
     total_episodes: int = 100000
@@ -120,8 +118,6 @@ class ExperimentConfig(
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    wandb_group_name: str | None = None
-    """Optional W&B group name used to group related runs together."""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: str | None = None

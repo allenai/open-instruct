@@ -91,6 +91,8 @@ class TrainingConfig:
     """
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
+    fused_optimizer: bool = True
+    """Whether to use fused AdamW."""
 
 
 def build_ac_config(
@@ -143,6 +145,8 @@ class LoggingConfig:
     """The entity (team) of wandb's project"""
     report_to: str | list[str] = "all"
     """The integration(s) to report results and logs to."""
+    wandb_group_name: str | None = None
+    """Optional W&B group name used to group related runs together."""
 
 
 @dataclass
