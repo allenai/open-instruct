@@ -28,7 +28,11 @@ For example, with 16 GPUs, `shard_degree=8`, and `num_replicas=2`:
 - Each group holds a complete model, sharded across 8 GPUs.
 - After the backward pass, gradients are reduced across the two groups.
 
-When `shard_degree` and `num_replicas` are left as `None` (the default), OLMo-core auto-detects the optimal configuration based on the number of available GPUs.
+When `shard_degree` and `num_replicas` are both `None` (the default), OLMo-core auto-detects using node boundaries: `num_replicas` is set to the number of nodes and `shard_degree` is set to the number of GPUs per node. This means all-gather/reduce-scatter traffic stays within a single node (fast NVLink), while only the lighter all-reduce crosses the network between nodes.
+
+If only one of the two is specified, OLMo-core infers the other by dividing `dp_world_size` by the given value. Both values must evenly divide the data-parallel world size.
+
+See `DataParallelConfig.get_replicate_and_shard_degree()` in `olmo_core/distributed/parallel/data_parallel.py` for the implementation.
 
 ### Wrapping Strategy
 
