@@ -1228,24 +1228,27 @@ def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
 
 
 def sft_tulu_tokenize_strict_length_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
-    """Tokenize without truncation; samples exceeding max_seq_length are later
-    removed by the paired filter ``sft_tulu_strict_length_filter_v1``."""
+    """Tokenize with truncation at max_seq_length + 1 so we can detect over-length
+    samples without risking OOM on very long inputs. The paired filter
+    ``sft_tulu_strict_length_filter_v1`` drops anything exceeding max_seq_length."""
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
+    tokenize_limit = max_seq_length + 1
     input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
         return_dict=False,
         padding=False,
-        truncation=False,
+        truncation=True,
+        max_length=tokenize_limit,
         add_generation_prompt=False,
     )
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
-    _mask_labels(labels, messages, tokenizer, None, lambda idx, msg, _msgs: msg["role"] != "assistant")
+    _mask_labels(labels, messages, tokenizer, tokenize_limit, lambda idx, msg, _msgs: msg["role"] != "assistant")
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
