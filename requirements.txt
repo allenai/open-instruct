@@ -449,7 +449,7 @@ lark==1.2.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (pl
     #   vllm
 lazy-object-proxy==1.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via openapi-spec-validator
-liger-kernel==0.7.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+liger-kernel-nightly==0.7.0.dev20260401183912 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via open-instruct
 litellm==1.75.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -1179,7 +1179,7 @@ torch==2.10.0+cu128 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   flash-attn-3
     #   flash-attn-4
     #   flashinfer-python
-    #   liger-kernel
+    #   liger-kernel-nightly
     #   open-instruct
     #   peft
     #   quack-kernels
@@ -1198,7 +1198,7 @@ torch==2.10.0+cu130 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     #   fla-core
     #   flash-attn-4
     #   flashinfer-python
-    #   liger-kernel
+    #   liger-kernel-nightly
     #   open-instruct
     #   peft
     #   quack-kernels
@@ -1240,7 +1240,7 @@ trimesh==4.11.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     # via alphashape
 triton==3.6.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
-    #   liger-kernel
+    #   liger-kernel-nightly
     #   torch
     #   xgrammar
 ty==0.0.12 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'

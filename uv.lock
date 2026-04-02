@@ -1951,17 +1951,17 @@ wheels = [
 ]
 
 [[package]]
-name = "liger-kernel"
-version = "0.7.0"
+name = "liger-kernel-nightly"
+version = "0.7.0.dev20260401183912"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "triton", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/73/f8/a25ab6549dd80c5055e84f0ee9be6ecf4a7c85ade448110607f4807ab2ef/liger_kernel-0.7.0.tar.gz", hash = "sha256:48c25648974c7d07d47591117b94188d1059999b7fb652e89e8ba50b21183cb3", size = 3780796, upload-time = "2026-02-12T22:01:00.101Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/37/ad/723ca41957dc44736323eeca10fa9565ce8fbe5382ed3f1cf0adbd2dadc2/liger_kernel_nightly-0.7.0.dev20260401183912.tar.gz", hash = "sha256:b19039bb4041df4597b305e7764647ed10fe631ca64859a4d3f09e72addf674e", size = 3905691, upload-time = "2026-04-01T18:39:20.914Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f7/c6/66c6a3c59b53f4cfbfa0c9e8c573c8843fb1d83cf3c2eb79e39109b76c17/liger_kernel-0.7.0-py3-none-any.whl", hash = "sha256:d2185d94362c069f508eb8aff5e7016c6669613265d5702733d674af4c616a56", size = 276512, upload-time = "2026-02-12T22:00:58.565Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/fc/09523f08691079b96245e1ccdd2c5d3a4bb8c84c61ccf018649a964db90e/liger_kernel_nightly-0.7.0.dev20260401183912-py3-none-any.whl", hash = "sha256:1fc3850d3af3b66b41697eda8b390f5b65873a040a080fa706a126b97c6192cf", size = 360608, upload-time = "2026-04-01T18:39:19.274Z" },
 ]
 
 [[package]]
@@ -2791,7 +2791,7 @@ dependencies = [
     { name = "hf-transfer", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "immutabledict", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "langdetect", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "liger-kernel", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "liger-kernel-nightly", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "litellm", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "matplotlib", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "mcp", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -2862,7 +2862,7 @@ requires-dist = [
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
-    { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.7.0" },
+    { name = "liger-kernel-nightly", marker = "sys_platform != 'darwin'", specifier = ">=0.7.0.dev0" },
     { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "mcp", specifier = ">=1.9.0" },
