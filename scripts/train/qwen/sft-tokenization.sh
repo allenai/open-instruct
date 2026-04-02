@@ -54,7 +54,7 @@ uv run python mason.py \
   --budget ai2/oe-adapt \
   --workspace ai2/flex2 \
   --image "$BEAKER_IMAGE" \
-#   --no-host-networking \
+  --no-host-networking \
   --gpus 8 \
   --priority urgent \
   --description "Qwen3 SFT tokenization (100k)" \
@@ -75,7 +75,7 @@ uv run python mason.py \
   --budget ai2/oe-adapt \
   --workspace ai2/flex2 \
   --image "$BEAKER_IMAGE" \
-#   --no-host-networking \
+  --no-host-networking \
   --gpus 8 \
   --priority urgent \
   --description "Qwen3 SFT tokenization (full)" \
