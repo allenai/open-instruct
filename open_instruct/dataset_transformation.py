@@ -1297,6 +1297,8 @@ def sft_tulu_tokenize_turn_truncate_v1(row: dict[str, Any], tokenizer: PreTraine
         last_valid_end = None
         last_valid_k = None
         for k in range(1, len(messages) + 1):
+            if not any(m["role"] == "user" for m in messages[:k]):
+                continue
             end = tokenizer.apply_chat_template(
                 conversation=messages[:k],
                 tokenize=True,
@@ -1308,7 +1310,7 @@ def sft_tulu_tokenize_turn_truncate_v1(row: dict[str, Any], tokenizer: PreTraine
             ).shape[1]
             if end > max_seq_length:
                 break
-            if messages[k - 1]["role"] == "assistant" and any(m["role"] == "user" for m in messages[:k]):
+            if messages[k - 1]["role"] == "assistant":
                 last_valid_end = end
                 last_valid_k = k
         if last_valid_end is None:
