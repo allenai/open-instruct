@@ -529,4 +529,5 @@ def compute_metrics_from_loss_stats(
     for key in _SCALAR_LOSS_STAT_KEYS:
         metrics[key] = (loss_stats_B[key] * weights).sum().item()
     metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
+    metrics["_token_count"] = total_tokens.item()
     return metrics

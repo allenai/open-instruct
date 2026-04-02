@@ -477,7 +477,6 @@ class PolicyTrainerRayProcess(RayProcess):
         metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
         for k, v in metrics.items():
             self.local_metrics[k] = v
-        self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
     def step(self):
@@ -1485,6 +1484,7 @@ def one_training_step(
     # Average scalar metrics from each worker
     for k in metrics[0]:
         if k == "_token_count":
+            # Don't include internal token count in final metrics
             continue
         if k in token_weighted_metrics:
             # Token-weighted average

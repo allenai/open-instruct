@@ -494,7 +494,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
-            local_tokens = token_counts.sum().item()
+            local_tokens = local_metrics.pop("_token_count")
 
             keys = sorted(local_metrics.keys())
             values = [local_tokens] + [local_metrics[k] * local_tokens for k in keys]
