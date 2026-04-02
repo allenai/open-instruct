@@ -16,8 +16,7 @@
 #
 set -euo pipefail
 
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
