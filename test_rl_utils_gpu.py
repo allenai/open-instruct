@@ -20,7 +20,7 @@ import torch
 from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
-from open_instruct import data_loader, rl_utils
+from open_instruct import data_loader, rl_utils, vllm_utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -63,11 +63,10 @@ class TestRlUtilsGPU(TestGrpoFastBase):
             ground_truths = [["4"], ["6"], ["8"], ["10"]]
             train_dataset = self._create_test_dataset(tokenizer, prompts, ground_truths)
 
-            param_prompt_Q = ray_queue.Queue(maxsize=100)
-            eval_prompt_Q = ray_queue.Queue(maxsize=100)
+            param_prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=100)
             inference_results_Q = ray_queue.Queue(maxsize=100)
             eval_results_Q = ray_queue.Queue(maxsize=100)
-            self._ray_queues.extend([param_prompt_Q, eval_prompt_Q, inference_results_Q, eval_results_Q])
+            self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
             engines = create_vllm_engines(
                 num_engines=1,
@@ -81,7 +80,6 @@ class TestRlUtilsGPU(TestGrpoFastBase):
                 max_model_len=512,
                 vllm_gpu_memory_utilization=0.5,
                 prompt_queue=param_prompt_Q,
-                eval_prompt_queue=eval_prompt_Q,
                 results_queue=inference_results_Q,
                 eval_results_queue=eval_results_Q,
                 reward_config=RewardConfig(),

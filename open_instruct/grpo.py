@@ -172,8 +172,7 @@ def main(
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    eval_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue()
 
     reward_config = RewardConfig(
@@ -192,7 +191,6 @@ def main(
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Prompt Queue": prompt_Q,
-        "Eval Prompt Queue": eval_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
@@ -272,7 +270,6 @@ def main(
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
-        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,

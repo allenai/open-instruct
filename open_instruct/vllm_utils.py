@@ -105,6 +105,96 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+EVAL_PROMPT_PRIORITY = 0
+TRAIN_PROMPT_PRIORITY = 1
+SHUTDOWN_PROMPT_PRIORITY = 2
+
+
+@ray.remote
+class _PriorityPromptQueueActor:
+    def __init__(self, maxsize: int = 0):
+        self.maxsize = maxsize
+        self.queue = asyncio.PriorityQueue(self.maxsize)
+
+    def qsize(self):
+        return self.queue.qsize()
+
+    def empty(self):
+        return self.queue.empty()
+
+    def full(self):
+        return self.queue.full()
+
+    async def put(self, item, timeout=None):
+        try:
+            await asyncio.wait_for(self.queue.put(item), timeout)
+        except asyncio.TimeoutError as err:
+            raise queue.Full from err
+
+    async def get(self, timeout=None):
+        try:
+            return await asyncio.wait_for(self.queue.get(), timeout)
+        except asyncio.TimeoutError as err:
+            raise queue.Empty from err
+
+    def put_nowait(self, item):
+        self.queue.put_nowait(item)
+
+    def get_nowait(self):
+        return self.queue.get_nowait()
+
+
+class PriorityPromptQueue:
+    """Ray-backed prompt queue that prioritizes eval requests over train requests."""
+
+    def __init__(self, maxsize: int = 0):
+        self.maxsize = maxsize
+        self.actor = _PriorityPromptQueueActor.remote(maxsize=maxsize)
+        self._next_seq = 0
+
+    def _pack(self, item: Any, priority: int | None) -> tuple[int, int, Any]:
+        if priority is None:
+            if item is None:
+                priority = SHUTDOWN_PROMPT_PRIORITY
+            else:
+                raise ValueError("priority must be provided when enqueueing prompt requests")
+        packed = (priority, self._next_seq, item)
+        self._next_seq += 1
+        return packed
+
+    def put(self, item: Any, block: bool = True, timeout: float | None = None, priority: int | None = None) -> None:
+        packed = self._pack(item, priority)
+        if not block:
+            try:
+                ray.get(self.actor.put_nowait.remote(packed))
+            except asyncio.QueueFull as err:
+                raise queue.Full from err
+        else:
+            if timeout is not None and timeout < 0:
+                raise ValueError("'timeout' must be a non-negative number")
+            ray.get(self.actor.put.remote(packed, timeout))
+
+    def get(self, block: bool = True, timeout: float | None = None) -> Any:
+        if not block:
+            try:
+                return ray.get(self.actor.get_nowait.remote())[2]
+            except asyncio.QueueEmpty as err:
+                raise queue.Empty from err
+        if timeout is not None and timeout < 0:
+            raise ValueError("'timeout' must be a non-negative number")
+        return ray.get(self.actor.get.remote(timeout))[2]
+
+    def qsize(self) -> int:
+        return ray.get(self.actor.qsize.remote())
+
+    def empty(self) -> bool:
+        return ray.get(self.actor.empty.remote())
+
+    def full(self) -> bool:
+        return ray.get(self.actor.full.remote())
+
+    def shutdown(self) -> None:
+        ray.kill(self.actor, no_restart=True)
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -468,33 +558,13 @@ async def _check_health(port: int) -> None:
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     poll_timeout_s = 0.1
     while True:
-        has_pending_eval = actor.eval_prompt_queue.qsize() > 0
-
-        # Strict eval priority: when eval work is pending, stop admitting new train requests
-        # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
-        if has_pending_eval and len(actor.active_tasks) > 0:
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-            continue
-
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        # Prioritize eval requests so local evals don't starve behind train backlog.
-        # Use timed gets so this worker doesn't block forever on train queue when eval
-        # items arrive later (e.g., final-step eval after training prompts are drained).
-        request = None
-        if has_pending_eval:
-            with contextlib.suppress(queue.Empty):
-                request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
-
-        if request is None:
-            with contextlib.suppress(queue.Empty):
-                request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
-
-        if request is None:
-            continue
-        add_request(actor, request)
+        with contextlib.suppress(queue.Empty):
+            request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+            add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
@@ -616,7 +686,6 @@ class LLMRayActor:
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
-        eval_prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
@@ -639,7 +708,7 @@ class LLMRayActor:
             train_dataset,
             eval_dataset,
         )
-        self._init_queues(prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -682,10 +751,9 @@ class LLMRayActor:
         self.reward_fn = reward_config.build() if reward_config else None
         self.tool_parser: ToolParser  # Set in _init_tool_parser
 
-    def _init_queues(self, prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
-        self.eval_prompt_queue = eval_prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
@@ -1274,7 +1342,6 @@ def create_vllm_engines(
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
-    eval_prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
@@ -1285,10 +1352,6 @@ def create_vllm_engines(
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
-    if eval_prompt_queue is None:
-        raise ValueError(
-            "eval_prompt_queue is required (use ray_queue.Queue() when no local eval prompts are enqueued)."
-        )
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
     # Using "ray" executor causes placement group context loss in vLLM v1's
@@ -1358,7 +1421,6 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
-                eval_prompt_queue=eval_prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,

@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, padding_free_collator, utils, vllm_utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -701,9 +701,10 @@ def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
 def add_prompt_to_generator(
     example: dict[str, Any],
     epoch_number: int,
-    param_prompt_Q: ray_queue.Queue,
+    param_prompt_Q: vllm_utils.PriorityPromptQueue,
     generation_config,
     is_eval: bool,
+    priority: int,
     base_env_config: EnvConfig,
 ) -> None:
     index = int(example["index"])
@@ -711,17 +712,16 @@ def add_prompt_to_generator(
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
 
-    param_prompt_Q.put(
-        data_types.PromptRequest(
-            prompt=example[INPUT_IDS_PROMPT_KEY],
-            generation_config=generation_config,
-            index=index,
-            prompt_id=f"{epoch_number}_{index}",
-            is_eval=is_eval,
-            active_tools=example.get(TOOLS_COLUMN_KEY),
-            env_config=env_config,
-        )
+    request = data_types.PromptRequest(
+        prompt=example[INPUT_IDS_PROMPT_KEY],
+        generation_config=generation_config,
+        index=index,
+        prompt_id=f"{epoch_number}_{index}",
+        is_eval=is_eval,
+        active_tools=example.get(TOOLS_COLUMN_KEY),
+        env_config=env_config,
     )
+    param_prompt_Q.put(request, priority=priority)
 
 
 def accumulate_inference_batches(
@@ -739,7 +739,7 @@ def accumulate_inference_batches(
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: HFDataLoader | None = None,
-    param_prompt_Q: ray_queue.Queue | None = None,
+    param_prompt_Q: vllm_utils.PriorityPromptQueue | None = None,
     training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
@@ -827,6 +827,7 @@ def accumulate_inference_batches(
                 param_prompt_Q,
                 generation_config,
                 is_eval=False,
+                priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
                 base_env_config=base_env_config,
             )
 
@@ -1100,7 +1101,7 @@ class DataPreparationActor:
         self,
         dataset: Dataset,
         inference_results_Q: ray_queue.Queue,
-        param_prompt_Q: ray_queue.Queue,
+        param_prompt_Q: vllm_utils.PriorityPromptQueue,
         tokenizer: PreTrainedTokenizer,
         config: StreamingDataLoaderConfig,
         generation_config,
@@ -1184,6 +1185,7 @@ class DataPreparationActor:
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
+                priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
                 base_env_config=self.base_env_config,
             )
 

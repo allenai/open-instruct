@@ -1263,8 +1263,7 @@ def create_model_and_optimizer(
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
-    prompt_Q: ray_queue.Queue,
-    eval_prompt_Q: ray_queue.Queue,
+    prompt_Q: vllm_utils.PriorityPromptQueue,
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1290,7 +1289,6 @@ def create_model_and_optimizer(
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Prompt Queue": prompt_Q,
-        "Eval Prompt Queue": eval_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
@@ -1366,7 +1364,6 @@ def create_model_and_optimizer(
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
-        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -1827,7 +1824,7 @@ def cleanup_judge_clients():
 def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
-    queues: list[ray_queue.Queue],
+    queues: list[vllm_utils.PriorityPromptQueue | ray_queue.Queue],
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
@@ -1891,7 +1888,6 @@ def run_training(
     executor,
     inference_results_Q,
     prompt_Q,
-    eval_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
@@ -2002,9 +1998,10 @@ def run_training(
                 add_prompt_to_generator(
                     eval_example,
                     training_step,
-                    eval_prompt_Q,
+                    prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
+                    priority=vllm_utils.EVAL_PROMPT_PRIORITY,
                     base_env_config=base_env_config,
                 )
             eval_data_loader.reset()
@@ -2314,8 +2311,7 @@ def main(
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    eval_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -2359,7 +2355,6 @@ def main(
             tokenizer,
             inference_results_Q,
             prompt_Q,
-            eval_prompt_Q,
             evaluation_inference_results_Q,
             streaming_config,
             vllm_config,
@@ -2404,7 +2399,6 @@ def main(
             executor,
             inference_results_Q,
             prompt_Q,
-            eval_prompt_Q,
             evaluation_inference_results_Q,
             weight_sync_metrics_Q,
             actor_manager,
@@ -2420,12 +2414,7 @@ def main(
             utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
         raise
     finally:
-        shutdown_queues: list[ray_queue.Queue] = [
-            inference_results_Q,
-            prompt_Q,
-            eval_prompt_Q,
-            evaluation_inference_results_Q,
-        ]
+        shutdown_queues: list[ray_queue.Queue] = [inference_results_Q, prompt_Q, evaluation_inference_results_Q]
         cleanup_training_resources(stop_event, executor, shutdown_queues, actor_manager)
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we

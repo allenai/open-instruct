@@ -228,19 +228,14 @@ def setup_vllm_engines(
     model_config: model_utils.ModelConfig,
     max_model_len: int,
     dataset: datasets.Dataset,
-) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
+) -> tuple[list[ray.actor.ActorHandle], vllm_utils.PriorityPromptQueue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
-    param_prompt_Q = ray_queue.Queue(maxsize=10)
-    eval_prompt_Q = ray_queue.Queue(maxsize=10)
+    param_prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    queues_to_monitor = {
-        "Param Prompt Queue": param_prompt_Q,
-        "Eval Prompt Queue": eval_prompt_Q,
-        "Inference Results Queue": inference_results_Q,
-    }
+    queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
 
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
@@ -265,7 +260,6 @@ def setup_vllm_engines(
         tool_parser_type="legacy",
         max_steps=5,  # default, no tools used in benchmarks
         prompt_queue=param_prompt_Q,
-        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=streaming_config.inflight_updates,
@@ -320,7 +314,7 @@ def simulate_weight_sync(
 
 
 def submission_thread(
-    param_prompt_Q: ray_queue.Queue,
+    param_prompt_Q: vllm_utils.PriorityPromptQueue,
     dataset: datasets.Dataset,
     generation_config: vllm_utils.SamplingConfig,
     stop_event: threading.Event,
@@ -349,7 +343,8 @@ def submission_thread(
                     index=start_idx + i,
                     prompt_id=f"batch_{batch_idx}_prompt_{i}",
                     generation_config=generation_config,
-                )
+                ),
+                priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
             )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
@@ -357,7 +352,7 @@ def submission_thread(
 def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: list[ray.actor.ActorHandle],
-    param_prompt_Q: ray_queue.Queue,
+    param_prompt_Q: vllm_utils.PriorityPromptQueue,
     inference_results_Q: ray_queue.Queue,
     actor_manager: ray.actor.ActorHandle,
     args: grpo_utils.ExperimentConfig,
@@ -405,7 +400,8 @@ def run_benchmark(
                 index=warmup_start_idx + i,
                 prompt_id=f"warmup_prompt_{i}",
                 generation_config=generation_config,
-            )
+            ),
+            priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
         )
 
     utils.ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking if engines are ready.")
