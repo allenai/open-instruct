@@ -15,7 +15,7 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/${IMAGE_NAME}}"
 EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-CLIP_HIGH=0.3
+CLIP_HIGH=0.28
 LR=5e-7
 SCORE_MODE=pass_rate
 TRAIN_LIST="manufactoria/has_train 1.0"
@@ -50,7 +50,6 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 16 \
     --num_mini_batches 1 \
     --num_epochs 1 \
-    --kl_estimator 3 \
     --learning_rate "${LR}" \
     --lr_scheduler_type constant \
     --per_device_train_batch_size 1 \
@@ -65,14 +64,11 @@ uv run python mason.py \
     --apply_verifiable_reward true \
     --manufactoria_api_url \$MANUFACTORIA_API_URL/test_solution \
     --manufactoria_scoring_mode "${SCORE_MODE}" \
-    --non_stop_penalty True \
-    --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
-    --total_episodes 1000000 \
+    --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 8 \
-    --vllm_tensor_parallel_size 1 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --clip_higher "${CLIP_HIGH}" \
     --seed 1 \
     --local_eval_every 25 \
