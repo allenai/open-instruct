@@ -2,26 +2,31 @@
 BEAKER_IMAGE=jacobm/flex-olmo-rl-test19
 
 # data mixes
-nonreasoner_integration_mix_decon="hamishivi/rlvr_acecoder_filtered_filtered 1.0"
+nonreasoner_integration_mix_decon="hamishivi/omega-combined-no-boxed_filtered 20000 hamishivi/rlvr_orz_math_57k_collected_filtered 14000 hamishivi/polaris_53k 14000 hamishivi/MathSub-30K_filtered 9000 hamishivi/DAPO-Math-17k-Processed_filtered 7000"
+all_datasets="hamishivi/rlvr_acecoder_filtered_filtered 20000 hamishivi/omega-combined-no-boxed_filtered 20000 hamishivi/rlvr_orz_math_57k_collected_filtered 14000 hamishivi/polaris_53k 14000 hamishivi/MathSub-30K_filtered 9000 hamishivi/DAPO-Math-17k-Processed_filtered 7000 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 38000 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 50000" #hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered 22000 hamishivi/virtuoussy_multi_subject_rlvr_filtered 20000 hamishivi/new-wildchat-english-general_filtered 19000"
 
 # eval suite
 general_evals_int="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek"
-code_evals="codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek"
+math_evals="minerva_math::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek"
+
 # model checkpoint
-# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex2-7B-sft/flexolmo-2x7b-code-sft-mixed-on-olmo3-code-anneal-no-eb-50B/step620-hf"
-# model_name_or_path=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex2-7B-sft/flexolmo-2x7b-olmo3_50b_code_anneal-general-olmo3_code-mix/step782-hf
-# model_name_or_path=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo2-7B-sft/olmo2-7b-50b_ol3_code_ann-general-olmo3_code-mix/step782-hf
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo2-7B-sft/olmo2-7b-BASE-general-olmo3_code-mix/step782-hf"
+# model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex2-7B-sft/flexolmo-4x7b-math_rl-olmo3_code-tool-rt-4-domain/step1128-hf"
+model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex2-7B-sft/flexolmo-4x7B-merge-all-olmo3_3x_domain-0.05-1e-4/step80-hf"
+
 # cluster
 cluster=ai2/jupiter
 #template
 chat_template=olmo123 #olmo
 
+WORKSPACE=ai2/olmo-instruct
+# WORKSPACE=ai2/flex2
 NUM_GPUS=${NUM_GPUS:-8}
 hosted_vllm=""
+# LR=2e-6
+# LR=1e-6
 LR=6e-7
-gs_model_name="flex-base-7b-ol3_code-no-anneal-${LR}-unf"
-exp_name="grpo_code_only_${gs_model_name}"
+gs_model_name="flex-4x7b-olm3_doms-0.05-RLRT-${LR}-unf-all"
+exp_name="grpo_math_only_${gs_model_name}"
 
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
@@ -29,16 +34,16 @@ uv run python mason.py \
         --description $exp_name \
         --task_name ${EXP_NAME} \
         --cluster ${cluster} \
-        --workspace ai2/olmo-instruct  \
+        --workspace $WORKSPACE  \
         --priority urgent \
         --pure_docker_mode \
         --image $BEAKER_IMAGE \
         --preemptible \
-        --num_nodes 2 \
+        --num_nodes 5 \
         --no_auto_dataset_cache \
         --gs_model_name $gs_model_name \
         --gpus ${NUM_GPUS} \
-        --budget ai2/oceo -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --budget ai2/oe-adapt -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${EXP_NAME} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
@@ -57,27 +62,29 @@ uv run python mason.py \
         --output_dir ${model_name_or_path}/${exp_name} \
         --chat_template_name ${chat_template} \
         --non_stop_penalty False \
+        --gather_whole_model False \
         --temperature 1.0 \
         --total_episodes 1024000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 \
-        --vllm_num_engines 8 \
-        --vllm_tensor_parallel_size 1 \
+        --num_learners_per_node 8 8 \
+        --deepspeed_zpg 1 \
+        --vllm_num_engines 6 \
+        --vllm_tensor_parallel_size 4 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
+        --gradient_checkpointing \
+        --eval_workspace ai2/flex2 \
         --seed 1 \
         --local_eval_every 50 \
-        --eval_workspace ai2/flex2 \
         --save_freq 50 \
-        --gradient_checkpointing \
         --with_tracking \
         --vllm_enable_prefix_caching \
         --clip_higher 0.272 \
         --mask_truncated_completions False \
         --oe_eval_max_length 32768 \
-        --try_launch_beaker_eval_jobs_on_weka False \
+        --try_launch_beaker_eval_jobs_on_weka True \
         --oe_eval_beaker_image jacobm/oe-eval-flex-olmo-9-29-5 \
-        --oe_eval_tasks ${code_evals} \
+        --oe_eval_tasks ${math_evals} \
         --eval_priority urgent \
         --code_pass_rate_reward_threshold 0.99 \
         --inflight_updates true \
@@ -86,12 +93,17 @@ uv run python mason.py \
         --no_resampling_pass_rate 0.875 # \
         # --freeze_parameters \
         # --freeze_patterns "model.layers.*.post_attention_layernorm.*" \
-        #         "model.layers.*.post_feedforward_layernorm.*" \
-        #         "model.layers.*.self_attn.*" \
-        #         "model.layers.*.mlp.experts.0.*" \
-        #         "model.layers.*.mlp.gate.*"
+        # --freeze_patterns "model.layers.*.post_feedforward_layernorm.*" \
+        # --freeze_patterns "model.layers.*.self_attn.*" \
+        # --freeze_patterns "model.layers.*.mlp.experts.*" # \
+        # --freeze_patterns "model.embed_tokens.*"
         # --freeze_patterns "lm_head.*"
+        
 
+
+
+
+        
         # --active_sampling \
 
         # --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
