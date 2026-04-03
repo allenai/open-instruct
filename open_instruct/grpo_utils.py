@@ -356,10 +356,11 @@ class ExperimentConfig:
         if self.use_lm_value_model:
             if not self.use_value_model:
                 raise ValueError("LM value model requires --use_value_model to be enabled.")
+            valid_lm_templates = ("lm_yesno", "lm_yesno_siblings", "lm_yesno_blind", "lm_yesno_siblings_blind")
             self.value_model_ground_truth_conditioning = True
-            if self.gt_conditioning_template not in ("lm_yesno", "lm_yesno_siblings"):
+            if self.gt_conditioning_template not in valid_lm_templates:
                 raise ValueError(
-                    f"LM value model requires gt_conditioning_template to be 'lm_yesno' or 'lm_yesno_siblings', "
+                    f"LM value model requires gt_conditioning_template to be one of {valid_lm_templates}, "
                     f"got '{self.gt_conditioning_template}'"
                 )
 

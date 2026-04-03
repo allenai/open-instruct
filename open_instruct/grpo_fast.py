@@ -1110,9 +1110,14 @@ class PolicyTrainerRayProcess(RayProcess):
         return "".join(parts)
 
     def _build_lm_yesno_siblings_context(
-        self, batch_idx: int, seg_idx: int, gt_text: str, sibling_rollouts: list[list[list[tuple[str, bool]]]] | None
+        self,
+        batch_idx: int,
+        seg_idx: int,
+        gt_text: str,
+        sibling_rollouts: list[list[list[tuple[str, bool]]]] | None,
+        include_answer: bool = True,
     ) -> str:
-        """Build LM value model prompt with answer, sibling rollout results, and Yes/No question."""
+        """Build LM value model prompt with optional answer, sibling rollout results, and Yes/No question."""
         siblings: list[tuple[str, bool]] = []
         if (
             sibling_rollouts is not None
@@ -1122,9 +1127,11 @@ class PolicyTrainerRayProcess(RayProcess):
             siblings = list(sibling_rollouts[batch_idx][seg_idx])
 
         if not siblings:
-            return f"Answer: {gt_text}. Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+            if include_answer:
+                return f"Answer: {gt_text}. Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+            return "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
 
-        header = f"Answer: {gt_text}\n"
+        header = f"Answer: {gt_text}\n" if include_answer else ""
         suffix = "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
         overhead_tokens = len(self.tokenizer.encode(header + suffix, add_special_tokens=False)) + 20 * len(siblings)
         budget = self._ROLLOUT_CONTEXT_MAX_TOKENS - overhead_tokens
@@ -1176,7 +1183,14 @@ class PolicyTrainerRayProcess(RayProcess):
         batch_size, orig_len = shifted_ids.shape
         device = shifted_ids.device
         template = self.args.gt_conditioning_template
-        is_postfix = template in ("expected_accuracy", "rollout_context", "lm_yesno", "lm_yesno_siblings")
+        is_postfix = template in (
+            "expected_accuracy",
+            "rollout_context",
+            "lm_yesno",
+            "lm_yesno_siblings",
+            "lm_yesno_blind",
+            "lm_yesno_siblings_blind",
+        )
 
         expanded_ids_list = []
         expanded_attn_list = []
@@ -1225,8 +1239,14 @@ class PolicyTrainerRayProcess(RayProcess):
                             f"Answer: {gt_text}. "
                             "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
                         )
+                    elif template == "lm_yesno_blind":
+                        cond_text = "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
                     elif template == "lm_yesno_siblings":
                         cond_text = self._build_lm_yesno_siblings_context(b, seg_i, gt_text, sibling_rollouts)
+                    elif template == "lm_yesno_siblings_blind":
+                        cond_text = self._build_lm_yesno_siblings_context(
+                            b, seg_i, gt_text, sibling_rollouts, include_answer=False
+                        )
                     else:
                         cond_text = f"Answer: {gt_text}\n"
                     cond_tokens = self.tokenizer.encode(cond_text, add_special_tokens=False)
