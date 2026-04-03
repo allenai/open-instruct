@@ -20,6 +20,7 @@ import warnings
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
 
 # isort: on
 import json
@@ -38,7 +39,7 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKwargs, ParallelismConfig, set_seed
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, snapshot_download
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -390,9 +391,21 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_3"
+                sp_seq_length_is_variable=True,
+                sp_attn_implementation="flash_attention_3" if args.use_flash_attn else "sdpa",
             ),
         )
+        # Monkey-patch DeepSpeed Ulysses SP to make position_ids contiguous before
+        # all_gather. Models like Qwen3.5 create non-contiguous position_ids internally
+        # (via expand + slice) which causes ValueError in NCCL all_gather.
+        _orig_usp_forward = UlyssesSPAttentionHF.forward
+
+        def _patched_usp_forward(self, query, key, value, *args, **kwargs):
+            if "position_ids" in kwargs and not kwargs["position_ids"].is_contiguous():
+                kwargs["position_ids"] = kwargs["position_ids"].contiguous()
+            return _orig_usp_forward(self, query, key, value, *args, **kwargs)
+
+        UlyssesSPAttentionHF.forward = _patched_usp_forward
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
@@ -519,6 +532,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     if args.cache_dataset_only:
         return
+
+    # Pre-download model files on main process to avoid race conditions
+    # when multiple ranks on a shared filesystem all try to access the
+    # HF hub cache concurrently.
+    model_path = args.config_name or args.model_name_or_path
+    if model_path and accelerator.is_main_process:
+        snapshot_download(model_path, revision=args.model_revision)
+    accelerator.wait_for_everyone()
 
     # Load pretrained model and tokenizer
     if args.config_name:
