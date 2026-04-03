@@ -119,6 +119,51 @@ def run_litellm(model_name: str, user_prompt: str, system_prompt: str | None = N
     return response.choices[0].message.content
 
 
+def _build_messages(
+    user_prompt: str | None = None, system_prompt: str | None = None, messages: list[dict[str, str]] | None = None
+) -> list[dict[str, str]]:
+    """Build chat messages for LiteLLM requests."""
+    if messages is not None:
+        return messages
+
+    return (
+        [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+        if system_prompt is not None
+        else [{"role": "user", "content": user_prompt}]
+    )
+
+
+def _apply_async_chat_defaults(chat_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Apply the existing `run_litellm_async` defaults for rubric-style callers."""
+    request_kwargs = dict(chat_kwargs)
+    request_kwargs["temperature"] = request_kwargs.get("temperature", 0)
+    if "max_tokens" not in request_kwargs and "max_completion_tokens" not in request_kwargs:
+        request_kwargs["max_tokens"] = 16384
+    request_kwargs["top_p"] = request_kwargs.get("top_p", 1.0)
+    request_kwargs["frequency_penalty"] = request_kwargs.get("frequency_penalty", 0.0)
+    request_kwargs["presence_penalty"] = request_kwargs.get("presence_penalty", 0.0)
+    request_kwargs["num_retries"] = request_kwargs.get("num_retries", 5)
+    request_kwargs["fallbacks"] = request_kwargs.get("fallbacks", [])
+    request_kwargs["timeout"] = request_kwargs.get("timeout", float(os.environ.get("LITELLM_DEFAULT_TIMEOUT", "600")))
+    return request_kwargs
+
+
+async def run_litellm_async_raw(
+    model_name: str,
+    user_prompt: str | None = None,
+    system_prompt: str | None = None,
+    messages: list[dict[str, str]] | None = None,
+    **chat_kwargs,
+) -> Any:
+    """Async LiteLLM helper that returns the raw response and preserves exceptions."""
+    litellm = _get_litellm()
+    msgs = _build_messages(user_prompt=user_prompt, system_prompt=system_prompt, messages=messages)
+
+    semaphore = _get_litellm_semaphore()
+    async with semaphore:
+        return await litellm.acompletion(messages=msgs, model=model_name, **chat_kwargs)
+
+
 async def run_litellm_async(
     model_name: str,
     user_prompt: str | None = None,
@@ -140,36 +185,15 @@ async def run_litellm_async(
     Returns:
         The response content from the model
     """
-    litellm = _get_litellm()
-
-    # Set default parameters
-    chat_kwargs["temperature"] = chat_kwargs.get("temperature", 0)
-    chat_kwargs["max_tokens"] = chat_kwargs.get("max_tokens", 16384)
-    chat_kwargs["top_p"] = chat_kwargs.get("top_p", 1.0)
-    chat_kwargs["frequency_penalty"] = chat_kwargs.get("frequency_penalty", 0.0)
-    chat_kwargs["presence_penalty"] = chat_kwargs.get("presence_penalty", 0.0)
-    chat_kwargs["num_retries"] = chat_kwargs.get("num_retries", 5)
-    chat_kwargs["fallbacks"] = chat_kwargs.get("fallbacks", [])
-
-    # Prepare messages
-    if messages is not None:
-        msgs = messages
-    else:
-        msgs = (
-            [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-            if system_prompt is not None
-            else [{"role": "user", "content": user_prompt}]
-        )
-
-    # Apply default timeout if not provided
-    chat_kwargs["timeout"] = chat_kwargs.get("timeout", float(os.environ.get("LITELLM_DEFAULT_TIMEOUT", "600")))
-
-    # Guard concurrent calls with a global semaphore
+    request_kwargs = _apply_async_chat_defaults(chat_kwargs)
     try:
-        semaphore = _get_litellm_semaphore()
-        async with semaphore:
-            # Create chat completion
-            response = await litellm.acompletion(messages=msgs, model=model_name, **chat_kwargs)
+        response = await run_litellm_async_raw(
+            model_name=model_name,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            messages=messages,
+            **request_kwargs,
+        )
     except Exception as e:
         # if we get an error, return an empty string
         logger.warning(f"Error in run_litellm_async: {e}")
