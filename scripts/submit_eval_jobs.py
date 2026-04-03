@@ -88,6 +88,7 @@ parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs="+", default=["ai2/jupiter", "ai2/saturn", "ai2/ceres", "ai2/neptune"])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
+parser.add_argument("--tokenizer_path", type=str, default=None, help="Path to a custom tokenizer to use for eval (overrides the model's bundled tokenizer).")
 parser.add_argument("--priority", type=str, default="low")
 parser.add_argument(
     "--preemptible", action="store_true", default=False, help="for using preemtipble jobs (required on some instances)"
@@ -720,6 +721,10 @@ if args.run_oe_eval_experiments:
     # Add beaker image from existing argument
     if args.beaker_image:
         oe_eval_cmd += f" --beaker-image {args.beaker_image}"
+
+    # Add custom tokenizer path
+    if args.tokenizer_path:
+        oe_eval_cmd += f" --tokenizer {args.tokenizer_path}"
 
     # Add cluster parameter - use the existing cluster argument
     # Join the list with commas since oe-eval.sh expects a comma-separated string

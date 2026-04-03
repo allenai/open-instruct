@@ -76,6 +76,7 @@ while [[ "$#" -gt 0 ]]; do
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
         --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
+        --tokenizer) TOKENIZER="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -291,6 +292,9 @@ MODEL_TYPE_OTHER=""
 MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
+fi
+if [[ -n "$TOKENIZER" ]]; then
+    MODEL_ARGS+=", \"tokenizer\": \"${TOKENIZER}\""
 fi
 MODEL_ARGS+="}"
 # Source the non-AI2 models list for bfcl
