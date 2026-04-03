@@ -34,6 +34,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import replay_buffer as rb
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -418,6 +419,13 @@ class StreamingDataLoaderConfig:
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
+
+    # Replay buffer
+    replay_buffer_capacity: int = 0
+    replay_buffer_sampler: str = "fifo"
+    replay_buffer_eviction: str = "fifo"
+    replay_buffer_max_sample_count: int = 1
+    replay_buffer_seed: int = 42
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -1091,6 +1099,52 @@ def prepare_collated_data_for_workers(
     return collated_data
 
 
+def _split_result_into_groups(
+    result: data_types.GenerationResult, batch: Batch, num_samples_per_prompt: int, step: int
+) -> list[rb.ReplayGroup]:
+    assert result.logprobs is not None
+    assert batch.scores is not None
+    num_groups = len(batch.queries) // num_samples_per_prompt
+    groups = []
+    for i in range(num_groups):
+        s = i * num_samples_per_prompt
+        e = s + num_samples_per_prompt
+        group = rb.ReplayGroup(
+            group_id=f"{batch.indices[i * num_samples_per_prompt] if batch.indices else i}_{step}",
+            queries=batch.queries[s:e],
+            responses=result.responses[s:e],
+            masks=result.masks[s:e],
+            logprobs=result.logprobs[s:e],
+            scores=batch.scores[s:e],
+            finish_reasons=result.finish_reasons[s:e],
+            insertion_step=step,
+            dataset_name=batch.datasets[s] if batch.datasets else "",
+            raw_query=batch.raw_queries[s] if batch.raw_queries else "",
+            active_tools=batch.active_tools[s] if batch.active_tools else None,
+        )
+        groups.append(group)
+    return groups
+
+
+def _flatten_groups(
+    groups: list[rb.ReplayGroup],
+) -> tuple[list[list[int]], list[list[int]], list[list[int]], list[list[float]], list[float], list[str]]:
+    queries = []
+    responses = []
+    masks = []
+    logprobs = []
+    scores = []
+    finish_reasons = []
+    for g in groups:
+        queries.extend(g.queries)
+        responses.extend(g.responses)
+        masks.extend(g.masks)
+        logprobs.extend(g.logprobs)
+        scores.extend(g.scores)
+        finish_reasons.extend(g.finish_reasons)
+    return queries, responses, masks, logprobs, scores, finish_reasons
+
+
 @ray.remote
 class DataPreparationActor:
     """Ray actor singleton that handles centralized data preparation for all ranks.
@@ -1164,9 +1218,21 @@ class DataPreparationActor:
         self.total_samples_written = 0
         self.metadata_saved = False
 
+        self.replay_buffer: rb.ReplayBuffer | None = None
+        if self.config.replay_buffer_capacity > 0:
+            self.replay_buffer = rb.ReplayBuffer(
+                capacity=self.config.replay_buffer_capacity,
+                sampler_type=self.config.replay_buffer_sampler,
+                eviction_type=self.config.replay_buffer_eviction,
+                max_sample_count=self.config.replay_buffer_max_sample_count,
+                seed=self.config.replay_buffer_seed,
+            )
+
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
             self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
+            if "replay_buffer_state" in initial_state and self.replay_buffer is not None:
+                self.replay_buffer.load_state_dict(initial_state["replay_buffer_state"])
             logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
 
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
@@ -1254,141 +1320,220 @@ class DataPreparationActor:
 
             assert batch is not None
             assert batch_stats is not None
-            scores = np.array(batch.scores)
-            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
 
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
+            if self.replay_buffer is not None:
+                collated_data, step_metrics = self._process_step_with_replay(
+                    result, batch, batch_stats, reward_metrics, step, generation_idle_wait_time
+                )
             else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
-
-            if self.config.save_traces and self.config.rollouts_save_path:
-                save_rollouts_to_disk(
-                    self.config.rollouts_save_path,
-                    self.run_name,
-                    step,
-                    batch,
-                    result,
-                    advantages,
-                    self.config.num_samples_per_prompt_rollout,
-                    self.total_samples_written,
+                collated_data, step_metrics = self._process_step_direct(
+                    result, batch, batch_stats, reward_metrics, step, generation_idle_wait_time
                 )
-                self.total_samples_written += len(batch.queries)
-
-            if self.config.mask_truncated_completions:
-                stop_idxes = torch.tensor(
-                    [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
-                )
-                num_truncated = len(result.finish_reasons) - len(stop_idxes)
-                if num_truncated > 0:
-                    logger.info(
-                        f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                        f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
-                    )
-                scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
-                batch = batch[stop_idxes.tolist()]
-                result.responses = [result.responses[i] for i in stop_idxes]
-                result.masks = [result.masks[i] for i in stop_idxes]
-                result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
-                assert result.logprobs is not None
-                result.logprobs = [result.logprobs[i] for i in stop_idxes]
-
-            assert result.logprobs is not None
-            packed_sequences = pack_sequences(
-                queries=batch.queries,
-                responses=result.responses,
-                masks=result.masks,
-                pack_length=self.config.pack_length,
-                pad_token_id=self.tokenizer.pad_token_id,
-                vllm_logprobs=result.logprobs,
-                mask_tool_use=self.config.mask_tool_use,
-                min_num_batches=self.dp_world_size,
-            )
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
-            ]
-            packed_sequences.advantages = packed_advantages
-
-            collated_data = prepare_collated_data_for_workers(
-                packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
-            )
-
-            if len(result.responses) == 0:
-                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
-            else:
-                real_num_responses = len(result.responses)
-                expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
-                unsolved_num_responses = (scores < self.config.max_possible_score).sum()
-                sequence_lengths = np.array([len(response) for response in result.responses])
-                sequence_length_solved = (
-                    np.array([])
-                    if np.all(scores == 0)
-                    else np.array(sequence_lengths[scores == self.config.max_possible_score])
-                )
-                sequence_length_unsolved = (
-                    np.array([])
-                    if np.all(scores == self.config.max_possible_score)
-                    else np.array(sequence_lengths[scores == 0])
-                )
-                stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
-
-                batch_metrics_dict = asdict(batch_stats)
-                batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
-
-                step_metrics = {
-                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
-                    "scores": scores.mean(),
-                    "real_batch_size_ratio": real_num_responses / expected_num_responses,
-                    "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
-                    "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
-                    "val/solve_rate_hist": batch_stats.percent_solved_hist,
-                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
-                    "val/sequence_lengths": sequence_lengths.mean(),
-                    "val/sequence_lengths_min": sequence_lengths.min(),
-                    "val/sequence_lengths_max": sequence_lengths.max(),
-                    "val/sequence_lengths_unsolved": (
-                        0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-                    ),
-                    "val/sequence_lengths_solved": (
-                        0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
-                    ),
-                    "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-                    "val/sequence_lengths_solved_hist": sequence_length_solved,
-                    "val/stop_rate": stop_rate,
-                    "val/advantages_mean": advantages.mean(),
-                    "val/advantages_min": advantages.min(),
-                    "val/advantages_max": advantages.max(),
-                    "val/advantages_hist": advantages,
-                    **reward_metrics,
-                    **batch_metrics_prefixed,
-                }
-
-                tool_stats = EnvStatistics(tool_names=self.tool_names)
-                for rollout_stats in result.request_info.tool_call_stats:
-                    tool_stats.add_rollout(rollout_stats)
-                step_metrics.update(tool_stats.compute_metrics())
-
-                step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
-
-                assert result.token_statistics is not None
-                total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
-                step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-                step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
             with self.lock:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
+
+    def _compute_advantages(self, scores: np.ndarray) -> np.ndarray:
+        scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
+        mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+        mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+        std_grouped_rewards = scores_per_prompt.std(axis=-1)
+        std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+        if self.config.advantage_normalization_type == "standard":
+            return (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+        elif self.config.advantage_normalization_type == "centered":
+            return scores - mean_grouped_rewards
+        else:
+            raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+
+    def _pack_and_collate(
+        self, queries, responses, masks, logprobs, advantages, finish_reasons
+    ) -> list[data_types.CollatedBatchData]:
+        packed_sequences = pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=self.config.pack_length,
+            pad_token_id=self.tokenizer.pad_token_id,
+            vllm_logprobs=logprobs,
+            mask_tool_use=self.config.mask_tool_use,
+            min_num_batches=self.dp_world_size,
+        )
+        lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
+        lookup_advantages[1:] = advantages
+        packed_advantages = [
+            torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+            for packed_mask in packed_sequences.response_masks
+        ]
+        packed_sequences.advantages = packed_advantages
+        return prepare_collated_data_for_workers(
+            packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
+        )
+
+    def _process_step_direct(self, result, batch, batch_stats, reward_metrics, step, generation_idle_wait_time):
+        scores = np.array(batch.scores)
+        advantages = self._compute_advantages(scores)
+
+        if self.config.save_traces and self.config.rollouts_save_path:
+            save_rollouts_to_disk(
+                self.config.rollouts_save_path,
+                self.run_name,
+                step,
+                batch,
+                result,
+                advantages,
+                self.config.num_samples_per_prompt_rollout,
+                self.total_samples_written,
+            )
+            self.total_samples_written += len(batch.queries)
+
+        if self.config.mask_truncated_completions:
+            stop_idxes = torch.tensor(
+                [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
+            )
+            num_truncated = len(result.finish_reasons) - len(stop_idxes)
+            if num_truncated > 0:
+                logger.info(
+                    f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+                    f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
+                )
+            scores = scores[stop_idxes]
+            advantages = advantages[stop_idxes]
+            batch = batch[stop_idxes.tolist()]
+            result.responses = [result.responses[i] for i in stop_idxes]
+            result.masks = [result.masks[i] for i in stop_idxes]
+            result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
+            assert result.logprobs is not None
+            result.logprobs = [result.logprobs[i] for i in stop_idxes]
+
+        assert result.logprobs is not None
+        collated_data = self._pack_and_collate(
+            batch.queries, result.responses, result.masks, result.logprobs, advantages, result.finish_reasons
+        )
+
+        step_metrics = self._compute_step_metrics(
+            result, batch, batch_stats, reward_metrics, scores, advantages, collated_data, generation_idle_wait_time
+        )
+        return collated_data, step_metrics
+
+    def _process_step_with_replay(self, result, batch, batch_stats, reward_metrics, step, generation_idle_wait_time):
+        assert self.replay_buffer is not None
+
+        if self.config.save_traces and self.config.rollouts_save_path:
+            scores_for_trace = np.array(batch.scores)
+            advantages_for_trace = self._compute_advantages(scores_for_trace)
+            save_rollouts_to_disk(
+                self.config.rollouts_save_path,
+                self.run_name,
+                step,
+                batch,
+                result,
+                advantages_for_trace,
+                self.config.num_samples_per_prompt_rollout,
+                self.total_samples_written,
+            )
+            self.total_samples_written += len(batch.queries)
+
+        assert result.logprobs is not None
+        new_groups = _split_result_into_groups(result, batch, self.config.num_samples_per_prompt_rollout, step)
+        new_group_ids = {g.group_id for g in new_groups}
+        self.replay_buffer.insert(new_groups)
+
+        sampled_groups = self.replay_buffer.sample(self.global_batch_size)
+        queries, responses, masks, logprobs, scores_list, finish_reasons = _flatten_groups(sampled_groups)
+        scores = np.array(scores_list)
+        advantages = self._compute_advantages(scores)
+
+        if self.config.mask_truncated_completions:
+            stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+            num_truncated = len(finish_reasons) - len(stop_idxes)
+            if num_truncated > 0:
+                logger.info(f"[DataPreparationActor] Filtered {num_truncated} truncated responses from sampled batch.")
+            scores = scores[stop_idxes]
+            advantages = advantages[stop_idxes]
+            queries = [queries[i] for i in stop_idxes]
+            responses = [responses[i] for i in stop_idxes]
+            masks = [masks[i] for i in stop_idxes]
+            logprobs = [logprobs[i] for i in stop_idxes]
+            finish_reasons = [finish_reasons[i] for i in stop_idxes]
+
+        collated_data = self._pack_and_collate(queries, responses, masks, logprobs, advantages, finish_reasons)
+
+        fresh_count = sum(1 for g in sampled_groups if g.group_id in new_group_ids)
+        step_metrics = self._compute_step_metrics(
+            result, batch, batch_stats, reward_metrics, scores, advantages, collated_data, generation_idle_wait_time
+        )
+        step_metrics["replay/buffer_size"] = len(self.replay_buffer)
+        step_metrics["replay/mean_sample_count"] = self.replay_buffer.mean_sample_count()
+        step_metrics["replay/fresh_fraction"] = fresh_count / len(sampled_groups) if sampled_groups else 0.0
+        return collated_data, step_metrics
+
+    def _compute_step_metrics(
+        self, result, batch, batch_stats, reward_metrics, scores, advantages, collated_data, generation_idle_wait_time
+    ) -> dict:
+        if len(result.responses) == 0:
+            return {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+
+        real_num_responses = len(result.responses)
+        expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
+        unsolved_num_responses = (scores < self.config.max_possible_score).sum()
+        sequence_lengths = np.array([len(response) for response in result.responses])
+        sequence_length_solved = (
+            np.array([])
+            if np.all(scores == 0)
+            else np.array(sequence_lengths[scores == self.config.max_possible_score])
+        )
+        sequence_length_unsolved = (
+            np.array([])
+            if np.all(scores == self.config.max_possible_score)
+            else np.array(sequence_lengths[scores == 0])
+        )
+        stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
+
+        batch_metrics_dict = asdict(batch_stats)
+        batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
+
+        num_packed = sum(len(cd.query_responses) for cd in collated_data)
+        step_metrics = {
+            "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+            "scores": scores.mean(),
+            "real_batch_size_ratio": real_num_responses / expected_num_responses,
+            "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
+            "packed_ratio": num_packed / real_num_responses,
+            "val/solve_rate_hist": batch_stats.percent_solved_hist,
+            "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
+            "val/sequence_lengths": sequence_lengths.mean(),
+            "val/sequence_lengths_min": sequence_lengths.min(),
+            "val/sequence_lengths_max": sequence_lengths.max(),
+            "val/sequence_lengths_unsolved": (
+                0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
+            ),
+            "val/sequence_lengths_solved": (0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()),
+            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+            "val/sequence_lengths_solved_hist": sequence_length_solved,
+            "val/stop_rate": stop_rate,
+            "val/advantages_mean": advantages.mean(),
+            "val/advantages_min": advantages.min(),
+            "val/advantages_max": advantages.max(),
+            "val/advantages_hist": advantages,
+            **reward_metrics,
+            **batch_metrics_prefixed,
+        }
+
+        tool_stats = EnvStatistics(tool_names=self.tool_names)
+        for rollout_stats in result.request_info.tool_call_stats:
+            tool_stats.add_rollout(rollout_stats)
+        step_metrics.update(tool_stats.compute_metrics())
+
+        step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
+
+        assert result.token_statistics is not None
+        total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
+        step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+        step_metrics["time/getting_response"] = result.token_statistics.generation_time
+        return step_metrics
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
@@ -1425,11 +1570,16 @@ class DataPreparationActor:
                 del self.metrics[s]
 
     def get_state(self) -> dict:
-        return {
+        state = {
             "training_step": self.current_prepared_step + 1,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
+        if self.replay_buffer is not None:
+            state["replay_buffer_state"] = self.replay_buffer.state_dict()
+        return state
 
     def set_state(self, state: dict):
         self.training_step = state["training_step"]
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
+        if "replay_buffer_state" in state and self.replay_buffer is not None:
+            self.replay_buffer.load_state_dict(state["replay_buffer_state"])
