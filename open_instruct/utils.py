@@ -679,7 +679,9 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
+    def parse_yaml_and_args(
+        self, yaml_arg: str, other_args: list[str] | None = None, allow_extra_keys: bool = False
+    ) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.
 
@@ -692,7 +694,7 @@ class ArgumentParserPlus(HfArgumentParser):
         Returns:
             [`List[dataclass]`]: a list of dataclasses with the values from the YAML file and the command line
         """
-        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg))
+        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg), allow_extra_keys=allow_extra_keys)
 
         outputs = []
         # strip other args list into dict of key-value pairs
@@ -736,14 +738,16 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> DataClassType | tuple[DataClassType]:
+    def parse(self, allow_extra_keys: bool = False) -> DataClassType | tuple[DataClassType]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
-            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]))
+            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]), allow_extra_keys=allow_extra_keys)
         # parse command line args and yaml file
         elif len(sys.argv) > 2 and sys.argv[1].endswith(".yaml"):
-            output = self.parse_yaml_and_args(os.path.abspath(sys.argv[1]), sys.argv[2:])
+            output = self.parse_yaml_and_args(
+                os.path.abspath(sys.argv[1]), sys.argv[2:], allow_extra_keys=allow_extra_keys
+            )
         # parse command line args only
         else:
             output = self.parse_args_into_dataclasses()

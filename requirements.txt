@@ -49,6 +49,7 @@ anyio==4.12.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   watchfiles
 apache-tvm-ffi==0.1.8.post2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
+    #   flash-attn-4
     #   flashinfer-python
     #   quack-kernels
 astor==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -69,7 +70,7 @@ backoff==2.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or 
     # via open-instruct
 backrefs==6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
-beaker-py==2.5.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+beaker-py==2.5.7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
 beautifulsoup4==4.14.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   crawl4ai
@@ -221,6 +222,7 @@ einops==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   deepspeed
     #   flash-attn
     #   flash-attn-3
+    #   flash-attn-4
     #   flashinfer-python
     #   vllm
 email-validator==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -265,6 +267,8 @@ filelock==3.20.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
 flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
 flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via open-instruct
+flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via open-instruct
 flashinfer-python==0.6.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
@@ -623,6 +627,7 @@ nvidia-cusparselt-cu13==0.8.0 ; platform_machine == 'aarch64' and sys_platform =
     # via torch
 nvidia-cutlass-dsl==4.4.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
+    #   flash-attn-4
     #   flashinfer-python
     #   quack-kernels
     #   vllm
@@ -845,7 +850,9 @@ py-cpuinfo==9.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') 
 py-spy==0.4.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via ray
 pyarrow==23.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via datasets
+    # via
+    #   datasets
+    #   open-instruct
 pyasn1==0.6.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   pyasn1-modules
@@ -959,6 +966,7 @@ pyyaml==6.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   mkdocs
     #   mkdocs-get-deps
     #   omegaconf
+    #   open-instruct
     #   openenv-core
     #   peft
     #   pre-commit
@@ -975,7 +983,9 @@ pyyaml-env-tag==1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux'
 pyzmq==27.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 quack-kernels==0.3.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via vllm
+    # via
+    #   flash-attn-4
+    #   vllm
 rank-bm25==0.2.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via crawl4ai
 ray==2.53.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -1160,6 +1170,7 @@ torch==2.10.0+cu128 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   deepspeed
     #   flash-attn
     #   flash-attn-3
+    #   flash-attn-4
     #   flashinfer-python
     #   liger-kernel
     #   open-instruct
@@ -1177,6 +1188,7 @@ torch==2.10.0+cu130 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     #   bitsandbytes
     #   compressed-tensors
     #   deepspeed
+    #   flash-attn-4
     #   flashinfer-python
     #   liger-kernel
     #   open-instruct
@@ -1188,7 +1200,9 @@ torch==2.10.0+cu130 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     #   vllm
     #   xgrammar
 torch-c-dlpack-ext==0.1.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via quack-kernels
+    # via
+    #   flash-attn-4
+    #   quack-kernels
 torchaudio==2.10.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 torchvision==0.25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -1205,7 +1219,7 @@ tqdm==4.67.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   peft
     #   transformers
     #   vllm
-transformers==5.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+transformers==5.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   compressed-tensors
     #   dr-agent
@@ -1242,6 +1256,7 @@ typing-extensions==4.15.0 ; (platform_machine == 'aarch64' and sys_platform == '
     #   dataclass-extensions
     #   exceptiongroup
     #   fastapi
+    #   flash-attn-4
     #   grpcio
     #   huggingface-hub
     #   mcp
