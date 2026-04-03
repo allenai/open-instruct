@@ -1,5 +1,5 @@
 MODEL_PATHS=(
-/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo-sft/qwen3-1.7b-sft-10k/step1476-hf
+/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo-sft/qwen3-4b-sft-100k/step1476-hf
 )
 current_evals="alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite"
 
