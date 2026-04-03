@@ -1,0 +1,56 @@
+## Polygon Dynamics Prediction
+In this task, you will implement a single function predict_position(t) that computes the 2D positions of all balls at an arbitrary future time t under idealized mechanics. The function parses the scene configuration (containers, balls, and physics/meta), reconstructs the motions, detects and handles boundary collisions with finite-size treatment, and returns a list where each element is the [x, y] position (rounded to 2 decimals) of a ball at time t. Each evaluation of t must be computed directly from initial conditions and scene mechanics with no hidden state or accumulation across calls. Rendering, animation, and explanatory text are out of scope; prefer closed-form reasoning and avoid coarse timestepping except where narrowly required for collision resolution.
+
+### Mechanics (General)
+- Kinematics: Use closed-form equations under constant acceleration: x(t)=x0+vx0*t+0.5*ax*t^2, y(t)=y0+vy0*t+0.5*ay*t^2.
+- Collisions: Perfectly elastic. Reflect velocity using v' = v 2·dot(v, n^)·n^, where n^ is the inward unit normal at the contact.
+- Finite size: Use polygon{polygon contact. Derive regular shapes from ('sides','radius','center','rotation'); irregular convex polygon balls use provided vertices.
+- Geometry: Irregular convex polygons (if present) are simple (non selfintersecting). Ball finite size must be respected in all interactions.
+- Units: Positions in meters; time in seconds; angles in radians; velocities in m/s; accelerations in m/s^2.
+- Cartesian Axes: +X is right, +Y is up.
+
+### Constraints
+- Implement only predict_position(t); no other entry points will be called.
+- No global variables; no variables defined outside the function.
+- Do not import external libraries (except math); do not perform I/O; do not print; do not use randomness.
+- Numerical output must be round(value, 2); normalize -0.0 to 0.0.
+
+### Verification and output contract
+- Return a list of positions per ball for the provided t: [[x1,y1],[x2,y2],...].
+- Each call must be computed independently (no state carry-over between calls).
+- You should assume that the ball will hit the wall and bounce back, which will be verified in test cases.
+
+### Scene description
+#### Containers
+- Container 1: regular polygon with 3 sides, radius 225.00m, center at (750, 750); initial orientation 0.000 rad; constant angular velocity 0.170 rad/s
+
+#### Objects
+- Ball 1: regular polygon (3 sides), radius 40.0m, initial position (750, 750), initial velocity (-220.61, 6.21) m/s
+
+22
+### Physics
+- no effective gravity (treated as zero).
+
+### Dynamics
+- No additional time-varying mechanisms.
+
+### Conventions for this scene
+- Containers are convex regular polygons (parameters: 'sides', 'radius', 'center'), unless otherwise specified.
+- Angle baseline: By default, the initial orientation is 0.000 rad, pointing to the first vertex along +X (standard Cartesian axes); positive angles rotate CCW about the container center.
+- Polygon vertices (if provided) are CCW and form a simple convex polygon.
+- Container 'radius' denotes the circumradius (meters).
+- For balls: irregular convex polygons rely on provided vertices (no radius mentioned); regular polygons may be derived from 'sides/radius/center/rotation'.
+- Containers are kinematic (infinite mass, prescribed motion); impacts do not alter container motion.
+
+### Task
+- Number of balls: 1
+- Your should think step by step and write python code.
+- The final output should be in the following format:
+[Your thinking steps here ...](optional)
+```python
+[Your Python code here]
+```
+- Define predict_position(t) returning a list of length n_balls; each element is [x_i, y_i] (rounded to 2 decimals) for Ball i at time t (seconds)
+
+### Output
+- Required format: function predict_position(t: float) -> [[x1,y1], [x2,y2],...]; coordinates as 2-decimal floats
