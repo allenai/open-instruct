@@ -299,14 +299,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
-    ac_config = (
-        transformer_config.TransformerActivationCheckpointingConfig(
-            mode=transformer_config.TransformerActivationCheckpointingMode.budget,
-            activation_memory_budget=args.activation_memory_budget,
-        )
-        if args.activation_memory_budget < 1.0 and args.compile_model
-        else None
-    )
+    ac_config = olmo_core_utils.build_ac_config(args.activation_memory_budget, args.compile_model)
 
     train_module = DPOTrainModule(
         model=model,

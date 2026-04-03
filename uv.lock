@@ -305,7 +305,7 @@ wheels = [
 
 [[package]]
 name = "beaker-py"
-version = "2.5.4"
+version = "2.5.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-crc32c", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -316,9 +316,9 @@ dependencies = [
     { name = "pyyaml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "requests", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/f7/5816cf63a0b29b23554a3515ba520b87f51fe34361927ba4118b368038fc/beaker_py-2.5.4.tar.gz", hash = "sha256:39c2bf9221f824c08c1062a3932c69b043f0ac14aa7fa58faaf7fafd635701e5", size = 96621, upload-time = "2026-01-14T01:40:29.505Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/95/acee7764ac42c272d6547d8b49f8bce9463c1ba55c56c793bcd6fe68e077/beaker_py-2.5.7.tar.gz", hash = "sha256:af9982ebe969931264006b89207fd7944cead4ae27fe442a8a73faa956312013", size = 104660, upload-time = "2026-04-03T00:02:37.651Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/86/2924508b3cabc07a23bf15501b56640e326756288acefb416995b3ccb25f/beaker_py-2.5.4-py3-none-any.whl", hash = "sha256:ec1a61ac50b87a9d30baac638d6d2b543ca7f9f2cca388ec351fac77f13ace2e", size = 107783, upload-time = "2026-01-14T01:40:28.184Z" },
+    { url = "https://files.pythonhosted.org/packages/71/4b/fadaea2947c41d6c910c01c7afd698e5f6423337c75b01920c6fd1f47359/beaker_py-2.5.7-py3-none-any.whl", hash = "sha256:0dd85d3ce81d320bd9613881124b4e65013c0d16fda9863d01bcaf232e7a9855", size = 115960, upload-time = "2026-04-03T00:02:36.314Z" },
 ]
 
 [[package]]
@@ -2893,7 +2893,7 @@ provides-extras = ["code", "dr-tulu"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "beaker-py", specifier = ">=2.5.3" },
+    { name = "beaker-py", specifier = ">=2.5.7" },
     { name = "mkdocs-material", specifier = ">=9.6.8" },
     { name = "parameterized", specifier = ">=0.9.0" },
     { name = "pre-commit", specifier = ">=4.5.0" },

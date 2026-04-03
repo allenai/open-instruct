@@ -77,6 +77,8 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | | `--save_freq` | Save every N train steps | `200` |
 | | `--with_tracking` | Track experiment with Weights and Biases | `False` |
 
+For details on how GRPO's HSDP sharding works, see [OLMo-core Sharding and Parallelism](olmo_core_sharding.md).
+
 ---
 
 

@@ -274,13 +274,11 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = self.policy.parameters()
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
-        warm_up_steps = args.warm_up_steps
-        if args.warmup_ratio > 0.0:
-            warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
+        warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=warm_up_steps,
+            num_warmup_steps=warmup_steps,
             num_training_steps=num_scheduler_steps,
         )
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -1006,7 +1004,7 @@ def setup_experiment_tracking(
     wandb_url = None
     if args.with_tracking:
         wandb.init(
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             entity=args.wandb_entity,
             config=all_configs,
             group=args.wandb_group_name,
@@ -2361,6 +2359,7 @@ if __name__ == "__main__":
             EnvsConfig,
         )
     )
+    parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
         parser.parse_args_into_dataclasses()
     )

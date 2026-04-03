@@ -301,7 +301,7 @@ def main(
             m.setup_callbacks.remote(
                 actor_manager=actor_manager,
                 with_tracking=args.with_tracking,
-                wandb_project=args.wandb_project_name,
+                wandb_project=args.wandb_project,
                 wandb_entity=args.wandb_entity,
                 run_name=args.run_name or args.exp_name,
                 json_config=json_config,
@@ -330,6 +330,9 @@ if __name__ == "__main__":
             data_loader_lib.VLLMConfig,
             EnvsConfig,
         ]
+    )
+    parser.set_defaults(
+        exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1, fused_optimizer=False
     )
     args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
 

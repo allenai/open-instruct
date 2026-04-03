@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, SDPA fallback for head_dim=256 (FA3 incompatible), Ulysses SP contiguous position_ids fix, liger-kernel bump to 0.7.0, and pre-download model on rank 0 to avoid HF cache race conditions (https://github.com/allenai/open-instruct/pull/1568).
+- Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
 - Add a vLLM-based teacher logit sampling pipeline for offline distillation, including `sample_logits_vllm.py`, distillkit sampling writer utilities, and a launch script for generating compressed parquet shards (https://github.com/allenai/open-instruct/pull/1534).
 - Add user-focused documentation for tool use training, RL environments, parser selection, and rollout configuration (https://github.com/allenai/open-instruct/pull/1546).
 - Adds support for flash attention 4, and changes attention implementation to FA2 (https://github.com/allenai/open-instruct/pull/1569).
