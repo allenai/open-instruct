@@ -3,7 +3,17 @@
 set -euo pipefail
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-ai2/cuda12.8-dev-ubuntu22.04-torch2.7.0}"
+git_hash=$(git rev-parse --short HEAD)
+git_branch=$(git rev-parse --abbrev-ref HEAD)
+# Sanitize the branch name to remove invalid characters for Beaker names
+# Beaker names can only contain letters, numbers, -_. and may not start with -
+sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
+IMAGE_NAME=open-instruct-integration-test-${sanitized_branch}
+
+BEAKER_IMAGE="${1:-${BEAKER_USER}/${IMAGE_NAME}}"
+
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 CLIP_HIGH=0.3
 LR=5e-7
@@ -18,7 +28,7 @@ uv run python mason.py \
     --cluster ai2/jupiter \
     --cluster ai2/saturn \
     --cluster ai2/ceres \
-    --workspace ai2/open-instruct-dev \
+    --workspace ai2/oe-adapt-code \
     --priority high \
     --preemptible \
     --pure_docker_mode \
@@ -29,7 +39,6 @@ uv run python mason.py \
     --gpus 8 \
     --max_retries 0 \
     --timeout 8h \
-    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
@@ -59,7 +68,6 @@ uv run python mason.py \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
-    --chat_template_name qwen3 \
     --total_episodes 1000000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 8 \
@@ -67,10 +75,9 @@ uv run python mason.py \
     --vllm_tensor_parallel_size 1 \
     --clip_higher "${CLIP_HIGH}" \
     --seed 1 \
-    --local_eval_every 10 \
-    --save_freq 40 \
+    --local_eval_every 25 \
+    --save_freq 100 \
     --checkpoint_state_freq 100 \
-    --checkpoint_state_dir /tmp/checkpoint_states \
     --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub false
+    --push_to_hub false "$@"
