@@ -501,6 +501,8 @@ class PolicyTrainerRayProcess(RayProcess):
             self.value_model.lm_head = value_head
             logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
 
+        disable_dropout_in_model(self.value_model)
+
         # Load pretrained value model checkpoint (backbone + value head) if specified
         if args.init_value_from_pretrained_checkpoint:
             pretrained_path = os.path.join(args.init_value_from_pretrained_checkpoint, "value_model.bin")
