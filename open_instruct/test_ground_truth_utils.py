@@ -3,11 +3,21 @@
 Test script for verifier functionality in Python
 """
 
+import asyncio
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from parameterized import parameterized
 
-from open_instruct.ground_truth_utils import F1Verifier, GSM8KVerifier, PuzzleMatcherVerifier
+from open_instruct.ground_truth_utils import (
+    F1Verifier,
+    GSM8KVerifier,
+    LMJudgeVerifier,
+    LMJudgeVerifierConfig,
+    PuzzleMatcherVerifier,
+    cleanup_all_llm_judge_clients,
+)
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -160,6 +170,63 @@ class TestGSM8KVerifier(unittest.TestCase):
     def test_signed_number_extraction(self, _name, prediction, label, expected_score):
         result = self.verifier([], prediction, label)
         self.assertEqual(result.score, expected_score)
+
+
+def _make_litellm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+    )
+
+
+class TestLMJudgeVerifier(unittest.TestCase):
+    def setUp(self):
+        self.verifier = LMJudgeVerifier(
+            "quality",
+            LMJudgeVerifierConfig(
+                llm_judge_model="azure/gpt-4o-mini-standard",
+                llm_judge_max_tokens=256,
+                llm_judge_max_context_length=4096,
+                llm_judge_temperature=0.0,
+                llm_judge_timeout=30,
+                seed=17,
+            ),
+        )
+
+    def test_async_call_uses_shared_helper_and_preserves_retry_and_cost(self):
+        response = _make_litellm_response('{"REASONING":"clear","SCORE":7}', prompt_tokens=10, completion_tokens=5)
+        raw_helper = AsyncMock(side_effect=[RuntimeError("temporary"), response])
+        sleep_mock = AsyncMock()
+
+        with (
+            patch("open_instruct.ground_truth_utils.run_litellm_async_raw", raw_helper),
+            patch(
+                "open_instruct.ground_truth_utils.context_window_checker.check_context_window_limit", return_value=True
+            ),
+            patch("open_instruct.ground_truth_utils.asyncio.sleep", sleep_mock),
+        ):
+            result = asyncio.run(
+                self.verifier.async_call(
+                    tokenized_prediction=[],
+                    prediction="<answer>final answer</answer>",
+                    label="reference",
+                    query="What is the answer?",
+                )
+            )
+
+        self.assertAlmostEqual(result.score, 0.7)
+        self.assertEqual(result.reasoning, "clear")
+        self.assertAlmostEqual(result.cost, 0.0000045)
+        self.assertEqual(raw_helper.await_count, 2)
+        self.assertEqual(sleep_mock.await_count, 1)
+        self.assertEqual(raw_helper.await_args_list[-1].kwargs["model_name"], "azure/gpt-4o-mini-standard")
+        self.assertEqual(raw_helper.await_args_list[-1].kwargs["max_completion_tokens"], 256)
+        self.assertNotIn("num_retries", raw_helper.await_args_list[-1].kwargs)
+        self.assertNotIn("fallbacks", raw_helper.await_args_list[-1].kwargs)
+
+    def test_cleanup_helpers_are_safe_noops(self):
+        self.assertIsNone(asyncio.run(LMJudgeVerifier.cleanup_all_clients()))
+        self.assertIsNone(asyncio.run(cleanup_all_llm_judge_clients()))
 
 
 if __name__ == "__main__":
