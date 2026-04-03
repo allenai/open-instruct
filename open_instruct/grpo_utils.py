@@ -178,6 +178,13 @@ class ExperimentConfig:
     rollout_context_num_siblings: int = 4
     """Number of sibling rollouts to include in the 'rollout_context' template."""
 
+    # LM Value Model (Yes/No probability as value)
+    use_lm_value_model: bool = False
+    """If True, keep the full LM head instead of replacing with a scalar value head.
+    The value at each position is P(Yes) extracted from the logits, trained with
+    cross-entropy on Yes/No labels (correct/incorrect rollout) instead of MSE on returns.
+    Requires use_value_model=True and value_model_ground_truth_conditioning=True."""
+
     # Segmental Advantage Estimation (SAE)
     # Reference: https://arxiv.org/abs/2601.07320
     use_sae: bool = False
@@ -344,6 +351,17 @@ class ExperimentConfig:
                 raise ValueError(f"value_loss_coef must be >= 0, got {self.value_loss_coef}")
             if self.vf_clip_range < 0:
                 raise ValueError(f"vf_clip_range must be >= 0, got {self.vf_clip_range}")
+
+        # LM Value Model validation
+        if self.use_lm_value_model:
+            if not self.use_value_model:
+                raise ValueError("LM value model requires --use_value_model to be enabled.")
+            self.value_model_ground_truth_conditioning = True
+            if self.gt_conditioning_template not in ("lm_yesno", "lm_yesno_siblings"):
+                raise ValueError(
+                    f"LM value model requires gt_conditioning_template to be 'lm_yesno' or 'lm_yesno_siblings', "
+                    f"got '{self.gt_conditioning_template}'"
+                )
 
         # SAE validation
         if self.use_sae:

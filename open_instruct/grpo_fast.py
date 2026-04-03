@@ -493,15 +493,28 @@ class PolicyTrainerRayProcess(RayProcess):
                 attn_implementation=model_config.attn_implementation,
                 use_cache=False,
             )
-            # Replace the LM head with a newly initialized Linear(hidden_size, 1)
-            hidden_size = self.value_model.config.hidden_size
-            value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
-            std = 1.0 / (hidden_size + 1) ** 0.5
-            torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
-            self.value_model.lm_head = value_head
-            logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
+            if args.use_lm_value_model:
+                logger.info(f"{self.rank=}: Keeping LM head for LM value model (P(Yes/No) extraction)")
+            else:
+                hidden_size = self.value_model.config.hidden_size
+                value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+                std = 1.0 / (hidden_size + 1) ** 0.5
+                torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
+                self.value_model.lm_head = value_head
+                logger.info(f"{self.rank=}: Replaced LM head with value head (hidden_size={hidden_size})")
 
         disable_dropout_in_model(self.value_model)
+
+        if args.use_lm_value_model:
+            yes_ids = self.tokenizer.encode("Yes", add_special_tokens=False)
+            no_ids = self.tokenizer.encode("No", add_special_tokens=False)
+            self._lm_value_yes_id = yes_ids[0]
+            self._lm_value_no_id = no_ids[0]
+            logger.info(
+                f"{self.rank=}: LM value model Yes/No token IDs: "
+                f"Yes={self._lm_value_yes_id} ({self.tokenizer.decode([self._lm_value_yes_id])}), "
+                f"No={self._lm_value_no_id} ({self.tokenizer.decode([self._lm_value_no_id])})"
+            )
 
         # Load pretrained value model checkpoint (backbone + value head) if specified
         if args.init_value_from_pretrained_checkpoint:
@@ -1027,7 +1040,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 output = self.value_model(
                     input_ids=shifted_ids, attention_mask=shifted_attn, position_ids=shifted_pos, return_dict=True
                 )
-                values = output.logits.squeeze(-1)
+                if self.args.use_lm_value_model:
+                    yes_logits = output.logits[:, :, self._lm_value_yes_id]
+                    no_logits = output.logits[:, :, self._lm_value_no_id]
+                    values = torch.softmax(torch.stack([yes_logits, no_logits], dim=-1), dim=-1)[:, :, 0]
+                else:
+                    values = output.logits.squeeze(-1)
 
             values = values * shifted_resp_mask
         return values
@@ -1091,6 +1109,54 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return "".join(parts)
 
+    def _build_lm_yesno_siblings_context(
+        self, batch_idx: int, seg_idx: int, gt_text: str, sibling_rollouts: list[list[list[tuple[str, bool]]]] | None
+    ) -> str:
+        """Build LM value model prompt with answer, sibling rollout results, and Yes/No question."""
+        siblings: list[tuple[str, bool]] = []
+        if (
+            sibling_rollouts is not None
+            and batch_idx < len(sibling_rollouts)
+            and seg_idx < len(sibling_rollouts[batch_idx])
+        ):
+            siblings = list(sibling_rollouts[batch_idx][seg_idx])
+
+        if not siblings:
+            return f"Answer: {gt_text}. Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+
+        header = f"Answer: {gt_text}\n"
+        suffix = "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+        overhead_tokens = len(self.tokenizer.encode(header + suffix, add_special_tokens=False)) + 20 * len(siblings)
+        budget = self._ROLLOUT_CONTEXT_MAX_TOKENS - overhead_tokens
+
+        max_per_sibling = max(128, budget // len(siblings))
+        truncated_siblings: list[tuple[str, bool]] = []
+        sibling_token_counts: list[int] = []
+        for text, is_correct in siblings:
+            tokens = self.tokenizer.encode(text, add_special_tokens=False)
+            if len(tokens) > max_per_sibling:
+                text = self.tokenizer.decode(tokens[:max_per_sibling], skip_special_tokens=True) + "..."
+                sibling_token_counts.append(max_per_sibling)
+            else:
+                sibling_token_counts.append(len(tokens))
+            truncated_siblings.append((text, is_correct))
+
+        while truncated_siblings and sum(sibling_token_counts) > budget:
+            longest_idx = max(range(len(sibling_token_counts)), key=lambda i: sibling_token_counts[i])
+            truncated_siblings.pop(longest_idx)
+            sibling_token_counts.pop(longest_idx)
+
+        parts = [header]
+        for r_idx, (text, is_correct) in enumerate(truncated_siblings, 1):
+            result = "success" if is_correct else "fail"
+            parts.append(f"Attempt {r_idx}: {text} Result: {result}\n")
+
+        parts.append(suffix)
+        attempt_k = len(truncated_siblings) + 1
+        parts.append(f"Attempt {attempt_k}: ")
+
+        return "".join(parts)
+
     def _forward_value_with_gt(
         self,
         shifted_ids: torch.Tensor,
@@ -1110,7 +1176,7 @@ class PolicyTrainerRayProcess(RayProcess):
         batch_size, orig_len = shifted_ids.shape
         device = shifted_ids.device
         template = self.args.gt_conditioning_template
-        is_postfix = template in ("expected_accuracy", "rollout_context")
+        is_postfix = template in ("expected_accuracy", "rollout_context", "lm_yesno", "lm_yesno_siblings")
 
         expanded_ids_list = []
         expanded_attn_list = []
@@ -1154,6 +1220,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         cond_text = f"Given the answer is {gt_text}, Let me compute the expected accuracy of the partial rollout: "
                     elif template == "rollout_context":
                         cond_text = self._build_sibling_rollout_context(b, seg_i, gt_text, sibling_rollouts)
+                    elif template == "lm_yesno":
+                        cond_text = (
+                            f"Answer: {gt_text}. "
+                            "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+                        )
+                    elif template == "lm_yesno_siblings":
+                        cond_text = self._build_lm_yesno_siblings_context(b, seg_i, gt_text, sibling_rollouts)
                     else:
                         cond_text = f"Answer: {gt_text}\n"
                     cond_tokens = self.tokenizer.encode(cond_text, add_special_tokens=False)
@@ -1238,7 +1311,14 @@ class PolicyTrainerRayProcess(RayProcess):
         output = self.value_model(
             input_ids=padded_ids, attention_mask=padded_attn, position_ids=padded_pos, return_dict=True
         )
-        all_values = output.logits.squeeze(-1)  # (batch, max_len)
+
+        if self.args.use_lm_value_model:
+            # Extract P(Yes) from vocab logits at Yes/No token positions
+            yes_logits = output.logits[:, :, self._lm_value_yes_id]
+            no_logits = output.logits[:, :, self._lm_value_no_id]
+            all_values = torch.softmax(torch.stack([yes_logits, no_logits], dim=-1), dim=-1)[:, :, 0]
+        else:
+            all_values = output.logits.squeeze(-1)  # (batch, max_len)
 
         # Extract values at original (non-prefix) positions
         values = torch.zeros(batch_size, orig_len, device=device, dtype=all_values.dtype)
@@ -2028,7 +2108,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         target_returns = returns_BT[i]
                         old_values = old_values_BT[i]
 
-                        if self.args.vf_clip_range > 0:
+                        if self.args.use_lm_value_model:
+                            # Cross-entropy loss: label is 1 (Yes) if correct, 0 (No) if incorrect
+                            # Build per-position binary labels from terminal rewards
+                            shifted_rewards = data_BT.rewards[i][:, 1:]
+                            shifted_dones = data_BT.dones[i][:, 1:].clamp(0, 1)
+                            labels_BT = torch.zeros_like(current_values)
+                            batch_sz = shifted_rewards.shape[0]
+                            for b_idx in range(batch_sz):
+                                eos_positions = (shifted_dones[b_idx] > 0).nonzero(as_tuple=True)[0]
+                                seg_start = 0
+                                for eos_pos in eos_positions:
+                                    is_correct = float(shifted_rewards[b_idx, eos_pos].item() > 0)
+                                    labels_BT[b_idx, seg_start : eos_pos.item() + 1] = is_correct
+                                    seg_start = eos_pos.item() + 1
+                            # Binary cross-entropy on P(Yes) values
+                            eps = 1e-7
+                            p_yes_clamped = current_values.clamp(eps, 1 - eps)
+                            vf_loss_BT = -(
+                                labels_BT * torch.log(p_yes_clamped) + (1 - labels_BT) * torch.log(1 - p_yes_clamped)
+                            )
+                            vf_clipfrac_BT = torch.zeros_like(current_values)
+                        elif self.args.vf_clip_range > 0:
                             values_clipped = old_values + torch.clamp(
                                 current_values - old_values, -self.args.vf_clip_range, self.args.vf_clip_range
                             )
@@ -2059,6 +2160,40 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 self.local_metrics["loss/value_avg"] = value_loss_stats.mean().item()
                 self.local_metrics["value/clipfrac_avg"] = vf_clipfrac_stats.mean().item()
+
+                if self.args.use_lm_value_model:
+                    # LM value model accuracy: does P(Yes) > 0.5 match the actual label?
+                    with torch.no_grad():
+                        all_preds = []
+                        all_labels = []
+                        for ii in range(num_samples):
+                            rm = data_BT.response_masks[ii][:, 1:].float()
+                            vals = old_values_BT[ii]
+                            shifted_r = data_BT.rewards[ii][:, 1:]
+                            shifted_d = data_BT.dones[ii][:, 1:].clamp(0, 1)
+                            lbls = torch.zeros_like(vals)
+                            for b_idx in range(shifted_r.shape[0]):
+                                eos_pos = (shifted_d[b_idx] > 0).nonzero(as_tuple=True)[0]
+                                seg_start = 0
+                                for ep in eos_pos:
+                                    lbls[b_idx, seg_start : ep.item() + 1] = float(shifted_r[b_idx, ep].item() > 0)
+                                    seg_start = ep.item() + 1
+                            mask_flat = rm.flatten() > 0
+                            all_preds.append(vals.flatten()[mask_flat])
+                            all_labels.append(lbls.flatten()[mask_flat])
+                        all_preds_t = torch.cat(all_preds)
+                        all_labels_t = torch.cat(all_labels)
+                        if len(all_preds_t) > 0:
+                            accuracy = ((all_preds_t > 0.5).float() == all_labels_t).float().mean()
+                            self.local_metrics["value/lm_accuracy"] = accuracy.item()
+                            self.local_metrics["value/lm_p_yes_mean"] = all_preds_t.mean().item()
+                            correct_mask = all_labels_t > 0.5
+                            if correct_mask.any():
+                                self.local_metrics["value/lm_p_yes_correct"] = all_preds_t[correct_mask].mean().item()
+                            if (~correct_mask).any():
+                                self.local_metrics["value/lm_p_yes_incorrect"] = (
+                                    all_preds_t[~correct_mask].mean().item()
+                                )
 
                 # Explained variance: how well the value model predicts returns
                 all_values = torch.cat([old_values_BT[i].flatten() for i in range(num_samples)])
