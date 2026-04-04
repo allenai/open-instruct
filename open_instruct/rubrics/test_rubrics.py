@@ -134,6 +134,28 @@ class TestRunLitellmAsyncHelpers(unittest.TestCase):
         ):
             asyncio.run(run_litellm_async_raw(model_name="test-model", user_prompt="hello"))
 
+    def test_raw_helper_requires_user_prompt_or_messages(self):
+        class FakeLiteLLM:
+            async def acompletion(self, **kwargs):
+                raise AssertionError("Should not reach LiteLLM when inputs are invalid")
+
+        with (
+            patch("open_instruct.rubrics.run_utils._get_litellm", return_value=FakeLiteLLM()),
+            self.assertRaisesRegex(ValueError, "Either messages or user_prompt must be provided"),
+        ):
+            asyncio.run(run_litellm_async_raw(model_name="test-model"))
+
+    def test_raw_helper_rejects_empty_messages(self):
+        class FakeLiteLLM:
+            async def acompletion(self, **kwargs):
+                raise AssertionError("Should not reach LiteLLM when inputs are invalid")
+
+        with (
+            patch("open_instruct.rubrics.run_utils._get_litellm", return_value=FakeLiteLLM()),
+            self.assertRaisesRegex(ValueError, "messages must not be empty"),
+        ):
+            asyncio.run(run_litellm_async_raw(model_name="test-model", messages=[]))
+
     def test_wrapper_preserves_existing_failure_behavior(self):
         with patch("open_instruct.rubrics.run_utils.run_litellm_async_raw", side_effect=RuntimeError("boom")):
             response = asyncio.run(run_litellm_async(model_name="test-model", user_prompt="hello"))
