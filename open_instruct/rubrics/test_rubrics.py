@@ -18,8 +18,11 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
+from open_instruct.rubrics import run_utils
 from open_instruct.rubrics.metrics import (
     compute_rubric_count_metrics,
     compute_rubric_reward_metrics,
@@ -30,7 +33,7 @@ from open_instruct.rubrics.rubric_utils import (
     save_evolving_rubric_cache_safe,
     update_ground_truths_with_evolving_rubrics,
 )
-from open_instruct.rubrics.run_utils import extract_json_from_response
+from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
 
 
 def _check_litellm_available():
@@ -86,6 +89,118 @@ class TestExtractJsonFromResponse(unittest.TestCase):
     def test_multiple_json_objects(self):
         """Test multiple JSON objects (should get last valid one)."""
         self.assertEqual(extract_json_from_response('{"a": 1} more text {"score": 2}'), {"score": 2})
+
+
+def _make_fake_response(content: str):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+
+class TestRunLitellmAsyncHelpers(unittest.TestCase):
+    def setUp(self):
+        run_utils._LITELLM_SEMAPHORES.clear()
+
+    def tearDown(self):
+        run_utils._LITELLM_SEMAPHORES.clear()
+
+    def test_raw_helper_returns_raw_response(self):
+        response = _make_fake_response("raw-content")
+
+        class FakeLiteLLM:
+            def __init__(self):
+                self.calls = []
+
+            async def acompletion(self, **kwargs):
+                self.calls.append(kwargs)
+                return response
+
+        fake_litellm = FakeLiteLLM()
+        with patch("open_instruct.rubrics.run_utils._get_litellm", return_value=fake_litellm):
+            result = asyncio.run(run_litellm_async_raw(model_name="test-model", user_prompt="hello"))
+
+        self.assertIs(result, response)
+        self.assertEqual(fake_litellm.calls[0]["model"], "test-model")
+        self.assertEqual(fake_litellm.calls[0]["messages"], [{"role": "user", "content": "hello"}])
+        self.assertNotIn("num_retries", fake_litellm.calls[0])
+        self.assertNotIn("fallbacks", fake_litellm.calls[0])
+
+    def test_raw_helper_preserves_exceptions(self):
+        class FakeLiteLLM:
+            async def acompletion(self, **kwargs):
+                raise RuntimeError("boom")
+
+        with (
+            patch("open_instruct.rubrics.run_utils._get_litellm", return_value=FakeLiteLLM()),
+            self.assertRaisesRegex(RuntimeError, "boom"),
+        ):
+            asyncio.run(run_litellm_async_raw(model_name="test-model", user_prompt="hello"))
+
+    def test_raw_helper_requires_user_prompt_or_messages(self):
+        class FakeLiteLLM:
+            async def acompletion(self, **kwargs):
+                raise AssertionError("Should not reach LiteLLM when inputs are invalid")
+
+        with (
+            patch("open_instruct.rubrics.run_utils._get_litellm", return_value=FakeLiteLLM()),
+            self.assertRaisesRegex(ValueError, "Either messages or user_prompt must be provided"),
+        ):
+            asyncio.run(run_litellm_async_raw(model_name="test-model"))
+
+    def test_raw_helper_rejects_empty_messages(self):
+        class FakeLiteLLM:
+            async def acompletion(self, **kwargs):
+                raise AssertionError("Should not reach LiteLLM when inputs are invalid")
+
+        with (
+            patch("open_instruct.rubrics.run_utils._get_litellm", return_value=FakeLiteLLM()),
+            self.assertRaisesRegex(ValueError, "messages must not be empty"),
+        ):
+            asyncio.run(run_litellm_async_raw(model_name="test-model", messages=[]))
+
+    def test_wrapper_preserves_existing_failure_behavior(self):
+        with patch("open_instruct.rubrics.run_utils.run_litellm_async_raw", side_effect=RuntimeError("boom")):
+            response = asyncio.run(run_litellm_async(model_name="test-model", user_prompt="hello"))
+
+        self.assertEqual(response, "")
+
+    def test_wrapper_applies_existing_defaults(self):
+        response = _make_fake_response("wrapped-content")
+
+        with patch(
+            "open_instruct.rubrics.run_utils.run_litellm_async_raw", AsyncMock(return_value=response)
+        ) as helper:
+            result = asyncio.run(run_litellm_async(model_name="test-model", user_prompt="hello"))
+
+        self.assertEqual(result, "wrapped-content")
+        self.assertEqual(helper.await_args.kwargs["temperature"], 0)
+        self.assertEqual(helper.await_args.kwargs["max_tokens"], 16384)
+        self.assertEqual(helper.await_args.kwargs["num_retries"], 5)
+        self.assertEqual(helper.await_args.kwargs["fallbacks"], [])
+        self.assertIn("timeout", helper.await_args.kwargs)
+
+    def test_raw_helper_respects_semaphore_limit(self):
+        state = {"active": 0, "max_active": 0}
+        response = _make_fake_response("ok")
+
+        class FakeLiteLLM:
+            async def acompletion(self, **kwargs):
+                state["active"] += 1
+                state["max_active"] = max(state["max_active"], state["active"])
+                await asyncio.sleep(0.01)
+                state["active"] -= 1
+                return response
+
+        async def run_many_calls():
+            tasks = [run_litellm_async_raw(model_name="test-model", user_prompt=f"hello-{i}") for i in range(6)]
+            return await asyncio.gather(*tasks)
+
+        with (
+            patch.dict(os.environ, {"LITELLM_MAX_CONCURRENT_CALLS": "2"}, clear=False),
+            patch("open_instruct.rubrics.run_utils._get_litellm", return_value=FakeLiteLLM()),
+        ):
+            results = asyncio.run(run_many_calls())
+
+        self.assertEqual(len(results), 6)
+        self.assertLessEqual(state["max_active"], 2)
 
 
 @unittest.skipIf(not _check_litellm_available(), "litellm not installed")
