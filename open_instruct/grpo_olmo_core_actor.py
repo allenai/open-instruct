@@ -185,9 +185,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
         self.train_module.model.load_state_dict(sd)
 
-        if self.grpo_config.single_gpu_mode:
-            logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
-            self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
+        logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype}")
+        self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
