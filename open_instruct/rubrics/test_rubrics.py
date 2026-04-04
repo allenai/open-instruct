@@ -782,10 +782,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
 
         metrics = self.mgr.run_step(
-            decoded_responses=self.decoded_responses,
-            ground_truths=self.ground_truths,
-            indices=self.indices,
-            step=0,
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
         )
 
         self.assertIn("evolving_rubrics/valid_rate", metrics)
@@ -824,10 +821,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         mock_generate.side_effect = [None, _FAKE_EVOLVING_RUBRICS]
 
         metrics = self.mgr.run_step(
-            decoded_responses=self.decoded_responses,
-            ground_truths=self.ground_truths,
-            indices=self.indices,
-            step=0,
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
         )
 
         self.assertIn("evolving_rubrics/skipped", metrics)
@@ -839,10 +833,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
 
         self.mgr.run_step(
-            decoded_responses=self.decoded_responses,
-            ground_truths=self.ground_truths,
-            indices=self.indices,
-            step=0,
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
         )
         active_count_1 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
 
@@ -851,10 +842,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
             "negative_rubrics": [],
         }
         self.mgr.run_step(
-            decoded_responses=self.decoded_responses,
-            ground_truths=self.ground_truths,
-            indices=self.indices,
-            step=1,
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=1
         )
         active_count_2 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
 
@@ -912,8 +900,7 @@ class TestBatchIndicesFromModel(unittest.TestCase):
 
 @unittest.skipIf(not _check_litellm_available(), "litellm not installed")
 @unittest.skipIf(
-    not (os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_API_KEY")),
-    "No API credentials available",
+    not (os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_API_KEY")), "No API credentials available"
 )
 class TestRubricManagerWithAPI(unittest.TestCase):
     """Full E2E test with real LLM calls (requires API)."""
@@ -936,10 +923,7 @@ class TestRubricManagerWithAPI(unittest.TestCase):
         mgr = RubricManager(_mock_streaming_config(num_samples=num_samples), gts_for_buffer)
 
         metrics = mgr.run_step(
-            decoded_responses=decoded_responses,
-            ground_truths=ground_truths,
-            indices=indices,
-            step=0,
+            decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0
         )
 
         self.assertIn("evolving_rubrics/valid_rate", metrics)
