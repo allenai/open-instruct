@@ -165,7 +165,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.train_module = GRPOTrainModule(
             model=self.model,
             optim=optim_config,
-            sample_microbatch_size=self.grpo_config.per_device_train_batch_size,
+            rank_microbatch_size=self.grpo_config.per_device_train_batch_size * self.max_sequence_length,
             max_sequence_length=self.max_sequence_length,
             grpo_config=self.grpo_config,
             temperature=self.streaming_config.temperature,
