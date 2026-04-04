@@ -58,6 +58,13 @@ beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_HF_TOKEN" xxxx
 ```
 
 
+0.5. Relaunch an existing job with the same spec:
+
+```bash
+./scripts/relaunch_beaker_job.sh <job-id>
+```
+
+
 1. `submit_eval_jobs.py`: Submit eval jobs for tasks in `scripts/evals/`. For example, llama 3 tulu 2 and upload to the tulu-3 eval database.
 ```bash
 # submit evals on a model in beaker dataset
