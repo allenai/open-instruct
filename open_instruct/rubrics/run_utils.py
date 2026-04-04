@@ -124,7 +124,12 @@ def _build_messages(
 ) -> list[dict[str, str]]:
     """Build chat messages for LiteLLM requests."""
     if messages is not None:
+        if not messages:
+            raise ValueError("messages must not be empty.")
         return messages
+
+    if user_prompt is None:
+        raise ValueError("Either messages or user_prompt must be provided.")
 
     return (
         [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
