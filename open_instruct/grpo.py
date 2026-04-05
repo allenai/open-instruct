@@ -63,7 +63,7 @@ def wait_for_gpus(expected_gpus: int) -> bool:
 
 
 def save_and_cleanup(
-    args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
+    args: grpo_utils.GRPOExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
 ) -> None:
     """Save the final model, optionally push to Hub, and launch eval jobs."""
     final_output_dir = args.output_dir
@@ -102,7 +102,7 @@ def save_and_cleanup(
 
 
 def main(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -231,6 +231,7 @@ def main(
     pg = placement_group(bundles, strategy="SPREAD")
     utils.ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
+    assert model_config.attn_implementation is not None
     policy_group = OLMoCoreModelGroup(
         pg=pg,
         num_gpus_per_node=args.num_learners_per_node,
@@ -241,6 +242,7 @@ def main(
         vllm_config=vllm_config,
         data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
+        attn_implementation=model_config.attn_implementation,
     )
     logger.info("======== Policy group created =========")
 
@@ -299,7 +301,7 @@ def main(
             m.setup_callbacks.remote(
                 actor_manager=actor_manager,
                 with_tracking=args.with_tracking,
-                wandb_project=args.wandb_project_name,
+                wandb_project=args.wandb_project,
                 wandb_entity=args.wandb_entity,
                 run_name=args.run_name or args.exp_name,
                 json_config=json_config,
@@ -321,13 +323,16 @@ def main(
 if __name__ == "__main__":
     parser = utils.ArgumentParserPlus(
         [  # ty: ignore[invalid-argument-type]
-            grpo_utils.ExperimentConfig,
+            grpo_utils.GRPOExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
             EnvsConfig,
         ]
+    )
+    parser.set_defaults(
+        exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1, fused_optimizer=False
     )
     args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
 
