@@ -65,13 +65,13 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --clip_higher "${CLIP_HIGH}" \
     --seed 1 \
-    --local_eval_every 25 \
-    --save_freq 50 \
-    --checkpoint_state_freq 50 \
+    --local_eval_every 10 \
+    --save_freq 10 \
+    --checkpoint_state_freq 10 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub false \
