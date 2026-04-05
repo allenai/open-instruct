@@ -944,6 +944,7 @@ def _normalize_env_config_column(row: dict[str, Any]) -> None:
     """Normalize row-level env_config to canonical dict form.
 
     We turn dict-only or list-only configs into the same form.
+    Top-level scalar fields like ``harbor_task_path`` are preserved.
     """
     env_config = row.get(ENV_CONFIG_KEY)
     if env_config is None:
@@ -956,6 +957,11 @@ def _normalize_env_config_column(row: dict[str, Any]) -> None:
     if not isinstance(env_config, dict):
         raise TypeError(f"{ENV_CONFIG_KEY} must be a dict, list, or None, got {type(env_config).__name__}")
 
+    # Preserve top-level scalar fields (e.g. harbor_task_path, max_steps)
+    # that sit alongside the env_configs structure.
+    _TOP_LEVEL_KEYS = {"max_steps", "harbor_task_path"}
+    top_level = {k: v for k, v in env_config.items() if k in _TOP_LEVEL_KEYS and v is not None}
+
     if "env_configs" in env_config:
         normalized = dict(env_config)
         normalized["env_configs"] = [dict(cfg) for cfg in (env_config.get("env_configs") or [])]
@@ -963,15 +969,12 @@ def _normalize_env_config_column(row: dict[str, Any]) -> None:
         return
 
     if "env_name" in env_config:
-        single_env = dict(env_config)
-        max_steps = single_env.pop("max_steps", None)
-        normalized: dict[str, Any] = {"env_configs": [single_env]}
-        if max_steps is not None:
-            normalized["max_steps"] = max_steps
+        single_env = {k: v for k, v in env_config.items() if k not in _TOP_LEVEL_KEYS}
+        normalized: dict[str, Any] = {"env_configs": [single_env], **top_level}
         row[ENV_CONFIG_KEY] = normalized
         return
 
-    row[ENV_CONFIG_KEY] = {"env_configs": []}
+    row[ENV_CONFIG_KEY] = {"env_configs": [], **top_level}
 
 
 def _normalize_env_config_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -1554,6 +1557,68 @@ def rlvr_max_length_filter_v2(
     return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
 
 
+def harbor_tokenize_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    harbor_task_path_key: str = "harbor_task_path",
+    system_prompt_override: str | None = None,
+    **_kwargs: Any,
+):
+    """Transform for Harbor-based GRPO training.
+
+    Supports two dataset schemas:
+
+    **Our format** — row has ``harbor_task_path`` (or whatever
+    ``harbor_task_path_key`` is set to) and optionally ``messages``.
+
+    **OpenThoughts-TBLite format** — row has ``task_name`` and
+    ``instruction``.  ``task_name`` is used as the Harbor task path and
+    ``instruction`` is wrapped into a single-turn user message.
+
+    The prompt is tokenized for the pipeline interface (Harbor's agent reads
+    ``instruction.md`` directly, but the pipeline still needs prompt tokens).
+    Rewards come from Harbor's verifier at runtime, so ``ground_truths``
+    are set to a sentinel value.
+    """
+    task_path = row.get(harbor_task_path_key) or row.get("task_name")
+    if task_path is None:
+        raise ValueError(f"Row missing '{harbor_task_path_key}' and 'task_name' — one is required for Harbor training")
+
+    prompt = row.get(sft_messages_key)
+    if prompt is None:
+        instruction = row.get("instruction", "Solve the task.")
+        prompt = [{"role": "user", "content": instruction}]
+    if isinstance(prompt, list) and len(prompt) > 1 and prompt[-1]["role"] == "assistant":
+        prompt = prompt[:-1]
+
+    if system_prompt_override:
+        if prompt and prompt[0]["role"] == "system":
+            prompt = prompt[1:]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
+
+    ground_truths_val = row.get(ground_truths_key, ["harbor"])
+    verifier_source_val = row.get(verifier_source_key, "harbor")
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val] if not isinstance(ground_truths_val, list) else ground_truths_val
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
+
+    existing_env_config = row.get(ENV_CONFIG_KEY) or {}
+    if isinstance(existing_env_config, dict):
+        existing_env_config["harbor_task_path"] = task_path
+    else:
+        existing_env_config = {"harbor_task_path": task_path}
+    row[ENV_CONFIG_KEY] = existing_env_config
+    return row
+
+
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -1566,6 +1631,7 @@ TRANSFORM_FNS = {
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
+    "harbor_tokenize_v1": (harbor_tokenize_v1, "map"),
 }
 
 

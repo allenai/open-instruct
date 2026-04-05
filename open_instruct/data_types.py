@@ -58,6 +58,8 @@ class GenerationResult:
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
+    group_id: str | None = None
+    """Prompt identity for advantage grouping, independent of positional layout."""
 
 
 @dataclass
@@ -76,6 +78,8 @@ class EnvConfig:
     max_steps: int = 100
     env_configs: dict[str, EnvConfigEntry] = field(default_factory=dict)
     """Mapping from env_name to its configuration entry."""
+    harbor_task_path: str | None = None
+    """Absolute path to a Harbor task directory (containing task.toml, instruction.md, etc.)."""
 
 
 @dataclass

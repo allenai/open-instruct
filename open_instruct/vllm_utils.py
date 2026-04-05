@@ -490,12 +490,19 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "env_config": request.env_config,
     }
 
+    use_harbor = getattr(actor, "use_harbor", False)
+    request_fn = process_request
+    if use_harbor:
+        from open_instruct.harbor_utils import process_request_harbor  # noqa: PLC0415
+
+        request_fn = process_request_harbor
+
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request(actor, sub_request_id, sub_sampling_params), actor.loop
+            request_fn(actor, sub_request_id, sub_sampling_params), actor.loop
         )
 
 
@@ -548,8 +555,14 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
-    dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+    harbor_rewards = [rs.get("harbor_reward") for rs in result.request_info.rollout_states]
+    if all(r is not None for r in harbor_rewards):
+        result.reward_scores = harbor_rewards
+        result.reward_metrics = {}
+    else:
+        dataset = actor.eval_dataset if is_eval else actor.train_dataset
+        result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
 
@@ -600,11 +613,15 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        use_harbor: bool = False,
+        harbor_config: dict | None = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
         self._tool_definitions = tool_definitions
         self._tool_stop_sequences = tool_stop_sequences
+        self.use_harbor = use_harbor
+        self._harbor_config = harbor_config or {}
         self._init_config(
             max_steps,
             per_turn_max_tokens,
@@ -1258,6 +1275,8 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    use_harbor: bool = False,
+    harbor_config: dict | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1344,6 +1363,8 @@ def create_vllm_engines(
                 eval_dataset=eval_dataset,
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
+                use_harbor=use_harbor,
+                harbor_config=harbor_config,
             )
         )
 

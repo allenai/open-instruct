@@ -85,6 +85,16 @@ class GRPOExperimentConfig(
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
+    # Harbor integration
+    use_harbor: bool = False
+    """Whether to use Harbor for agent-based rollouts instead of the built-in process_request loop."""
+    harbor_agent_name: str = "terminus-2"
+    """Harbor agent to use for rollouts (extensible to other Harbor agents)."""
+    harbor_agent_kwargs: str | None = None
+    """JSON string of extra kwargs passed through to the Harbor agent config (e.g. '{"timeout": 300}')."""
+    harbor_environment: str = "docker"
+    """Harbor environment provider: 'docker' or 'daytona'."""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""

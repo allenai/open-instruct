@@ -48,6 +48,7 @@ from open_instruct.data_types import EnvConfig, EnvConfigEntry
 # isort: on
 import asyncio
 import dataclasses
+import json
 import logging
 import math
 import random
@@ -1281,6 +1282,14 @@ def create_model_and_optimizer(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         vllm_attention_backend=vllm_config.vllm_attention_backend,
+        use_harbor=args.use_harbor,
+        harbor_config={
+            "agent_name": args.harbor_agent_name,
+            "agent_kwargs": json.loads(args.harbor_agent_kwargs) if args.harbor_agent_kwargs else {},
+            "environment": args.harbor_environment,
+        }
+        if args.use_harbor
+        else None,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

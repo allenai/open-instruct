@@ -674,7 +674,8 @@ def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, A
         merged_kwargs = {**(base.kwargs if base else {}), **extra}
         merged[env_name] = EnvConfigEntry(env_name=env_name, is_text_env=is_text_env, kwargs=merged_kwargs)
 
-    return EnvConfig(max_steps=max_steps, env_configs=merged)
+    harbor_task_path = sample_env_config.get("harbor_task_path", base_env_config.harbor_task_path)
+    return EnvConfig(max_steps=max_steps, env_configs=merged, harbor_task_path=harbor_task_path)
 
 
 def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
