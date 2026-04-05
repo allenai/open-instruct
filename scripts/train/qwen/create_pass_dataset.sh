@@ -10,7 +10,7 @@ SOURCE_SPLIT="${SOURCE_SPLIT:-test}"
 NUM_SAMPLES="${NUM_SAMPLES:-1024}"
 MAX_TOKENS="${MAX_TOKENS:-4096}"
 TOP_P="${TOP_P:-1.0}"
-NUM_ENGINES="${NUM_ENGINES:-8}"
+NUM_GPUS="${NUM_GPUS:-8}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 PASS_DATASET_REPO="${PASS_DATASET_REPO:-mnoukhov/gsm8k-platinum-qwen2.5-0.5b-base-1024samples}"
 BUCKET_DATASET_REPO="${BUCKET_DATASET_REPO:-mnoukhov/gsm8k-platinum-qwen2.5-0.5b-base-1024samples-buckets}"
@@ -27,7 +27,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --gpus 8 \
+    --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
     -- \
 uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
@@ -38,7 +38,7 @@ uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
   --num-samples ${NUM_SAMPLES} \
   --max-tokens ${MAX_TOKENS} \
   --top-p ${TOP_P} \
-  --num_engines ${NUM_ENGINES} \
+  --num_engines ${NUM_GPUS} \
   --tensor-parallel-size ${TENSOR_PARALLEL_SIZE} \
   --push-to-hub ${PASS_DATASET_REPO} \
   --save-local-dir /weka/oe-adapt-default/allennlp/deletable_rollouts/michaeln/ \
