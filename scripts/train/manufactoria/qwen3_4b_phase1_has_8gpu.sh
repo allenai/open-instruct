@@ -10,9 +10,9 @@ git_branch=$(git rev-parse --abbrev-ref HEAD)
 sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
 IMAGE_NAME=open-instruct-integration-test-${sanitized_branch}
 
-BEAKER_IMAGE="${1:-${BEAKER_USER}/${IMAGE_NAME}}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/${IMAGE_NAME}}"
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_32k}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_manu}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 CLIP_HIGH=0.28
@@ -38,7 +38,6 @@ uv run python mason.py \
     --num_nodes 1 \
     --gpus 8 \
     --max_retries 0 \
-    --timeout 8h \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
@@ -67,8 +66,8 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 2 \
+    --vllm_num_engines 6 \
     --clip_higher "${CLIP_HIGH}" \
     --seed 1 \
     --local_eval_every 25 \
