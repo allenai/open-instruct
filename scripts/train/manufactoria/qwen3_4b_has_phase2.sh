@@ -12,16 +12,16 @@ IMAGE_NAME=open-instruct-integration-test-${sanitized_branch}
 
 BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/${IMAGE_NAME}}"
 
-EXP_NAME="${EXP_NAME:-"qwen3_4b_instruct_manufactoria_${SCORE_MODE}"}"
+EXP_NAME="${EXP_NAME:-Qwen3_4B_Instruct_manufactoria_has_phase2_${SCORE_MODE}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-CLIP_HIGH=0.28
-LR=5e-7
-SCORE_MODE=pass_rate
-TRAIN_LIST="manufactoria/has_train 1.0"
-EVAL_LIST="manufactoria/has_test 50"
-DESCRIPTION="manufactoria_has_phase1_pass_rate_8gpu"
-BASE_MODEL="Qwen/Qwen3-4B-Instruct-2507"
+CLIP_HIGH="${CLIP_HIGH:-0.28}"
+LR="${LR:-5e-7}"
+SCORE_MODE="${SCORE_MODE:-all_pass}"
+TRAIN_LIST="${TRAIN_LIST:-manufactoria/has_train 1.0}"
+EVAL_LIST="${EVAL_LIST:-manufactoria/has_test 50}"
+DESCRIPTION="${DESCRIPTION:-manufactoria_has_phase2_all_pass_16gpu}"
+BASE_MODEL="${BASE_MODEL:-/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/Qwen3_4B_Instruct_manufactoria_has_phase1_pass_rate__1__1775248654_checkpoints/step_200}"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -34,13 +34,16 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --description "${DESCRIPTION}" \
     --image "${BEAKER_IMAGE}" \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --gpus 8 \
     --max_retries 0 \
+    --resumable \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
     python open_instruct/grpo_fast.py \
+    --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --beta 0.0 \
     --load_ref_policy false \
@@ -50,6 +53,7 @@ uv run python mason.py \
     --num_epochs 1 \
     --learning_rate "${LR}" \
     --lr_scheduler_type constant \
+    --kl_estimator 3 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list ${TRAIN_LIST} \
     --dataset_mixer_list_splits train \
@@ -63,10 +67,10 @@ uv run python mason.py \
     --manufactoria_api_url \$MANUFACTORIA_API_URL/test_solution \
     --manufactoria_scoring_mode "${SCORE_MODE}" \
     --temperature 1.0 \
-    --total_episodes 768000 \
+    --total_episodes 1000000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --clip_higher "${CLIP_HIGH}" \
     --seed 1 \
     --local_eval_every 25 \
