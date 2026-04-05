@@ -2001,6 +2001,40 @@ def maybe_evaluate(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
             )
         dataset_sequence_length_metrics: dict[str, Any] = {}
+        dataset_filtered_prompt_metrics: dict[str, int] = {}
+        if eval_batch_stats is not None:
+            dataset_filtered_prompts = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            dataset_filtered_prompts_zero = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            dataset_filtered_prompts_solved = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            dataset_filtered_prompts_nonzero = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets:
+                dataset_filtered_prompts.setdefault(dataset_name, 0)
+                dataset_filtered_prompts[dataset_name] += 1
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets_zero:
+                dataset_filtered_prompts_zero.setdefault(dataset_name, 0)
+                dataset_filtered_prompts_zero[dataset_name] += 1
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets_solved:
+                dataset_filtered_prompts_solved.setdefault(dataset_name, 0)
+                dataset_filtered_prompts_solved[dataset_name] += 1
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets_nonzero:
+                dataset_filtered_prompts_nonzero.setdefault(dataset_name, 0)
+                dataset_filtered_prompts_nonzero[dataset_name] += 1
+            for dataset_name, count in dataset_filtered_prompts.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts/{dataset_name}"] = count
+            for dataset_name, count in dataset_filtered_prompts_zero.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_zero/{dataset_name}"] = count
+            for dataset_name, count in dataset_filtered_prompts_solved.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_solved/{dataset_name}"] = count
+            for dataset_name, count in dataset_filtered_prompts_nonzero.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_nonzero/{dataset_name}"] = count
         if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) > 0:
             num_eval_prompts = len(eval_batch_stats.prompt_datasets)
             if eval_sequence_lengths.size % num_eval_prompts == 0:
@@ -2062,6 +2096,7 @@ def maybe_evaluate(
         for metric_name, pass_rates in dataset_pass_at_by_k.items():
             for k, pass_rate in pass_rates.items():
                 eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
+        eval_metrics.update(dataset_filtered_prompt_metrics)
         eval_metrics.update(dataset_sequence_length_metrics)
         eval_metrics["eval/model_step_mean"] = float(model_step_mean)
         eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
