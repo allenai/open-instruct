@@ -23,9 +23,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${SCORE_MODE}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 uv run python mason.py \
-    --cluster ai2/jupiter \
-    --cluster ai2/saturn \
-    --cluster ai2/ceres \
+    --cluster ai2/jupiter ai2/saturn ai2/ceres \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --preemptible \
