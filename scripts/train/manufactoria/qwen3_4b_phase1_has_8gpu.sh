@@ -12,16 +12,15 @@ IMAGE_NAME=open-instruct-integration-test-${sanitized_branch}
 
 BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/${IMAGE_NAME}}"
 
-EXP_NAME="${EXP_NAME:-"qwen3_4b_instruct_manufactoria_${SCORE_MODE}"}"
-RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
-
 CLIP_HIGH=0.28
 LR=5e-7
 SCORE_MODE=pass_rate
 TRAIN_LIST="manufactoria/has_train 1.0"
 EVAL_LIST="manufactoria/has_test 50"
-DESCRIPTION="manufactoria_has_phase1_pass_rate_8gpu"
 BASE_MODEL="Qwen/Qwen3-4B-Instruct-2507"
+
+EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${SCORE_MODE}}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -32,7 +31,7 @@ uv run python mason.py \
     --preemptible \
     --pure_docker_mode \
     --budget ai2/oe-adapt \
-    --description "${DESCRIPTION}" \
+    --description "${RUN_NAME}" \
     --image "${BEAKER_IMAGE}" \
     --num_nodes 1 \
     --gpus 8 \
@@ -41,6 +40,7 @@ uv run python mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
     python open_instruct/grpo_fast.py \
+    --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --beta 0.0 \
     --load_ref_policy false \
@@ -74,4 +74,5 @@ uv run python mason.py \
     --checkpoint_state_freq 50 \
     --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub false "$@"
+    --push_to_hub false \
+    "$@"
