@@ -34,6 +34,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --gpus 8 \
     --max_retries 0 \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
