@@ -11,7 +11,7 @@ from typing import Any
 import ray
 
 from open_instruct import logger_utils
-from open_instruct.rubrics.metrics import compute_rubric_count_metrics, filter_rubric_buffer
+from open_instruct.rubrics.metrics import compute_rubric_count_metrics
 from open_instruct.rubrics.rubric_utils import (
     _generate_instance_wise_evolving_rubrics,
     initialize_rubric_buffer,
@@ -43,12 +43,7 @@ class RubricManager:
         self._vllm_engines = engines
 
     def run_step(
-        self,
-        *,
-        decoded_responses: list[str],
-        ground_truths: list,
-        indices: list[int] | None,
-        step: int,
+        self, *, decoded_responses: list[str], ground_truths: list, indices: list[int] | None, step: int
     ) -> dict[str, Any]:
         """Run one evolving-rubric cycle and return metrics."""
         metrics: dict[str, Any] = {}
@@ -88,8 +83,7 @@ def _run_evolving_rubric_step(
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     metrics: dict[str, Any] = {}
 
-    loop = asyncio.new_event_loop()
-    all_evolving_rubrics, num_subsampled = loop.run_until_complete(
+    all_evolving_rubrics, num_subsampled = asyncio.run(
         _generate_instance_wise_evolving_rubrics(
             responses=decoded_responses,
             ground_truths=ground_truths,
@@ -97,7 +91,6 @@ def _run_evolving_rubric_step(
             rubric_buffer=rubric_buffer,
         )
     )
-    loop.close()
 
     (
         updated_ground_truths,
@@ -115,7 +108,7 @@ def _run_evolving_rubric_step(
     )
 
     if rubric_buffer is not None:
-        filter_rubric_buffer(rubric_buffer, {}, max_active)
+        _cap_active_rubrics(rubric_buffer, max_active)
 
     _push_ground_truth_overrides(updated_ground_truths, indices, vllm_engines)
 
@@ -146,11 +139,24 @@ def _run_evolving_rubric_step(
     return metrics, rubric_buffer
 
 
-def _push_ground_truth_overrides(
-    updated_ground_truths: list,
-    indices: list[int] | None,
-    vllm_engines: list,
-) -> None:
+def _cap_active_rubrics(rubric_buffer: dict[str, Any], max_active: int) -> None:
+    """Enforce max_active_rubrics per query using FIFO eviction.
+
+    When per-rubric variance stats are not yet available (early training),
+    ``filter_rubric_buffer`` from metrics.py is a no-op.  This function
+    provides a simple fallback: keep the *most recently added* rubrics and
+    move the oldest excess ones to inactive.
+    """
+    for query, buf in rubric_buffer.items():
+        active = buf.get("active_rubrics", [])
+        if len(active) > max_active:
+            evicted = active[:-max_active]
+            buf["active_rubrics"] = active[-max_active:]
+            buf.setdefault("inactive_rubrics", []).extend(evicted)
+            logger.debug(f"Capped {len(evicted)} rubrics for query '{query[:60]}...'")
+
+
+def _push_ground_truth_overrides(updated_ground_truths: list, indices: list[int] | None, vllm_engines: list) -> None:
     """Send updated ground truths to vLLM engines for future reward computation."""
     if not vllm_engines or not indices:
         return

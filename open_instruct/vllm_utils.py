@@ -562,7 +562,10 @@ async def compute_rewards(
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
-    ground_truth = actor._ground_truth_overrides.get(result.index, example[GROUND_TRUTHS_KEY])
+    if is_eval:
+        ground_truth = example[GROUND_TRUTHS_KEY]
+    else:
+        ground_truth = actor._ground_truth_overrides.get(result.index, example[GROUND_TRUTHS_KEY])
     k_ground_truths = [ground_truth] * k
     k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
     k_raw_queries = [example[RAW_PROMPT_KEY]] * k

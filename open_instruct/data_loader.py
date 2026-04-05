@@ -1168,8 +1168,7 @@ class DataPreparationActor:
 
         self.rubric_manager: RubricManager | None = None
         if self.config.apply_evolving_rubric_reward:
-            all_ground_truths = [dataset[i][GROUND_TRUTHS_KEY] for i in range(len(dataset))]
-            self.rubric_manager = RubricManager(self.config, all_ground_truths)
+            self.rubric_manager = RubricManager(self.config, dataset[GROUND_TRUTHS_KEY])
 
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
@@ -1263,12 +1262,14 @@ class DataPreparationActor:
             assert batch_stats is not None
 
             if self.rubric_manager and batch.decoded_responses:
-                reward_metrics.update(self.rubric_manager.run_step(
-                    decoded_responses=batch.decoded_responses,
-                    ground_truths=batch.ground_truths,
-                    indices=batch.indices,
-                    step=step,
-                ))
+                reward_metrics.update(
+                    self.rubric_manager.run_step(
+                        decoded_responses=batch.decoded_responses,
+                        ground_truths=batch.ground_truths,
+                        indices=batch.indices,
+                        step=step,
+                    )
+                )
 
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
