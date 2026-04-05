@@ -32,7 +32,7 @@ import contextlib
 import os
 import pathlib
 from concurrent import futures
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -79,7 +79,7 @@ from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
@@ -100,7 +100,6 @@ from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, 
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
-    estimate_kl,
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
@@ -109,7 +108,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
-    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
@@ -167,7 +165,7 @@ class PolicyTrainerRayProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
-        args: grpo_utils.ExperimentConfig,
+        args: grpo_utils.GRPOExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -193,7 +191,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def from_pretrained(
         self,
-        args: grpo_utils.ExperimentConfig,
+        args: grpo_utils.GRPOExperimentConfig,
         model_config: ModelConfig,
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
@@ -262,7 +260,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # note this returns None if sequence_parallel_size == 1
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_config.attn_implementation,
+            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
@@ -271,7 +269,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation=model_config.attn_implementation,
+            attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
@@ -283,13 +281,11 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = self.policy.parameters()
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
-        warm_up_steps = args.warm_up_steps
-        if args.warmup_ratio > 0.0:
-            warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
+        warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=warm_up_steps,
+            num_warmup_steps=warmup_steps,
             num_training_steps=num_scheduler_steps,
         )
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -496,34 +492,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
-    def _compute_loss_metrics(
-        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
-    ) -> dict[str, float]:
-        """Compute weighted average metrics from per-batch loss statistics."""
-        token_counts = loss_stats_B["token_count"]
-        total_tokens = token_counts.sum()
-        # Zero weights when no tokens - all weighted sums become 0
-        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
-
-        if self.args.load_ref_policy:
-            for j in range(4):
-                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
-            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
-        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
-        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
-        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
-        self.local_metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum()
-        self.local_metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum()
-        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
-        weighted_mean_ratio = self.local_metrics["val/ratio"]
-        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
-        self.local_metrics["val/tv_divergence"] = (loss_stats_B["tv_divergence"] * weights).sum()
-        self.local_metrics["val/token_tv_divergence"] = (loss_stats_B["token_tv_divergence"] * weights).sum()
-        if self.args.record_entropy:
-            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
-
+    def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor) -> None:
+        metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
+        for k, v in metrics.items():
+            self.local_metrics[k] = v
+        self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
-        self.local_metrics["_token_count"] = total_valid_tokens
 
     def _get_grad_norm(self) -> float | None:
         """Read the cached DeepSpeed global grad norm after an optimizer step."""
@@ -561,8 +535,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
-        for f in dataclasses.fields(data_BT):
-            to_device_inplace(getattr(data_BT, f.name), self.device)
+        data_BT = data_BT.to(self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
@@ -594,44 +567,25 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
-                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
-                        vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
-                        )
-                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
-
                         if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = vllm_old_logprob_BT
+                            old_logprobs_BT[i] = grpo_utils.mask_logprobs(
+                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
+                            )
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
                         torch.cuda.empty_cache()
 
         local_step = 0
-        grad_norms: list[float] = []
         num_samples = len(data_BT.query_responses)
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
         # This only needs to be done once since response_masks don't change across epochs
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
-        total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            loss_stats_B: dict[str, torch.Tensor] = {
-                "kl": torch.zeros(4, num_samples, device=device),
-                "kl_loss": torch.zeros(num_samples, device=device),
-                "tis_ratio": torch.zeros(num_samples, device=device),
-                "tis_clipfrac": torch.zeros(num_samples, device=device),
-                "pg_clipfrac": torch.zeros(num_samples, device=device),
-                "pg_loss": torch.zeros(num_samples, device=device),
-                "loss": torch.zeros(num_samples, device=device),
-                "ratio": torch.zeros(num_samples, device=device),
-                "entropy": torch.zeros(num_samples, device=device),
-                "token_count": token_counts_per_sample,
-                "tv_divergence": torch.zeros(num_samples, device=device),
-                "token_tv_divergence": torch.zeros(num_samples, device=device),
-            }
+            loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -657,10 +611,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
-                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
-                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
+                    local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
+                    vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
@@ -684,73 +636,25 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     new_logprobs_BT = local_logprobs_BT
 
-                    # Cache the old logprobs
-                    if num_mini_batches > 1:
-                        old_logprob_BT = old_logprobs_BT[i]
-                    else:
-                        with torch.no_grad():
-                            if epoch_idx == 0:
-                                if self.args.use_vllm_logprobs:
-                                    old_logprobs_BT[i] = vllm_logprobs_BT
-                                else:
-                                    old_logprobs_BT[i] = local_logprobs_BT.detach()
-                            old_logprob_BT = old_logprobs_BT[i]
-
-                    old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
-                    assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
-                        f"Old logprobs mask should match response mask. "
-                        f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                        f"response_mask sum={response_mask_BT.sum()}"
+                    old_logprob_BT = grpo_utils.resolve_old_logprob(
+                        old_logprobs_BT,
+                        i,
+                        epoch_idx,
+                        num_mini_batches,
+                        self.args.use_vllm_logprobs,
+                        vllm_logprobs_BT,
+                        local_logprobs_BT,
                     )
 
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-
-                    # Calculate TV divergence
-                    token_tv_div_BT = torch.abs(ratio_BT.detach() - 1)
-                    token_tv_divergence_BT = 0.5 * masked_mean(token_tv_div_BT, response_mask_BT)
-                    sequence_logprob_diff_sum_BT = (logprobs_diff_BT.detach() * response_mask_BT).sum(dim=1)
-                    sequence_tv_divergence_BT = torch.abs(torch.exp(sequence_logprob_diff_sum_BT) - 1)
-                    tv_divergence_BT = 0.5 * torch.mean(sequence_tv_divergence_BT)
-
-                    # Apply truncated importance sampling if enabled
-                    tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
-                    clipped_tis_imp_ratio_BT = tis_imp_ratio_BT
-                    if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
-                        old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
-                        vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
-
-                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
-                            f"Old logprobs mask should match response mask. "
-                            f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_BT.sum()}"
-                        )
-                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
-                            f"vLLM logprobs mask should match response mask. "
-                            f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_BT.sum()}"
-                        )
-
-                        valid_mask_BT = response_mask_BT
-                        # Initialize importance ratio to 1.0 (no effect) for all positions
-                        if valid_mask_BT.any():
-                            # Calculate logprob difference only for valid positions
-                            logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
-                            # Clamp to prevent numerical overflow in exp
-                            logprob_diff_is_BT = torch.where(
-                                valid_mask_BT,
-                                logprob_diff_is_BT.clamp(-10.0, 10.0),
-                                torch.zeros_like(logprob_diff_is_BT),
-                            )
-                            # Compute importance ratio only for valid positions
-                            tis_imp_ratio_BT = torch.where(
-                                valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
-                            )
-                            # Apply cap
-                            clipped_tis_imp_ratio_BT = torch.clamp(
-                                tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
-                            )
+                    tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
+                        old_logprob_BT,
+                        vllm_logprobs_BT,
+                        response_mask_BT,
+                        self.args.truncated_importance_sampling_ratio_cap,
+                    )
 
                     pg_loss_max_BT, clip_mask_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -758,8 +662,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=clipped_tis_imp_ratio_BT,
-                        tv_divergence=tv_divergence_BT,
+                        tis_weights=tis_clamped_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -780,29 +683,25 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                         grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
-                    with torch.no_grad():
-                        if self.args.load_ref_policy:
-                            # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprobs_BT[i]).clamp(-40.0, 40.0)
-                            kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
-                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
-                            loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
-                        loss_stats_B["tis_ratio"][i] = masked_mean(clipped_tis_imp_ratio_BT.float(), response_mask_BT)
-                        loss_stats_B["tis_clipfrac"][i] = masked_mean(
-                            (clipped_tis_imp_ratio_BT < tis_imp_ratio_BT).float(), response_mask_BT
-                        )
-                        loss_stats_B["pg_clipfrac"][i] = masked_mean(clip_mask_BT.float(), response_mask_BT)
-                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
-                        loss_stats_B["loss"][i] = loss
-                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
-                        loss_stats_B["tv_divergence"][i] = tv_divergence_BT
-                        loss_stats_B["token_tv_divergence"][i] = token_tv_divergence_BT
-                        if self.args.record_entropy:
-                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
+                    grpo_utils.populate_sample_loss_stats(
+                        loss_stats_B,
+                        i,
+                        pg_loss_max_BT,
+                        clip_mask_BT,
+                        ratio_BT,
+                        loss,
+                        response_mask_BT,
+                        new_logprobs_BT,
+                        ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                        entropy_BT,
+                        self.args,
+                        tis_clamped=tis_clamped_BT,
+                        tis_unclamped=tis_unclamped_BT,
+                    )
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
-                self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
@@ -969,7 +868,7 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
-        args: grpo_utils.ExperimentConfig,
+        args: grpo_utils.GRPOExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -1074,40 +973,16 @@ def validate_configs(
 
 
 def setup_runtime_variables(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     tools_config: EnvsConfig,
-) -> grpo_utils.ExperimentConfig:
+) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
-    if args.eval_only and (
-        streaming_config.dataset_mixer_eval_list is None or len(streaming_config.dataset_mixer_eval_list) == 0
-    ):
-        raise ValueError("`--eval_only` requires `--dataset_mixer_eval_list` to be set.")
-    if args.eval_only:
-        if args.save_freq != -1:
-            logger.info("`--eval_only` detected; disabling checkpoint saves by setting `save_freq=-1`.")
-            args.save_freq = -1
-        if args.checkpoint_state_freq != -1:
-            logger.info(
-                "`--eval_only` detected; disabling checkpoint-state saves by setting `checkpoint_state_freq=-1`."
-            )
-            args.checkpoint_state_freq = -1
-        if args.push_to_hub:
-            logger.info("`--eval_only` detected; disabling `push_to_hub`.")
-            args.push_to_hub = False
-        if args.eval_response_length is not None and streaming_config.response_length != args.eval_response_length:
-            logger.info(
-                "`--eval_only` detected; aligning `response_length` with `eval_response_length=%s`.",
-                args.eval_response_length,
-            )
-            streaming_config.response_length = args.eval_response_length
-
-    if args.run_name is None:
-        args.run_name = f"{args.exp_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():
@@ -1136,7 +1011,7 @@ def setup_runtime_variables(
 
 
 def setup_experiment_tracking(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1152,7 +1027,7 @@ def setup_experiment_tracking(
     wandb_url = None
     if args.with_tracking:
         wandb.init(
-            project=args.wandb_project_name,
+            project=args.wandb_project,
             entity=args.wandb_entity,
             config=all_configs,
             group=args.wandb_group_name,
@@ -1180,7 +1055,7 @@ def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | 
 
 
 def setup_datasets(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1210,7 +1085,6 @@ def setup_datasets(
     transform_fn_args = [
         {
             "system_prompt_override": system_prompt_override,
-            "user_prompt_transform": streaming_config.user_prompt_transform,
             "tool_definitions": tool_definitions,
             "pass_tools_to_chat_template": pass_tools_to_chat_template,
         },
@@ -1232,7 +1106,7 @@ def setup_datasets(
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
 
-    if streaming_config.dataset_mixer_eval_list is not None and len(streaming_config.dataset_mixer_eval_list) > 0:
+    if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=streaming_config.dataset_mixer_eval_list,
             dataset_mixer_list_splits=streaming_config.dataset_mixer_eval_list_splits,
@@ -1248,10 +1122,6 @@ def setup_datasets(
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
-        if "index" not in eval_dataset.column_names:
-            raise ValueError(
-                "eval_dataset must have an `index` column for stable prompt identity and per-index metrics."
-            )
     else:
         eval_dataset = None
 
@@ -1334,7 +1204,7 @@ def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.A
 
 
 def create_model_and_optimizer(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     beaker_config: BeakerRuntimeConfig,
@@ -1342,7 +1212,6 @@ def create_model_and_optimizer(
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
     prompt_Q: ray_queue.Queue,
-    eval_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1356,21 +1225,18 @@ def create_model_and_optimizer(
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
-    eval_only: bool = False,
 ) -> tuple[
-    ModelGroup | None,
-    list[vllm_utils.LLMRayActor],
-    int,
-    int,
-    ray.actor.ActorHandle,
-    utils.ModelDims,
-    ray.actor.ActorHandle | None,
+    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
     """Create the model, optimizer, and vLLM engines."""
+    # Create placement group
+    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
+    pg = placement_group(bundles, strategy="STRICT_SPREAD")
+    ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
         "Prompt Queue": prompt_Q,
-        "Eval Prompt Queue": eval_prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
@@ -1378,65 +1244,51 @@ def create_model_and_optimizer(
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
-    policy_group = None
-    inits = []
-    resume_training_step = 1
-    episode = 0
-    _data_prep_actor = None
-    pg = None
-    if not eval_only:
-        # Create placement group
-        bundles = [
-            {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node
-        ]
-        pg = placement_group(bundles, strategy="STRICT_SPREAD")
-        ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+    # Create DataPreparationActor FIRST so StreamingDataLoader can find it
+    data_prep_actor_name = "data_prep_singleton"
+    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+        dataset=train_dataset,
+        inference_results_Q=inference_results_Q,
+        param_prompt_Q=prompt_Q,
+        tokenizer=tokenizer,
+        config=streaming_config,
+        generation_config=generation_config,
+        num_training_steps=args.num_training_steps,
+        seed=args.seed,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        global_batch_size=streaming_config.num_unique_prompts_rollout,
+        dp_world_size=args.world_size // args.sequence_parallel_size,
+        max_possible_score=streaming_config.max_possible_score,
+        actor_manager=actor_manager,
+        model_dims=model_dims,
+        verbose=args.verbose,
+        work_dir=args.output_dir,
+        tool_names=tools_config.tool_call_names if tools_config else [],
+        run_name=args.run_name,
+        model_name=model_config.model_name_or_path,
+        initial_state=data_prep_actor_state,
+        base_env_config=base_env_config,
+    )
 
-        # Create DataPreparationActor FIRST so StreamingDataLoader can find it
-        data_prep_actor_name = "data_prep_singleton"
-        _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
-            dataset=train_dataset,
-            inference_results_Q=inference_results_Q,
-            param_prompt_Q=prompt_Q,
-            tokenizer=tokenizer,
-            config=streaming_config,
-            generation_config=generation_config,
-            num_training_steps=args.num_training_steps,
-            seed=args.seed,
-            per_device_train_batch_size=args.per_device_train_batch_size,
-            global_batch_size=streaming_config.num_unique_prompts_rollout,
-            dp_world_size=args.world_size // args.sequence_parallel_size,
-            max_possible_score=streaming_config.max_possible_score,
-            actor_manager=actor_manager,
-            model_dims=model_dims,
-            verbose=args.verbose,
-            work_dir=args.output_dir,
-            tool_names=tools_config.tool_call_names if tools_config else [],
-            run_name=args.run_name,
-            model_name=model_config.model_name_or_path,
-            initial_state=data_prep_actor_state,
-            base_env_config=base_env_config,
-        )
-
-        # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
-        # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
-        # the vLLM placement group and prevents port collisions during vLLM initialization.
-        wandb_url = wandb.run.url if args.with_tracking else None
-        policy_group = ModelGroup(
-            pg,
-            PolicyTrainerRayProcess,
-            args.num_learners_per_node,
-            args.single_gpu_mode,
-            args=args,
-            streaming_config=streaming_config,
-            vllm_config=vllm_config,
-            data_prep_actor_name=data_prep_actor_name,
-            tokenizer=tokenizer,
-        )
-        inits = [
-            model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
-            for model in policy_group.models
-        ]
+    # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
+    # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
+    # the vLLM placement group and prevents port collisions during vLLM initialization.
+    wandb_url = wandb.run.url if args.with_tracking else None
+    policy_group = ModelGroup(
+        pg,
+        PolicyTrainerRayProcess,
+        args.num_learners_per_node,
+        args.single_gpu_mode,
+        args=args,
+        streaming_config=streaming_config,
+        vllm_config=vllm_config,
+        data_prep_actor_name=data_prep_actor_name,
+        tokenizer=tokenizer,
+    )
+    inits = [
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        for model in policy_group.models
+    ]
 
     # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
     vllm_engines = vllm_utils.create_vllm_engines(
@@ -1450,8 +1302,8 @@ def create_model_and_optimizer(
         vllm_config.vllm_enable_prefix_caching,
         streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
         vllm_config.vllm_gpu_memory_utilization,
-        False if eval_only else args.single_gpu_mode,
-        pg=pg if pg is not None and args.single_gpu_mode else None,
+        args.single_gpu_mode,
+        pg=pg if args.single_gpu_mode else None,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
         tool_stop_sequences=tool_stop_sequences,
@@ -1460,7 +1312,6 @@ def create_model_and_optimizer(
         mask_tool_use=streaming_config.mask_tool_use,
         pools=pools,
         prompt_queue=prompt_Q,
-        eval_prompt_queue=eval_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -1495,35 +1346,37 @@ def create_model_and_optimizer(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    if not eval_only:
-        # Wait for policy models to finish loading
-        results, _ = ray_get_with_progress(inits, desc="Initializing models")
-        resume_training_step = results[0] + 1
-        episode = (
-            (resume_training_step - 1)
-            * streaming_config.num_unique_prompts_rollout
-            * streaming_config.num_samples_per_prompt_rollout
-        )
-        logger.info("======== ✅ all models initialized =========")
+    # Wait for policy models to finish loading
+    results, _ = ray_get_with_progress(inits, desc="Initializing models")
+    resume_training_step = results[0] + 1
+    episode = (
+        (resume_training_step - 1)
+        * streaming_config.num_unique_prompts_rollout
+        * streaming_config.num_samples_per_prompt_rollout
+    )
+    logger.info("======== ✅ all models initialized =========")
 
-        ray_get_with_progress(
-            [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
-            desc="Setting up model update group",
-        )
-        logger.info("======== ✅ model update group setup successfully =========")
+    ray_get_with_progress(
+        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+        desc="Setting up model update group",
+    )
+    logger.info("======== ✅ model update group setup successfully =========")
 
     return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
 
 def create_generation_configs(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    vllm_config: data_loader_lib.VLLMConfig,
+    vllm_config: data_loader_lib.VLLMConfig | None = None,
 ):
     """Create generation configs for training and evaluation."""
+    if vllm_config is None:
+        vllm_config = globals()["vllm_config"]
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         top_p=vllm_config.vllm_top_p,
+        top_k=-1,
         max_tokens=streaming_config.response_length,
         n=streaming_config.num_samples_per_prompt_rollout,
         stop=streaming_config.stop_strings,
@@ -1543,37 +1396,11 @@ def create_generation_configs(
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-class WeightSyncTrigger:
-    """Event-like trigger that also carries the latest target model step."""
-
-    def __init__(self) -> None:
-        self._event = threading.Event()
-        self._lock = threading.Lock()
-        self._step: int | None = None
-
-    def notify(self, step: int | None = None) -> None:
-        with self._lock:
-            if step is not None:
-                self._step = step
-        self._event.set()
-
-    def wait(self, timeout: float | None = None) -> bool:
-        return self._event.wait(timeout=timeout)
-
-    def clear(self) -> None:
-        self._event.clear()
-
-    def get_step(self) -> int | None:
-        with self._lock:
-            return self._step
-
-
 def weight_sync_thread(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger: WeightSyncTrigger,
+    weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
-    vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1582,16 +1409,15 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
+        weight_sync_trigger_event.set()
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger.wait(timeout=1.0):
+        if not weight_sync_trigger_event.wait(timeout=1.0):
             continue
 
         # Clear the event for next iteration
-        weight_sync_trigger.clear()
-        target_model_step = weight_sync_trigger.get_step()
+        weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1627,13 +1453,6 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
-
         # Calculate distribution statistics
         sync_time_stats = {
             "time/weight_sync": timer.duration,
@@ -1652,7 +1471,7 @@ def weight_sync_thread(
 
 
 def one_training_step(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
@@ -1666,7 +1485,6 @@ def one_training_step(
     wandb_url: str,
     chat_template_name: str,
     model_dims: utils.ModelDims,
-    vllm_config: data_loader_lib.VLLMConfig,
     actor_manager: ActorManager | None = None,
 ) -> int:
     """Train the model for one step. Returns the number of tokens processed."""
@@ -1734,10 +1552,6 @@ def one_training_step(
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
-    # Learner MFU uses only the distributed training step duration. Local eval runs on vLLM
-    # workers; wall time since local_eval_start_time spans health checks, checkpointing, etc.,
-    # and must not be subtracted from train_timer.duration (that wrongly drives MFU to ~0 time).
-    training_time_for_utilization = max(train_timer.duration, 1e-9)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1747,7 +1561,7 @@ def one_training_step(
         samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
         num_engines=vllm_config.vllm_num_engines,
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
-        training_time=training_time_for_utilization,
+        training_time=train_timer.duration,
         num_training_gpus=args.world_size,
     )
 
@@ -1761,78 +1575,29 @@ def one_training_step(
         "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
         "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
+        "time/training": train_timer.duration,
         "time/saving": save_time,
         **data_thread_metrics,
         **average_metrics,
         **utilization_metrics,
     }
-    metrics["model_step_diff"] = float(training_step - metrics["model_step_mean"])
-    metrics["time/training"] = train_timer.duration
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging.
-        # Handles arrays with missing values (None/NaN) by filtering to finite numeric values.
-        metrics_to_log = {}
-        _add_dataset_index_solve_rate_table(
-            metrics,
-            metrics_to_log,
-            source_key="val/train_prompt_solve_rate_by_dataset_index",
-            table_key="val/train_prompt_solve_rate_by_index_table",
-        )
-        _add_model_step_values_table(
-            metrics, metrics_to_log, source_key="model_step_values", table_key="model_step_values_table"
-        )
-
+        # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                values_iter = value.tolist() if isinstance(value, np.ndarray) else value
-
-                numeric_values = [
-                    float(v)
-                    for v in values_iter
-                    if isinstance(v, (int, float, np.integer, np.floating)) and np.isfinite(v)
-                ]
-                if len(numeric_values) > 0:
-                    metrics_to_log[key] = wandb.Histogram(numeric_values)
-                else:
-                    metrics_to_log[f"{key}/num_items"] = len(values_iter)
-            else:
-                metrics_to_log[key] = value
-        wandb.log(metrics_to_log, step=training_step)
+                metrics[key] = wandb.Histogram(value)
+        wandb.log(metrics, step=training_step)
 
     return num_step_tokens
 
 
-def _add_dataset_index_solve_rate_table(
-    metrics: dict[str, Any], metrics_to_log: dict[str, Any], source_key: str, table_key: str
-) -> None:
-    per_index_solve_rates = metrics.pop(source_key, None)
-    if per_index_solve_rates is None:
-        return
-    index_table = wandb.Table(columns=["dataset_index", "solve_rate"])
-    for dataset_index, solve_rate in per_index_solve_rates:
-        index_table.add_data(int(dataset_index), float(solve_rate))
-    metrics_to_log[table_key] = index_table
-
-
-def _add_model_step_values_table(
-    metrics: dict[str, Any], metrics_to_log: dict[str, Any], source_key: str, table_key: str
-) -> None:
-    model_step_values = metrics.pop(source_key, None)
-    if model_step_values is None:
-        return
-    model_step_values_table = wandb.Table(columns=["sample_idx", "model_step"])
-    for sample_idx, model_step_value in enumerate(np.asarray(model_step_values, dtype=float).tolist()):
-        model_step_values_table.add_data(int(sample_idx), float(model_step_value))
-    metrics_to_log[table_key] = model_step_values_table
-
-
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def maybe_save_checkpoint(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     training_step: int,
     policy_group: ModelGroup,
     chat_template_name: str,
@@ -1865,13 +1630,8 @@ def maybe_save_checkpoint(
     return save_time
 
 
-def estimate_pass_at_k_array(num_samples: int, num_correct: np.ndarray, k: int) -> np.ndarray:
-    """Estimate pass@k for a vector of prompts with shared num_samples."""
-    return np.asarray([grpo_utils.estimate_pass_at_k(num_samples, int(c), k) for c in num_correct], dtype=float)
-
-
 def maybe_evaluate(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
@@ -1879,12 +1639,8 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
-    max_possible_score: float,
-    base_env_config: EnvConfig | None = None,
-    local_eval_start_time: float | None = None,
+    base_env_config: EnvConfig,
     actor_manager=None,
-    beaker_progress_label: str | None = None,
-    beaker_wandb_url: str | None = None,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1893,64 +1649,26 @@ def maybe_evaluate(
     """
     if eval_dataset is None:
         return True  # No eval to do, so consider it "successful"
-    if base_env_config is None:
-        base_env_config = EnvConfig()
 
     try:
-        is_final_step = training_step >= args.num_training_steps
-        num_eval_prompts = len(eval_dataset)
-        # On non-final steps, only evaluate when we have a full batch ready.
-        # This avoids partially draining the queue and losing results.
-        if not is_final_step:
-            queued_results = evaluation_inference_results_Q.qsize()
-            if queued_results < num_eval_prompts:
-                logger.info(
-                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
-                    queued_results,
-                    num_eval_prompts,
-                )
-                return False
-
-        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        if not is_final_step:
-            timeout = 0.01
-        elif args.eval_timeout_minutes is not None:
-            timeout = args.eval_timeout_minutes * 60
-        else:
-            timeout = max(300, args.backend_timeout * 5)
-
-        eval_dataset_index_map = {eval_dataset[i]["index"]: i for i in range(num_eval_prompts)}
-        progress_callback = None
-        if beaker_progress_label is not None and local_eval_start_time is not None:
-
-            def progress_callback(completed: int, total: int) -> None:
-                maybe_update_beaker_description(
-                    current_step=completed,
-                    total_steps=total,
-                    start_time=local_eval_start_time,
-                    wandb_url=beaker_wandb_url,
-                    progress_label=beaker_progress_label,
-                )
+        # timeout 0.01 if this is not the last training step
+        # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
-            dataset_index_map=eval_dataset_index_map,
             base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
-            max_possible_score=max_possible_score,
-            progress_bar_desc=f"Eval responses step {training_step}",
-            show_progress_bar=True,
-            progress_callback=progress_callback,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1960,92 +1678,6 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        eval_reward_metrics.pop("eval/model_step_min", None)
-        eval_reward_metrics.pop("eval/model_step_max", None)
-        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean")
-        eval_reward_metrics.pop("eval/model_step_span", None)
-        model_step_values = eval_reward_metrics.pop("eval/model_step_values", None)
-        eval_k = eval_generation_config.n
-        scores = np.array(eval_batch.scores)
-        pass_at_by_k: dict[int, float] = {}
-        dataset_pass_at_by_k: dict[str, dict[int, float]] = {}
-        if max_possible_score <= 0:
-            logger.warning("Max possible score is %s; skipping pass@k metrics.", max_possible_score)
-        elif scores.size and scores.size % eval_k == 0:
-            scores_per_prompt = scores.reshape(-1, eval_k)
-            threshold = max_possible_score - 1e-8
-            num_correct_per_prompt = (scores_per_prompt >= threshold).sum(axis=1)
-            pass_at_ks = [2**i for i in range(eval_k.bit_length()) if 2**i <= eval_k]
-            per_prompt_pass_at_by_k = np.asarray(
-                [estimate_pass_at_k_array(eval_k, num_correct_per_prompt, k) for k in pass_at_ks], dtype=float
-            ).T
-            for col, k in enumerate(pass_at_ks):
-                pass_at_by_k[k] = float(per_prompt_pass_at_by_k[:, col].mean())
-            if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == scores_per_prompt.shape[0]:
-                dataset_to_indices: dict[str, list[int]] = {}
-                for prompt_idx, dataset_name in enumerate(eval_batch_stats.prompt_datasets):
-                    dataset_to_indices.setdefault(dataset_name, []).append(prompt_idx)
-                for dataset_name, dataset_indices in dataset_to_indices.items():
-                    dataset_prompt_pass_at = per_prompt_pass_at_by_k[np.asarray(dataset_indices, dtype=int)]
-                    dataset_pass_at_by_k[dataset_name] = {
-                        k: float(dataset_prompt_pass_at[:, col].mean()) for col, k in enumerate(pass_at_ks)
-                    }
-            elif eval_batch_stats is not None:
-                logger.warning(
-                    "Eval prompt_datasets size %s does not match prompts %s; skipping per-dataset pass@k metrics.",
-                    len(eval_batch_stats.prompt_datasets),
-                    scores_per_prompt.shape[0],
-                )
-        else:
-            logger.warning(
-                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
-            )
-        dataset_sequence_length_metrics: dict[str, Any] = {}
-        if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) > 0:
-            num_eval_prompts = len(eval_batch_stats.prompt_datasets)
-            if eval_sequence_lengths.size % num_eval_prompts == 0:
-                responses_per_prompt = eval_sequence_lengths.size // num_eval_prompts
-                response_dataset_names = np.repeat(
-                    np.array(eval_batch_stats.prompt_datasets, dtype=object), responses_per_prompt
-                )
-                solved_threshold = max_possible_score - 1e-8
-                solved_mask = scores >= solved_threshold
-
-                for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets):
-                    dataset_mask = response_dataset_names == dataset_name
-                    dataset_sequence_lengths = eval_sequence_lengths[dataset_mask].astype(float)
-                    dataset_sequence_lengths_solved = eval_sequence_lengths[dataset_mask & solved_mask].astype(float)
-                    dataset_sequence_lengths_unsolved = eval_sequence_lengths[dataset_mask & ~solved_mask].astype(
-                        float
-                    )
-                    metric_prefix = f"eval/{dataset_name}"
-                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_mean"] = float(
-                        dataset_sequence_lengths.mean()
-                    )
-                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_solved_mean"] = (
-                        0.0
-                        if len(dataset_sequence_lengths_solved) == 0
-                        else float(dataset_sequence_lengths_solved.mean())
-                    )
-                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_unsolved_mean"] = (
-                        0.0
-                        if len(dataset_sequence_lengths_unsolved) == 0
-                        else float(dataset_sequence_lengths_unsolved.mean())
-                    )
-                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_solved_hist"] = (
-                        dataset_sequence_lengths_solved
-                    )
-                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_unsolved_hist"] = (
-                        dataset_sequence_lengths_unsolved
-                    )
-            else:
-                logger.warning(
-                    "Eval sequence_lengths size %s is not divisible by prompt_datasets size %s; "
-                    "skipping per-dataset sequence length metrics.",
-                    eval_sequence_lengths.size,
-                    num_eval_prompts,
-                )
-
         eval_metrics = {
             "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
@@ -2054,84 +1686,25 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
-        if args.eval_only:
-            eval_metrics["episode"] = 0
-            eval_metrics["global_step"] = 0
-        for k, pass_rate in pass_at_by_k.items():
-            eval_metrics[f"eval/pass_at_{k}"] = pass_rate
-        for metric_name, pass_rates in dataset_pass_at_by_k.items():
-            for k, pass_rate in pass_rates.items():
-                eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
-        eval_metrics.update(dataset_sequence_length_metrics)
-        eval_metrics["eval/model_step_mean"] = float(model_step_mean)
-        eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
-        if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
-            prompt_index_to_solve_rates: dict[int, list[float]] = {}
-            for prompt_index, prompt_solve_rate in zip(
-                eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
-            ):
-                prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
-            eval_prompt_solve_rate_by_dataset_index = [
-                (int(prompt_index), float(np.mean(rates)))
-                for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
-            ]
-            eval_metrics["eval/prompt_solve_rate_by_dataset_index"] = eval_prompt_solve_rate_by_dataset_index
-            eval_metrics["eval/prompt_solve_rate_by_dataset_index_count"] = len(
-                eval_prompt_solve_rate_by_dataset_index
-            )
-
-            dataset_to_solve_rates: dict[str, list[float]] = {}
-            for dataset_name, prompt_solve_rate in zip(
-                eval_batch_stats.prompt_datasets, eval_batch_stats.percent_solved_hist
-            ):
-                dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
-            for dataset_name, rates in dataset_to_solve_rates.items():
-                eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
         )
         eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
-        if local_eval_start_time is not None:
-            eval_metrics["time/local_eval"] = time.perf_counter() - local_eval_start_time
 
         print_rich_single_line_metrics(eval_metrics)
-
-        def _ground_truth_for_table(value: Any) -> str:
-            while isinstance(value, list) and len(value) > 0:
-                value = value[0]
-            if value is None:
-                return ""
-            return str(value)
 
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_batch.decoded_responses
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
-        table["ground_truth"] = (
-            [_ground_truth_for_table(ground_truth) for ground_truth in eval_batch.ground_truths] if eval_batch else []
-        )
+        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         if eval_batch.active_tools is not None:
             table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
 
         if args.with_tracking:
-            table_metrics: dict[str, Any] = {}
-            _add_dataset_index_solve_rate_table(
-                eval_metrics,
-                table_metrics,
-                source_key="eval/prompt_solve_rate_by_dataset_index",
-                table_key="eval/prompt_solve_rate_by_index_table",
-            )
-            eval_metrics["eval/model_step_values"] = model_step_values
-            _add_model_step_values_table(
-                eval_metrics,
-                table_metrics,
-                source_key="eval/model_step_values",
-                table_key="eval/model_step_values_table",
-            )
-            eval_metrics.update(table_metrics)
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
             wandb.log(eval_metrics, step=training_step)
         else:
@@ -2144,7 +1717,7 @@ def maybe_evaluate(
 
 
 def save_final_model(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     training_step: int,
@@ -2245,85 +1818,9 @@ def cleanup_training_resources(
         logger.info("✅ Process group destroyed")
 
 
-def run_eval_only_round(
-    args: grpo_utils.ExperimentConfig,
-    resume_training_step: int,
-    episode: int,
-    eval_dataset: Dataset | None,
-    eval_prompt_Q: ray_queue.Queue,
-    evaluation_inference_results_Q: ray_queue.Queue,
-    generation_configs: dict[str, Any],
-    tokenizer: PreTrainedTokenizer,
-    model_dims: utils.ModelDims,
-    max_possible_score: float,
-    base_env_config: EnvConfig,
-    training_start_time: float,
-    wandb_url: str,
-    actor_manager: ActorManager,
-    health_check_fn,
-) -> int:
-    if eval_dataset is None:
-        raise ValueError("`--eval_only` requires a non-empty eval dataset.")
-
-    health_check_fn()
-    eval_step = max(resume_training_step, 1)
-    # Use a single training step in eval-only mode so status/progress waits for eval completion.
-    args.num_training_steps = eval_step
-    local_eval_start_time = time.perf_counter()
-    logger.info("Eval-only mode enabled: scheduling one local evaluation round and exiting.")
-
-    maybe_update_beaker_description(
-        current_step=0,
-        total_steps=len(eval_dataset),
-        start_time=local_eval_start_time,
-        wandb_url=wandb_url,
-        progress_label="eval",
-    )
-
-    for idx in range(len(eval_dataset)):
-        eval_example = eval_dataset[idx]
-        add_prompt_to_generator(
-            eval_example,
-            eval_step,
-            eval_prompt_Q,
-            generation_configs["eval"],
-            is_eval=True,
-            base_env_config=base_env_config,
-        )
-
-    eval_collected = maybe_evaluate(
-        args,
-        eval_step,
-        evaluation_inference_results_Q,
-        tokenizer,
-        episode,
-        eval_dataset,
-        generation_configs["eval"],
-        model_dims,
-        max_possible_score,
-        base_env_config=base_env_config,
-        local_eval_start_time=local_eval_start_time,
-        actor_manager=actor_manager,
-        beaker_progress_label="eval",
-        beaker_wandb_url=wandb_url,
-    )
-    if not eval_collected:
-        raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
-
-    maybe_update_beaker_description(
-        current_step=len(eval_dataset),
-        total_steps=len(eval_dataset),
-        start_time=local_eval_start_time,
-        wandb_url=wandb_url,
-        progress_label="eval",
-    )
-    return episode
-
-
 def run_training(
     args,
     streaming_config,
-    vllm_config: data_loader_lib.VLLMConfig,
     tokenizer,
     train_dataset,
     eval_dataset,
@@ -2338,7 +1835,6 @@ def run_training(
     executor,
     inference_results_Q,
     prompt_Q,
-    eval_prompt_Q,
     evaluation_inference_results_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
@@ -2363,19 +1859,13 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger = WeightSyncTrigger()
-    initial_model_step = resume_training_step - 1
-    ray_get_with_progress(
-        [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
-        desc=f"Initializing vLLM model step to {initial_model_step}",
-    )
+    weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger,
+        weight_sync_trigger_event,
         policy_group,
-        vllm_engines,
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
@@ -2429,9 +1919,7 @@ def run_training(
         start_time=training_start_time,
         wandb_url=wandb_url,
     )
-    pending_local_eval_rounds = 0
-    local_eval_start_time = None
-
+    last_eval_collected = True
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -2448,25 +1936,21 @@ def run_training(
                 or (training_step % args.local_eval_every == 0 and training_step > 1)
             )
         ):
-            if local_eval_start_time is None:
-                local_eval_start_time = time.perf_counter()
-            if pending_local_eval_rounds > 0:
+            if not last_eval_collected:
                 logger.warning(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
                     "Consider increasing local_eval_every."
                 )
-            for idx in range(len(eval_dataset)):
-                eval_example = eval_dataset[idx]
-                # Use training_step to keep eval prompt IDs unique across rounds.
+            for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
                     eval_example,
                     training_step,
-                    eval_prompt_Q,
+                    prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
                     base_env_config=base_env_config,
                 )
-            pending_local_eval_rounds += 1
+            eval_data_loader.reset()
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2493,7 +1977,6 @@ def run_training(
             wandb_url,
             tc.chat_template_name,
             model_dims,
-            vllm_config,
             actor_manager,
         )
         num_total_tokens += num_step_tokens
@@ -2505,8 +1988,7 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
-            if args.warn_if_low_disk_space:
-                utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
+            utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including dataloader state
                 client_state = {
@@ -2532,32 +2014,20 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger.notify(step=training_step)
+        weight_sync_trigger_event.set()
 
-        # Collect at most one pending eval round per non-final step. On the final step,
-        # keep collecting until all pending rounds are drained (or timeout/no-results).
-        max_rounds_to_collect = pending_local_eval_rounds if training_step >= args.num_training_steps else 1
-        rounds_collected = 0
-        while pending_local_eval_rounds > 0 and rounds_collected < max_rounds_to_collect:
-            eval_collected = maybe_evaluate(
-                args,
-                training_step,
-                evaluation_inference_results_Q,
-                tokenizer,
-                episode,
-                eval_dataset,
-                generation_configs["eval"],
-                model_dims,
-                streaming_config.max_possible_score,
-                base_env_config=base_env_config,
-                actor_manager=actor_manager,
-                local_eval_start_time=local_eval_start_time,
-            )
-            if not eval_collected:
-                break
-            pending_local_eval_rounds -= 1
-            rounds_collected += 1
-            local_eval_start_time = None
+        last_eval_collected = maybe_evaluate(
+            args,
+            training_step,
+            evaluation_inference_results_Q,
+            tokenizer,
+            episode,
+            eval_dataset,
+            generation_configs["eval"],
+            model_dims,
+            base_env_config,
+            actor_manager,
+        )
 
         maybe_update_beaker_description(
             current_step=training_step,
@@ -2712,7 +2182,7 @@ def initialize_tools_and_envs(
 
 
 def main(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -2767,9 +2237,8 @@ def main(
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
     ):
-        logger.warning(
-            f"Train dataset has {len(train_dataset)} prompts, below the {needed} prompts needed to fully "
-            "prefill async steps without reuse. Continuing with prompt reuse across epochs."
+        raise ValueError(
+            f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
 
     if args.cache_dataset_only:
@@ -2779,7 +2248,7 @@ def main(
     if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
         utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
 
-    pprint([args, tc, model_config, streaming_config, vllm_config, tools_config])
+    pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2789,7 +2258,6 @@ def main(
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
-    eval_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -2798,7 +2266,6 @@ def main(
         r1_style_format_reward=streaming_config.r1_style_format_reward,
         apply_verifiable_reward=streaming_config.apply_verifiable_reward,
         verification_reward=streaming_config.verification_reward,
-        spurious_reward_mode=streaming_config.spurious_reward_mode,
         non_stop_penalty=streaming_config.non_stop_penalty,
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
         only_reward_good_outputs=tools_config.only_reward_good_outputs,
@@ -2834,7 +2301,6 @@ def main(
             tokenizer,
             inference_results_Q,
             prompt_Q,
-            eval_prompt_Q,
             evaluation_inference_results_Q,
             streaming_config,
             vllm_config,
@@ -2848,124 +2314,55 @@ def main(
             tools_config,
             pools,
             tool_stop_sequences,
-            eval_only=args.eval_only,
         )
     )
 
-    if args.eval_only:
-        resume_training_step = (
-            int(checkpoint_state["training_step"]) + 1
-            if checkpoint_state and "training_step" in checkpoint_state
-            else (args.eval_only_set_checkpoint if args.eval_only_set_checkpoint is not None else 1)
+    if checkpoint_state:
+        episode = checkpoint_state["episode"]
+        logger.info(f"Restored episode count: {episode}")
+
+    # Create additional queues (main queues already created above)
+    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
+
+    stop_event = threading.Event()
+    executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
+
+    try:
+        episode = run_training(
+            args,
+            streaming_config,
+            tokenizer,
+            train_dataset,
+            eval_dataset,
+            policy_group,
+            vllm_engines,
+            generation_configs,
+            resume_training_step,
+            episode,
+            wandb_url,
+            tc,
+            stop_event,
+            executor,
+            inference_results_Q,
+            prompt_Q,
+            evaluation_inference_results_Q,
+            weight_sync_metrics_Q,
+            actor_manager,
+            model_dims,
+            checkpoint_state,
+            base_env_config,
         )
-        if args.eval_only_set_checkpoint is not None and (
-            not checkpoint_state or "training_step" not in checkpoint_state
-        ):
-            logger.info(
-                f"Eval-only mode using explicit checkpoint step {args.eval_only_set_checkpoint} for eval logging."
-            )
-        episode = (
-            int(checkpoint_state["episode"])
-            if checkpoint_state and "episode" in checkpoint_state
-            else (resume_training_step - 1)
-            * streaming_config.num_unique_prompts_rollout
-            * streaming_config.num_samples_per_prompt_rollout
+
+        if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    except Exception as e:
+        if args.send_slack_alerts:
+            utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
+        raise
+    finally:
+        cleanup_training_resources(
+            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
         )
-        stop_event = threading.Event()
-        executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
-        try:
-            ray_get_with_progress(
-                [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
-            )
-
-            def eval_health_check_fn():
-                ray_get_with_progress(
-                    [engine.check_background_threads.remote() for engine in vllm_engines],
-                    desc="Checking vLLM engine health",
-                    enable=False,
-                )
-
-            start_time = time.perf_counter()
-            run_eval_only_round(
-                args,
-                resume_training_step,
-                episode,
-                eval_dataset,
-                eval_prompt_Q,
-                evaluation_inference_results_Q,
-                generation_configs,
-                tokenizer,
-                model_dims,
-                streaming_config.max_possible_score,
-                base_env_config,
-                start_time,
-                wandb_url,
-                actor_manager,
-                eval_health_check_fn,
-            )
-            if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
-                push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
-        except Exception as e:
-            if args.send_slack_alerts:
-                utils.send_slack_message(f"<!here> An eval job has died. Error message: {e}.")
-            raise
-        finally:
-            cleanup_training_resources(
-                stop_event,
-                executor,
-                [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
-                actor_manager,
-            )
-    else:
-        if checkpoint_state:
-            episode = checkpoint_state["episode"]
-            logger.info(f"Restored episode count: {episode}")
-
-        weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
-        stop_event = threading.Event()
-        executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
-
-        try:
-            episode = run_training(
-                args,
-                streaming_config,
-                vllm_config,
-                tokenizer,
-                train_dataset,
-                eval_dataset,
-                policy_group,
-                vllm_engines,
-                generation_configs,
-                resume_training_step,
-                episode,
-                wandb_url,
-                tc,
-                stop_event,
-                executor,
-                inference_results_Q,
-                prompt_Q,
-                eval_prompt_Q,
-                evaluation_inference_results_Q,
-                weight_sync_metrics_Q,
-                actor_manager,
-                model_dims,
-                checkpoint_state,
-                base_env_config,
-            )
-
-            if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
-                push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
-        except Exception as e:
-            if args.send_slack_alerts:
-                utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
-            raise
-        finally:
-            cleanup_training_resources(
-                stop_event,
-                executor,
-                [inference_results_Q, prompt_Q, eval_prompt_Q, evaluation_inference_results_Q],
-                actor_manager,
-            )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
@@ -2990,7 +2387,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParserPlus(
         (
-            grpo_utils.ExperimentConfig,
+            grpo_utils.GRPOExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
@@ -2998,10 +2395,11 @@ if __name__ == "__main__":
             EnvsConfig,
         )
     )
+    parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
         parser.parse_args_into_dataclasses()
     )
-    assert isinstance(args, grpo_utils.ExperimentConfig)
+    assert isinstance(args, grpo_utils.GRPOExperimentConfig)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)

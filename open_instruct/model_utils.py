@@ -15,13 +15,15 @@
 
 
 import asyncio
+import functools
+import importlib.util
 import itertools
 import pathlib
 import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Union
 
 import deepspeed
 import pandas as pd
@@ -31,6 +33,7 @@ from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
+from olmo_core.nn.attention import AttentionBackendName
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
@@ -42,6 +45,53 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+_OLMO_CORE_TO_HF_ATTN: dict[AttentionBackendName, str] = {
+    AttentionBackendName.flash_4: "flash_attention_4",
+    AttentionBackendName.flash_3: "flash_attention_3",
+    AttentionBackendName.flash_2: "flash_attention_2",
+    AttentionBackendName.torch: "sdpa",
+    AttentionBackendName.te: "sdpa",
+}
+
+
+def olmo_core_attn_to_hf(backend: AttentionBackendName) -> str:
+    return _OLMO_CORE_TO_HF_ATTN[backend]
+
+
+@functools.lru_cache(maxsize=1)
+def detect_hf_attn_implementation() -> str:
+    return olmo_core_attn_to_hf(detect_attn_implementation())
+
+
+def _is_flash_attn_4_available() -> bool:
+    return importlib.util.find_spec("flash_attn.cute") is not None
+
+
+@functools.lru_cache(maxsize=1)
+def _gpu_compute_major() -> int | None:
+    """Return the CUDA compute capability major version (e.g. 9=Hopper, 10=Blackwell)."""
+    if not torch.cuda.is_available():
+        return None
+    major, _ = torch.cuda.get_device_capability()
+    return major
+
+
+@functools.lru_cache(maxsize=1)
+def detect_attn_implementation() -> AttentionBackendName:
+    if not torch.cuda.is_available():
+        result = AttentionBackendName.torch
+    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:
+        result = AttentionBackendName.flash_4
+    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() >= 9:
+        result = AttentionBackendName.flash_3
+    elif transformers.utils.is_flash_attn_2_available():
+        result = AttentionBackendName.flash_2
+    else:
+        result = AttentionBackendName.torch
+    logger.info(f"Auto-detected attention implementation: {result}")
+    return result
 
 
 @dataclass
@@ -134,10 +184,9 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_3", "flash_attention_2", "sdpa"] = "flash_attention_3"
+    attn_implementation: AttentionBackendName | None = None
     """Which attention implementation to use.
-    flash_attention_3: Requires flash-attn package (default)
-    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
+    If None, auto-detects the best available implementation."""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -170,6 +219,9 @@ class ModelConfig:
     """use nested quantization"""
 
     def __post_init__(self):
+        if self.attn_implementation is None:
+            self.attn_implementation = detect_attn_implementation()
+
         # `use_cache=True` is incompatible with gradient checkpointing.
         # https://github.com/huggingface/transformers/blob/d6751d91c8f58cdeb35af6adae182d7dc90aa883/src/transformers/models/llama/modeling_llama.py#L945
         if self.gradient_checkpointing:
@@ -253,7 +305,7 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation=model_config.attn_implementation,
+        attn_implementation=olmo_core_attn_to_hf(model_config.attn_implementation),
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
@@ -402,17 +454,6 @@ async def apply_verifiable_reward(
     async_tasks = []
     task_metadata = []
 
-    def resolve_reward_function(dataset_name: str) -> VerifierFunction | None:
-        dataset_key = dataset_name.lower()
-        reward_func = reward_fn_mapping.get(dataset_key)
-        if reward_func is not None:
-            return reward_func
-        if dataset_key.startswith("gsm8k"):
-            return reward_fn_mapping.get("gsm8k")
-        if dataset_key.startswith("math"):
-            return reward_fn_mapping.get("math")
-        return None
-
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
         zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
@@ -425,7 +466,7 @@ async def apply_verifiable_reward(
 
         # Create async tasks for each ground truth/dataset pair
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = resolve_reward_function(ds)
+            reward_func = reward_fn_mapping.get(ds.lower())
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue

@@ -152,7 +152,7 @@ class TestDAPOLoss(unittest.TestCase):
             self.assertTrue(torch.all(pg_losses[high_ratio_mask] > pg_losses2[high_ratio_mask]))
 
 
-def _make_grpo_config(**kwargs) -> grpo_utils.ExperimentConfig:
+def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
     defaults = {
         "clip_lower": 0.2,
         "clip_higher": 0.2,
@@ -162,7 +162,7 @@ def _make_grpo_config(**kwargs) -> grpo_utils.ExperimentConfig:
         "load_ref_policy": False,
     }
     defaults.update(kwargs)
-    config = MagicMock(spec=grpo_utils.ExperimentConfig)
+    config = MagicMock(spec=grpo_utils.GRPOExperimentConfig)
     for key, value in defaults.items():
         setattr(config, key, value)
     return config

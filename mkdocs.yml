@@ -82,6 +82,8 @@ nav:
     - algorithms/finetune.md
     - algorithms/dpo.md
     - algorithms/grpo.md
+    - algorithms/olmo_core_sharding.md
+    - algorithms/tool_training.md
     - algorithms/reward_modeling.md
     - slack-alerts.md
   - Not Maintained:

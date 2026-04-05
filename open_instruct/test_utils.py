@@ -517,7 +517,7 @@ class TestUtilityFunctions(unittest.TestCase):
 
 class TestFlatArguments(unittest.TestCase):
     def test_grpo_warn_if_low_disk_space_defaults_to_false(self) -> None:
-        parser = utils.ArgumentParserPlus(grpo_utils.ExperimentConfig)
+        parser = utils.ArgumentParserPlus(grpo_utils.GRPOExperimentConfig)
         (args,) = parser.parse_args_into_dataclasses([])
         self.assertFalse(args.warn_if_low_disk_space)
 
@@ -539,7 +539,7 @@ class TestFlatArguments(unittest.TestCase):
         self.assertFalse(args.additional_model_arguments)
 
     def test_grpo_warn_if_low_disk_space_can_be_disabled(self) -> None:
-        parser = utils.ArgumentParserPlus(grpo_utils.ExperimentConfig)
+        parser = utils.ArgumentParserPlus(grpo_utils.GRPOExperimentConfig)
         (args,) = parser.parse_args_into_dataclasses(["--warn_if_low_disk_space", "False"])
         self.assertFalse(args.warn_if_low_disk_space)
 

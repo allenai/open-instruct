@@ -26,7 +26,6 @@ tasks:
         --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B
         --use_slow_tokenizer
         --train_file /net/nfs.cirrascale/allennlp/yizhongw/open-instruct-public/data/processed/tulu/tulu_v1_mix.jsonl
-        --use_flash_attn
         --use_lora
         --use_qlora
         --lora_rank 64

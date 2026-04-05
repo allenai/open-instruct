@@ -107,12 +107,13 @@ class HFDataLoader(data_loader.DataLoaderBase):
         device: torch.device | None = None,
         drop_last: bool = True,
         fs_local_rank: int | None = None,
+        max_seq_length: int = 1,
     ) -> None:
         """Initialize the HFDataLoader.
 
         Args:
             dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
-            batch_size: The global batch size.
+            batch_size: The global batch size (in sequences).
             seed: Random seed for shuffling.
             dp_rank: The rank of the current process in the distributed setup.
             dp_world_size: Total number of data-parallel processes in the distributed setup.
@@ -124,15 +125,18 @@ class HFDataLoader(data_loader.DataLoaderBase):
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
+            max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
+                to the trainer for batch-size validation.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
+        # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
-            global_batch_size=batch_size,
+            global_batch_size=batch_size * max_seq_length,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
@@ -489,6 +493,16 @@ class StreamingDataLoaderConfig:
     code_max_execution_time: float = 1.0
     code_pass_rate_reward_threshold: float = 0.0
     code_apply_perf_penalty: bool = False
+    manufactoria_api_url: str = field(
+        default_factory=lambda: os.environ.get("MANUFACTORIA_API_URL", "http://localhost:1235") + "/test_solution"
+    )
+    manufactoria_max_execution_time: float = 1.0
+    manufactoria_scoring_mode: Literal["all_pass", "pass_rate"] = "all_pass"
+    ballsim_api_url: str = field(
+        default_factory=lambda: os.environ.get("BALLSIM_API_URL", "http://localhost:2345") + "/test_program"
+    )
+    ballsim_max_execution_time: float = 1.0
+    ballsim_scoring_mode: Literal["all_pass", "pass_rate"] = "all_pass"
 
     # Max length verifier
     max_length_verifier_max_length: int = 32768

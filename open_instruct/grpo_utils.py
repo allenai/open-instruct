@@ -7,7 +7,8 @@ from typing import Literal
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
+from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
@@ -26,38 +27,17 @@ class GRPOLossType(enum.StrEnum):
 
 
 @dataclass
-class ExperimentConfig:
-    # Experiment
-    exp_name: str = "grpo"
-    """The name of this experiment"""
-    seed: int = 1
-    """Seed of the experiment"""
-    run_name: str | None = None
-    """RUNTIME VALUE: A unique name of this run"""
-
+class GRPOExperimentConfig(
+    olmo_core_utils.ExperimentConfig,
+    olmo_core_utils.TrainingConfig,
+    olmo_core_utils.LoggingConfig,
+    olmo_core_utils.CheckpointConfig,
+):
     # Optimizer
-    learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    lr_scheduler_type: Literal[
-        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-    ] = "linear"
-    """Which scheduler to use"""
-    warm_up_steps: int = 0
-    """Number of warm up steps for the scheduler"""
-    warmup_ratio: float = 0.0
-    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
-    weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
-    max_grad_norm: float = 1.0
-    """Maximum gradient norm for gradient clipping."""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
-    """Whether to use fused optimizer"""
 
     # Batch sizes
-    per_device_train_batch_size: int = 1
-    """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
@@ -74,8 +54,6 @@ class ExperimentConfig:
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
-    num_epochs: int = 1
-    """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
@@ -130,6 +108,10 @@ class ExperimentConfig:
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    fsdp_shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    fsdp_num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
     queue_dashboard_port: int | None = None
@@ -138,14 +120,6 @@ class ExperimentConfig:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_group_name: str | None = None
-    """Optional W&B group name used to group related runs together."""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: str | None = None
@@ -156,12 +130,8 @@ class ExperimentConfig:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: str = "output"
-    """Where to save the model"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
@@ -218,6 +188,10 @@ class ExperimentConfig:
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
             )
+        if self.local_eval_every == 0 or self.local_eval_every < -1:
+            raise ValueError(f"`local_eval_every` must be -1 or > 0, got {self.local_eval_every}")
+        if self.loss_fn == GRPOLossType.tvpo and self.truncated_importance_sampling_ratio_cap > 0.0:
+            raise ValueError("`loss_fn=tvpo` cannot be used with `truncated_importance_sampling_ratio_cap > 0`.")
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
@@ -245,6 +219,28 @@ class ExperimentConfig:
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+
+        total_learner_gpus = sum(self.num_learners_per_node)
+        if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
+            expected = self.fsdp_shard_degree * self.fsdp_num_replicas
+            if expected != total_learner_gpus:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) * fsdp_num_replicas ({self.fsdp_num_replicas}) "
+                    f"= {expected}, but total learner GPUs = {total_learner_gpus} "
+                    f"(from num_learners_per_node={self.num_learners_per_node}). These must match."
+                )
+        elif self.fsdp_shard_degree is not None:
+            if total_learner_gpus % self.fsdp_shard_degree != 0:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
+        elif self.fsdp_num_replicas is not None:
+            if total_learner_gpus % self.fsdp_num_replicas != 0:
+                raise ValueError(
+                    f"fsdp_num_replicas ({self.fsdp_num_replicas}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
@@ -287,6 +283,9 @@ class ExperimentConfig:
             )
 
 
+ExperimentConfig = GRPOExperimentConfig
+
+
 def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
     """Estimate pass@k for one prompt."""
     if num_samples < 1:
@@ -302,26 +301,81 @@ def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
     return 1.0 - (math.comb(num_samples - num_correct, k) / math.comb(num_samples, k))
 
 
+def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    """Set non-response positions to INVALID_LOGPROB and replace NaNs."""
+    vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
+    vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
+    return vllm_logprobs
+
+
+def compute_tis_weights(
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Compute truncated importance sampling weights: clamp(π_old / π_vllm, max=cap).
+
+    Returns (clamped, unclamped) tuple, both None when cap <= 0 (disabled).
+    """
+    if cap <= 0:
+        return None, None
+    unclamped = torch.ones_like(old_logprob)
+    logprob_diff = old_logprob - vllm_logprobs
+    logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
+    unclamped = torch.where(response_mask, torch.exp(logprob_diff), unclamped)
+    clamped = torch.clamp(unclamped, max=cap)
+    return clamped, unclamped
+
+
+def resolve_old_logprob(
+    old_logprobs_cache: list[torch.Tensor | None],
+    sample_idx: int,
+    epoch_idx: int,
+    num_mini_batches: int,
+    use_vllm_logprobs: bool,
+    vllm_logprobs: torch.Tensor,
+    new_logprobs: torch.Tensor,
+) -> torch.Tensor:
+    """Return the old (baseline) logprobs for a sample.
+
+    With multiple mini-batches, old logprobs are pre-computed and cached.
+    With a single mini-batch, they are lazily set on the first epoch from
+    either vllm logprobs or the current policy's detached logprobs.
+    """
+    if num_mini_batches > 1:
+        result = old_logprobs_cache[sample_idx]
+    else:
+        with torch.no_grad():
+            if epoch_idx == 0:
+                if use_vllm_logprobs:
+                    old_logprobs_cache[sample_idx] = vllm_logprobs
+                else:
+                    old_logprobs_cache[sample_idx] = new_logprobs.detach()
+            result = old_logprobs_cache[sample_idx]
+    assert result is not None
+    return result
+
+
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
-    config: ExperimentConfig,
+    config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
     tv_divergence: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
-        pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
-        pg_loss = torch.max(pg_losses, pg_losses2)
-        clip_mask = pg_losses2 > pg_losses
+        pg_losses_clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        pg_loss = torch.max(pg_losses, pg_losses_clipped)
+        clip_mask = pg_losses_clipped > pg_losses
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
         pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
         clip_mask = torch.zeros_like(pg_loss, dtype=torch.bool)
     elif config.loss_fn == GRPOLossType.tvpo:
+        if tv_divergence is None:
+            raise ValueError("tv_divergence is required when `loss_fn=tvpo`.")
         clip_mask = (tv_divergence > config.clip_higher) * (((ratio.detach() - 1) * advantages) > 0)
         clipped_ratio = torch.where(clip_mask, torch.ones_like(ratio), ratio)
         pg_loss = -advantages * clipped_ratio
@@ -411,10 +465,8 @@ def compute_logprobs(
                         False,
                     )
 
-                    response_mask_BT = data_BT.response_masks[i].to(single_logprobs.device)
-                    single_logprobs = torch.masked_fill(
-                        single_logprobs, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB
-                    )
+                    response_mask_BT = data_BT.response_masks[i]
+                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
                     logprobs_BT.append(single_logprobs)
                 continue
 
@@ -436,8 +488,8 @@ def compute_logprobs(
             split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)
 
             for i, logprob_BT in zip(batch_indices, split_logprobs):
-                response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
-                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
+                response_mask_BT = data_BT.response_masks[i]
+                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:].bool())
                 logprobs_BT.append(logprob_BT)
 
     return logprobs_BT
@@ -467,3 +519,74 @@ def calculate_token_counts(
         accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
 
     return accumulation_counts
+
+
+_SCALAR_LOSS_STAT_KEYS = [
+    "loss/kl_avg",
+    "loss/policy_avg",
+    "loss/total_avg",
+    "objective/kl0_avg",
+    "objective/kl1_avg",
+    "objective/kl2_avg",
+    "objective/kl3_avg",
+    "policy/clipfrac_avg",
+    "val/ratio",
+    "val/tis_clipfrac",
+    "val/tis_ratio",
+]
+
+
+def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bool = False) -> dict[str, torch.Tensor]:
+    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+    if record_entropy:
+        stats |= {"policy/entropy_avg": torch.zeros(num_samples, device=device)}
+    return stats
+
+
+def populate_sample_loss_stats(
+    loss_stats_B: dict[str, torch.Tensor],
+    sample_idx: int,
+    pg_loss: torch.Tensor,
+    clip_mask: torch.Tensor,
+    ratio: torch.Tensor,
+    loss: torch.Tensor,
+    response_mask: torch.Tensor,
+    new_logprobs: torch.Tensor,
+    ref_logprobs: torch.Tensor | None,
+    entropy: torch.Tensor | None,
+    config: GRPOExperimentConfig,
+    tis_clamped: torch.Tensor | None = None,
+    tis_unclamped: torch.Tensor | None = None,
+) -> None:
+    with torch.no_grad():
+        if config.load_ref_policy and ref_logprobs is not None:
+            ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
+            kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
+            kl_values = masked_mean(kl_4BT, response_mask).float()
+            for j in range(4):
+                loss_stats_B[f"objective/kl{j}_avg"][sample_idx] = kl_values[j]
+            loss_stats_B["loss/kl_avg"][sample_idx] = kl_values[config.kl_estimator] * config.beta
+        if tis_clamped is not None and tis_unclamped is not None:
+            loss_stats_B["val/tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
+            loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
+                (tis_clamped < tis_unclamped).float(), response_mask
+            )
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(clip_mask.float(), response_mask)
+        loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
+        loss_stats_B["loss/total_avg"][sample_idx] = loss
+        loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)
+        if entropy is not None:
+            loss_stats_B["policy/entropy_avg"][sample_idx] = masked_mean(entropy, response_mask).float()
+
+
+def compute_metrics_from_loss_stats(
+    loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor
+) -> dict[str, float]:
+    total_tokens = token_counts.sum()
+    weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
+
+    metrics: dict[str, float] = {}
+    for key in loss_stats_B:
+        metrics[key] = (loss_stats_B[key] * weights).sum().item()
+    metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
+    return metrics

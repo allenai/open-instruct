@@ -39,6 +39,7 @@ if [ -n "$1" ]; then
         --budget ai2/oe-adapt \
         --gpus 1 \
         --non_resumable \
+        --no_auto_dataset_cache \
         -- \
         $LAUNCH_CMD
 else

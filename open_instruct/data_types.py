@@ -114,3 +114,12 @@ class CollatedBatchData:
 
     def __len__(self) -> int:
         return len(self.query_responses)
+
+    def to(self, device: torch.device, non_blocking: bool = True) -> "CollatedBatchData":
+        return dataclasses.replace(
+            self,
+            **{
+                f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
+                for f in dataclasses.fields(self)
+            },
+        )
