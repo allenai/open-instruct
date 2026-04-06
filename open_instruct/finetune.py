@@ -20,7 +20,6 @@ import warnings
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
-    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
 
 # isort: on
 import json
@@ -395,17 +394,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 sp_attn_implementation="flash_attention_3" if args.use_flash_attn else "sdpa",
             ),
         )
-        # Monkey-patch DeepSpeed Ulysses SP to make position_ids contiguous before
-        # all_gather. Models like Qwen3.5 create non-contiguous position_ids internally
-        # (via expand + slice) which causes ValueError in NCCL all_gather.
-        _orig_usp_forward = UlyssesSPAttentionHF.forward
-
-        def _patched_usp_forward(self, query, key, value, *args, **kwargs):
-            if "position_ids" in kwargs and not kwargs["position_ids"].is_contiguous():
-                kwargs["position_ids"] = kwargs["position_ids"].contiguous()
-            return _orig_usp_forward(self, query, key, value, *args, **kwargs)
-
-        UlyssesSPAttentionHF.forward = _patched_usp_forward
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
