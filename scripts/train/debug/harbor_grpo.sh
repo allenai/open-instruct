@@ -35,9 +35,9 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list open-thoughts/OpenThoughts-TBLite 1.0 \
+    --dataset_mixer_list NousResearch/openthoughts-tblite 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list open-thoughts/OpenThoughts-TBLite 8 \
+    --dataset_mixer_eval_list NousResearch/openthoughts-tblite 8 \
     --dataset_mixer_eval_list_splits train \
     --dataset_transform_fn harbor_tokenize_v1 \
     --max_prompt_token_length 2048 \
