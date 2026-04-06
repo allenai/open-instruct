@@ -1,8 +1,8 @@
 #!/bin/bash
-# SFT Qwen3.5-4B on tmax-sft-full-20260403 with default truncation.
+# SFT Qwen3.5-9B on tmax-sft-full-20260403 with default truncation.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-EXP_NAME="${EXP_NAME:-sft_qwen35_4b_tmax_0403}"
+EXP_NAME="${EXP_NAME:-sft_qwen35_9b_tmax_0403}"
 
 DATASETS="hamishivi/tmax-sft-full-20260403 1.0"
 DATASET_SPLITS="train"
@@ -27,8 +27,8 @@ uv run python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name ${EXP_NAME} \
-    --model_name_or_path Qwen/Qwen3.5-4B \
-    --tokenizer_name Qwen/Qwen3.5-4B \
+    --model_name_or_path Qwen/Qwen3.5-9B \
+    --tokenizer_name Qwen/Qwen3.5-9B \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits $DATASET_SPLITS \
     --dataset_transform_fn sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
