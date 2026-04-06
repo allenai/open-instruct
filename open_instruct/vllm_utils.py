@@ -99,30 +99,6 @@ logger = logger_utils.setup_logger(__name__)
 MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
 MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
-# ---------------------------------------------------------------------------
-# Monkey-patch: transformers 5.4+ rope validation with Qwen3.5
-#
-# When vLLM deserializes a config from JSON, ignore_keys_at_rope_validation
-# arrives as a list (JSON has no set type). _check_received_keys then does
-# `received_keys -= ignore_keys` which is `set -= list` → TypeError.
-# The @strict decorator captures validators at class decoration time, so
-# patching validate_rope on PreTrainedConfig is too late. Instead, patch
-# _check_received_keys to normalise ignore_keys to a set.
-# ---------------------------------------------------------------------------
-import transformers  # noqa: E402
-
-_original_check_received_keys = transformers.PreTrainedConfig._check_received_keys
-
-
-@staticmethod
-def _patched_check_received_keys(rope_type, received_keys, required_keys, optional_keys=None, ignore_keys=None):
-    if ignore_keys is not None and not isinstance(ignore_keys, set):
-        ignore_keys = set(ignore_keys)
-    return _original_check_received_keys(rope_type, received_keys, required_keys, optional_keys, ignore_keys)
-
-
-transformers.PreTrainedConfig._check_received_keys = _patched_check_received_keys
-
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
