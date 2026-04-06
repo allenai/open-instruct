@@ -23,6 +23,7 @@ uv run mason.py \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
+    --no_auto_dataset_cache \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
