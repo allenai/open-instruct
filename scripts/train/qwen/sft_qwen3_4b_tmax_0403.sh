@@ -2,7 +2,7 @@
 # SFT Qwen3.5-9B on tmax-sft-full-20260403 with default truncation.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-EXP_NAME="${EXP_NAME:-sft_qwen35_9b_tmax_0403}"
+EXP_NAME="${EXP_NAME:-sft_qwen35_9b_tmax_0406}"
 
 DATASETS="hamishivi/tmax-sft-full-20260403 1.0"
 DATASET_SPLITS="train"
