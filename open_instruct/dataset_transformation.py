@@ -1133,6 +1133,29 @@ def mask_labels(
     the prefix contains a user turn, then everything from position 0 is masked in
     one shot.
     """
+    chat_template_kwargs: dict[str, Any] = {
+        "tokenize": True,
+        "return_tensors": "pt",
+        "return_dict": False,
+        "padding": False,
+        "truncation": max_seq_length is not None,
+        "max_length": max_seq_length,
+    }
+
+    # We find token boundaries by tokenizing message prefixes with
+    # apply_chat_template. For each masked message we need:
+    #   start = len(tokens(messages[:idx]))       — end of previous messages
+    #   end   = len(tokens(messages[:idx+1]))     — end of this message
+    # Then labels[:, start:end] = -100.
+    #
+    # Special cases:
+    #   - If the next message is an assistant turn, we set add_generation_prompt=True
+    #     when computing `end` so that the assistant header (e.g. "<|assistant|>") is
+    #     included in the masked region and excluded from the loss.
+    #   - Some chat templates (e.g. Qwen3.5) crash on prefixes with no user turn.
+    #     We track `seen_user` and defer masking until a user turn appears, then
+    #     mask everything from position 0 in one shot via `deferred_from_zero`.
+
     deferred_from_zero = False
     seen_user = False
     for message_idx, message in enumerate(messages):
@@ -1142,46 +1165,29 @@ def mask_labels(
         if not should_mask(message_idx, message, messages):
             continue
 
+        # Defer: can't call apply_chat_template on a prefix with no user turn.
         if not seen_user:
             deferred_from_zero = True
             continue
 
+        # Compute start of this message's token span.
         if message_idx == 0 or deferred_from_zero:
+            # First message or catching up after deferred system/tool turns — start at 0.
             message_start_idx = 0
             deferred_from_zero = False
         else:
             message_start_idx = tokenizer.apply_chat_template(
-                conversation=messages[:message_idx],
-                tokenize=True,
-                return_tensors="pt",
-                return_dict=False,
-                padding=False,
-                truncation=True,
-                max_length=max_seq_length,
-                add_generation_prompt=False,
+                conversation=messages[:message_idx], add_generation_prompt=False, **chat_template_kwargs
             ).shape[1]
-        if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-            message_end_idx = tokenizer.apply_chat_template(
-                conversation=messages[: message_idx + 1],
-                tokenize=True,
-                return_tensors="pt",
-                return_dict=False,
-                padding=False,
-                truncation=True,
-                max_length=max_seq_length,
-                add_generation_prompt=True,
-            ).shape[1]
-        else:
-            message_end_idx = tokenizer.apply_chat_template(
-                conversation=messages[: message_idx + 1],
-                tokenize=True,
-                return_tensors="pt",
-                return_dict=False,
-                padding=False,
-                truncation=True,
-                max_length=max_seq_length,
-                add_generation_prompt=False,
-            ).shape[1]
+
+        # Compute end of this message's token span. If the next turn is an
+        # assistant turn, include the generation prompt header in the masked
+        # region so it's excluded from the loss.
+        next_is_assistant = message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant"
+        message_end_idx = tokenizer.apply_chat_template(
+            conversation=messages[: message_idx + 1], add_generation_prompt=next_is_assistant, **chat_template_kwargs
+        ).shape[1]
+
         labels[:, message_start_idx:message_end_idx] = -100
         if max_seq_length and message_end_idx >= max_seq_length:
             break
