@@ -587,7 +587,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                if accelerator.sync_gradients and args.max_grad_norm is not None:
                     accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
