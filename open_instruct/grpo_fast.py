@@ -55,7 +55,6 @@ import shutil
 import socket
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import asdict
 from queue import Empty, Full, Queue
 from typing import Any
@@ -134,18 +133,6 @@ logger = logger_utils.setup_logger(__name__)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
-
-
-def _build_vlm_name_mapper(model_name: str) -> Callable[[str], str] | None:
-    """Build a name mapper for VLM models loaded as CausalLM.
-
-    When a VLM (e.g. Qwen3.5) is loaded via AutoModelForCausalLM, param names
-    lack the ``language_model.`` prefix that vLLM expects because vLLM loads
-    the full VLM architecture (e.g. Qwen3_5ForConditionalGeneration).
-    """
-    if "qwen3.5" in model_name.lower():
-        return lambda name: f"language_model.{name}"
-    return None
 
 
 @ray.remote(num_gpus=1)
@@ -262,7 +249,12 @@ class PolicyTrainerRayProcess(RayProcess):
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-        self._vllm_name_mapper = _build_vlm_name_mapper(model_config.model_name_or_path)
+        # When a VLM (e.g. Qwen3.5) is loaded via AutoModelForCausalLM, param names
+        # lack the "language_model." prefix that vLLM expects because vLLM loads
+        # the full VLM architecture (e.g. Qwen3_5ForConditionalGeneration).
+        self._vllm_name_mapper = (
+            (lambda name: f"language_model.{name}") if "qwen3.5" in model_config.model_name_or_path.lower() else None
+        )
         self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
