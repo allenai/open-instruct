@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1579).
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
 - Add a vLLM-based teacher logit sampling pipeline for offline distillation, including `sample_logits_vllm.py`, distillkit sampling writer utilities, and a launch script for generating compressed parquet shards (https://github.com/allenai/open-instruct/pull/1534).
 - Add user-focused documentation for tool use training, RL environments, parser selection, and rollout configuration (https://github.com/allenai/open-instruct/pull/1546).
