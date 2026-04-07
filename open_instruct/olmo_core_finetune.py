@@ -31,22 +31,22 @@ from typing import Any, cast
 
 import torch
 import torch.distributed as dist
+from olmo_core import optim
 from olmo_core.config import DType
-from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
-from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn import attention
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
-from olmo_core.train import Duration, TrainerConfig, prepare_training_environment, teardown_training_environment
-from olmo_core.train.callbacks import ConfigSaverCallback, GarbageCollectorCallback, GPUMemoryMonitorCallback
+from olmo_core.train import (
+    Duration,
+    TrainerConfig,
+    callbacks,
+    prepare_training_environment,
+    teardown_training_environment,
+)
+from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.checkpoint import CheckpointerConfig
-from olmo_core.train.train_module import (
-    TransformerActivationCheckpointingConfig,
-    TransformerActivationCheckpointingMode,
-    TransformerDataParallelConfig,
-    TransformerTrainModuleConfig,
-)
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, olmo_core_utils, utils
@@ -103,7 +103,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     model, model_config = olmo_core_utils.setup_model(
         args.model.model_name_or_path,
         args.model.config_name,
-        cast(AttentionBackendName, args.model.attn_implementation),
+        cast(attention.AttentionBackendName, args.model.attn_implementation),
     )
 
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
@@ -136,32 +136,32 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         f"Total training steps: {effective_steps} (data_loader len={len(data_loader)}, epochs={args.training.num_epochs})"
     )
 
-    scheduler = LinearWithWarmup(warmup_steps=int(effective_steps * args.training.warmup_ratio), alpha_f=0.0)
+    scheduler = optim.LinearWithWarmup(warmup_steps=int(effective_steps * args.training.warmup_ratio), alpha_f=0.0)
 
     rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
     dp_shard_degree = min(world_size, torch.cuda.device_count() if torch.cuda.is_available() else 1)
 
-    dp_config = TransformerDataParallelConfig(
-        name=DataParallelType.hsdp if world_size > dp_shard_degree else DataParallelType.fsdp,
+    dp_config = train_module_lib.TransformerDataParallelConfig(
+        name=parallel.DataParallelType.hsdp if world_size > dp_shard_degree else parallel.DataParallelType.fsdp,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
         shard_degree=dp_shard_degree,
     )
 
     if args.training.activation_memory_budget < 1.0 and args.training.compile_model:
-        ac_config = TransformerActivationCheckpointingConfig(
-            mode=TransformerActivationCheckpointingMode.budget,
+        ac_config = train_module_lib.TransformerActivationCheckpointingConfig(
+            mode=train_module_lib.TransformerActivationCheckpointingMode.budget,
             activation_memory_budget=args.training.activation_memory_budget,
         )
     else:
         ac_config = None
 
-    train_module_config = TransformerTrainModuleConfig(
+    train_module_config = train_module_lib.TransformerTrainModuleConfig(
         rank_microbatch_size=rank_microbatch_size,
         max_sequence_length=args.training.max_seq_length,
         z_loss_multiplier=None,
         compile_model=args.training.compile_model,
-        optim=SkipStepAdamWConfig(
+        optim=optim.SkipStepAdamWConfig(
             lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
         ),
         dp_config=dp_config,
@@ -186,9 +186,9 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     config_dict = dataclasses.asdict(args)
 
     trainer_callbacks: dict[str, Any] = {
-        "gpu_monitor": GPUMemoryMonitorCallback(),
-        "config_saver": ConfigSaverCallback(_config=config_dict),
-        "garbage_collector": GarbageCollectorCallback(),
+        "gpu_monitor": callbacks.GPUMemoryMonitorCallback(),
+        "config_saver": callbacks.ConfigSaverCallback(_config=config_dict),
+        "garbage_collector": callbacks.GarbageCollectorCallback(),
         "checkpointer": olmo_core_utils.build_checkpointer_callback(
             args.checkpoint.checkpointing_steps, args.checkpoint.ephemeral_save_interval
         ),
