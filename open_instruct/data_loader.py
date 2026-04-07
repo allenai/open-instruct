@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, padding_free_collator, replay_buffer, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -486,6 +486,18 @@ class StreamingDataLoaderConfig:
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
+    # Replay buffer
+    replay_buffer_capacity: int | None = None
+    """Max items in replay buffer. None = global_batch_size (FIFO-equivalent default)."""
+    replay_buffer_sampler: str = "uniform"
+    """Sampling strategy: 'uniform', 'prioritized', 'fifo', 'lifo'."""
+    replay_buffer_remover: str = "fifo"
+    """Removal strategy when buffer is full: 'uniform', 'prioritized', 'fifo', 'lifo'."""
+    replay_buffer_max_times_sampled: int = 1
+    """Evict items after being sampled this many times. 1 = each item used once (default)."""
+    replay_buffer_min_size: int | None = None
+    """Min items before sampling is allowed. None = global_batch_size."""
+
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -744,6 +756,7 @@ class ProcessedResult:
     percent_solved: float
 
 
+
 def process_single_result(
     result: data_types.GenerationResult,
     generation_config: vllm.SamplingParams,
@@ -1000,7 +1013,7 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
-    collected_results = []  # Track results for potential requeue on timeout
+    collected_results = []
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
@@ -1247,21 +1260,27 @@ class DataPreparationActor:
         self.total_samples_written = 0
         self.metadata_saved = False
 
+        capacity = config.replay_buffer_capacity if config.replay_buffer_capacity is not None else global_batch_size
+        min_size = config.replay_buffer_min_size if config.replay_buffer_min_size is not None else global_batch_size
+        self._table = replay_buffer.Table(
+            max_size=capacity,
+            sampler=replay_buffer.make_selector(config.replay_buffer_sampler),
+            remover=replay_buffer.make_selector(config.replay_buffer_remover),
+            max_times_sampled=config.replay_buffer_max_times_sampled,
+            rate_limiter=replay_buffer.MinSize(min_size),
+        )
+
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
             self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
             logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
 
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="DataPrepActor")
+        self._consumer_future = self._executor.submit(self._consumer_loop)
         self._prep_future = self._executor.submit(self._data_preparation_loop)
 
-    def _data_preparation_loop(self):
-        logger.info("[DataPreparationActor] Starting _data_preparation_loop")
-
-        if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
-            save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
-            self.metadata_saved = True
-
+    def _consumer_loop(self):
+        logger.info("[DataPreparationActor] Starting _consumer_loop")
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
         for _ in range(num_initial_prompts):
@@ -1273,6 +1292,46 @@ class DataPreparationActor:
                 is_eval=False,
                 base_env_config=self.base_env_config,
             )
+
+        insert_counter = 0
+        while not self.shutdown_requested:
+            try:
+                raw_result = self.inference_results_Q.get(timeout=1.0)
+            except Empty:
+                continue
+
+            if isinstance(raw_result, data_types.ShutdownSentinel):
+                logger.info("[DataPreparationActor] Consumer received ShutdownSentinel")
+                self._table.shutdown()
+                return
+
+            processed = process_single_result(
+                result=raw_result,
+                generation_config=self.generation_config,
+                tokenizer=self.tokenizer,
+                dataset=self.dataset,
+                max_possible_score=self.config.max_possible_score,
+                no_resampling_pass_rate=self.config.no_resampling_pass_rate,
+                iter_dataloader=self.iter_dataloader,
+                filter_zero_std_samples=self.config.filter_zero_std_samples,
+                replenish_prompts=True,
+                param_prompt_Q=self.param_prompt_Q,
+                base_env_config=self.base_env_config,
+            )
+
+            if processed is not None:
+                key = f"{raw_result.prompt_id}_{insert_counter}"
+                insert_counter += 1
+                self._table.insert(key, processed)
+
+        self._table.shutdown()
+
+    def _data_preparation_loop(self):
+        logger.info("[DataPreparationActor] Starting _data_preparation_loop")
+
+        if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
+            save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
+            self.metadata_saved = True
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
@@ -1289,33 +1348,17 @@ class DataPreparationActor:
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
-                f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
+                f"[DataPreparationActor] Step {step}: sampling {self.global_batch_size} items from replay buffer"
             )
-            result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
-                self.inference_results_Q,
-                self.generation_config,
-                num_prompts=self.global_batch_size,
-                model_dims=self.model_dims,
-                tokenizer=self.tokenizer,
-                dataset=self.dataset,
-                actor_manager=self.actor_manager,
-                active_sampling=self.config.active_sampling,
-                filter_zero_std_samples=self.config.filter_zero_std_samples,
-                replenish_prompts=True,
-                no_resampling_pass_rate=self.config.no_resampling_pass_rate,
-                iter_dataloader=self.iter_dataloader,
-                param_prompt_Q=self.param_prompt_Q,
-                training_step=step,
-                verbose=self.verbose,
-                max_possible_score=self.config.max_possible_score,
-                base_env_config=self.base_env_config,
-            )
-            logger.info(
-                f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
-            )
-
-            if isinstance(result, data_types.ShutdownSentinel):
+            sampled = self._table.sample(self.global_batch_size)
+            if sampled is None:
+                logger.info("[DataPreparationActor] Table shut down, exiting")
                 return
+
+            result, batch, reward_metrics, batch_stats = combine_processed_results(
+                sampled, self.generation_config, self.actor_manager
+            )
+            logger.info(f"[DataPreparationActor] Step {step}: combine_processed_results returned")
 
             if result is None:
                 empty_data = [
@@ -1480,6 +1523,8 @@ class DataPreparationActor:
         )
         wait_count = 0
         while True:
+            if self._consumer_future.done():
+                self._consumer_future.result()
             if self._prep_future.done():
                 self._prep_future.result()
             with self.lock:
