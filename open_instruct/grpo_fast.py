@@ -42,7 +42,12 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
-from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_loader import (
+    DataPreparationActor,
+    accumulate_inference_batches,
+    add_prompt_to_generator,
+    summarize_test_solve_rate_metrics,
+)
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
@@ -133,6 +138,16 @@ logger = logger_utils.setup_logger(__name__)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 1200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+
+
+def estimate_pass_at_k_array(num_samples: int, num_correct: np.ndarray, k: int) -> np.ndarray:
+    return np.asarray(
+        [
+            grpo_utils.estimate_pass_at_k(num_samples=num_samples, num_correct=int(correct), k=k)
+            for correct in num_correct
+        ],
+        dtype=float,
+    )
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -1639,8 +1654,9 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
-    base_env_config: EnvConfig,
+    base_env_config: EnvConfig | None = None,
     actor_manager=None,
+    max_possible_score: float = 1.0,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1649,6 +1665,8 @@ def maybe_evaluate(
     """
     if eval_dataset is None:
         return True  # No eval to do, so consider it "successful"
+    if base_env_config is None:
+        base_env_config = EnvConfig()
 
     try:
         # timeout 0.01 if this is not the last training step
@@ -1656,7 +1674,7 @@ def maybe_evaluate(
         timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
             num_prompts=len(eval_dataset),
@@ -1669,6 +1687,7 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            max_possible_score=max_possible_score,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1682,7 +1701,7 @@ def maybe_evaluate(
         eval_reward_metrics.pop("eval/model_step_max", None)
         model_step_mean = eval_reward_metrics.pop("eval/model_step_mean")
         eval_reward_metrics.pop("eval/model_step_span", None)
-        model_step_values = eval_reward_metrics.pop("eval/model_step_values", None)
+        eval_reward_metrics.pop("eval/model_step_values", None)
         eval_k = eval_generation_config.n
         scores = np.array(eval_batch.scores)
         pass_at_by_k: dict[int, float] = {}
@@ -1840,6 +1859,11 @@ def maybe_evaluate(
                 dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
             for dataset_name, rates in dataset_to_solve_rates.items():
                 eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
+            eval_metrics.update(
+                summarize_test_solve_rate_metrics(
+                    "eval", getattr(eval_batch_stats, "test_records", None), add_per_test_scalars=False
+                )
+            )
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens

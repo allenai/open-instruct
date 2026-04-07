@@ -4,9 +4,10 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import numpy as np
 from parameterized import parameterized
@@ -228,6 +229,8 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertAlmostEqual(result.score, 2 / 3)
+        self.assertEqual(result.metadata["manufactoria_test_results"][0]["test_index"], 0)
+        self.assertTrue(result.metadata["manufactoria_test_results"][0]["passed"])
 
     async def test_all_pass_scoring(self):
         verifier = ManufactoriaVerifier(
@@ -253,6 +256,36 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.score, 0.0)
+
+    async def test_preserves_test_metadata(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="pass_rate",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": False,
+            "results": [{"passed": True}, {"passed": False}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+        label = [
+            {"input": "", "expected_accepted": True, "test_global_index": 7, "test_group_name": "quartile0"},
+            {"input": "R", "expected_accepted": False, "test_id": "custom_test", "test_quartile": 3},
+        ]
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", label)
+
+        self.assertEqual(result.metadata["manufactoria_test_results"][0]["test_global_index"], 7)
+        self.assertEqual(result.metadata["manufactoria_test_results"][0]["test_group_name"], "quartile0")
+        self.assertEqual(result.metadata["manufactoria_test_results"][1]["test_id"], "custom_test")
+        self.assertEqual(result.metadata["manufactoria_test_results"][1]["test_quartile"], 3)
 
 
 class TestGSM8KVerifier(unittest.TestCase):
@@ -307,6 +340,37 @@ class TestRewardConfig(unittest.TestCase):
         self.assertTrue(all(score in {0.0, float(verification_reward)} for score in scores))
         self.assertIn("objective/spurious_reward", metrics)
         self.assertIn("objective/spurious_correct_rate", metrics)
+
+    def test_apply_verifiable_reward_collects_manufactoria_test_records(self):
+        verifier = Mock()
+        verifier.name = "manufactoria"
+        verifier.weight = 1.0
+        verifier.async_call = AsyncMock(
+            return_value=VerificationResult(
+                score=0.5,
+                metadata={
+                    "manufactoria_test_results": [
+                        {"test_index": 0, "passed": True, "test_global_index": 4},
+                        {"test_index": 1, "passed": False, "test_group_name": "quartile1"},
+                    ]
+                },
+            )
+        )
+
+        rewards, per_func_rewards, extra_metrics = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"manufactoria": verifier},
+                responses=[[1]],
+                decoded_responses=["resp"],
+                ground_truths=[json.dumps([{"input": ""}, {"input": "R"}])],
+                datasets=["manufactoria/basic_mix_test"],
+            )
+        )
+
+        self.assertEqual(rewards, [0.5])
+        self.assertEqual(per_func_rewards[0]["manufactoria"], 0.5)
+        self.assertEqual(len(extra_metrics["__manufactoria_test_records__"]), 2)
+        self.assertEqual(extra_metrics["__manufactoria_test_records__"][0]["response_idx"], 0)
 
     def test_spurious_reward_mode_logs_spurious_metrics(self):
         verification_reward = 10

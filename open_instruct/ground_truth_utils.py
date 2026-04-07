@@ -1292,6 +1292,17 @@ class ManufactoriaVerifier(VerifierFunction):
             return model_output
         return matches[-1].strip()
 
+    @staticmethod
+    def _extract_test_metadata(test_case: Any, test_index: int) -> dict[str, Any]:
+        if not isinstance(test_case, dict):
+            return {"test_index": test_index}
+
+        metadata = {"test_index": test_index}
+        for key in ("test_id", "test_global_index", "test_group_name", "test_quartile", "description"):
+            if key in test_case:
+                metadata[key] = test_case[key]
+        return metadata
+
     async def async_call(
         self,
         tokenized_prediction: list[int],
@@ -1340,8 +1351,14 @@ class ManufactoriaVerifier(VerifierFunction):
                 raw_results = result.get("results", [])
                 if isinstance(raw_results, list) and raw_results:
                     passes = [bool(test_result.get("passed", False)) for test_result in raw_results]
+                    test_metadata = [
+                        self._extract_test_metadata(test_case, test_index)
+                        | {"passed": bool(test_result.get("passed", False))}
+                        for test_index, (test_case, test_result) in enumerate(zip(test_cases, raw_results))
+                    ]
                     pass_rate_score = sum(passes) / len(passes)
                 else:
+                    test_metadata = []
                     pass_rate_score = all_pass_score
             elif "results" in result and isinstance(result["results"], list) and result["results"]:
                 raw_results = result["results"]
@@ -1349,6 +1366,10 @@ class ManufactoriaVerifier(VerifierFunction):
                     passes = [bool(test_result.get("passed", False)) for test_result in raw_results]
                 else:
                     passes = [bool(value) for value in raw_results]
+                test_metadata = [
+                    self._extract_test_metadata(test_case, test_index) | {"passed": bool(passed)}
+                    for test_index, (test_case, passed) in enumerate(zip(test_cases, passes))
+                ]
                 pass_rate_score = sum(passes) / len(passes)
                 all_pass_score = 1.0 if pass_rate_score == 1.0 else 0.0
             else:
@@ -1359,7 +1380,7 @@ class ManufactoriaVerifier(VerifierFunction):
                 score = pass_rate_score
             else:
                 score = all_pass_score
-            return VerificationResult(score=score)
+            return VerificationResult(score=score, metadata={"manufactoria_test_results": test_metadata})
         except Exception as e:
             logger.warning(f"Error verifying Manufactoria code sample: {e}")
             return VerificationResult(score=0.0)
@@ -1686,6 +1707,8 @@ async def apply_verifiable_reward(
             return reward_fn_mapping.get("gsm8k")
         if dataset_key.startswith("math"):
             return reward_fn_mapping.get("math")
+        if dataset_key.startswith("manufactoria"):
+            return reward_fn_mapping.get("manufactoria")
         return None
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(
@@ -1721,6 +1744,7 @@ async def apply_verifiable_reward(
     response_per_func_rewards = [{} for _ in range(len(responses))]
     fallback_used_counts: Counter[str] = Counter()
     fallback_correct_counts: Counter[str] = Counter()
+    manufactoria_test_records: list[dict[str, Any]] = []
 
     for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
@@ -1736,6 +1760,8 @@ async def apply_verifiable_reward(
         )
 
         result_metadata = getattr(result, "metadata", {}) or {}
+        for test_result in result_metadata.get("manufactoria_test_results", []) or []:
+            manufactoria_test_records.append({"response_idx": response_idx} | dict(test_result))
         if result_metadata.get("llm_judge_fallback_used"):
             verifier_name = result_metadata.get("llm_judge_fallback_primary_verifier", dataset)
             fallback_used_counts[verifier_name] += 1
@@ -1744,6 +1770,8 @@ async def apply_verifiable_reward(
             )
 
     extra_metrics: dict[str, float] = {}
+    if manufactoria_test_records:
+        extra_metrics["__manufactoria_test_records__"] = manufactoria_test_records
     total_fallback_uses = sum(fallback_used_counts.values())
     total_fallback_correct = sum(fallback_correct_counts.values())
     if total_fallback_uses > 0:

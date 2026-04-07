@@ -606,6 +606,13 @@ async def compute_rewards(
         result.request_info,
         k_raw_queries,
     )
+    manufactoria_test_records = metrics.get("__manufactoria_test_records__")
+    if isinstance(manufactoria_test_records, list):
+        for test_record in manufactoria_test_records:
+            if not isinstance(test_record, dict):
+                continue
+            test_record.setdefault("prompt_index", int(result.index))
+            test_record.setdefault("prompt_dataset", example[VERIFIER_SOURCE_KEY])
     return scores, metrics
 
 

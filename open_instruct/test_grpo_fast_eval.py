@@ -474,6 +474,100 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=2), 0.5)
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=4), 1.0)
 
+    def test_records_eval_test_solve_rate_metrics(self):
+        args = SimpleNamespace(
+            num_training_steps=200,
+            with_tracking=False,
+            backend_timeout=120,
+            eval_only=False,
+            eval_timeout_minutes=None,
+        )
+        eval_dataset = self._build_eval_dataset(num_prompts=1)
+        eval_queue = _QueueWithSize(size=1)
+        eval_generation_config = SimpleNamespace(n=2)
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["prompt", "prompt"]
+        tokenizer.pad_token = "<pad>"
+
+        eval_result = SimpleNamespace(
+            responses=[[1], [2]],
+            finish_reasons=["stop", "stop"],
+            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=4, generation_time=2.0),
+        )
+        eval_batch = SimpleNamespace(
+            scores=[1.0, 0.0],
+            queries=[[1, 2, 3], [1, 2, 3]],
+            decoded_responses=["resp_a", "resp_b"],
+            ground_truths=["42", "42"],
+            active_tools=None,
+        )
+        eval_batch_stats = SimpleNamespace(
+            percent_solved_hist=np.array([0.5]),
+            prompt_indices=[0],
+            prompt_datasets=["manufactoria_basic_mix_test"],
+            filtered_prompt_datasets=[],
+            filtered_prompt_datasets_zero=[],
+            filtered_prompt_datasets_solved=[],
+            filtered_prompt_datasets_nonzero=[],
+            test_records=[
+                {
+                    "prompt_index": 0,
+                    "test_global_index": 3,
+                    "passed": True,
+                    "test_group_name": "quartile0",
+                    "test_quartile": 0,
+                },
+                {
+                    "prompt_index": 0,
+                    "test_global_index": 3,
+                    "passed": False,
+                    "test_group_name": "quartile0",
+                    "test_quartile": 0,
+                },
+                {
+                    "prompt_index": 0,
+                    "test_global_index": 7,
+                    "passed": False,
+                    "test_group_name": "quartile3",
+                    "test_quartile": 3,
+                },
+                {
+                    "prompt_index": 0,
+                    "test_global_index": 7,
+                    "passed": True,
+                    "test_group_name": "quartile3",
+                    "test_quartile": 3,
+                },
+            ],
+        )
+
+        with (
+            patch(
+                "open_instruct.grpo_fast.accumulate_inference_batches",
+                return_value=(eval_result, eval_batch, {"model_step_mean": 100.0}, eval_batch_stats),
+            ),
+            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_fast.print_rich_table"),
+        ):
+            maybe_evaluate(
+                args=args,
+                training_step=100,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=tokenizer,
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                max_possible_score=1.0,
+            )
+
+        logged = mock_print_metrics.call_args.args[0]
+        self.assertEqual(logged["eval/test_solve_rate_by_index"], [(3, 0.5), (7, 0.5)])
+        self.assertEqual(logged["eval/test_solve_rate_by_index_count"], 2)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile0"], 0.5)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile3"], 0.5)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile0"], logged["eval/test_solve_rate_mean_quartile3"])
+
 
 if __name__ == "__main__":
     unittest.main()
