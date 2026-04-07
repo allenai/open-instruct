@@ -2228,8 +2228,22 @@ def main(
     checkpoint_state = None
     data_prep_actor_state = None
     if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
+        # Find the latest checkpoint tag from the 'latest' file written by DeepSpeed/calibrate_checkpoint_state_dir
+        latest_file = os.path.join(args.checkpoint_state_dir, "latest")
+        checkpoint_path = None
+        if os.path.exists(latest_file):
+            with open(latest_file) as f:
+                tag = f.read().strip()
+            # DeepSpeed saves rank-0 model states (including client_state) in this file
+            candidate = os.path.join(args.checkpoint_state_dir, tag, "mp_rank_00_model_states.pt")
+            if os.path.exists(candidate):
+                checkpoint_path = candidate
+        if checkpoint_path is None:
+            # Fallback: search for any model states file in the checkpoint directory
+            matches = sorted(pathlib.Path(args.checkpoint_state_dir).rglob("mp_rank_00_model_states.pt"))
+            if matches:
+                checkpoint_path = str(matches[-1])
+        if checkpoint_path is not None and os.path.exists(checkpoint_path):
             checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             logger.info(f"Loaded checkpoint state from {checkpoint_path}")
             data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
