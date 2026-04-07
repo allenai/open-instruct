@@ -6,7 +6,7 @@ from typing import Literal
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -25,38 +25,17 @@ class GRPOLossType(enum.StrEnum):
 
 
 @dataclass
-class ExperimentConfig:
-    # Experiment
-    exp_name: str = "grpo"
-    """The name of this experiment"""
-    seed: int = 1
-    """Seed of the experiment"""
-    run_name: str | None = None
-    """RUNTIME VALUE: A unique name of this run"""
-
+class GRPOExperimentConfig(
+    olmo_core_utils.ExperimentConfig,
+    olmo_core_utils.TrainingConfig,
+    olmo_core_utils.LoggingConfig,
+    olmo_core_utils.CheckpointConfig,
+):
     # Optimizer
-    learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    lr_scheduler_type: Literal[
-        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-    ] = "linear"
-    """Which scheduler to use"""
-    warm_up_steps: int = 0
-    """Number of warm up steps for the scheduler"""
-    warmup_ratio: float = 0.0
-    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
-    weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
-    max_grad_norm: float = 1.0
-    """Maximum gradient norm for gradient clipping."""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
-    """Whether to use fused optimizer"""
 
     # Batch sizes
-    per_device_train_batch_size: int = 1
-    """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
@@ -73,8 +52,6 @@ class ExperimentConfig:
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
-    num_epochs: int = 1
-    """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
@@ -129,6 +106,10 @@ class ExperimentConfig:
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    fsdp_shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    fsdp_num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
     queue_dashboard_port: int | None = None
@@ -137,14 +118,6 @@ class ExperimentConfig:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_group_name: str | None = None
-    """Optional W&B group name used to group related runs together."""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: str | None = None
@@ -155,12 +128,8 @@ class ExperimentConfig:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: str = "output"
-    """Where to save the model"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
@@ -224,6 +193,28 @@ class ExperimentConfig:
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+
+        total_learner_gpus = sum(self.num_learners_per_node)
+        if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
+            expected = self.fsdp_shard_degree * self.fsdp_num_replicas
+            if expected != total_learner_gpus:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) * fsdp_num_replicas ({self.fsdp_num_replicas}) "
+                    f"= {expected}, but total learner GPUs = {total_learner_gpus} "
+                    f"(from num_learners_per_node={self.num_learners_per_node}). These must match."
+                )
+        elif self.fsdp_shard_degree is not None:
+            if total_learner_gpus % self.fsdp_shard_degree != 0:
+                raise ValueError(
+                    f"fsdp_shard_degree ({self.fsdp_shard_degree}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
+        elif self.fsdp_num_replicas is not None:
+            if total_learner_gpus % self.fsdp_num_replicas != 0:
+                raise ValueError(
+                    f"fsdp_num_replicas ({self.fsdp_num_replicas}) must evenly divide "
+                    f"total learner GPUs ({total_learner_gpus})."
+                )
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
@@ -306,7 +297,7 @@ def compute_grpo_loss(
     ratio: torch.Tensor,
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
-    config: ExperimentConfig,
+    config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
@@ -406,7 +397,7 @@ def compute_logprobs(
                         False,
                     )
 
-                    response_mask_BT = data_BT.response_masks[i].to(single_logprobs.device)
+                    response_mask_BT = data_BT.response_masks[i]
                     single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
                     logprobs_BT.append(single_logprobs)
                 continue
@@ -429,7 +420,7 @@ def compute_logprobs(
             split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)
 
             for i, logprob_BT in zip(batch_indices, split_logprobs):
-                response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
+                response_mask_BT = data_BT.response_masks[i]
                 logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:].bool())
                 logprobs_BT.append(logprob_BT)
 
@@ -462,19 +453,26 @@ def calculate_token_counts(
     return accumulation_counts
 
 
-def create_loss_stats(num_samples: int, token_counts: torch.Tensor, device: torch.device) -> dict[str, torch.Tensor]:
-    return {
-        "kl": torch.zeros(4, num_samples, device=device),
-        "kl_loss": torch.zeros(num_samples, device=device),
-        "tis_ratio": torch.zeros(num_samples, device=device),
-        "tis_clipfrac": torch.zeros(num_samples, device=device),
-        "pg_clipfrac": torch.zeros(num_samples, device=device),
-        "pg_loss": torch.zeros(num_samples, device=device),
-        "loss": torch.zeros(num_samples, device=device),
-        "ratio": torch.zeros(num_samples, device=device),
-        "entropy": torch.zeros(num_samples, device=device),
-        "token_count": token_counts,
-    }
+_SCALAR_LOSS_STAT_KEYS = [
+    "loss/kl_avg",
+    "loss/policy_avg",
+    "loss/total_avg",
+    "objective/kl0_avg",
+    "objective/kl1_avg",
+    "objective/kl2_avg",
+    "objective/kl3_avg",
+    "policy/clipfrac_avg",
+    "val/ratio",
+    "val/tis_clipfrac",
+    "val/tis_ratio",
+]
+
+
+def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bool = False) -> dict[str, torch.Tensor]:
+    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+    if record_entropy:
+        stats |= {"policy/entropy_avg": torch.zeros(num_samples, device=device)}
+    return stats
 
 
 def populate_sample_loss_stats(
@@ -489,7 +487,7 @@ def populate_sample_loss_stats(
     new_logprobs: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
     entropy: torch.Tensor | None,
-    config: ExperimentConfig,
+    config: GRPOExperimentConfig,
     tis_clamped: torch.Tensor | None = None,
     tis_unclamped: torch.Tensor | None = None,
 ) -> None:
@@ -497,42 +495,31 @@ def populate_sample_loss_stats(
         if config.load_ref_policy and ref_logprobs is not None:
             ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
             kl_4BT = model_utils.estimate_kl(ref_logprobs_diff, ratio)
-            loss_stats_B["kl"][:, sample_idx] = masked_mean(kl_4BT, response_mask).float()
-            loss_stats_B["kl_loss"][sample_idx] = loss_stats_B["kl"][config.kl_estimator, sample_idx] * config.beta
+            kl_values = masked_mean(kl_4BT, response_mask).float()
+            for j in range(4):
+                loss_stats_B[f"objective/kl{j}_avg"][sample_idx] = kl_values[j]
+            loss_stats_B["loss/kl_avg"][sample_idx] = kl_values[config.kl_estimator] * config.beta
         if tis_clamped is not None and tis_unclamped is not None:
-            loss_stats_B["tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
-            loss_stats_B["tis_clipfrac"][sample_idx] = masked_mean(
+            loss_stats_B["val/tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
+            loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
                 (tis_clamped < tis_unclamped).float(), response_mask
             )
-        loss_stats_B["pg_clipfrac"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
-        loss_stats_B["pg_loss"][sample_idx] = masked_mean(pg_loss, response_mask)
-        loss_stats_B["loss"][sample_idx] = loss
-        loss_stats_B["ratio"][sample_idx] = masked_mean(ratio, response_mask)
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
+        loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
+        loss_stats_B["loss/total_avg"][sample_idx] = loss
+        loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)
         if entropy is not None:
-            loss_stats_B["entropy"][sample_idx] = masked_mean(entropy, response_mask).float()
+            loss_stats_B["policy/entropy_avg"][sample_idx] = masked_mean(entropy, response_mask).float()
 
 
 def compute_metrics_from_loss_stats(
-    loss_stats_B: dict[str, torch.Tensor], config: ExperimentConfig
+    loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor
 ) -> dict[str, float]:
-    token_counts = loss_stats_B["token_count"]
     total_tokens = token_counts.sum()
     weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
     metrics: dict[str, float] = {}
-    if config.load_ref_policy:
-        for j in range(4):
-            metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum().item()
-        metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum().item()
-    metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum().item()
-    metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum().item()
-    metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum().item()
-    metrics["val/tis_ratio"] = (loss_stats_B["tis_ratio"] * weights).sum().item()
-    metrics["val/tis_clipfrac"] = (loss_stats_B["tis_clipfrac"] * weights).sum().item()
-    metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum().item()
-    weighted_mean_ratio = metrics["val/ratio"]
-    metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum().item()
-    if config.record_entropy:
-        metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum().item()
-    metrics["_token_count"] = total_tokens.item()
+    for key in loss_stats_B:
+        metrics[key] = (loss_stats_B[key] * weights).sum().item()
+    metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
     return metrics
