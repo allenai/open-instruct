@@ -929,6 +929,7 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
+MASKED_TOKEN_VALUE = -100
 DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
@@ -1111,7 +1112,7 @@ def sft_filter_v1(
     if max_token_length is not None:
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
-    contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+    contain_some_labels = any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
@@ -1174,7 +1175,7 @@ def mask_labels(
             conversation=messages[: message_idx + 1], add_generation_prompt=next_is_assistant, **chat_template_kwargs
         ).shape[1]
 
-        labels[:, message_start_idx:message_end_idx] = -100
+        labels[:, message_start_idx:message_end_idx] = MASKED_TOKEN_VALUE
         if max_seq_length and message_end_idx >= max_seq_length:
             break
 
@@ -1232,7 +1233,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
 
 
 def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
-    return any(x != -100 for x in row[LABELS_KEY])
+    return any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
 
 
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -1347,7 +1348,9 @@ def preference_tulu_tokenize_and_truncate_v1_2(
 
 
 def preference_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
-    return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
+    return any(x != MASKED_TOKEN_VALUE for x in row[CHOSEN_LABELS_KEY]) and any(
+        x != MASKED_TOKEN_VALUE for x in row[REJECTED_LABELS_KEY]
+    )
 
 
 def rlvr_tokenize_v1(
@@ -1523,7 +1526,7 @@ def rlvr_filter_v1(
     if max_token_length is not None:
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
-    contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+    contain_some_labels = any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
@@ -1957,7 +1960,7 @@ class LocalDatasetTransformationCache:
 
                 def count_tokens(sample):
                     token_count = len(sample[INPUT_IDS_KEY])
-                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != -100)
+                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != MASKED_TOKEN_VALUE)
                     return {"token_count": token_count, "label_token_count": trainable_tokens}
 
                 token_count_dataset = dataset.map(count_tokens, batched=False)
