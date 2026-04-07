@@ -54,7 +54,7 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | | `--max_seq_length` | Maximum sequence length after tokenization | `2048` |
 | | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
 | | `--weight_decay` | Weight decay for AdamW | `0.0` |
-| | `--max_grad_norm` | Maximum gradient norm for clipping (None = no clipping) | `None` |
+| | `--max_grad_norm` | Maximum gradient norm for clipping (-1 = no clipping) | `-1` |
 | | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, `constant` | `linear` |
 | | `--compile_model` | Apply `torch.compile` to model blocks | `True` |
 | | `--activation_memory_budget` | Activation checkpointing budget (0.0–1.0) | `1.0` |

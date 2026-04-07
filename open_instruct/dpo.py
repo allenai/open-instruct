@@ -290,7 +290,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
     else:
         raise ValueError(f"Unknown optimizer_type: {args.optimizer_type!r}. Must be 'adamw' or 'muon'.")
     scheduler = _setup_scheduler(args, effective_steps)
-    max_grad_norm = args.max_grad_norm
+    max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     dp_config = transformer_config.TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
         num_replicas=args.fsdp_num_replicas,

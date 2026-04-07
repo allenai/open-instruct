@@ -167,7 +167,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         dp_config=dp_config,
         ac_config=ac_config,
         scheduler=scheduler,
-        max_grad_norm=args.training.max_grad_norm,
+        max_grad_norm=args.training.max_grad_norm if args.training.max_grad_norm > 0 else None,
     )
 
     train_module = train_module_config.build(model)
