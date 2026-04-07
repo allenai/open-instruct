@@ -161,11 +161,13 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         max_sequence_length=args.training.max_seq_length,
         z_loss_multiplier=None,
         compile_model=args.training.compile_model,
-        optim=SkipStepAdamWConfig(lr=args.training.learning_rate, weight_decay=0.0, betas=(0.9, 0.95), compile=False),
+        optim=SkipStepAdamWConfig(
+            lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
+        ),
         dp_config=dp_config,
         ac_config=ac_config,
         scheduler=scheduler,
-        max_grad_norm=1.0,
+        max_grad_norm=args.training.max_grad_norm if args.training.max_grad_norm > 0 else None,
     )
 
     train_module = train_module_config.build(model)
