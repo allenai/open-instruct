@@ -63,7 +63,7 @@ def wait_for_gpus(expected_gpus: int) -> bool:
 
 
 def save_and_cleanup(
-    args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
+    args: grpo_utils.GRPOExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
 ) -> None:
     """Save the final model, optionally push to Hub, and launch eval jobs."""
     final_output_dir = args.output_dir
@@ -102,7 +102,7 @@ def save_and_cleanup(
 
 
 def main(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -323,7 +323,7 @@ def main(
 if __name__ == "__main__":
     parser = utils.ArgumentParserPlus(
         [  # ty: ignore[invalid-argument-type]
-            grpo_utils.ExperimentConfig,
+            grpo_utils.GRPOExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
