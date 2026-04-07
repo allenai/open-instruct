@@ -13,10 +13,12 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix incorrect hardcoded checkpoint state path for multi-GPU DeepSpeed resumption (https://github.com/allenai/open-instruct/pull/1589).
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, liger-kernel bump to 0.7.0, pre-download model on rank 0 to avoid HF cache race conditions, update vllm to 0.19.0, and fix Ulysses SP for VLM models by passing the model object to `register_with_transformers` (https://github.com/allenai/open-instruct/pull/1568).
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
 - Add a vLLM-based teacher logit sampling pipeline for offline distillation, including `sample_logits_vllm.py`, distillkit sampling writer utilities, and a launch script for generating compressed parquet shards (https://github.com/allenai/open-instruct/pull/1534).
 - Add user-focused documentation for tool use training, RL environments, parser selection, and rollout configuration (https://github.com/allenai/open-instruct/pull/1546).

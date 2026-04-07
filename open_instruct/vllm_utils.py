@@ -1344,6 +1344,7 @@ def create_vllm_engines(
                 eval_dataset=eval_dataset,
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
+                language_model_only=True,
             )
         )
 
