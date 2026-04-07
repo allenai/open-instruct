@@ -1134,11 +1134,15 @@ def mask_labels(
     one shot.
     """
     deferred_from_zero = False
+    seen_user = False
     for message_idx, message in enumerate(messages):
+        if message["role"] == "user":
+            seen_user = True
+
         if not should_mask(message_idx, message, messages):
             continue
 
-        if not any(m["role"] == "user" for m in messages[: message_idx + 1]):
+        if not seen_user:
             deferred_from_zero = True
             continue
 
