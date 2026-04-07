@@ -248,21 +248,23 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
-        # set sequence parallel
-        # note this returns None if sequence_parallel_size == 1
-        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-            model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            sequence_parallel_size=args.sequence_parallel_size,
-            micro_batch_size=args.per_device_train_batch_size,
-            seq_length_is_variable=True,
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+        )
+        # Register Ulysses SP after model creation (returns None if sp_size == 1).
+        # Passing the model lets DeepSpeed use model.config, which for VLM models
+        # (e.g. Qwen 3.5) is the text config with num_attention_heads accessible
+        # directly, unlike AutoConfig which returns the composite VLM config.
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=self.policy,
+            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            sequence_parallel_size=args.sequence_parallel_size,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
         )
         self._vllm_name_mapper = _build_vlm_name_mapper(model_config.model_name_or_path)
         self.policy.config.use_cache = False
