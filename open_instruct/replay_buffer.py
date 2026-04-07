@@ -11,10 +11,7 @@ from open_instruct import data_types
 
 @dataclass
 class ProcessedResult:
-    """One processed prompt's worth of data (after per-result processing).
-
-    All list fields have length generation_config.n (one per sample).
-    """
+    """All list fields have length generation_config.n (one per sample)."""
 
     result: data_types.GenerationResult
     queries: list[list[int]]
@@ -148,7 +145,7 @@ class Table:
             results = [self._data[k] for k in selected_keys]
             for k in selected_keys:
                 self._metadata[k].sample_count += 1
-            self._evict_oversampled()
+            self._evict_oversampled(selected_keys)
             return results
 
     def shutdown(self) -> None:
@@ -157,18 +154,20 @@ class Table:
             self._can_sample.notify_all()
 
     def _evict_overflow(self) -> None:
-        while len(self._data) > self._max_size:
-            keys = list(self._data.keys())
-            to_remove = self._remover.select(keys, self._metadata, 1)
-            for k in to_remove:
-                del self._data[k]
-                del self._metadata[k]
-
-    def _evict_oversampled(self) -> None:
-        to_remove = [k for k, m in self._metadata.items() if m.sample_count >= self._max_times_sampled]
+        excess = len(self._data) - self._max_size
+        if excess <= 0:
+            return
+        keys = list(self._data.keys())
+        to_remove = self._remover.select(keys, self._metadata, excess)
         for k in to_remove:
             del self._data[k]
             del self._metadata[k]
+
+    def _evict_oversampled(self, candidates: list[str]) -> None:
+        for k in candidates:
+            if self._metadata[k].sample_count >= self._max_times_sampled:
+                del self._data[k]
+                del self._metadata[k]
 
     def __len__(self) -> int:
         with self._lock:
