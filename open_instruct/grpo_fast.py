@@ -135,6 +135,14 @@ WEIGHT_SYNC_TIMEOUT_S = 120.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
+def _build_vlm_name_mapper(model_name: str):
+    """Sometimes we have different weight names btw vLLM and HF, so we build
+    a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in vLLM but not HF."""
+    if "qwen3.5" in model_name.lower():
+        return lambda name: f"language_model.{name}"
+    return None
+
+
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
@@ -235,23 +243,22 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
-        # set sequence parallel
-        # note this returns None if sequence_parallel_size == 1
-        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-            model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            sequence_parallel_size=args.sequence_parallel_size,
-            micro_batch_size=args.per_device_train_batch_size,
-            seq_length_is_variable=True,
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=self.policy,
+            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            sequence_parallel_size=args.sequence_parallel_size,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
+        )
+        self._model_name_or_path = model_config.model_name_or_path
+        self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -440,6 +447,7 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
+            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
 
     def update_ref_policy(self):
