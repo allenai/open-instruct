@@ -1157,6 +1157,41 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return "".join(parts)
 
+    def _build_lm_yesno_correct_demo_context(
+        self, batch_idx: int, seg_idx: int, gt_text: str, sibling_rollouts: list[list[list[tuple[str, bool]]]] | None
+    ) -> str:
+        """Build LM value prompt with a single correct sibling as a demonstration.
+
+        Picks one correct sibling rollout. If none are correct, picks a random one.
+        """
+        siblings: list[tuple[str, bool]] = []
+        if (
+            sibling_rollouts is not None
+            and batch_idx < len(sibling_rollouts)
+            and seg_idx < len(sibling_rollouts[batch_idx])
+        ):
+            siblings = list(sibling_rollouts[batch_idx][seg_idx])
+
+        if not siblings:
+            return f"Answer: {gt_text}. Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+
+        correct = [s for s in siblings if s[1]]
+        chosen_text, chosen_correct = correct[0] if correct else random.choice(siblings)
+
+        # Truncate the demo rollout if needed
+        tokens = self.tokenizer.encode(chosen_text, add_special_tokens=False)
+        max_demo_tokens = self._ROLLOUT_CONTEXT_MAX_TOKENS // 2
+        if len(tokens) > max_demo_tokens:
+            chosen_text = self.tokenizer.decode(tokens[:max_demo_tokens], skip_special_tokens=True) + "..."
+
+        result = "success" if chosen_correct else "fail"
+        return (
+            f"Answer: {gt_text}\n"
+            f"Attempt 1: {chosen_text} Result: {result}\n"
+            "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
+            "Attempt 2: "
+        )
+
     def _forward_value_with_gt(
         self,
         shifted_ids: torch.Tensor,
@@ -1182,6 +1217,7 @@ class PolicyTrainerRayProcess(RayProcess):
             "lm_yesno",
             "lm_yesno_siblings",
             "lm_yesno_blind",
+            "lm_yesno_correct_demo",
         )
 
         expanded_ids_list = []
@@ -1235,6 +1271,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         cond_text = "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
                     elif template == "lm_yesno_siblings":
                         cond_text = self._build_lm_yesno_siblings_context(b, seg_i, gt_text, sibling_rollouts)
+                    elif template == "lm_yesno_correct_demo":
+                        cond_text = self._build_lm_yesno_correct_demo_context(b, seg_i, gt_text, sibling_rollouts)
                     else:
                         cond_text = f"Answer: {gt_text}\n"
                     cond_tokens = self.tokenizer.encode(cond_text, add_special_tokens=False)
