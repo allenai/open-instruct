@@ -249,9 +249,9 @@ class PolicyTrainerRayProcess(RayProcess):
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-        # When a VLM (e.g. Qwen3.5) is loaded via AutoModelForCausalLM, param names
-        # lack the "language_model." prefix that vLLM expects because vLLM loads
-        # the full VLM architecture (e.g. Qwen3_5ForConditionalGeneration).
+        # Sometimes we have different weight names btw vllm and hf, so we
+        # store a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in HF
+        # but not in vLLM.
         self._vllm_name_mapper = (
             (lambda name: f"language_model.{name}") if "qwen3.5" in model_config.model_name_or_path.lower() else None
         )
