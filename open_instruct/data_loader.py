@@ -702,6 +702,9 @@ class BatchStatistics:
     prompt_indices: list[int]
     prompt_datasets: list[str]
     filtered_prompt_datasets: list[str]
+    filtered_prompt_datasets_zero: list[str]
+    filtered_prompt_datasets_solved: list[str]
+    filtered_prompt_datasets_nonzero: list[str]
     no_resampled_prompts: int
     total_prompts: int
 
@@ -856,6 +859,9 @@ def accumulate_inference_batches(
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
     filtered_prompt_datasets = []
+    filtered_prompt_datasets_zero = []
+    filtered_prompt_datasets_solved = []
+    filtered_prompt_datasets_nonzero = []
     progress_bar = tqdm(total=num_prompts, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
     logger.info(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
@@ -953,10 +959,13 @@ def accumulate_inference_batches(
             filtered_prompt_datasets.append(prompt_dataset_key)
             if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
+                filtered_prompt_datasets_zero.append(prompt_dataset_key)
             elif result.reward_scores[0] == max_possible_score:
                 filtered_prompt_solved += 1
+                filtered_prompt_datasets_solved.append(prompt_dataset_key)
             else:
                 filtered_prompt_nonzero += 1
+                filtered_prompt_datasets_nonzero.append(prompt_dataset_key)
             logging.debug(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
@@ -1115,6 +1124,9 @@ def accumulate_inference_batches(
         prompt_indices=all_prompt_indices,
         prompt_datasets=all_prompt_datasets,
         filtered_prompt_datasets=filtered_prompt_datasets,
+        filtered_prompt_datasets_zero=filtered_prompt_datasets_zero,
+        filtered_prompt_datasets_solved=filtered_prompt_datasets_solved,
+        filtered_prompt_datasets_nonzero=filtered_prompt_datasets_nonzero,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
@@ -1478,6 +1490,9 @@ class DataPreparationActor:
                 # Keep dataset names as internal metadata for downstream metric aggregation.
                 prompt_datasets = batch_metrics_dict.pop("prompt_datasets", None)
                 filtered_prompt_datasets = batch_metrics_dict.pop("filtered_prompt_datasets", [])
+                filtered_prompt_datasets_zero = batch_metrics_dict.pop("filtered_prompt_datasets_zero", [])
+                filtered_prompt_datasets_solved = batch_metrics_dict.pop("filtered_prompt_datasets_solved", [])
+                filtered_prompt_datasets_nonzero = batch_metrics_dict.pop("filtered_prompt_datasets_nonzero", [])
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
@@ -1516,12 +1531,33 @@ class DataPreparationActor:
                 filtered_prompts_by_dataset: dict[str, int] = {
                     dataset_name: 0 for dataset_name in self.dataset_metric_names
                 }
+                filtered_prompts_zero_by_dataset: dict[str, int] = {
+                    dataset_name: 0 for dataset_name in self.dataset_metric_names
+                }
+                filtered_prompts_solved_by_dataset: dict[str, int] = {
+                    dataset_name: 0 for dataset_name in self.dataset_metric_names
+                }
+                filtered_prompts_nonzero_by_dataset: dict[str, int] = {
+                    dataset_name: 0 for dataset_name in self.dataset_metric_names
+                }
                 for dataset_name in filtered_prompt_datasets:
                     filtered_prompts_by_dataset[dataset_name] += 1
+                for dataset_name in filtered_prompt_datasets_zero:
+                    filtered_prompts_zero_by_dataset[dataset_name] += 1
+                for dataset_name in filtered_prompt_datasets_solved:
+                    filtered_prompts_solved_by_dataset[dataset_name] += 1
+                for dataset_name in filtered_prompt_datasets_nonzero:
+                    filtered_prompts_nonzero_by_dataset[dataset_name] += 1
                 for dataset_name, count in nonzero_prompts_by_dataset.items():
                     step_metrics[f"batch/nonzero_prompts/{dataset_name}"] = count
                 for dataset_name, count in filtered_prompts_by_dataset.items():
                     step_metrics[f"batch/filtered_prompts/{dataset_name}"] = count
+                for dataset_name, count in filtered_prompts_zero_by_dataset.items():
+                    step_metrics[f"batch/filtered_prompts_zero/{dataset_name}"] = count
+                for dataset_name, count in filtered_prompts_solved_by_dataset.items():
+                    step_metrics[f"batch/filtered_prompts_solved/{dataset_name}"] = count
+                for dataset_name, count in filtered_prompts_nonzero_by_dataset.items():
+                    step_metrics[f"batch/filtered_prompts_nonzero/{dataset_name}"] = count
                 solve_rates = batch_stats.percent_solved_hist
                 if solve_rates.size > 0:
                     step_metrics["val/train_prompt_solve_rate_count"] = int(solve_rates.size)

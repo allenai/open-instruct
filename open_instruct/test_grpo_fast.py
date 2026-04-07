@@ -1004,6 +1004,9 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertIsNotNone(batch_stats)
         self.assertEqual(batch_stats.prompt_datasets, ["dataset_a", "dataset_b"])
         self.assertEqual(batch_stats.filtered_prompt_datasets, ["dataset_a", "dataset_b"])
+        self.assertEqual(batch_stats.filtered_prompt_datasets_zero, [])
+        self.assertEqual(batch_stats.filtered_prompt_datasets_solved, ["dataset_b"])
+        self.assertEqual(batch_stats.filtered_prompt_datasets_nonzero, ["dataset_a"])
 
 
 class TestDataPreparation(TestGrpoFastBase):

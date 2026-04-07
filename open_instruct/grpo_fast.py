@@ -1678,6 +1678,126 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_reward_metrics.pop("eval/model_step_min", None)
+        eval_reward_metrics.pop("eval/model_step_max", None)
+        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean")
+        eval_reward_metrics.pop("eval/model_step_span", None)
+        model_step_values = eval_reward_metrics.pop("eval/model_step_values", None)
+        eval_k = eval_generation_config.n
+        scores = np.array(eval_batch.scores)
+        pass_at_by_k: dict[int, float] = {}
+        dataset_pass_at_by_k: dict[str, dict[int, float]] = {}
+        if max_possible_score <= 0:
+            logger.warning("Max possible score is %s; skipping pass@k metrics.", max_possible_score)
+        elif scores.size and scores.size % eval_k == 0:
+            scores_per_prompt = scores.reshape(-1, eval_k)
+            threshold = max_possible_score - 1e-8
+            num_correct_per_prompt = (scores_per_prompt >= threshold).sum(axis=1)
+            pass_at_ks = [2**i for i in range(eval_k.bit_length()) if 2**i <= eval_k]
+            per_prompt_pass_at_by_k = np.asarray(
+                [estimate_pass_at_k_array(eval_k, num_correct_per_prompt, k) for k in pass_at_ks], dtype=float
+            ).T
+            for col, k in enumerate(pass_at_ks):
+                pass_at_by_k[k] = float(per_prompt_pass_at_by_k[:, col].mean())
+            if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == scores_per_prompt.shape[0]:
+                dataset_to_indices: dict[str, list[int]] = {}
+                for prompt_idx, dataset_name in enumerate(eval_batch_stats.prompt_datasets):
+                    dataset_to_indices.setdefault(dataset_name, []).append(prompt_idx)
+                for dataset_name, dataset_indices in dataset_to_indices.items():
+                    dataset_prompt_pass_at = per_prompt_pass_at_by_k[np.asarray(dataset_indices, dtype=int)]
+                    dataset_pass_at_by_k[dataset_name] = {
+                        k: float(dataset_prompt_pass_at[:, col].mean()) for col, k in enumerate(pass_at_ks)
+                    }
+            elif eval_batch_stats is not None:
+                logger.warning(
+                    "Eval prompt_datasets size %s does not match prompts %s; skipping per-dataset pass@k metrics.",
+                    len(eval_batch_stats.prompt_datasets),
+                    scores_per_prompt.shape[0],
+                )
+        else:
+            logger.warning(
+                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
+            )
+        dataset_sequence_length_metrics: dict[str, Any] = {}
+        dataset_filtered_prompt_metrics: dict[str, int] = {}
+        if eval_batch_stats is not None:
+            dataset_filtered_prompts = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            dataset_filtered_prompts_zero = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            dataset_filtered_prompts_solved = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            dataset_filtered_prompts_nonzero = {
+                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
+            }
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets:
+                dataset_filtered_prompts.setdefault(dataset_name, 0)
+                dataset_filtered_prompts[dataset_name] += 1
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets_zero:
+                dataset_filtered_prompts_zero.setdefault(dataset_name, 0)
+                dataset_filtered_prompts_zero[dataset_name] += 1
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets_solved:
+                dataset_filtered_prompts_solved.setdefault(dataset_name, 0)
+                dataset_filtered_prompts_solved[dataset_name] += 1
+            for dataset_name in eval_batch_stats.filtered_prompt_datasets_nonzero:
+                dataset_filtered_prompts_nonzero.setdefault(dataset_name, 0)
+                dataset_filtered_prompts_nonzero[dataset_name] += 1
+            for dataset_name, count in dataset_filtered_prompts.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts/{dataset_name}"] = count
+            for dataset_name, count in dataset_filtered_prompts_zero.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_zero/{dataset_name}"] = count
+            for dataset_name, count in dataset_filtered_prompts_solved.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_solved/{dataset_name}"] = count
+            for dataset_name, count in dataset_filtered_prompts_nonzero.items():
+                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_nonzero/{dataset_name}"] = count
+        if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) > 0:
+            num_eval_prompts = len(eval_batch_stats.prompt_datasets)
+            if eval_sequence_lengths.size % num_eval_prompts == 0:
+                responses_per_prompt = eval_sequence_lengths.size // num_eval_prompts
+                response_dataset_names = np.repeat(
+                    np.array(eval_batch_stats.prompt_datasets, dtype=object), responses_per_prompt
+                )
+                solved_threshold = max_possible_score - 1e-8
+                solved_mask = scores >= solved_threshold
+
+                for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets):
+                    dataset_mask = response_dataset_names == dataset_name
+                    dataset_sequence_lengths = eval_sequence_lengths[dataset_mask].astype(float)
+                    dataset_sequence_lengths_solved = eval_sequence_lengths[dataset_mask & solved_mask].astype(float)
+                    dataset_sequence_lengths_unsolved = eval_sequence_lengths[dataset_mask & ~solved_mask].astype(
+                        float
+                    )
+                    metric_prefix = f"eval/{dataset_name}"
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_mean"] = float(
+                        dataset_sequence_lengths.mean()
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_solved_mean"] = (
+                        0.0
+                        if len(dataset_sequence_lengths_solved) == 0
+                        else float(dataset_sequence_lengths_solved.mean())
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_unsolved_mean"] = (
+                        0.0
+                        if len(dataset_sequence_lengths_unsolved) == 0
+                        else float(dataset_sequence_lengths_unsolved.mean())
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_solved_hist"] = (
+                        dataset_sequence_lengths_solved
+                    )
+                    dataset_sequence_length_metrics[f"{metric_prefix}/sequence_length_unsolved_hist"] = (
+                        dataset_sequence_lengths_unsolved
+                    )
+            else:
+                logger.warning(
+                    "Eval sequence_lengths size %s is not divisible by prompt_datasets size %s; "
+                    "skipping per-dataset sequence length metrics.",
+                    eval_sequence_lengths.size,
+                    num_eval_prompts,
+                )
+
         eval_metrics = {
             "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
@@ -1686,6 +1806,40 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
+        if args.eval_only:
+            eval_metrics["episode"] = 0
+            eval_metrics["global_step"] = 0
+        for k, pass_rate in pass_at_by_k.items():
+            eval_metrics[f"eval/pass_at_{k}"] = pass_rate
+        for metric_name, pass_rates in dataset_pass_at_by_k.items():
+            for k, pass_rate in pass_rates.items():
+                eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
+        eval_metrics.update(dataset_filtered_prompt_metrics)
+        eval_metrics.update(dataset_sequence_length_metrics)
+        eval_metrics["eval/model_step_mean"] = float(model_step_mean)
+        eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
+        if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
+            prompt_index_to_solve_rates: dict[int, list[float]] = {}
+            for prompt_index, prompt_solve_rate in zip(
+                eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
+            ):
+                prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
+            eval_prompt_solve_rate_by_dataset_index = [
+                (int(prompt_index), float(np.mean(rates)))
+                for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
+            ]
+            eval_metrics["eval/prompt_solve_rate_by_dataset_index"] = eval_prompt_solve_rate_by_dataset_index
+            eval_metrics["eval/prompt_solve_rate_by_dataset_index_count"] = len(
+                eval_prompt_solve_rate_by_dataset_index
+            )
+
+            dataset_to_solve_rates: dict[str, list[float]] = {}
+            for dataset_name, prompt_solve_rate in zip(
+                eval_batch_stats.prompt_datasets, eval_batch_stats.percent_solved_hist
+            ):
+                dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
+            for dataset_name, rates in dataset_to_solve_rates.items():
+                eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
