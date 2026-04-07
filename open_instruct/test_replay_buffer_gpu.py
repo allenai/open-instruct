@@ -5,16 +5,16 @@ import unittest
 
 import yaml
 
-from open_instruct import data_loader, utils
+from open_instruct import data_loader, replay_buffer, utils
 
 
 class TestReplayBufferConfig(unittest.TestCase):
     def test_default_values(self):
         config = data_loader.StreamingDataLoaderConfig()
-        self.assertEqual(config.replay_buffer, data_loader.ReplayBufferConfig())
+        self.assertEqual(config.replay_buffer, replay_buffer.ReplayBufferConfig())
 
     def test_custom_replay_buffer_config(self):
-        rb = data_loader.ReplayBufferConfig(
+        rb = replay_buffer.ReplayBufferConfig(
             capacity=100, sampler="prioritized", remover="lifo", max_times_sampled=3, min_size=10
         )
         config = data_loader.StreamingDataLoaderConfig(replay_buffer=rb)
@@ -37,7 +37,7 @@ class TestReplayBufferConfig(unittest.TestCase):
             (config,) = parser.parse_yaml_file(f.name)
         self.assertEqual(
             config.replay_buffer,
-            data_loader.ReplayBufferConfig(
+            replay_buffer.ReplayBufferConfig(
                 capacity=50, sampler="lifo", remover="prioritized", max_times_sampled=5, min_size=10
             ),
         )

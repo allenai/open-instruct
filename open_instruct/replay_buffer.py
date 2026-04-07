@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import numpy as np
 
@@ -82,28 +82,28 @@ class MinSize:
         return len(table._data) >= self.min_size
 
 
-SELECTOR_REGISTRY: dict[str, type[Selector]] = {
-    "uniform": Uniform,
-    "prioritized": Prioritized,
-    "fifo": Fifo,
-    "lifo": Lifo,
-}
-
-
-def make_selector(name: str) -> Selector:
-    cls = SELECTOR_REGISTRY.get(name)
-    if cls is None:
-        raise ValueError(f"Unknown selector: {name!r}. Options: {list(SELECTOR_REGISTRY)}")
-    return cls()
+_SELECTORS: dict[str, type[Selector]] = {"uniform": Uniform, "prioritized": Prioritized, "fifo": Fifo, "lifo": Lifo}
 
 
 @dataclass
-class TableConfig:
-    max_size: int
-    sampler: str = "uniform"
-    remover: str = "fifo"
+class ReplayBufferConfig:
+    capacity: int | None = None
+    """Max items in replay buffer. None = global_batch_size (FIFO-equivalent default)."""
+    sampler: Literal["uniform", "prioritized", "fifo", "lifo"] = "uniform"
+    """Sampling strategy: 'uniform', 'prioritized', 'fifo', 'lifo'."""
+    remover: Literal["uniform", "prioritized", "fifo", "lifo"] = "fifo"
+    """Removal strategy when buffer is full: 'uniform', 'prioritized', 'fifo', 'lifo'."""
     max_times_sampled: int = 1
-    min_size_to_sample: int = 1
+    """Evict items after being sampled this many times. 1 = each item used once (default)."""
+    min_size: int | None = None
+    """Min items before sampling is allowed. None = global_batch_size."""
+
+
+def make_selector(name: str) -> Selector:
+    cls = _SELECTORS.get(name)
+    if cls is None:
+        raise ValueError(f"Unknown selector: {name!r}. Options: {list(_SELECTORS)}")
+    return cls()
 
 
 class Table:
@@ -126,16 +126,6 @@ class Table:
         self._metadata: dict[str, ItemMetadata] = {}
         self._insert_counter: int = 0
         self._shutdown: bool = False
-
-    @classmethod
-    def from_config(cls, config: TableConfig) -> Table:
-        return cls(
-            max_size=config.max_size,
-            sampler=make_selector(config.sampler),
-            remover=make_selector(config.remover),
-            max_times_sampled=config.max_times_sampled,
-            rate_limiter=MinSize(config.min_size_to_sample),
-        )
 
     def insert(self, key: str, data: ProcessedResult, priority: float = 1.0) -> None:
         with self._can_sample:

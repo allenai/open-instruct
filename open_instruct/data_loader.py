@@ -33,7 +33,8 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, replay_buffer, utils
+from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import replay_buffer as replay_buffer_mod
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -400,20 +401,6 @@ class VLLMConfig:
 
 
 @dataclass
-class ReplayBufferConfig:
-    capacity: int | None = None
-    """Max items in replay buffer. None = global_batch_size (FIFO-equivalent default)."""
-    sampler: Literal["uniform", "prioritized", "fifo", "lifo"] = "uniform"
-    """Sampling strategy: 'uniform', 'prioritized', 'fifo', 'lifo'."""
-    remover: Literal["uniform", "prioritized", "fifo", "lifo"] = "fifo"
-    """Removal strategy when buffer is full: 'uniform', 'prioritized', 'fifo', 'lifo'."""
-    max_times_sampled: int = 1
-    """Evict items after being sampled this many times. 1 = each item used once (default)."""
-    min_size: int | None = None
-    """Min items before sampling is allowed. None = global_batch_size."""
-
-
-@dataclass
 class StreamingDataLoaderConfig:
     # Data loading/packing
     max_prompt_token_length: int = 256
@@ -500,8 +487,7 @@ class StreamingDataLoaderConfig:
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
-    # Replay buffer
-    replay_buffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
+    replay_buffer: replay_buffer_mod.ReplayBufferConfig = field(default_factory=replay_buffer_mod.ReplayBufferConfig)
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -1266,12 +1252,12 @@ class DataPreparationActor:
         self.metadata_saved = False
 
         rb = config.replay_buffer
-        self._table = replay_buffer.Table(
+        self._table = replay_buffer_mod.Table(
             max_size=rb.capacity or global_batch_size,
-            sampler=replay_buffer.make_selector(rb.sampler),
-            remover=replay_buffer.make_selector(rb.remover),
+            sampler=replay_buffer_mod.make_selector(rb.sampler),
+            remover=replay_buffer_mod.make_selector(rb.remover),
             max_times_sampled=rb.max_times_sampled,
-            rate_limiter=replay_buffer.MinSize(rb.min_size or global_batch_size),
+            rate_limiter=replay_buffer_mod.MinSize(rb.min_size or global_batch_size),
         )
 
         if initial_state is not None:
