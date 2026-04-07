@@ -400,6 +400,20 @@ class VLLMConfig:
 
 
 @dataclass
+class ReplayBufferConfig:
+    capacity: int | None = None
+    """Max items in replay buffer. None = global_batch_size (FIFO-equivalent default)."""
+    sampler: Literal["uniform", "prioritized", "fifo", "lifo"] = "uniform"
+    """Sampling strategy: 'uniform', 'prioritized', 'fifo', 'lifo'."""
+    remover: Literal["uniform", "prioritized", "fifo", "lifo"] = "fifo"
+    """Removal strategy when buffer is full: 'uniform', 'prioritized', 'fifo', 'lifo'."""
+    max_times_sampled: int = 1
+    """Evict items after being sampled this many times. 1 = each item used once (default)."""
+    min_size: int | None = None
+    """Min items before sampling is allowed. None = global_batch_size."""
+
+
+@dataclass
 class StreamingDataLoaderConfig:
     # Data loading/packing
     max_prompt_token_length: int = 256
@@ -487,16 +501,7 @@ class StreamingDataLoaderConfig:
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
     # Replay buffer
-    replay_buffer_capacity: int | None = None
-    """Max items in replay buffer. None = global_batch_size (FIFO-equivalent default)."""
-    replay_buffer_sampler: str = "uniform"
-    """Sampling strategy: 'uniform', 'prioritized', 'fifo', 'lifo'."""
-    replay_buffer_remover: str = "fifo"
-    """Removal strategy when buffer is full: 'uniform', 'prioritized', 'fifo', 'lifo'."""
-    replay_buffer_max_times_sampled: int = 1
-    """Evict items after being sampled this many times. 1 = each item used once (default)."""
-    replay_buffer_min_size: int | None = None
-    """Min items before sampling is allowed. None = global_batch_size."""
+    replay_buffer: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -1260,14 +1265,13 @@ class DataPreparationActor:
         self.total_samples_written = 0
         self.metadata_saved = False
 
-        capacity = config.replay_buffer_capacity if config.replay_buffer_capacity is not None else global_batch_size
-        min_size = config.replay_buffer_min_size if config.replay_buffer_min_size is not None else global_batch_size
+        rb = config.replay_buffer
         self._table = replay_buffer.Table(
-            max_size=capacity,
-            sampler=replay_buffer.make_selector(config.replay_buffer_sampler),
-            remover=replay_buffer.make_selector(config.replay_buffer_remover),
-            max_times_sampled=config.replay_buffer_max_times_sampled,
-            rate_limiter=replay_buffer.MinSize(min_size),
+            max_size=rb.capacity or global_batch_size,
+            sampler=replay_buffer.make_selector(rb.sampler),
+            remover=replay_buffer.make_selector(rb.remover),
+            max_times_sampled=rb.max_times_sampled,
+            rate_limiter=replay_buffer.MinSize(rb.min_size or global_batch_size),
         )
 
         if initial_state is not None:
