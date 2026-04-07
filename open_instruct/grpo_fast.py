@@ -58,7 +58,6 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict
 from queue import Empty, Full, Queue
-from types import SimpleNamespace
 from typing import Any
 
 import backoff
@@ -78,7 +77,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, model_utils, vllm_utils
@@ -251,13 +250,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # set sequence parallel
         # note this returns None if sequence_parallel_size == 1
-        # VLM models (e.g. Qwen 3.5) use a composite config where num_attention_heads
-        # etc. live under text_config. DeepSpeed accesses these at the top level, so we
-        # resolve text_config and pass it via an object with a .config attribute.
-        hf_config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
-        sp_config = getattr(hf_config, "text_config", hf_config)
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-            model_name_or_path=SimpleNamespace(config=sp_config),
+            model_name_or_path=model_config.model_name_or_path,
             core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
