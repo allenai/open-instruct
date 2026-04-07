@@ -103,6 +103,16 @@ def main():
                 task_to_image[t] = image_tag
             continue
 
+        # Skip if image already exists locally or on registry
+        try:
+            client.images.get(image_tag)
+            logger.info(f"Skipping {image_tag} (already exists locally)")
+            for t in tasks:
+                task_to_image[t] = image_tag
+            continue
+        except docker_sdk.errors.ImageNotFound:
+            pass
+
         logger.info(f"Building {image_tag} for {len(tasks)} tasks...")
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
