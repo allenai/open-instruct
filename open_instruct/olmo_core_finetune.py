@@ -49,10 +49,14 @@ from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.checkpoint import CheckpointerConfig
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, olmo_core_utils, utils
-from open_instruct.dataset_transformation import TOKENIZED_SFT_DATASET_KEYS, TokenizerConfig, visualize_token
-from open_instruct.olmo_core_callbacks import BeakerCallbackV2
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
+from open_instruct import (
+    dataset_transformation,
+    logger_utils,
+    olmo_core_callbacks,
+    olmo_core_utils,
+    padding_free_collator,
+    utils,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -70,7 +74,7 @@ class SFTArguments:
     checkpoint: olmo_core_utils.CheckpointConfig
 
 
-def main(args: SFTArguments, tc: TokenizerConfig) -> None:
+def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     assert args.model.model_name_or_path is not None, "model_name_or_path is required"
     tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
 
@@ -93,7 +97,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     logger_utils.setup_logger(rank=global_rank)
 
     if is_main_process:
-        visualize_token(dataset[0]["input_ids"], tokenizer)
+        dataset_transformation.visualize_token(dataset[0]["input_ids"], tokenizer)
         os.makedirs(args.checkpoint.output_dir, exist_ok=True)
     if is_distributed():
         dist.barrier()
@@ -109,7 +113,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
     global_batch_size_seqs = rank_batch_size_seqs * world_size
 
-    collator = TensorDataCollatorWithFlattening(
+    collator = padding_free_collator.TensorDataCollatorWithFlattening(
         return_position_ids=True,
         return_flash_attn_kwargs=True,
         max_seq_length=rank_batch_size_seqs * args.training.max_seq_length,
@@ -192,7 +196,7 @@ def main(args: SFTArguments, tc: TokenizerConfig) -> None:
         "checkpointer": olmo_core_utils.build_checkpointer_callback(
             args.checkpoint.checkpointing_steps, args.checkpoint.ephemeral_save_interval
         ),
-        "beaker": BeakerCallbackV2(config=config_dict),
+        "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
     }
 
     if args.logging.with_tracking and args.logging.wandb_project:
@@ -230,7 +234,7 @@ if __name__ == "__main__":
             olmo_core_utils.DatasetConfig,
             olmo_core_utils.LoggingConfig,
             olmo_core_utils.CheckpointConfig,
-            TokenizerConfig,
+            dataset_transformation.TokenizerConfig,
         )
     )
     parser.set_defaults(
@@ -241,7 +245,7 @@ if __name__ == "__main__":
         warmup_ratio=0.03,
         mixer_list=["allenai/tulu-3-sft-olmo-2-mixture", "1.0"],
         transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
-        target_columns=list(TOKENIZED_SFT_DATASET_KEYS),
+        target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS),
     )
     tracking, model, training, dataset, logging_cfg, checkpoint, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     args = SFTArguments(
