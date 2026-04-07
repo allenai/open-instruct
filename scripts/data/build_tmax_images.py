@@ -103,14 +103,24 @@ def main():
                 task_to_image[t] = image_tag
             continue
 
-        # Skip if image already exists locally or on registry
+        # Skip if image already exists locally
         try:
             client.images.get(image_tag)
-            logger.info(f"Skipping {image_tag} (already exists locally)")
+            logger.info(f"Skipping {image_tag} (exists locally)")
             for t in tasks:
                 task_to_image[t] = image_tag
             continue
         except docker_sdk.errors.ImageNotFound:
+            pass
+
+        # Skip if image already exists on DockerHub (avoids rebuild + disk usage)
+        try:
+            client.images.get_registry_data(image_tag)
+            logger.info(f"Skipping {image_tag} (exists on registry)")
+            for t in tasks:
+                task_to_image[t] = image_tag
+            continue
+        except docker_sdk.errors.APIError:
             pass
 
         logger.info(f"Building {image_tag} for {len(tasks)} tasks...")
