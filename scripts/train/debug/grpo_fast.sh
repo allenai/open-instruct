@@ -18,7 +18,6 @@ uv run --active open_instruct/grpo_fast.py \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3.5-0.8B \
-    --attn_implementation sdpa \
     --system_prompt_override_file scripts/train/qwen/math_system_prompt.txt \
     --apply_verifiable_reward true \
     --learning_rate 1e-6 \
