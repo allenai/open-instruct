@@ -255,10 +255,6 @@ class PolicyTrainerRayProcess(RayProcess):
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
-        # Register Ulysses SP after model creation (returns None if sp_size == 1).
-        # Passing the model lets DeepSpeed use model.config, which for VLM models
-        # (e.g. Qwen 3.5) is the text config with num_attention_heads accessible
-        # directly, unlike AutoConfig which returns the composite VLM config.
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
             core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
