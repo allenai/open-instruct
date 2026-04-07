@@ -34,7 +34,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, padding_free_collator, utils
-from open_instruct import replay_buffer as replay_buffer_mod
+from open_instruct import replay_buffer as replay_buffer_lib
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -487,14 +487,14 @@ class StreamingDataLoaderConfig:
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
-    replay_buffer: replay_buffer_mod.ReplayBufferConfig = field(default_factory=replay_buffer_mod.ReplayBufferConfig)
+    replay_buffer: replay_buffer_lib.ReplayBufferConfig = field(default_factory=replay_buffer_lib.ReplayBufferConfig)
 
     # Computed at post_init
     max_possible_score: float = 1.0
 
     def __post_init__(self):
         if isinstance(self.replay_buffer, dict):
-            self.replay_buffer = replay_buffer_mod.ReplayBufferConfig(**self.replay_buffer)
+            self.replay_buffer = replay_buffer_lib.ReplayBufferConfig(**self.replay_buffer)
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1254,12 +1254,12 @@ class DataPreparationActor:
         self.metadata_saved = False
 
         rb = config.replay_buffer
-        self._table = replay_buffer_mod.Table(
+        self._table = replay_buffer_lib.Table(
             max_size=rb.capacity or global_batch_size,
-            sampler=replay_buffer_mod.make_selector(rb.sampler),
-            remover=replay_buffer_mod.make_selector(rb.remover),
+            sampler=replay_buffer_lib.make_selector(rb.sampler),
+            remover=replay_buffer_lib.make_selector(rb.remover),
             max_times_sampled=rb.max_times_sampled,
-            rate_limiter=replay_buffer_mod.MinSize(rb.min_size or global_batch_size),
+            rate_limiter=replay_buffer_lib.MinSize(rb.min_size or global_batch_size),
         )
 
         if initial_state is not None:
