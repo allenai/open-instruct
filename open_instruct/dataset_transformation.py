@@ -1115,7 +1115,7 @@ def sft_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def _mask_labels(
+def mask_labels(
     labels: torch.Tensor,
     messages: list[dict[str, Any]],
     tokenizer: PreTrainedTokenizer,
@@ -1201,7 +1201,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
-    _mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
+    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
@@ -1227,7 +1227,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
-    _mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, _msg, msgs: idx < len(msgs) - 1)
+    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, _msg, msgs: idx < len(msgs) - 1)
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()

@@ -6,6 +6,9 @@ import shutil
 import tempfile
 import unittest
 
+import torch
+from transformers import AutoTokenizer
+
 import open_instruct.dataset_transformation
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "test_data")
@@ -199,6 +202,110 @@ class TestCachedDataset(unittest.TestCase):
         for row in dataset:
             dataset_hash.update(str(row[open_instruct.dataset_transformation.INPUT_IDS_PROMPT_KEY]).encode())
         self.assertEqual(dataset_hash.hexdigest(), GOLD_RLVR["hash"])
+
+
+class TestMaskLabels(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+
+    def _tokenize(self, messages):
+        ids = self.tokenizer.apply_chat_template(
+            conversation=messages,
+            tokenize=True,
+            return_tensors="pt",
+            return_dict=False,
+            padding=False,
+            truncation=False,
+            add_generation_prompt=False,
+        )
+        assert isinstance(ids, torch.Tensor)
+        return ids
+
+    def test_masks_non_assistant_turns(self):
+        """Standard case: system and user tokens masked, assistant tokens kept."""
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+        input_ids = self._tokenize(messages)
+        labels = input_ids.clone()
+        open_instruct.dataset_transformation.mask_labels(
+            labels, messages, self.tokenizer, 4096, lambda idx, msg, _msgs: msg["role"] != "assistant"
+        )
+        flat = labels.flatten().tolist()
+        has_masked = any(x == -100 for x in flat)
+        has_kept = any(x != -100 for x in flat)
+        self.assertTrue(has_masked, "Should have masked non-assistant tokens")
+        self.assertTrue(has_kept, "Should have kept assistant tokens")
+
+    def test_masks_all_but_last_turn(self):
+        """last_turn mode: everything except the final turn is masked."""
+        messages = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "And 3+3?"},
+            {"role": "assistant", "content": "6"},
+        ]
+        input_ids = self._tokenize(messages)
+        labels = input_ids.clone()
+        open_instruct.dataset_transformation.mask_labels(
+            labels, messages, self.tokenizer, 4096, lambda idx, _msg, msgs: idx < len(msgs) - 1
+        )
+        flat = labels.flatten().tolist()
+        last_assistant_ids = self.tokenizer.apply_chat_template(
+            conversation=messages[:3],
+            tokenize=True,
+            return_tensors="pt",
+            return_dict=False,
+            add_generation_prompt=False,
+        ).shape[1]
+        self.assertTrue(all(x == -100 for x in flat[:last_assistant_ids]))
+        self.assertTrue(any(x != -100 for x in flat[last_assistant_ids:]))
+
+    def test_deferred_masking_for_system_only_prefix(self):
+        """When the first message is system (no user), masking is deferred and
+        applied from position 0 once a user turn appears."""
+        messages = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+        ]
+        input_ids = self._tokenize(messages)
+        labels = input_ids.clone()
+        open_instruct.dataset_transformation.mask_labels(
+            labels, messages, self.tokenizer, 4096, lambda idx, msg, _msgs: msg["role"] != "assistant"
+        )
+        flat = labels.flatten().tolist()
+        assistant_start = self.tokenizer.apply_chat_template(
+            conversation=messages[:2],
+            tokenize=True,
+            return_tensors="pt",
+            return_dict=False,
+            add_generation_prompt=True,
+        ).shape[1]
+        self.assertTrue(all(x == -100 for x in flat[:assistant_start]))
+        self.assertTrue(any(x != -100 for x in flat[assistant_start:]))
+
+    def test_multiturn_masking(self):
+        """Multi-turn: user and system masked, both assistant turns kept."""
+        messages = [
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": "First answer"},
+            {"role": "user", "content": "Second question"},
+            {"role": "assistant", "content": "Second answer"},
+        ]
+        input_ids = self._tokenize(messages)
+        labels = input_ids.clone()
+        open_instruct.dataset_transformation.mask_labels(
+            labels, messages, self.tokenizer, 4096, lambda idx, msg, _msgs: msg["role"] != "assistant"
+        )
+        flat = labels.flatten().tolist()
+        total_masked = sum(1 for x in flat if x == -100)
+        total_kept = sum(1 for x in flat if x != -100)
+        self.assertGreater(total_masked, 0)
+        self.assertGreater(total_kept, 0)
 
 
 if __name__ == "__main__":
