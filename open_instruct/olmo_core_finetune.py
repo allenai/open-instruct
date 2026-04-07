@@ -27,18 +27,20 @@ Usage:
 
 import dataclasses
 import os
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.distributed as dist
 from olmo_core import optim
 from olmo_core.config import DType
+from olmo_core.data import NumpyDataLoaderConfig, NumpyPackedFSLDatasetConfig, TokenizerConfig
+from olmo_core.data.types import LongDocStrategy
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
-from olmo_core.nn import attention
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import (
     Duration,
+    LoadStrategy,
     TrainerConfig,
     callbacks,
     prepare_training_environment,
@@ -74,76 +76,58 @@ class SFTArguments:
     checkpoint: olmo_core_utils.CheckpointConfig
 
 
+def _build_numpy_dataset_config(numpy_dataset_path: str, sequence_length: int) -> NumpyPackedFSLDatasetConfig:
+    tokenizer_config = TokenizerConfig.dolma2()
+    clean_path = numpy_dataset_path.rstrip("/")
+    return NumpyPackedFSLDatasetConfig(
+        tokenizer=tokenizer_config,
+        work_dir=os.path.join(clean_path, "_work"),
+        paths=[f"{clean_path}/token_ids_part_*.npy"],
+        expand_glob=True,
+        label_mask_paths=[f"{clean_path}/labels_mask_*.npy"],
+        generate_doc_lengths=True,
+        long_doc_strategy=LongDocStrategy.truncate,
+        sequence_length=sequence_length,
+    )
+
+
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     assert args.model.model_name_or_path is not None, "model_name_or_path is required"
-    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
 
-    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
+    use_numpy_data = args.dataset.numpy_dataset_path is not None
+    use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
-    if args.dataset.cache_dataset_only:
-        olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process=True)
-        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
-        return
+    if not use_numpy_data:
+        tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
+        transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
+
+        if args.dataset.cache_dataset_only:
+            olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process=True)
+            logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+            return
 
     prepare_training_environment(seed=args.tracking.seed)
 
     global_rank = get_rank() if is_distributed() else 0
     is_main_process = global_rank == 0
     world_size = get_world_size() if is_distributed() else 1
-    dataset = olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process)
-    dataset = dataset.shuffle(seed=args.tracking.seed)
-    dataset.set_format(type="pt")
 
     logger_utils.setup_logger(rank=global_rank)
 
     if is_main_process:
-        dataset_transformation.visualize_token(dataset[0]["input_ids"], tokenizer)
         os.makedirs(args.checkpoint.output_dir, exist_ok=True)
     if is_distributed():
         dist.barrier()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = olmo_core_utils.setup_model(
-        args.model.model_name_or_path,
-        args.model.config_name,
-        cast(attention.AttentionBackendName, args.model.attn_implementation),
-    )
+    init_device = "meta" if not use_hf_ckpt else "cpu"
+    model, model_config = olmo_core_utils.setup_model(args.model, init_device=init_device)
 
-    rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
-    global_batch_size_seqs = rank_batch_size_seqs * world_size
-
-    collator = padding_free_collator.TensorDataCollatorWithFlattening(
-        return_position_ids=True,
-        return_flash_attn_kwargs=True,
-        max_seq_length=rank_batch_size_seqs * args.training.max_seq_length,
-    )
-
-    data_loader = data_loader_lib.HFDataLoader(
-        dataset=dataset,
-        batch_size=global_batch_size_seqs,
-        seed=args.tracking.seed,
-        dp_rank=global_rank,
-        dp_world_size=world_size,
-        work_dir=args.checkpoint.output_dir,
-        collator=collator,
-        device=device,
-        drop_last=True,
-        fs_local_rank=global_rank,
-        max_seq_length=args.training.max_seq_length,
-    )
-    num_training_steps = len(data_loader) * args.training.num_epochs
-    effective_steps = (
-        args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
-    )
-    logger.info(
-        f"Total training steps: {effective_steps} (data_loader len={len(data_loader)}, epochs={args.training.num_epochs})"
-    )
-
-    scheduler = optim.LinearWithWarmup(warmup_steps=int(effective_steps * args.training.warmup_ratio), alpha_f=0.0)
-
-    rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
-    dp_shard_degree = min(world_size, torch.cuda.device_count() if torch.cuda.is_available() else 1)
+    cp_config = olmo_core_utils.build_cp_config(args.training)
+    cp_degree = args.training.cp_degree or 1
+    gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
+    dp_shard_degree = gpus_per_node // cp_degree
 
     dp_config = train_module_lib.TransformerDataParallelConfig(
         name=parallel.DataParallelType.hsdp if world_size > dp_shard_degree else parallel.DataParallelType.fsdp,
@@ -152,13 +136,58 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         shard_degree=dp_shard_degree,
     )
 
-    if args.training.activation_memory_budget < 1.0 and args.training.compile_model:
-        ac_config = train_module_lib.TransformerActivationCheckpointingConfig(
-            mode=train_module_lib.TransformerActivationCheckpointingMode.budget,
-            activation_memory_budget=args.training.activation_memory_budget,
+    ac_config = olmo_core_utils.build_ac_config(args.training)
+
+    if use_numpy_data:
+        global_batch_size_tokens = args.training.global_batch_size_tokens
+        assert global_batch_size_tokens is not None, (
+            "--global_batch_size_tokens is required when using --numpy_dataset_path"
         )
+        dp_world_size = world_size // cp_degree
+        rank_batch_size_tokens = global_batch_size_tokens // dp_world_size
+        rank_microbatch_size = rank_batch_size_tokens
+        data_seed = args.training.data_seed if args.training.data_seed is not None else args.tracking.seed
+        scheduler = optim.LinearWithWarmup(warmup_fraction=args.training.warmup_ratio, alpha_f=0.0)
     else:
-        ac_config = None
+        rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
+        rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
+
+        dataset = olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process)
+        dataset = dataset.shuffle(seed=args.tracking.seed)
+        dataset.set_format(type="pt")
+        if is_main_process:
+            dataset_transformation.visualize_token(dataset[0]["input_ids"], tokenizer)
+
+        global_batch_size_seqs = rank_batch_size_seqs * world_size
+
+        collator = padding_free_collator.TensorDataCollatorWithFlattening(
+            return_position_ids=True,
+            return_flash_attn_kwargs=True,
+            max_seq_length=rank_batch_size_seqs * args.training.max_seq_length,
+        )
+
+        hf_data_loader = data_loader_lib.HFDataLoader(
+            dataset=dataset,
+            batch_size=global_batch_size_seqs,
+            seed=args.tracking.seed,
+            dp_rank=global_rank,
+            dp_world_size=world_size,
+            work_dir=args.checkpoint.output_dir,
+            collator=collator,
+            device=device,
+            drop_last=True,
+            fs_local_rank=global_rank,
+            max_seq_length=args.training.max_seq_length,
+        )
+
+        num_training_steps = len(hf_data_loader) * args.training.num_epochs
+        effective_steps = (
+            args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
+        )
+        logger.info(
+            f"Total training steps: {effective_steps} (data_loader len={len(hf_data_loader)}, epochs={args.training.num_epochs})"
+        )
+        scheduler = optim.LinearWithWarmup(warmup_steps=int(effective_steps * args.training.warmup_ratio), alpha_f=0.0)
 
     train_module_config = train_module_lib.TransformerTrainModuleConfig(
         rank_microbatch_size=rank_microbatch_size,
@@ -169,6 +198,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
         ),
         dp_config=dp_config,
+        cp_config=cp_config,
         ac_config=ac_config,
         scheduler=scheduler,
         max_grad_norm=args.training.max_grad_norm if args.training.max_grad_norm > 0 else None,
@@ -176,10 +206,21 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     train_module = train_module_config.build(model)
 
-    logger.info("Reloading HuggingFace weights after parallelization...")
-    sd = train_module.model.state_dict()
-    load_hf_model(args.model.model_name_or_path, sd, work_dir=args.checkpoint.output_dir)
-    train_module.model.load_state_dict(sd)
+    if use_numpy_data:
+        assert args.dataset.numpy_dataset_path is not None
+        dataset_config = _build_numpy_dataset_config(args.dataset.numpy_dataset_path, args.training.max_seq_length)
+        dataset = dataset_config.build()
+        data_loader = NumpyDataLoaderConfig(
+            global_batch_size=global_batch_size_tokens, seed=data_seed, num_workers=4
+        ).build(dataset, dp_process_group=train_module.dp_process_group)
+    else:
+        data_loader = hf_data_loader
+
+    if use_hf_ckpt:
+        logger.info("Reloading HuggingFace weights after parallelization...")
+        sd = train_module.model.state_dict()
+        load_hf_model(args.model.model_name_or_path, sd, work_dir=args.checkpoint.output_dir)
+        train_module.model.load_state_dict(sd)
 
     if args.training.max_train_steps is not None:
         max_duration = Duration.steps(args.training.max_train_steps)
@@ -209,14 +250,21 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             cancel_check_interval=10,
         )
 
+    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
+
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
+        load_strategy=load_strategy,
         max_duration=max_duration,
         metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
         save_overwrite=True,
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
+
+    if not use_hf_ckpt:
+        logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
+        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 
     logger.info("Starting training...")
     trainer.fit()
