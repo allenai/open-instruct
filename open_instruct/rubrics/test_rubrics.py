@@ -19,13 +19,12 @@ import os
 import shutil
 import tempfile
 import unittest
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
 from open_instruct.model_utils import Batch
 from open_instruct.rubrics import RubricManager
-from open_instruct.rubrics.evolving_rubric_step import _push_ground_truth_overrides
+from open_instruct.rubrics.evolving_rubric_step import _build_ground_truth_overrides
 from open_instruct.rubrics.metrics import (
     compute_rubric_count_metrics,
     compute_rubric_reward_metrics,
@@ -720,43 +719,32 @@ class TestRubricManagerInit(unittest.TestCase):
         self.assertEqual(len(mgr._buffer), 1)
 
 
-class TestPushGroundTruthOverrides(unittest.TestCase):
-    """Test ``_push_ground_truth_overrides`` without Ray."""
+class TestBuildGroundTruthOverrides(unittest.TestCase):
+    """Test ``_build_ground_truth_overrides`` helper."""
 
-    def test_no_engines_noop(self):
-        """No engines → no crash, no-op."""
-        _push_ground_truth_overrides(["gt1", "gt2"], [0, 1], [])
+    def test_no_indices_returns_empty(self):
+        """No indices → empty dict."""
+        result = _build_ground_truth_overrides(["gt1", "gt2"], None)
+        self.assertEqual(result, {})
 
-    def test_no_indices_noop(self):
-        """No indices → engine method never called."""
-        engine = MagicMock()
-        _push_ground_truth_overrides(["gt1"], None, [engine])
-        engine.update_ground_truths.remote.assert_not_called()
+    def test_empty_indices_returns_empty(self):
+        """Empty indices list → empty dict."""
+        result = _build_ground_truth_overrides([], [])
+        self.assertEqual(result, {})
 
     def test_deduplicates_indices(self):
         """Indices repeat for num_samples_per_prompt_rollout > 1."""
-        overrides_seen: dict[int, Any] = {}
+        result = _build_ground_truth_overrides(
+            updated_ground_truths=["gt_a", "gt_a", "gt_b", "gt_b"], indices=[0, 0, 1, 1]
+        )
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], "gt_a")
+        self.assertEqual(result[1], "gt_b")
 
-        class FakeEngine:
-            class _Remote:
-                @staticmethod
-                def remote(overrides):
-                    overrides_seen.update(overrides)
-                    return MagicMock()
-
-            update_ground_truths = _Remote()
-
-        with patch("open_instruct.rubrics.evolving_rubric_step.ray") as mock_ray:
-            mock_ray.get = lambda futures: None
-            _push_ground_truth_overrides(
-                updated_ground_truths=["gt_a", "gt_a", "gt_b", "gt_b"],
-                indices=[0, 0, 1, 1],
-                vllm_engines=[FakeEngine()],
-            )
-
-        self.assertEqual(len(overrides_seen), 2)
-        self.assertEqual(overrides_seen[0], "gt_a")
-        self.assertEqual(overrides_seen[1], "gt_b")
+    def test_single_index(self):
+        """Single ground truth and index."""
+        result = _build_ground_truth_overrides(["gt_x"], [42])
+        self.assertEqual(result, {42: "gt_x"})
 
 
 class TestRubricManagerRunStepMocked(unittest.TestCase):
@@ -777,11 +765,11 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         self.mgr = RubricManager(_mock_streaming_config(num_samples=self.num_samples), gts_for_buffer)
 
     @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
-    def test_step_returns_metrics(self, mock_generate):
-        """Test that a step returns expected metrics and updates the buffer."""
+    def test_step_returns_metrics_and_overrides(self, mock_generate):
+        """Test that a step returns expected metrics, overrides, and updates the buffer."""
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
 
-        metrics = self.mgr.run_step(
+        metrics, overrides = self.mgr.run_step(
             decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
         )
 
@@ -789,6 +777,9 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         self.assertIn("evolving_rubrics/num_new_rubrics", metrics)
         self.assertIn("evolving_rubrics/num_active_rubrics", metrics)
         self.assertGreater(metrics["evolving_rubrics/valid_rate"], 0)
+
+        self.assertIsInstance(overrides, dict)
+        self.assertGreater(len(overrides), 0)
 
         for query, _ in _STEP_SAMPLE_QUERIES:
             self.assertGreater(len(self.mgr._buffer[query]["active_rubrics"]), 0)
@@ -803,7 +794,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
             mgr = RubricManager(
                 _mock_streaming_config(num_samples=self.num_samples, cache_dir=cache_dir), gts_for_buffer
             )
-            mgr.run_step(
+            _metrics, _overrides = mgr.run_step(
                 decoded_responses=self.decoded_responses,
                 ground_truths=self.ground_truths,
                 indices=self.indices,
@@ -820,7 +811,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         """LLM generation can fail and return None for some prompts."""
         mock_generate.side_effect = [None, _FAKE_EVOLVING_RUBRICS]
 
-        metrics = self.mgr.run_step(
+        metrics, _overrides = self.mgr.run_step(
             decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
         )
 
@@ -832,7 +823,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
         """Active rubrics should accumulate across multiple steps."""
         mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
 
-        self.mgr.run_step(
+        _metrics, _overrides = self.mgr.run_step(
             decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
         )
         active_count_1 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
@@ -841,7 +832,7 @@ class TestRubricManagerRunStepMocked(unittest.TestCase):
             "positive_rubrics": [{"description": "New rubric", "title": "New"}],
             "negative_rubrics": [],
         }
-        self.mgr.run_step(
+        _metrics, _overrides = self.mgr.run_step(
             decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=1
         )
         active_count_2 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
@@ -922,13 +913,14 @@ class TestRubricManagerWithAPI(unittest.TestCase):
         gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
         mgr = RubricManager(_mock_streaming_config(num_samples=num_samples), gts_for_buffer)
 
-        metrics = mgr.run_step(
+        metrics, overrides = mgr.run_step(
             decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0
         )
 
         self.assertIn("evolving_rubrics/valid_rate", metrics)
         self.assertIn("evolving_rubrics/num_new_rubrics", metrics)
         self.assertGreater(metrics["evolving_rubrics/valid_rate"], 0, "At least one rubric should be generated")
+        self.assertIsInstance(overrides, dict)
 
         total_active = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
         self.assertGreater(total_active, 0, "Buffer should have active rubrics after generation")
@@ -950,10 +942,14 @@ class TestRubricManagerWithAPI(unittest.TestCase):
         gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
         mgr = RubricManager(_mock_streaming_config(num_samples=num_samples, max_active=10), gts_for_buffer)
 
-        mgr.run_step(decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0)
+        _metrics, _overrides = mgr.run_step(
+            decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0
+        )
         active_step0 = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
 
-        mgr.run_step(decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=1)
+        _metrics, _overrides = mgr.run_step(
+            decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=1
+        )
         active_step1 = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
 
         self.assertGreaterEqual(active_step1, active_step0)

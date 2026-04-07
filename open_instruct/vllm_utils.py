@@ -488,6 +488,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
         "env_config": request.env_config,
+        "ground_truth": request.ground_truth,
     }
 
     for j in range(request.generation_config.n):
@@ -545,27 +546,33 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
         actor.request_metadata,
     )
 
+    metadata = actor.request_metadata.get(base_request_id, {})
+    ground_truth_override = metadata.get("ground_truth")
+
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+    result.reward_scores, result.reward_metrics = await compute_rewards(
+        actor, result, dataset, is_eval, ground_truth_override=ground_truth_override
+    )
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
 
 
 async def compute_rewards(
-    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
+    actor: "LLMRayActor",
+    result: GenerationResult,
+    dataset: datasets.Dataset,
+    is_eval: bool,
+    ground_truth_override: Any = None,
 ) -> tuple[list[float], dict]:
     index_map = actor._eval_index_map if is_eval else actor._train_index_map
     example = dataset[index_map[result.index]]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
-    if is_eval:
-        ground_truth = example[GROUND_TRUTHS_KEY]
-    else:
-        ground_truth = actor._ground_truth_overrides.get(result.index, example[GROUND_TRUTHS_KEY])
+    ground_truth = example[GROUND_TRUTHS_KEY] if is_eval or ground_truth_override is None else ground_truth_override
     k_ground_truths = [ground_truth] * k
     k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
     k_raw_queries = [example[RAW_PROMPT_KEY]] * k
@@ -659,7 +666,6 @@ class LLMRayActor:
         self._eval_index_map: dict[int, int] = (
             {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
         )
-        self._ground_truth_overrides: dict[int, Any] = {}
         self.reward_fn = reward_config.build() if reward_config else None
         self.tool_parser: ToolParser  # Set in _init_tool_parser
 
@@ -673,14 +679,6 @@ class LLMRayActor:
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
-
-    def update_ground_truths(self, overrides: dict[int, Any]) -> None:
-        """Update ground truth overrides for specific dataset indices.
-
-        Used by evolving rubrics to inject updated rubrics into the reward computation
-        without modifying the immutable Arrow-backed HF dataset.
-        """
-        self._ground_truth_overrides.update(overrides)
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS

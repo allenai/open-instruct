@@ -8,8 +8,6 @@ state management to it.
 import asyncio
 from typing import Any
 
-import ray
-
 from open_instruct import logger_utils
 from open_instruct.rubrics.metrics import compute_rubric_count_metrics
 from open_instruct.rubrics.rubric_utils import (
@@ -25,9 +23,12 @@ logger = logger_utils.setup_logger(__name__)
 class RubricManager:
     """Manages evolving rubric state across training steps.
 
-    Encapsulates the rubric buffer, config, and vLLM engine handles so
-    that callers only need a single import and two calls
-    (``__init__`` and ``run_step``).
+    Encapsulates the rubric buffer and config so that callers only need a
+    single import and two calls (``__init__`` and ``run_step``).
+
+    Ground truth overrides are returned from ``run_step`` so the caller
+    (``DataPreparationActor``) can include them in future ``PromptRequest``
+    objects — keeping data flow unidirectional (dataloader → vLLM).
     """
 
     def __init__(self, streaming_config, ground_truths: list) -> None:
@@ -35,20 +36,21 @@ class RubricManager:
         self._max_active = streaming_config.max_active_rubrics
         self._cache_dir: str | None = streaming_config.cache_evolving_rubric_data_dir
         self._buffer = initialize_rubric_buffer(ground_truths)
-        self._vllm_engines: list = []
         logger.info(f"Initialized rubric buffer with {len(self._buffer)} unique queries")
-
-    def set_vllm_engines(self, engines: list) -> None:
-        """Register vLLM engine handles (called after engines are created)."""
-        self._vllm_engines = engines
 
     def run_step(
         self, *, decoded_responses: list[str], ground_truths: list, indices: list[int] | None, step: int
-    ) -> dict[str, Any]:
-        """Run one evolving-rubric cycle and return metrics."""
+    ) -> tuple[dict[str, Any], dict[int, Any]]:
+        """Run one evolving-rubric cycle.
+
+        Returns:
+            Tuple of (metrics dict, ground_truth_overrides dict mapping
+            dataset index → updated ground truth value).
+        """
         metrics: dict[str, Any] = {}
+        overrides: dict[int, Any] = {}
         try:
-            metrics, self._buffer = _run_evolving_rubric_step(
+            metrics, overrides, self._buffer = _run_evolving_rubric_step(
                 decoded_responses=decoded_responses,
                 ground_truths=ground_truths,
                 indices=indices,
@@ -56,12 +58,11 @@ class RubricManager:
                 max_active=self._max_active,
                 cache_dir=self._cache_dir,
                 rubric_buffer=self._buffer,
-                vllm_engines=self._vllm_engines,
                 step=step,
             )
         except Exception:
             logger.exception("Error in evolving rubric step")
-        return metrics
+        return metrics, overrides
 
 
 # ---------------------------------------------------------------------------
@@ -78,9 +79,8 @@ def _run_evolving_rubric_step(
     max_active: int,
     cache_dir: str | None,
     rubric_buffer: dict[str, Any] | None,
-    vllm_engines: list,
     step: int,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
+) -> tuple[dict[str, Any], dict[int, Any], dict[str, Any] | None]:
     metrics: dict[str, Any] = {}
 
     all_evolving_rubrics, num_subsampled = asyncio.run(
@@ -110,7 +110,7 @@ def _run_evolving_rubric_step(
     if rubric_buffer is not None:
         _cap_active_rubrics(rubric_buffer, max_active)
 
-    _push_ground_truth_overrides(updated_ground_truths, indices, vllm_engines)
+    overrides = _build_ground_truth_overrides(updated_ground_truths, indices)
 
     metrics.update(compute_rubric_count_metrics(avg_evolving_rubrics, avg_active_buffer))
     metrics["evolving_rubrics/valid_rate"] = valid_rate
@@ -136,7 +136,7 @@ def _run_evolving_rubric_step(
         f"avg_active_buffer={avg_active_buffer:.1f}, skipped={skipped}"
     )
 
-    return metrics, rubric_buffer
+    return metrics, overrides, rubric_buffer
 
 
 def _cap_active_rubrics(rubric_buffer: dict[str, Any], max_active: int) -> None:
@@ -156,10 +156,13 @@ def _cap_active_rubrics(rubric_buffer: dict[str, Any], max_active: int) -> None:
             logger.debug(f"Capped {len(evicted)} rubrics for query '{query[:60]}...'")
 
 
-def _push_ground_truth_overrides(updated_ground_truths: list, indices: list[int] | None, vllm_engines: list) -> None:
-    """Send updated ground truths to vLLM engines for future reward computation."""
-    if not vllm_engines or not indices:
-        return
+def _build_ground_truth_overrides(updated_ground_truths: list, indices: list[int] | None) -> dict[int, Any]:
+    """Build a mapping from dataset index → updated ground truth.
+
+    Deduplicates indices (each prompt index appears ``num_samples`` times).
+    """
+    if not indices:
+        return {}
 
     overrides: dict[int, Any] = {}
     seen: set[int] = set()
@@ -169,5 +172,6 @@ def _push_ground_truth_overrides(updated_ground_truths: list, indices: list[int]
             seen.add(idx)
 
     if overrides:
-        ray.get([engine.update_ground_truths.remote(overrides) for engine in vllm_engines])
-        logger.info(f"Pushed {len(overrides)} ground truth overrides to {len(vllm_engines)} vLLM engines")
+        logger.info(f"Built {len(overrides)} ground truth overrides for future prompts")
+
+    return overrides

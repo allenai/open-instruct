@@ -706,11 +706,14 @@ def add_prompt_to_generator(
     generation_config,
     is_eval: bool,
     base_env_config: EnvConfig,
+    ground_truth_overrides: dict[int, Any] | None = None,
 ) -> None:
     index = int(example["index"])
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
+
+    ground_truth = ground_truth_overrides.get(index) if ground_truth_overrides else None
 
     param_prompt_Q.put(
         data_types.PromptRequest(
@@ -721,6 +724,7 @@ def add_prompt_to_generator(
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
+            ground_truth=ground_truth,
         )
     )
 
@@ -745,6 +749,7 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    ground_truth_overrides: dict[int, Any] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -830,6 +835,7 @@ def accumulate_inference_batches(
                 generation_config,
                 is_eval=False,
                 base_env_config=base_env_config,
+                ground_truth_overrides=ground_truth_overrides,
             )
 
         for i in range(len(result.finish_reasons)):
@@ -1123,7 +1129,6 @@ class DataPreparationActor:
         model_name: str | None,
         base_env_config: EnvConfig,
         initial_state: dict | None = None,
-        vllm_engines: list | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1143,7 +1148,6 @@ class DataPreparationActor:
         self.run_name = run_name
         self.model_name = model_name
         self.base_env_config = base_env_config
-        self.vllm_engines: list = vllm_engines or []
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1167,6 +1171,7 @@ class DataPreparationActor:
         self.metadata_saved = False
 
         self.rubric_manager: RubricManager | None = None
+        self.ground_truth_overrides: dict[int, Any] = {}
         if self.config.apply_evolving_rubric_reward:
             self.rubric_manager = RubricManager(self.config, dataset[GROUND_TRUTHS_KEY])
 
@@ -1195,6 +1200,7 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
                 base_env_config=self.base_env_config,
+                ground_truth_overrides=self.ground_truth_overrides,
             )
 
         for step in range(self.training_step, self.num_training_steps):
@@ -1232,6 +1238,7 @@ class DataPreparationActor:
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
+                ground_truth_overrides=self.ground_truth_overrides,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1262,14 +1269,14 @@ class DataPreparationActor:
             assert batch_stats is not None
 
             if self.rubric_manager and batch.decoded_responses:
-                reward_metrics.update(
-                    self.rubric_manager.run_step(
-                        decoded_responses=batch.decoded_responses,
-                        ground_truths=batch.ground_truths,
-                        indices=batch.indices,
-                        step=step,
-                    )
+                rubric_metrics, new_overrides = self.rubric_manager.run_step(
+                    decoded_responses=batch.decoded_responses,
+                    ground_truths=batch.ground_truths,
+                    indices=batch.indices,
+                    step=step,
                 )
+                reward_metrics.update(rubric_metrics)
+                self.ground_truth_overrides.update(new_overrides)
 
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
@@ -1406,12 +1413,6 @@ class DataPreparationActor:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
-
-    def set_vllm_engines(self, vllm_engines: list) -> None:
-        """Set vLLM engine handles after they've been created."""
-        self.vllm_engines = vllm_engines
-        if self.rubric_manager:
-            self.rubric_manager.set_vllm_engines(vllm_engines)
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
