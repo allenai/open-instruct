@@ -1,31 +1,9 @@
 """
 Manufactoria DSL verification API.
 
-Can launch local server with:
+Launch locally with:
 ```
-uv run uvicorn open_instruct.code_utils.manufactoria_api:app --host 0.0.0.0 --port 1235
-```
-
-or launch the server in a docker container:
-```
-docker build -t manufactoria-api -f open_instruct/code_utils/Dockerfile.manufactoria .
-docker run -p 1235:1235 manufactoria-api
-```
-
-and then test with:
-```
-python open_instruct/code_utils/manufactoria_api.py
-```
-
-or
-
-```
-curl -X GET http://localhost:1235/health
-curl -X POST http://localhost:1235/test_solution -H "Content-Type: application/json" -d '{
-    "dsl": "START start:\n    NEXT end\nEND end",
-    "test_cases": [{"input": "", "expected_output": "", "expected_accepted": true, "check_output": false}],
-    "max_execution_time": 1.0
-}'
+uv run uvicorn examples.manufactoria.api:app --host 0.0.0.0 --port 1235
 ```
 """
 
@@ -34,8 +12,8 @@ import re
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from examples.manufactoria import parser as manufactoria_parser
 from open_instruct import logger_utils
-from open_instruct.code_utils.manufactoria_parser import ParseError, create_robot_factory
 
 app = FastAPI()
 
@@ -60,7 +38,7 @@ class ManufactoriaTestRequest(BaseModel):
 async def test_solution(request: ManufactoriaTestRequest):
     """Test a Manufactoria DSL solution against test cases."""
     try:
-        factory = create_robot_factory(request.dsl)
+        factory = manufactoria_parser.create_robot_factory(request.dsl)
         results = []
 
         for test_case in request.test_cases:
@@ -97,7 +75,7 @@ async def test_solution(request: ManufactoriaTestRequest):
 
         all_passed = all(result["passed"] for result in results)
         return {"valid": True, "all_passed": all_passed, "results": results}
-    except ParseError as e:
+    except manufactoria_parser.ParseError as e:
         logger.warning(f"Manufactoria DSL parse error: {e}")
         return {"valid": False, "all_passed": False, "message": f"DSL Parse Error: {e}", "results": []}
     except Exception as e:

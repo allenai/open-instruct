@@ -67,7 +67,7 @@ start_uvicorn_servers() {
 
         echo "Starting BounceSim API server on core $CPU_ID, port $PORT"
         cd "$REPO_PATH"
-        taskset -c $CPU_ID nohup uvicorn open_instruct.code_utils.ballsim_api:app --host 0.0.0.0 --port $PORT > api_logs/ballsim_server_$PORT.log 2>&1 &
+        taskset -c $CPU_ID nohup uvicorn examples.ballsim.api:app --host 0.0.0.0 --port $PORT > api_logs/ballsim_server_$PORT.log 2>&1 &
         SERVER_PID=$!
         echo "BounceSim API server started on port $PORT with PID $SERVER_PID"
 

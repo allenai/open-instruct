@@ -57,7 +57,7 @@ import threading
 import time
 from dataclasses import asdict
 from queue import Empty, Full, Queue
-from typing import Any
+from typing import Any, cast
 
 import backoff
 import datasets
@@ -96,7 +96,13 @@ from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
 from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
-from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
+from open_instruct.ground_truth_utils import (
+    RewardConfig,
+    VerifierFunction,
+    build_all_verifiers,
+    cleanup_all_llm_judge_clients,
+    parse_extra_verifier_cli_args,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
@@ -2136,6 +2142,9 @@ def main(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
+    *,
+    verifier_extra_sources: tuple[Any, ...] = (),
+    extra_verifier_functions: dict[str, VerifierFunction] | None = None,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
@@ -2209,6 +2218,10 @@ def main(
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
+    verifier_functions = dict(build_all_verifiers(args, streaming_config, *verifier_extra_sources))
+    if extra_verifier_functions:
+        verifier_functions.update(extra_verifier_functions)
+
     reward_config = RewardConfig(
         apply_r1_style_format_reward=streaming_config.apply_r1_style_format_reward,
         r1_style_format_reward=streaming_config.r1_style_format_reward,
@@ -2218,7 +2231,7 @@ def main(
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
         only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
-        verifier_functions=build_all_verifiers(args, streaming_config),
+        verifier_functions=verifier_functions,
         reward_aggregator=streaming_config.reward_aggregator,
     )
 
@@ -2344,9 +2357,9 @@ if __name__ == "__main__":
         )
     )
     parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
-    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
-        parser.parse_args_into_dataclasses()
-    )
+    parsed = parser.parse_args_into_dataclasses(return_remaining_strings=True)
+    remaining = cast(list[str], parsed[-1])
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = parsed[:-1]
     assert isinstance(args, grpo_utils.GRPOExperimentConfig)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
@@ -2354,4 +2367,13 @@ if __name__ == "__main__":
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
     assert isinstance(tools_config, EnvsConfig)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)
+    verifier_extra = parse_extra_verifier_cli_args(remaining)
+    main(
+        args,
+        tokenizer_config,
+        model_config,
+        streaming_config,
+        vllm_config,
+        tools_config,
+        verifier_extra_sources=(verifier_extra,),
+    )

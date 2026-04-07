@@ -19,10 +19,14 @@ import json
 import os
 from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 from datasets import Dataset
 from tqdm import tqdm
+
+import examples.ballsim.register  # noqa: F401  # Register example verifiers for build_all_verifiers
+import examples.manufactoria.register  # noqa: F401
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction, build_all_verifiers
@@ -135,7 +139,8 @@ def main():
     if args.lower_bound == 0 and args.upper_bound == 1:
         logger.warning("Upper bound is 1 and lower bound is 0. No filtering will be done, is this intended?")
 
-    reward_fn_mapping = build_all_verifiers(args)
+    streaming_config = SimpleNamespace(remap_verifier=args.remap_verifier)
+    reward_fn_mapping = build_all_verifiers(args, streaming_config)
 
     # Resolve judge override if provided
     override_key = None

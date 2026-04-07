@@ -21,7 +21,7 @@ uv run mason.py \
     --budget ai2/oe-adapt \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run open_instruct/grpo_fast.py \
+\&\& uv run python -m examples.grpo_fast \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --vllm_top_p 1.0 \
@@ -53,6 +53,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
+    --ballsim_api_url "${BALLSIM_API_URL:-http://localhost:2345}/test_program" \
+    --ballsim_scoring_mode "${BALLSIM_SCORING_MODE:-all_pass}" \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 100 \

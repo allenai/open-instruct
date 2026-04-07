@@ -18,7 +18,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-uv run --active python -m uvicorn open_instruct.code_utils.ballsim_api:app --host 0.0.0.0 --port 2345 >/tmp/ballsim_api.log 2>&1 &
+uv run --active python -m uvicorn examples.ballsim.api:app --host 0.0.0.0 --port 2345 >/tmp/ballsim_api.log 2>&1 &
 BALLSIM_API_PID=$!
 
 for _ in {1..120}; do
@@ -29,7 +29,7 @@ for _ in {1..120}; do
 done
 curl -sf "http://localhost:2345/health" >/dev/null
 
-uv run --active python open_instruct/grpo_fast.py \
+uv run --active python -m examples.grpo_fast \
     --dataset_mixer_list bouncingsim/bouncingsim-MULTIOBJ-basic 32 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list bouncingsim/bouncingsim-MULTIOBJ-basic 16 \

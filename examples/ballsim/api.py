@@ -3,7 +3,7 @@ BounceSim code execution API.
 
 Launch locally with:
 ```
-uv run uvicorn open_instruct.code_utils.ballsim_api:app --host 0.0.0.0 --port 2345
+uv run uvicorn examples.ballsim.api:app --host 0.0.0.0 --port 2345
 ```
 """
 

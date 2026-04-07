@@ -65,7 +65,7 @@ start_uvicorn_servers() {
 
         echo "Starting Manufactoria API server on core $CPU_ID, port $PORT"
         cd "$REPO_PATH"
-        taskset -c $CPU_ID nohup uvicorn open_instruct.code_utils.manufactoria_api:app --host 0.0.0.0 --port $PORT > api_logs/manufactoria_server_$PORT.log 2>&1 &
+        taskset -c $CPU_ID nohup uvicorn examples.manufactoria.api:app --host 0.0.0.0 --port $PORT > api_logs/manufactoria_server_$PORT.log 2>&1 &
         SERVER_PID=$!
         echo "Manufactoria API server started on port $PORT with PID $SERVER_PID"
 

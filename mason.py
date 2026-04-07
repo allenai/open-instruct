@@ -470,32 +470,24 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     raise Exception(f"Error code {return_code} when creating cached dataset")
                 console.log("✅✅✅ Finished running the caching command")
 
-        for file in OPEN_INSTRUCT_COMMANDS:
-            try:
-                idx = command.index(file)
-            except ValueError:
-                continue
+                if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
+                    need_to_override_checkpoint_state_dir = True
+                    default_checkpoint_state_freq = 200
+                    for idx, cmd in enumerate(command):
+                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
+                            need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
+                            default_checkpoint_state_freq = command[idx + 1]
 
-            if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
-                need_to_override_checkpoint_state_dir = True
-                default_checkpoint_state_freq = 200
-                for idx, cmd in enumerate(command):
-                    if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
-                        need_to_override_checkpoint_state_dir = False
-                    if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
-                        default_checkpoint_state_freq = command[idx + 1]
-
-                if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
-                    new_checkpoint_state_dir = (
-                        f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-                    )
-                    console.log(
-                        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-                    )
-                    command.append("--checkpoint_state_dir")
-                    command.append(new_checkpoint_state_dir)
-                    command.append("--checkpoint_state_freq")
-                    command.append(str(default_checkpoint_state_freq))
+                    if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
+                        new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+                        console.log(
+                            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+                        )
+                        command.append("--checkpoint_state_dir")
+                        command.append(new_checkpoint_state_dir)
+                        command.append("--checkpoint_state_freq")
+                        command.append(str(default_checkpoint_state_freq))
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path

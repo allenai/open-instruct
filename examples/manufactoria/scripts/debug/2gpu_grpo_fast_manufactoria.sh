@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-uv run --active python -m uvicorn open_instruct.code_utils.manufactoria_api:app --host 0.0.0.0 --port 1235 >/tmp/manufactoria_api.log 2>&1 &
+uv run --active python -m uvicorn examples.manufactoria.api:app --host 0.0.0.0 --port 1235 >/tmp/manufactoria_api.log 2>&1 &
 MANUFACTORIA_API_PID=$!
 
 for _ in {1..120}; do
@@ -30,7 +30,7 @@ for _ in {1..120}; do
 done
 curl -sf "http://localhost:1235/health" >/dev/null
 
-uv run --active python open_instruct/grpo_fast.py \
+uv run --active python -m examples.grpo_fast \
     --dataset_mixer_list manufactoria/basic_mix_train 8 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list manufactoria/basic_mix_test 4 \

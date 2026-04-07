@@ -54,6 +54,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["open_instruct"]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["examples*"]
+
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
 flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
@@ -140,7 +144,7 @@ target-version = ['py310']
 [tool.ruff]
 target-version = "py310"
 line-length = 119
-src = ["open_instruct"]
+src = ["open_instruct", "examples"]
 exclude = ["wandb"]
 
 [tool.ruff.format]

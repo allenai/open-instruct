@@ -23,6 +23,7 @@ Uses Ray for distributed training with Beaker.
 import dataclasses
 import os
 import shutil
+from typing import Any, cast
 
 import backoff
 import ray
@@ -36,7 +37,12 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
-from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
+from open_instruct.ground_truth_utils import (
+    RewardConfig,
+    VerifierFunction,
+    build_all_verifiers,
+    parse_extra_verifier_cli_args,
+)
 from open_instruct.grpo_olmo_core_actor import OLMoCoreModelGroup
 from open_instruct.model_utils import ModelConfig, push_folder_to_hub
 
@@ -108,6 +114,9 @@ def main(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
+    *,
+    verifier_extra_sources: tuple[Any, ...] = (),
+    extra_verifier_functions: dict[str, VerifierFunction] | None = None,
 ) -> None:
     """Main entry point for GRPO training with OLMo-core Trainer using Ray actors.
 
@@ -175,6 +184,10 @@ def main(
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue()
 
+    verifier_functions = dict(build_all_verifiers(args, streaming_config, *verifier_extra_sources))
+    if extra_verifier_functions:
+        verifier_functions.update(extra_verifier_functions)
+
     reward_config = RewardConfig(
         apply_r1_style_format_reward=streaming_config.apply_r1_style_format_reward,
         r1_style_format_reward=streaming_config.r1_style_format_reward,
@@ -184,7 +197,7 @@ def main(
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
         only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
-        verifier_functions=build_all_verifiers(args, streaming_config),
+        verifier_functions=verifier_functions,
     )
     generation_config = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)["train"]
 
@@ -334,6 +347,9 @@ if __name__ == "__main__":
     parser.set_defaults(
         exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1, fused_optimizer=False
     )
-    args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
+    parsed = parser.parse_args_into_dataclasses(return_remaining_strings=True)
+    remaining = cast(list[str], parsed[-1])
+    args, tc, model_config, streaming_config, vllm_config, tools_config = parsed[:-1]
 
-    main(args, tc, model_config, streaming_config, vllm_config, tools_config)  # type: ignore[arg-type]
+    verifier_extra = parse_extra_verifier_cli_args(remaining)
+    main(args, tc, model_config, streaming_config, vllm_config, tools_config, verifier_extra_sources=(verifier_extra,))

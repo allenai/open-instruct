@@ -71,4 +71,4 @@ uv sync
 # Run the provided script with the image name and all remaining arguments
 script="$1"
 shift
-BEAKER_IMAGE="$beaker_user/$image_name" bash "$script" "$@"
+bash "$script" "$beaker_user/$image_name" "$@"

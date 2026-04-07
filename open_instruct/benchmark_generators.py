@@ -30,7 +30,12 @@ from ray.util import queue as ray_queue
 from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
-from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
+from open_instruct.ground_truth_utils import (
+    RewardConfig,
+    VerifierFunction,
+    build_all_verifiers,
+    parse_extra_verifier_cli_args,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -228,6 +233,9 @@ def setup_vllm_engines(
     model_config: model_utils.ModelConfig,
     max_model_len: int,
     dataset: datasets.Dataset,
+    *,
+    verifier_extra_sources: tuple[Any, ...] = (),
+    extra_verifier_functions: dict[str, VerifierFunction] | None = None,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
@@ -241,6 +249,10 @@ def setup_vllm_engines(
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
     assert tokenizer_name_or_path is not None
     assert model_config.model_name_or_path is not None
+
+    verifier_functions = dict(build_all_verifiers(args, streaming_config, *verifier_extra_sources))
+    if extra_verifier_functions:
+        verifier_functions.update(extra_verifier_functions)
 
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=vllm_config.vllm_num_engines,
@@ -266,7 +278,7 @@ def setup_vllm_engines(
         reward_config=RewardConfig(
             apply_verifiable_reward=streaming_config.apply_verifiable_reward,
             verification_reward=streaming_config.verification_reward,
-            verifier_functions=build_all_verifiers(args, streaming_config),
+            verifier_functions=verifier_functions,
         ),
         train_dataset=dataset,
         trust_remote_code=tokenizer_config.trust_remote_code,
@@ -691,16 +703,10 @@ def main() -> None:
         )  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
-        tuple[
-            grpo_utils.GRPOExperimentConfig,
-            dataset_transformation.TokenizerConfig,
-            model_utils.ModelConfig,
-            data_loader.StreamingDataLoaderConfig,
-            data_loader.VLLMConfig,
-        ],
-        parser.parse_args_into_dataclasses(),
-    )
+    parsed = parser.parse_args_into_dataclasses(return_remaining_strings=True)
+    remaining = cast(list[str], parsed[-1])
+    args, tokenizer_config, model_config, streaming_config, vllm_config = parsed[:-1]
+    verifier_extra_args = parse_extra_verifier_cli_args(remaining)
 
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -715,7 +721,14 @@ def main() -> None:
     dataset = setup_dataset(args, streaming_config, tokenizer_config)
     max_model_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
-        args, streaming_config, vllm_config, tokenizer_config, model_config, max_model_len, dataset
+        args,
+        streaming_config,
+        vllm_config,
+        tokenizer_config,
+        model_config,
+        max_model_len,
+        dataset,
+        verifier_extra_sources=(verifier_extra_args,),
     )
 
     # Create the timestamp here so we use it for both filenames.

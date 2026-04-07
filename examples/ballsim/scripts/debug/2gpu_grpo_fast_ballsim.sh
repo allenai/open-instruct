@@ -13,7 +13,7 @@ export BEAKER_LEADER_REPLICA_HOSTNAME=$(hostname)
 source .venv/bin/activate
 # source configs/beaker_configs/ray_node_setup.sh
 source configs/beaker_configs/ballsim_api_setup.sh
-python open_instruct/grpo_fast.py \
+python -m examples.grpo_fast \
     --dataset_mixer_list bouncingsim/bouncingsim-MULTIOBJ-basic 32 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list bouncingsim/bouncingsim-MULTIOBJ-basic 16 \
@@ -37,6 +37,6 @@ python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --push_to_hub false \
     --system_prompt_override_file scripts/train/debug/ballsim_system_prompt.txt \
-    --ballsim_api_url "${BALLSIM_API_URL}" \
+    --ballsim_api_url "${BALLSIM_API_URL}/test_program" \
     --ballsim_max_execution_time 1.0 \
     --ballsim_scoring_mode all_pass

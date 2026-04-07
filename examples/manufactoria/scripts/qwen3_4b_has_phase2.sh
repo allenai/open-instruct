@@ -12,5 +12,5 @@ export RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 exec "${SCRIPT_DIR}/qwen3_4b_phase1_has_8gpu.sh" \
     --model_name_or_path "${BASE_MODEL}" \
-    --manufactoria_scoring_mode $SCORE_MODE \
+    --manufactoria_scoring_mode "${SCORE_MODE}" \
     "$@"

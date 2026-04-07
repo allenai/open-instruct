@@ -1,14 +1,20 @@
 """
 Collection of 'ground truth rewards' for different datasets/tasks.
 Used to give feedback to the model based on the ground truth answer.
-Add new verifiers by subclassing VerifierFunction and implementing the __call__ method.
-They are then automatically added to the REWARD_FN_MAPPING.
+
+Add verifiers by subclassing ``VerifierFunction`` and implementing ``__call__`` / ``async_call``.
+In-repo verifiers are picked up via subclass discovery once their module is imported.
+For custom verifiers (e.g. under ``examples/``), decorate the class with ``@register_verifier``
+(see :mod:`open_instruct.ground_truth_registry`) for explicit opt-in; ``build_all_verifiers`` merges
+decorated classes with subclass discovery.
 """
 
 import ast
 import asyncio
 import copy
 import dataclasses
+import importlib
+import inspect
 import json
 import logging
 import os
@@ -17,7 +23,8 @@ import string
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import numpy as np
@@ -92,20 +99,6 @@ class CodeVerifierConfig(VerifierConfig):
     code_max_execution_time: float
     code_pass_rate_reward_threshold: float
     code_apply_perf_penalty: bool
-
-
-@dataclasses.dataclass
-class BallsimVerifierConfig(VerifierConfig):
-    ballsim_api_url: str
-    ballsim_max_execution_time: float
-    ballsim_scoring_mode: str = "all_pass"
-
-
-@dataclasses.dataclass
-class ManufactoriaVerifierConfig(VerifierConfig):
-    manufactoria_api_url: str
-    manufactoria_max_execution_time: float
-    manufactoria_scoring_mode: str = "all_pass"
 
 
 @dataclasses.dataclass
@@ -196,6 +189,9 @@ class VerifierFunction(ABC):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
+
+
+from open_instruct.ground_truth_registry import _decorated_verifier_classes  # noqa: E402
 
 
 # small helper to optionally remove thinking section + answer output.
@@ -1043,268 +1039,6 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
-class BallsimVerifier(VerifierFunction):
-    """
-    Verifier that executes Python code against BounceSim test cases using an external API.
-    """
-
-    _session_pool = None
-
-    def __init__(self, verifier_config: BallsimVerifierConfig) -> None:
-        super().__init__("ballsim", verifier_config=verifier_config, weight=1.0)
-
-    @classmethod
-    def _get_session(cls):
-        if cls._session_pool is None:
-            cls._session_pool = requests.Session()
-            retry_config = requests.adapters.Retry(
-                total=3,
-                connect=3,
-                read=3,
-                status=3,
-                backoff_factor=0.3,
-                status_forcelist=[500, 502, 503, 504],
-                allowed_methods=None,
-            )
-            adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=retry_config)
-            cls._session_pool.mount("http://", adapter)
-            cls._session_pool.mount("https://", adapter)
-        return cls._session_pool
-
-    def extract_python_code(self, model_output: str) -> str:
-        pattern = r"```(?:python)?(.*?)```"
-        matches = re.findall(pattern, model_output, re.DOTALL)
-        if not matches:
-            return model_output
-        return matches[-1].strip()
-
-    async def async_call(
-        self,
-        tokenized_prediction: list[int],
-        prediction: str,
-        label: Any,
-        query: str | None = None,
-        rollout_state: dict | None = None,
-    ) -> VerificationResult:
-        python_code = self.extract_python_code(prediction)
-
-        if isinstance(label, str):
-            try:
-                tests = json.loads(label)
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse BounceSim tests as JSON; got string label")
-                return VerificationResult(score=0.0)
-        else:
-            tests = label
-
-        payload = {
-            "program": python_code,
-            "tests": tests,
-            "max_execution_time": self.verifier_config.ballsim_max_execution_time,
-        }
-
-        try:
-            session = self._get_session()
-            http_timeout = max(30, min(300, self.verifier_config.ballsim_max_execution_time * 10))
-
-            def make_request():
-                response = session.post(
-                    self.verifier_config.ballsim_api_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=http_timeout,
-                )
-                response.raise_for_status()
-                return response.json()
-
-            result = await asyncio.to_thread(make_request)
-            passes = result["results"]
-            pass_rate = sum(passes) / len(passes) if passes else 0.0
-
-            if self.verifier_config.ballsim_scoring_mode == "pass_rate":
-                score = pass_rate
-            else:
-                score = 1.0 if pass_rate == 1.0 else 0.0
-            return VerificationResult(score=score)
-        except Exception as e:
-            logger.warning(f"Error verifying ballsim code sample: {e}")
-            return VerificationResult(score=0.0)
-
-    def __call__(
-        self,
-        tokenized_prediction: list[int],
-        prediction: str,
-        label: Any,
-        query: str | None = None,
-        rollout_state: dict | None = None,
-    ) -> VerificationResult:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                raise RuntimeError(
-                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
-                )
-            else:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
-        except RuntimeError as e:
-            if "cannot schedule new futures after interpreter shutdown" in str(e):
-                logger.warning("Skipping ballsim verification due to interpreter shutdown")
-                return VerificationResult(score=0.0, reasoning="Verification skipped due to shutdown")
-            try:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
-            except Exception as nested_e:
-                logger.warning(f"Error verifying ballsim sample during shutdown: {nested_e}")
-                return VerificationResult(score=0.0, reasoning=f"Verification failed: {nested_e}")
-        except Exception as e:
-            logger.warning(f"Error verifying ballsim sample: {e}")
-            return VerificationResult(score=0.0, reasoning=f"Verification failed: {e}")
-
-    @classmethod
-    def get_config_class(cls) -> type:
-        return BallsimVerifierConfig
-
-
-class ManufactoriaVerifier(VerifierFunction):
-    """
-    Verifier that executes Manufactoria DSL code against test cases using an external API.
-    """
-
-    _session_pool = None
-
-    def __init__(self, verifier_config: ManufactoriaVerifierConfig) -> None:
-        super().__init__("manufactoria", verifier_config=verifier_config, weight=1.0)
-
-    @classmethod
-    def _get_session(cls):
-        if cls._session_pool is None:
-            cls._session_pool = requests.Session()
-            retry_config = requests.adapters.Retry(
-                total=3,
-                connect=3,
-                read=3,
-                status=3,
-                backoff_factor=0.3,
-                status_forcelist=[500, 502, 503, 504],
-                allowed_methods=None,
-            )
-            adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=retry_config)
-            cls._session_pool.mount("http://", adapter)
-            cls._session_pool.mount("https://", adapter)
-        return cls._session_pool
-
-    def extract_manufactoria_code(self, model_output: str) -> str:
-        pattern = r"```(?:manufactoria)?(.*?)```"
-        matches = re.findall(pattern, model_output, re.DOTALL)
-        if not matches:
-            return model_output
-        return matches[-1].strip()
-
-    async def async_call(
-        self,
-        tokenized_prediction: list[int],
-        prediction: str,
-        label: Any,
-        query: str | None = None,
-        rollout_state: dict | None = None,
-    ) -> VerificationResult:
-        if isinstance(label, str):
-            try:
-                test_cases = json.loads(label)
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse Manufactoria tests as JSON; got string label")
-                return VerificationResult(score=0.0)
-        else:
-            test_cases = label
-
-        if not isinstance(test_cases, list) or not test_cases:
-            logger.warning("Manufactoria verifier expected a non-empty test case list")
-            return VerificationResult(score=0.0)
-
-        payload = {
-            "dsl": self.extract_manufactoria_code(prediction),
-            "test_cases": test_cases,
-            "max_execution_time": self.verifier_config.manufactoria_max_execution_time,
-        }
-
-        try:
-            session = self._get_session()
-            http_timeout = max(30, min(300, self.verifier_config.manufactoria_max_execution_time * 10))
-
-            def make_request():
-                response = session.post(
-                    self.verifier_config.manufactoria_api_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=http_timeout,
-                )
-                response.raise_for_status()
-                return response.json()
-
-            result = await asyncio.to_thread(make_request)
-
-            if "all_passed" in result:
-                all_pass_score = 1.0 if result["all_passed"] else 0.0
-                raw_results = result.get("results", [])
-                if isinstance(raw_results, list) and raw_results:
-                    passes = [bool(test_result.get("passed", False)) for test_result in raw_results]
-                    pass_rate_score = sum(passes) / len(passes)
-                else:
-                    pass_rate_score = all_pass_score
-            elif "results" in result and isinstance(result["results"], list) and result["results"]:
-                raw_results = result["results"]
-                if isinstance(raw_results[0], dict):
-                    passes = [bool(test_result.get("passed", False)) for test_result in raw_results]
-                else:
-                    passes = [bool(value) for value in raw_results]
-                pass_rate_score = sum(passes) / len(passes)
-                all_pass_score = 1.0 if pass_rate_score == 1.0 else 0.0
-            else:
-                logger.warning(f"Unexpected Manufactoria API response format: {result}")
-                return VerificationResult(score=0.0)
-
-            if self.verifier_config.manufactoria_scoring_mode == "pass_rate":
-                score = pass_rate_score
-            else:
-                score = all_pass_score
-            return VerificationResult(score=score)
-        except Exception as e:
-            logger.warning(f"Error verifying Manufactoria code sample: {e}")
-            return VerificationResult(score=0.0)
-
-    def __call__(
-        self,
-        tokenized_prediction: list[int],
-        prediction: str,
-        label: Any,
-        query: str | None = None,
-        rollout_state: dict | None = None,
-    ) -> VerificationResult:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                raise RuntimeError(
-                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
-                )
-            else:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
-        except RuntimeError as e:
-            if "cannot schedule new futures after interpreter shutdown" in str(e):
-                logger.warning("Skipping Manufactoria verification due to interpreter shutdown")
-                return VerificationResult(score=0.0, reasoning="Verification skipped due to shutdown")
-            try:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
-            except Exception as nested_e:
-                logger.warning(f"Error verifying Manufactoria sample during shutdown: {nested_e}")
-                return VerificationResult(score=0.0, reasoning=f"Verification failed: {nested_e}")
-        except Exception as e:
-            logger.warning(f"Error verifying Manufactoria sample: {e}")
-            return VerificationResult(score=0.0, reasoning=f"Verification failed: {e}")
-
-    @classmethod
-    def get_config_class(cls) -> type:
-        return ManufactoriaVerifierConfig
-
-
 class PassthroughVerifier(VerifierFunction):
     """Passthrough verifier for environment-only tasks.
 
@@ -1470,19 +1204,117 @@ class RubricVerifier(VerifierFunction):
         return RubricVerifierConfig
 
 
-def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
+def _coerce_verifier_cli_scalar(key: str, val: str) -> Any:
+    """Best-effort typing for custom verifier flags parsed from leftover argv."""
+    lk = key.lower()
+    if lk.endswith("_max_execution_time") or lk.endswith("_execution_time"):
+        try:
+            return float(val)
+        except ValueError:
+            return val
+    if val.lower() in ("true", "false"):
+        return val.lower() == "true"
+    return val
+
+
+def parse_extra_verifier_cli_args(remaining: list[str]) -> SimpleNamespace:
+    """Parse argv tokens left over after ``HfArgumentParser`` into a namespace.
+
+    Used by the stock ``grpo_fast`` CLI when task-specific flags are not registered on core dataclasses.
+    Verifiers merge these via ``VerifierConfig.from_args`` (attribute names use underscores).
+
+    Args:
+        remaining: Typically the last element of ``parse_args_into_dataclasses(return_remaining_strings=True)``.
+
+    Returns:
+        A namespace whose attributes are the parsed keys (e.g. ``some_task_api_url``).
+    """
+    if not remaining:
+        return SimpleNamespace()
+    kwargs: dict[str, Any] = {}
+    i = 0
+    while i < len(remaining):
+        token = remaining[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+        body = token[2:]
+        if "=" in body:
+            key, val = body.split("=", 1)
+            kwargs[key.replace("-", "_")] = _coerce_verifier_cli_scalar(key.replace("-", "_"), val)
+            i += 1
+            continue
+        key = body.replace("-", "_")
+        if i + 1 < len(remaining) and not remaining[i + 1].startswith("-"):
+            kwargs[key] = _coerce_verifier_cli_scalar(key, remaining[i + 1])
+            i += 2
+        else:
+            kwargs[key] = True
+            i += 1
+    return SimpleNamespace(**kwargs)
+
+
+def import_extra_verifier_modules(module_paths: list[str] | None) -> None:
+    """Import dotted module paths so ``VerifierFunction`` subclasses register before ``build_all_verifiers``.
+
+    There is no CLI flag for this; call from tests, launch wrappers, or scripts that need custom verifiers.
+    """
+    if not module_paths:
+        return
+    for path in module_paths:
+        importlib.import_module(path)
+
+
+def _iter_concrete_verifier_subclasses() -> Iterator[type[VerifierFunction]]:
+    """All non-abstract VerifierFunction subclasses, including nested subclasses (e.g. from examples/)."""
+    stack = list(VerifierFunction.__subclasses__())
+    seen: set[type] = set()
+    while stack:
+        cls = stack.pop()
+        if cls in seen:
+            continue
+        seen.add(cls)
+        stack.extend(cls.__subclasses__())
+        if cls is LMJudgeVerifier:
+            continue
+        if inspect.isabstract(cls):
+            continue
+        yield cls
+
+
+def _iter_verifier_classes_for_build() -> Iterator[type[VerifierFunction]]:
+    """Concrete verifier classes: ``@register_verifier`` first, then subclass walk (deduped)."""
+    seen: set[type] = set()
+    for cls in _decorated_verifier_classes:
+        if cls in seen:
+            continue
+        if inspect.isabstract(cls):
+            continue
+        if cls is LMJudgeVerifier:
+            continue
+        seen.add(cls)
+        yield cls
+    for cls in _iter_concrete_verifier_subclasses():
+        if cls in seen:
+            continue
+        seen.add(cls)
+        yield cls
+
+
+def build_all_verifiers(args, streaming_config=None, *extra_verifier_sources: Any) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given configs.
+
     Args:
         args: The main Args object
         streaming_config: Optional StreamingDataLoaderConfig for additional fields
+        *extra_verifier_sources: Optional objects (e.g. parsed dataclasses or namespaces) whose attributes
+            are merged into each verifier config via ``VerifierConfig.from_args``.
     """
     verifiers: dict[str, VerifierFunction] = {}
-    for subclass in VerifierFunction.__subclasses__():
-        if subclass == LMJudgeVerifier:
-            continue
 
-        verifier_config = subclass.get_config_class().from_args(args, streaming_config)
+    for subclass in _iter_verifier_classes_for_build():
+        verifier_config = subclass.get_config_class().from_args(args, streaming_config, *extra_verifier_sources)
         instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
 
@@ -1495,7 +1327,9 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
             verifiers["code_stdio"] = instance
 
     for judge_type in JUDGE_PROMPT_MAP:
-        instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
+        instance = LMJudgeVerifier(
+            judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config, *extra_verifier_sources)
+        )
         verifiers[instance.name.lower()] = instance
 
     # if we have remap arg, remap!

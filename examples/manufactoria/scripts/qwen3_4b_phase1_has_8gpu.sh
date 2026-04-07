@@ -14,7 +14,8 @@ BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/${IMAGE_NAME}}"
 
 CLIP_HIGH=0.28
 LR=5e-7
-SCORE_MODE=pass_rate
+# Overridable by env (e.g. phase2 sets MANUFACTORIA_SCORING_MODE)
+SCORE_MODE="${MANUFACTORIA_SCORING_MODE:-pass_rate}"
 TRAIN_LIST="manufactoria/has_train 1.0"
 EVAL_LIST="manufactoria/has_test 50"
 BASE_MODEL="Qwen/Qwen3-4B-Instruct-2507"
@@ -38,7 +39,7 @@ uv run python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
-    python open_instruct/grpo_fast.py \
+    python -m examples.grpo_fast \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --beta 0.0 \
@@ -59,7 +60,7 @@ uv run python mason.py \
     --pack_length 10240 \
     --model_name_or_path "${BASE_MODEL}" \
     --apply_verifiable_reward true \
-    --manufactoria_api_url \$MANUFACTORIA_API_URL/test_solution \
+    --manufactoria_api_url "\$MANUFACTORIA_API_URL/test_solution" \
     --manufactoria_scoring_mode "${SCORE_MODE}" \
     --temperature 1.0 \
     --total_episodes 768000 \
