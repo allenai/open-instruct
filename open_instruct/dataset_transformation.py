@@ -1142,20 +1142,6 @@ def mask_labels(
         "max_length": max_seq_length,
     }
 
-    # We find token boundaries by tokenizing message prefixes with
-    # apply_chat_template. For each masked message we need:
-    #   start = len(tokens(messages[:idx]))       — end of previous messages
-    #   end   = len(tokens(messages[:idx+1]))     — end of this message
-    # Then labels[:, start:end] = -100.
-    #
-    # Special cases:
-    #   - If the next message is an assistant turn, we set add_generation_prompt=True
-    #     when computing `end` so that the assistant header (e.g. "<|assistant|>") is
-    #     included in the masked region and excluded from the loss.
-    #   - Some chat templates (e.g. Qwen3.5) crash on prefixes with no user turn.
-    #     We track `seen_user` and defer masking until a user turn appears, then
-    #     mask everything from position 0 in one shot via `deferred_from_zero`.
-
     deferred_from_zero = False
     seen_user = False
     for message_idx, message in enumerate(messages):
