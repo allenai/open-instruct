@@ -493,6 +493,8 @@ class StreamingDataLoaderConfig:
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if isinstance(self.replay_buffer, dict):
+            self.replay_buffer = replay_buffer_mod.ReplayBufferConfig(**self.replay_buffer)
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
