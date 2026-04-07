@@ -2,24 +2,12 @@ from __future__ import annotations
 
 import threading
 import unittest
-from dataclasses import dataclass, field
-from typing import Any
-from unittest import mock
 
 import numpy as np
 from parameterized import parameterized
 
 from open_instruct import data_types
-from open_instruct.replay_buffer import (
-    Fifo,
-    ItemMetadata,
-    Lifo,
-    MinSize,
-    Prioritized,
-    ProcessedResult,
-    Table,
-    Uniform,
-)
+from open_instruct.replay_buffer import Fifo, ItemMetadata, Lifo, MinSize, Prioritized, ProcessedResult, Table, Uniform
 
 
 def _make_result(index: int = 0) -> ProcessedResult:
@@ -28,20 +16,12 @@ def _make_result(index: int = 0) -> ProcessedResult:
         finish_reasons=["stop"],
         masks=[[1, 1, 1]],
         request_info=data_types.RequestInfo(
-            num_calls=[0],
-            timeouts=[0],
-            tool_errors=[""],
-            tool_outputs=[""],
-            tool_runtimes=[0.0],
-            tool_calleds=[False],
+            num_calls=[0], timeouts=[0], tool_errors=[""], tool_outputs=[""], tool_runtimes=[0.0], tool_calleds=[False]
         ),
         index=index,
         prompt_id=f"prompt_{index}",
         token_statistics=data_types.TokenStatistics(
-            num_prompt_tokens=10,
-            num_response_tokens=3,
-            generation_time=1.0,
-            earliest_start_time=0.0,
+            num_prompt_tokens=10, num_response_tokens=3, generation_time=1.0, earliest_start_time=0.0
         ),
         start_time=0.0,
         logprobs=[[0.1, 0.2, 0.3]],
@@ -64,10 +44,7 @@ def _make_result(index: int = 0) -> ProcessedResult:
 
 class TestSelectors(unittest.TestCase):
     def _make_metadata(self, n: int) -> dict[str, ItemMetadata]:
-        return {
-            f"k{i}": ItemMetadata(insert_order=i, sample_count=0, priority=float(i + 1))
-            for i in range(n)
-        }
+        return {f"k{i}": ItemMetadata(insert_order=i, sample_count=0, priority=float(i + 1)) for i in range(n)}
 
     def test_uniform_selects_n(self):
         keys = ["k0", "k1", "k2", "k3"]
@@ -175,13 +152,7 @@ class TestTable(unittest.TestCase):
         assert len(results) == 3
 
     def test_sample_evicts_after_max_times_sampled(self):
-        table = Table(
-            max_size=5,
-            sampler=Uniform(),
-            remover=Fifo(),
-            max_times_sampled=1,
-            rate_limiter=MinSize(3),
-        )
+        table = Table(max_size=5, sampler=Uniform(), remover=Fifo(), max_times_sampled=1, rate_limiter=MinSize(3))
         for i in range(3):
             table.insert(f"k{i}", _make_result(i))
         results = table.sample(3)
@@ -192,13 +163,7 @@ class TestTable(unittest.TestCase):
     def test_fifo_equivalent_default(self):
         """Default config: insert N, sample N, all consumed, buffer empty."""
         n = 4
-        table = Table(
-            max_size=n,
-            sampler=Uniform(),
-            remover=Fifo(),
-            max_times_sampled=1,
-            rate_limiter=MinSize(n),
-        )
+        table = Table(max_size=n, sampler=Uniform(), remover=Fifo(), max_times_sampled=1, rate_limiter=MinSize(n))
         inserted = []
         for i in range(n):
             r = _make_result(i)
@@ -213,12 +178,7 @@ class TestTable(unittest.TestCase):
         assert len(table) == 0
 
     def test_shutdown_unblocks_sample(self):
-        table = Table(
-            max_size=10,
-            sampler=Uniform(),
-            remover=Fifo(),
-            rate_limiter=MinSize(5),
-        )
+        table = Table(max_size=10, sampler=Uniform(), remover=Fifo(), rate_limiter=MinSize(5))
         result_holder = [None]
 
         def sample_thread():
@@ -232,13 +192,7 @@ class TestTable(unittest.TestCase):
         assert result_holder[0] is None
 
     def test_sample_blocks_until_min_size(self):
-        table = Table(
-            max_size=10,
-            sampler=Uniform(),
-            remover=Fifo(),
-            max_times_sampled=1,
-            rate_limiter=MinSize(3),
-        )
+        table = Table(max_size=10, sampler=Uniform(), remover=Fifo(), max_times_sampled=1, rate_limiter=MinSize(3))
         result_holder = [None]
         event = threading.Event()
 
@@ -259,13 +213,7 @@ class TestTable(unittest.TestCase):
 
     def test_concurrent_insert_and_sample(self):
         n = 20
-        table = Table(
-            max_size=n * 2,
-            sampler=Uniform(),
-            remover=Fifo(),
-            max_times_sampled=1,
-            rate_limiter=MinSize(n),
-        )
+        table = Table(max_size=n * 2, sampler=Uniform(), remover=Fifo(), max_times_sampled=1, rate_limiter=MinSize(n))
         all_results = []
         lock = threading.Lock()
 
@@ -288,18 +236,11 @@ class TestTable(unittest.TestCase):
         assert not t_sample.is_alive()
         assert len(all_results) == n
 
-    @parameterized.expand([
-        ("max_times_2",),
-        ("max_times_3",),
-    ])
+    @parameterized.expand([("max_times_2",), ("max_times_3",)])
     def test_max_times_sampled_parametrized(self, name):
         max_times = int(name.split("_")[-1])
         table = Table(
-            max_size=5,
-            sampler=Uniform(),
-            remover=Fifo(),
-            max_times_sampled=max_times,
-            rate_limiter=MinSize(1),
+            max_size=5, sampler=Uniform(), remover=Fifo(), max_times_sampled=max_times, rate_limiter=MinSize(1)
         )
         table.insert("k0", _make_result(0))
         for _ in range(max_times - 1):
