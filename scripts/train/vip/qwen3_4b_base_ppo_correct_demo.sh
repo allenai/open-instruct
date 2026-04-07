@@ -1,10 +1,10 @@
 #!/bin/bash
-# Qwen3-4B-Base PPO with Qwen3-4B-Base as value model + GT conditioning
-# GT conditioning uses expected_accuracy template (inserted between prompt and response)
-# lambda=1.0, no decoupled/adaptive GAE
+# Qwen3-4B-Base PPO with correct_demo GT conditioning
+# Conditions value model on one correct sibling rollout (inserted between prompt and response)
+# Decoupled + length-adaptive GAE
 # 1 node (8 GPUs): 4 learner + 4 vLLM engines
 DDMM=$(date +"%d%m")
-exp_name=vip_ppo_base_bval_gt_${DDMM}_qwen3_4b_math
+exp_name=vip_ppo_correct_demo_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -73,9 +73,9 @@ uv run python mason.py \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False \
     --use_value_model \
-    --value_model_name_or_path Qwen/Qwen3-4B-Base \
     --value_model_ground_truth_conditioning \
-    --gt_conditioning_template expected_accuracy \
+    --gt_conditioning_template correct_demo \
+    --rollout_context_num_siblings 4 \
     --value_learning_rate 1e-5 \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
