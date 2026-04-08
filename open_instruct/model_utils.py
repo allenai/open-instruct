@@ -137,7 +137,6 @@ class Batch:
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
-        active_tools = self.active_tools[key] if self.active_tools is not None else None
         if isinstance(key, slice):
             return Batch(
                 queries=self.queries[key],
@@ -147,7 +146,7 @@ class Batch:
                 decoded_responses=self.decoded_responses[key] if self.decoded_responses is not None else None,
                 indices=self.indices[key] if self.indices is not None else None,
                 scores=self.scores[key] if self.scores is not None else None,
-                active_tools=active_tools,
+                active_tools=self.active_tools[key] if self.active_tools is not None else None,
                 group_ids=self.group_ids[key] if self.group_ids is not None else None,
             )
         elif isinstance(key, int):
@@ -159,7 +158,7 @@ class Batch:
                 decoded_responses=[self.decoded_responses[key]] if self.decoded_responses is not None else None,
                 indices=[self.indices[key]] if self.indices is not None else None,
                 scores=[self.scores[key]] if self.scores is not None else None,
-                active_tools=active_tools,
+                active_tools=[self.active_tools[key]] if self.active_tools is not None else None,
                 group_ids=[self.group_ids[key]] if self.group_ids is not None else None,
             )
         else:
@@ -173,7 +172,7 @@ class Batch:
                 else None,
                 indices=[self.indices[i] for i in key] if self.indices is not None else None,
                 scores=[self.scores[i] for i in key] if self.scores is not None else None,
-                active_tools=active_tools,
+                active_tools=[self.active_tools[i] for i in key] if self.active_tools is not None else None,
                 group_ids=[self.group_ids[i] for i in key] if self.group_ids is not None else None,
             )
 
@@ -308,9 +307,9 @@ def load_ref_policy(
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
         attn_implementation=olmo_core_attn_to_hf(model_config.attn_implementation),
-        use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
+    ref_policy.config.use_cache = False
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
