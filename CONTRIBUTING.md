@@ -66,29 +66,23 @@ Track new large or binary test data files with `git lfs track "path/to/file"` an
 
 ## Changelog
 
-We use [towncrier](https://github.com/twisted/towncrier) to manage changelog entries. Instead of editing `CHANGELOG.md` directly, each PR adds a small fragment file to `changelog/`.
+Changelog entries live in the PR description. A GitHub Action automatically appends them to `CHANGELOG.md` when the PR merges.
 
 ### Adding a changelog entry
 
-Create a file in `changelog/` named `<PR-number>.<type>.md`, where `<type>` is one of: `added`, `changed`, `deprecated`, `fixed`.
+In your PR body, include a `## Changelog` section with a **Type** line and a one-line entry:
 
-For example, for PR #1600 that adds a new feature:
-
-```
-changelog/1600.added.md
-```
-
-With contents:
-
-```
-Add support for new model architecture (https://github.com/allenai/open-instruct/pull/1600).
+```markdown
+## Changelog
+**Type:** fixed
+Fix gradient accumulation count in multi-node GRPO training.
 ```
 
-CI will fail if you change files under `open_instruct/` without adding a fragment. Bypass with `CHANGELOG=<reason>` in the PR body.
+Valid types: `added`, `changed`, `deprecated`, `fixed`.
 
-### Building the changelog
+The PR URL is appended automatically on merge — you don't need to include it.
 
-At release time, run `uv run towncrier build --yes` to compile all fragments into `CHANGELOG.md`.
+CI will fail if you change files under `open_instruct/` without a changelog entry. Bypass with `CHANGELOG=<reason>` anywhere in the PR body.
 
 ## Running Tests
 
@@ -102,7 +96,7 @@ At release time, run `uv run towncrier build --yes` to compile all fragments int
 
 Four GitHub Actions workflows run on PRs:
 
-1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also verifies that a changelog fragment exists in `changelog/` for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body). See the Changelog section below for details.
+1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also validates that a `## Changelog` section exists in the PR body for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body). See the Changelog section above for details.
 
 2. **Unit Tests** (`tests.yml` → `unit-tests` job): Runs `uv run pytest` on an Ubuntu runner. 20-minute timeout.
 

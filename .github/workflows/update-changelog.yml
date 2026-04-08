@@ -1,0 +1,135 @@
+name: Update CHANGELOG
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: changelog-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update-changelog:
+    name: Update CHANGELOG.md
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 5
+
+    - name: Find merged PR and extract changelog
+      id: extract
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        MERGE_SHA: ${{ github.sha }}
+      run: |
+        PR_JSON=$(gh api "repos/${{ github.repository }}/commits/${MERGE_SHA}/pulls" \
+          --jq '.[0] // empty' 2>/dev/null || true)
+
+        if [ -z "$PR_JSON" ]; then
+          echo "No merged PR found for commit ${MERGE_SHA}, skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+        PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+        PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+
+        echo "Processing PR #${PR_NUMBER}"
+
+        if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
+          echo "PR #${PR_NUMBER} has CHANGELOG skip marker, skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        CHANGELOG_SECTION=$(echo "$PR_BODY" | awk '/^## Changelog/{found=1; next} /^## /{if(found) exit} found{print}')
+
+        if [ -z "$CHANGELOG_SECTION" ]; then
+          echo "No changelog section in PR #${PR_NUMBER}, skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        TYPE=$(echo "$CHANGELOG_SECTION" | grep -oiP '\*\*Type:\*\*\s*\K\w+' | head -1 | tr '[:upper:]' '[:lower:]')
+
+        if [ -z "$TYPE" ]; then
+          echo "::warning::PR #${PR_NUMBER} has a Changelog section but no Type. Skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        ENTRY=$(echo "$CHANGELOG_SECTION" | grep -v '^\*\*Type:\*\*' | grep -v '^<!--' | grep -v '^-->' | grep -v '^\s*$' | head -1)
+
+        if [ -z "$ENTRY" ]; then
+          echo "::warning::PR #${PR_NUMBER} has a Changelog type but no entry text. Skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        SECTION=$(echo "$TYPE" | sed 's/^./\U&/')
+
+        {
+          echo "skip=false"
+          echo "section=${SECTION}"
+          echo "pr_number=${PR_NUMBER}"
+          echo "pr_url=${PR_URL}"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "entry<<ENTRY_EOF" >> "$GITHUB_OUTPUT"
+        echo "${ENTRY}" >> "$GITHUB_OUTPUT"
+        echo "ENTRY_EOF" >> "$GITHUB_OUTPUT"
+
+    - name: Update CHANGELOG.md
+      if: steps.extract.outputs.skip != 'true'
+      env:
+        SECTION: ${{ steps.extract.outputs.section }}
+        ENTRY: ${{ steps.extract.outputs.entry }}
+        PR_URL: ${{ steps.extract.outputs.pr_url }}
+      run: |
+        git pull --rebase origin main
+
+        ENTRY_LINE="- ${ENTRY} (${PR_URL})."
+        if ! grep -q "^### ${SECTION}$" CHANGELOG.md; then
+          echo "ERROR: Section '### ${SECTION}' not found in CHANGELOG.md"
+          exit 1
+        fi
+        sed -i "0,/^### ${SECTION}$/a\\${ENTRY_LINE}" CHANGELOG.md
+
+    - name: Commit and push
+      if: steps.extract.outputs.skip != 'true'
+      env:
+        PR_NUMBER: ${{ steps.extract.outputs.pr_number }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        git add CHANGELOG.md
+
+        if git diff --cached --quiet; then
+          echo "No changes to CHANGELOG.md, skipping commit."
+          exit 0
+        fi
+
+        git commit -m "docs: update CHANGELOG.md for PR #${PR_NUMBER} [skip ci]"
+
+        for attempt in 1 2 3; do
+          if git push origin main; then
+            echo "Successfully pushed changelog update."
+            exit 0
+          fi
+          echo "Push failed (attempt $attempt/3), pulling and retrying..."
+          git pull --rebase origin main
+        done
+
+        echo "ERROR: Failed to push after 3 attempts."
+        exit 1

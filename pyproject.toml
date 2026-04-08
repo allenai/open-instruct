@@ -123,7 +123,6 @@ dev = [
     "rich>=13.7.0",
     "responses>=0.25.8",
     "pre-commit>=4.5.0",
-    "towncrier>=25.8.0",
 ]
 
 [tool.pytest.ini_options]
@@ -228,31 +227,3 @@ include = [
     "open_instruct/environments/tools/utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
-
-[tool.towncrier]
-directory = "changelog"
-filename = "CHANGELOG.md"
-template = "changelog/_template.md.jinja"
-title_format = ""
-underlines = ["", "", ""]
-issue_format = "[#{issue}](https://github.com/allenai/open-instruct/pull/{issue})"
-
-[[tool.towncrier.type]]
-directory = "added"
-name = "Added"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "changed"
-name = "Changed"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "deprecated"
-name = "Deprecated"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "fixed"
-name = "Fixed"
-showcontent = true

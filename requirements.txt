@@ -128,7 +128,6 @@ click==8.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   nltk
     #   ray
     #   rich-toolkit
-    #   towncrier
     #   typer
     #   uvicorn
     #   wandb
@@ -414,7 +413,6 @@ jinja2==3.1.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   mkdocs
     #   mkdocs-material
     #   torch
-    #   towncrier
 jiter==0.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   anthropic
@@ -1219,7 +1217,6 @@ torchaudio==2.10.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     # via vllm
 torchvision==0.25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
-towncrier==25.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
 tqdm==4.67.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   datasets

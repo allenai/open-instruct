@@ -7,7 +7,7 @@
 
 
 # Workflow
-- When creating a PR, add a changelog fragment to `changelog/<PR#>.<type>.md` (e.g., `changelog/123.added.md`) with a one-line description including the PR URL. Valid types: `added`, `changed`, `deprecated`, `fixed`. Do not edit `CHANGELOG.md` directly.
+- When creating a PR, include a `## Changelog` section in the PR body with `**Type:** added|changed|deprecated|fixed` and a one-line entry. A GitHub Action appends it to `CHANGELOG.md` on merge. Skip with `CHANGELOG=<reason>` in the PR body. Do not edit `CHANGELOG.md` directly.
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.

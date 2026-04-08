@@ -24,10 +24,9 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Check for changelog fragment
+    - name: Validate changelog entry in PR body
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
           REASON=$(echo "$PR_BODY" | grep -oP 'CHANGELOG=\K[^\n\r]*' | head -1)
@@ -35,22 +34,41 @@ jobs:
           exit 0
         fi
 
-        if ! git diff --name-only $(git merge-base origin/main HEAD) | grep -q '^open_instruct/'; then
+        if ! git diff --name-only "$(git merge-base origin/main HEAD)" | grep -q '^open_instruct/'; then
           echo "No open_instruct/ changes detected, skipping CHANGELOG check"
           exit 0
         fi
 
-        FRAGMENTS=$(git diff --name-only $(git merge-base origin/main HEAD) | grep '^changelog/' | grep -v '.gitkeep' || true)
-        if [ -z "$FRAGMENTS" ]; then
-          echo "ERROR: Changes to open_instruct/ detected but no changelog fragment found."
-          echo "Please add a file to changelog/ named <PR#>.<type>.md (e.g. ${PR_NUMBER}.added.md)"
+        CHANGELOG_SECTION=$(echo "$PR_BODY" | awk '/^## Changelog/{found=1; next} /^## /{if(found) exit} found{print}')
+
+        if [ -z "$CHANGELOG_SECTION" ]; then
+          echo "ERROR: No '## Changelog' section found in PR body."
+          echo "Please add a changelog entry or CHANGELOG=<reason> to bypass."
+          exit 1
+        fi
+
+        TYPE=$(echo "$CHANGELOG_SECTION" | grep -oiP '\*\*Type:\*\*\s*\K\w+' | head -1 | tr '[:upper:]' '[:lower:]')
+        if [ -z "$TYPE" ]; then
+          echo "ERROR: No '**Type:**' line found in the Changelog section."
           echo "Valid types: added, changed, deprecated, fixed"
           exit 1
         fi
 
-        echo "Found changelog fragment(s):"
-        echo "$FRAGMENTS"
-        echo "Thanks for helping keep our CHANGELOG up-to-date!"
+        if ! echo "$TYPE" | grep -qP '^(added|changed|deprecated|fixed)$'; then
+          echo "ERROR: Invalid changelog type '$TYPE'."
+          echo "Valid types: added, changed, deprecated, fixed"
+          exit 1
+        fi
+
+        ENTRY=$(echo "$CHANGELOG_SECTION" | grep -v '^\*\*Type:\*\*' | grep -v '^<!--' | grep -v '^-->' | grep -v '^\s*$' | head -1)
+        if [ -z "$ENTRY" ]; then
+          echo "ERROR: Changelog section has a type but no entry text."
+          exit 1
+        fi
+
+        echo "Valid changelog entry found:"
+        echo "  Type: $TYPE"
+        echo "  Entry: $ENTRY"
 
   code-quality:
     name: Code Quality
