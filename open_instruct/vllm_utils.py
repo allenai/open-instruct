@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
@@ -43,6 +43,7 @@ import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
@@ -53,12 +54,14 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
+from vllm.v1.kv_cache_interface import MambaSpec
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
     EnvConfig,
     EnvConfigEntry,
@@ -72,9 +75,29 @@ from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_K
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
+#
+# vLLM's MambaSpec.dtypes field is typed as tuple[torch.dtype] (fixed-length,
+# exactly 1 element). Hybrid models like Olmo-Hybrid-Instruct-DPO-7B have
+# Mamba layers with 2 state tensors of different dtypes, producing a 2-element
+# tuple. When the EngineCore subprocess serializes collective_rpc results back
+# to the client via msgspec, the fixed-length tuple type is enforced and the
+# deserialization fails:
+#   msgspec.ValidationError: Expected `array` of length 1, got 2 - at `$.dtypes`
+#
+# The client-side decoder (in serial_utils._convert_result) dynamically imports
+# MambaSpec and calls msgspec.convert(data, MambaSpec), which checks the live
+# type annotations. By widening dtypes to tuple[torch.dtype, ...] (variable-
+# length), msgspec accepts any number of dtypes during deserialization.
+#
+# Upstream fix: change dtypes annotation in vllm/v1/kv_cache_interface.py.
+# ---------------------------------------------------------------------------
+MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
+MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -83,7 +106,7 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
-def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
+def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
     intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
@@ -95,7 +118,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
         layer_types = getattr(model_config.hf_text_config, "layer_types", None)
         num_sliding_window_layers = layer_types.count("sliding_attention") if layer_types is not None else num_layers
 
-    return ModelDims(
+    return utils.ModelDims(
         num_layers=num_layers,
         hidden_size=hidden_size,
         intermediate_size=intermediate_size,
@@ -105,7 +128,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
         head_dim=model_config.get_head_size(),
         sliding_window=sliding_window,
         num_sliding_window_layers=num_sliding_window_layers,
-        device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+        device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
     )
 
 
@@ -114,6 +137,7 @@ class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
     max_tokens: int = 256
+    min_tokens: int = 0
     n: int = 1
     stop: list[str] | None = None
     seed: int | None = None
@@ -415,10 +439,6 @@ def init_process_group(
         # different systems (e.g. RPC) in case the store is multi-tenant.
         store = PrefixStore(group_name, store)
 
-    # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
-    # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
-    # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -426,7 +446,7 @@ def init_process_group(
         backend,
         store,
         group_name=group_name,
-        **{pg_options_param_name: pg_options},
+        backend_options=pg_options,
         timeout=timeout,
         device_id=device_id,
     )
@@ -831,18 +851,15 @@ class LLMRayActor:
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+    def update_weights_batch(self, param_metadata: list[tuple[str, str, tuple[int, ...]]]) -> None:
+        for name, dtype, _ in param_metadata:
+            self._prepare_weight_update(name, dtype)
+        return self._run_async(self.llm_engine.collective_rpc("update_weights_batch", args=(param_metadata,)))
 
-    def update_weight_cuda_ipc(
-        self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
-    ) -> None:
+    def update_weight_cuda_ipc(self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any]) -> None:
         self._prepare_weight_update(name, dtype)
         return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
+            self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles))
         )
 
     def reset_prefix_cache(self) -> None:
@@ -1045,6 +1062,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 break
 
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            params_dict = dataclasses.asdict(current_sampling_params)
+            min_tokens = params_dict.pop("min_tokens", 0)
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
@@ -1053,8 +1072,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     "cache_salt": base_request_id,
                     "include_stop_str_in_output": True,
                     "skip_special_tokens": False,
+                    "min_tokens": min_tokens,
                 },
-                **dataclasses.asdict(current_sampling_params),
+                **params_dict,
             )
 
             output = api_response.choices[0]
@@ -1240,7 +1260,8 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
-    vllm_dtype: str = "bfloat16",
+    trust_remote_code: bool = False,
+    vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1301,7 +1322,7 @@ def create_vllm_engines(
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
-                dtype=vllm_dtype,
+                dtype="bfloat16",
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
@@ -1325,10 +1346,13 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                trust_remote_code=trust_remote_code,
+                attention_backend=vllm_attention_backend,
+                language_model_only=True,
             )
         )
 
-    ray_get_with_progress(
+    utils.ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
     )
 
@@ -1336,41 +1360,88 @@ def create_vllm_engines(
 
 
 def _send_to_vllm(
-    name: str,
-    param: torch.nn.Parameter,
-    is_last: bool,
-    deepspeed_stage: int,
+    params: list[tuple[str, torch.nn.Parameter, torch.Size]],
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
 ) -> list[ray.ObjectRef]:
-    """Send a parameter to vLLM engines via broadcast."""
-    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
-    refs = [
-        engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
-        for engine in vllm_engines
-    ]
-    torch.distributed.broadcast(param.data, 0, group=model_update_group)
+    """Send parameters to vLLM engines via a single RPC + sequential NCCL broadcasts."""
+    param_metadata = [(name, str(param.dtype), tuple(shape)) for name, param, shape in params]
+    refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
+    for _, param, _ in params:
+        torch.distributed.broadcast(param.data, 0, group=model_update_group)
     return refs
+
+
+def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]]:
+    """Get all FSDP2-wrapped submodules (excluding the root if it's FSDP2)."""
+    fsdp_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, FSDPModule) and module is not model:
+            fsdp_modules.append((name, module))
+    return fsdp_modules
+
+
+def _broadcast_fsdp2_block_params(
+    block_name: str,
+    block: FSDPModule,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+    is_rank_0: bool,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters from one FSDP2 block to vLLM engines.
+
+    All ranks must call this (unshard/reshard are collective ops).
+    Only rank 0 actually sends to vLLM.
+    """
+    block.unshard()
+    try:
+        refs: list[ray.ObjectRef] = []
+        if is_rank_0:
+            batch_params = []
+            for name, param in block.named_parameters():
+                full_name = f"{block_name}.{name}" if block_name else name
+                mapped_name = name_mapper(full_name) if name_mapper else full_name
+                batch_params.append((mapped_name, param, param.shape))
+            refs = _send_to_vllm(batch_params, vllm_engines, model_update_group)
+        return refs
+    finally:
+        block.reshard()
+
+
+def _broadcast_params_to_vllm(
+    params: list[tuple[str, torch.nn.Parameter]],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
+    batch_params = []
+    for name, param in params:
+        mapped_name = name_mapper(name) if name_mapper else name
+        shape = getattr(param, "ds_shape", param.shape)
+        batch_params.append((mapped_name, param, shape))
+    return _send_to_vllm(batch_params, vllm_engines, model_update_group)
 
 
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup | None,
-    deepspeed_stage: int,
+    name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
-    """Broadcast DeepSpeed model weights to vLLM engines.
+    """Broadcast model weights to vLLM engines.
 
-    Must be called on ALL ranks when using DeepSpeed stage 3, since
-    GatheredParameters is a collective operation. Only rank 0 actually
-    sends weights to vLLM.
+    Supports both DeepSpeed and FSDP sharded models. Must be called on ALL ranks
+    when using DeepSpeed stage 3 or FSDP, since gathering is a collective operation.
+    Only rank 0 actually sends weights to vLLM.
 
     Args:
-        model: The unwrapped model (model.module from DeepSpeed engine)
+        model: The unwrapped model (model.module from DeepSpeed/FSDP engine)
         vllm_engines: List of vLLM engine actor handles
         model_update_group: Process group for distributed broadcast (only needed on rank 0)
-        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters)
+        name_mapper: Optional function to map parameter names (e.g., OLMo-core to HF format)
         gather_whole_model: If True, gather all params at once (more memory, faster).
             If False, gather each param individually (less memory, slower).
 
@@ -1378,27 +1449,46 @@ def broadcast_weights_to_vllm(
         List of Ray ObjectRefs for the weight update calls (empty on non-rank-0)
     """
     is_rank_0 = torch.distributed.get_rank() == 0
+
+    if isinstance(model, FSDP) and not gather_whole_model:
+        raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+
+    if isinstance(model, FSDPModule):
+        fsdp_submodules = _get_fsdp2_submodules(model)
+        if not fsdp_submodules:
+            raise ValueError("FSDP2 model has no FSDP submodules.")
+        all_refs: list[ray.ObjectRef] = []
+        for block_name, block in fsdp_submodules:
+            refs = _broadcast_fsdp2_block_params(
+                block_name, block, vllm_engines, model_update_group, name_mapper, is_rank_0
+            )
+            all_refs.extend(refs)
+        return all_refs
+
     params = list(model.named_parameters())
-    num_params = len(params)
-    all_refs: list[ray.ObjectRef] = []
+    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
     if gather_whole_model:
-        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
+        if isinstance(model, FSDP):
+            ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+        else:
+            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+        with ctx:
             if is_rank_0:
-                for i, (name, param) in enumerate(params):
-                    all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
-                    )
+                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+            return []
     else:
-        for i, (name, param) in enumerate(params):
-            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
+        if is_rank_0:
+            param_metadata = []
+            for name, param in params:
+                mapped_name = name_mapper(name) if name_mapper else name
+                shape = tuple(getattr(param, "ds_shape", param.shape))
+                param_metadata.append((mapped_name, str(param.dtype), shape))
+            all_refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
+        else:
+            all_refs = []
+        for _name, param in params:
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
                 if is_rank_0:
-                    all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
-                    )
-
-    return all_refs
+                    torch.distributed.broadcast(param.data, 0, group=model_update_group)
+        return all_refs

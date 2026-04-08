@@ -2,19 +2,70 @@
 
 We support Supervised finetuning (SFT) on a variety of datasets.
 
-> **OLMo-core SFT**: For supported models (OLMo, Qwen, and more), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the current list of supported models.
-
-We plan to update `finetune.py` at some point to use Olmo-core: https://github.com/allenai/open-instruct/pull/1327. 
-
-
-
-
 ## Implemented Variants
 
-- `finetune.py` is the original SFT implementation.
+- **OLMo-core SFT** (recommended): Uses OLMo-core's native training infrastructure. Most users should use this — it is more GPU-efficient and supports OLMo, Qwen, and other models. See `open_instruct/olmo_core_utils.py` for the current list of supported models.
+- `finetune.py` is the legacy SFT implementation using DeepSpeed/Accelerate. Use this only if you need a model architecture not yet supported by OLMo-core.
 
+## OLMo-core SFT
 
-## `finetune.py`
+The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft).
+
+### Setup
+
+OLMo-core SFT requires a **separate OLMo-core clone** — the `build_image_and_launch.sh` script only works for open-instruct jobs (DPO, RL), not for SFT.
+
+1. Clone OLMo-core: `git clone https://github.com/allenai/OLMo-core.git`
+2. Follow the [OLMo-core setup instructions](https://github.com/allenai/OLMo-core) to install dependencies.
+3. Run the SFT training script from the OLMo-core checkout. For example:
+
+```bash
+cd /path/to/OLMo-core
+python src/scripts/train/sft/OLMo-sft.py train \
+    my-experiment-name \
+    gs://my-bucket/checkpoint/path \
+    ai2/jupiter \
+    --trainer.max_duration.value=2 \
+    --train_module.optim.lr=8e-5 \
+    --seq_len=32768 \
+    --launch.num_gpus=8 \
+    --num_nodes=4 \
+    --global_batch_size=1048576 \
+    --model_name=olmo3-7b
+```
+
+### Key Flags
+
+OLMo-core SFT uses **CLI flags** (not YAML config files). Key options include:
+
+| Flag | Description |
+|------|-------------|
+| `--trainer.max_duration.value` | Number of training epochs |
+| `--train_module.optim.lr` | Learning rate |
+| `--seq_len` | Maximum sequence length |
+| `--launch.num_gpus` | GPUs per node |
+| `--num_nodes` | Number of nodes |
+| `--global_batch_size` | Global batch size in tokens |
+| `--model_name` | Model architecture (e.g., `olmo3-7b`, `olmo3-32b`) |
+| `--dataset_path` | Path to the SFT dataset |
+| `--trainer.callbacks.wandb.enabled` | Enable W&B logging |
+
+See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for the full list of options.
+
+### Olmo 3 SFT Scripts
+
+These scripts are run from the OLMo-core checkout, not via `build_image_and_launch.sh`.
+
+| Script | Scale | Description |
+|--------|-------|-------------|
+| `scripts/train/olmo3/7b_instruct_sft.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Instruct SFT, 32k sequence length |
+| `scripts/train/olmo3/7b_think_sft.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Think SFT, 32k sequence length |
+| `scripts/train/olmo3/32b_instruct_sft.sh` | 8 nodes (64 GPUs) | Olmo 3 32B Instruct SFT, 32k sequence length |
+| `scripts/train/olmo3/32b_think_sft.sh` | 32 nodes (256 GPUs) | Olmo 3 32B Think SFT, 32k sequence length |
+
+---
+
+## `finetune.py` (Legacy)
 
 
 This implementation has the following key features:
@@ -24,16 +75,44 @@ This implementation has the following key features:
 
 
 
-### Debug (Single GPU)
+### Debug Scripts
 
-You can run the script in a single GPU mode to debug the training process.
-
-```bash
-bash scripts/train/debug/finetune.sh
-```
+| Script | Scale | Launch |
+|--------|-------|--------|
+| `scripts/train/debug/finetune.sh` | 1 GPU, local | `bash scripts/train/debug/finetune.sh` |
+| `scripts/train/debug/sft_integration_test.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/sft_integration_test.sh` |
+| `scripts/train/debug/sft_multinode_test.sh` | 2 nodes, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/sft_multinode_test.sh` |
 
 ![finetune](finetune/finetune_debug.png)
 
+### Key Flags
+
+| Group | Flag | Description | Default |
+|-------|------|-------------|---------|
+| **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+| | `--use_liger_kernel` | Use LigerKernel for optimized training | `False` |
+| **Training** | `--learning_rate` | Initial learning rate | `2e-5` |
+| | `--num_train_epochs` | Total number of training epochs | `2` |
+| | `--per_device_train_batch_size` | Batch size per GPU | `8` |
+| | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
+| | `--max_seq_length` | Maximum sequence length after tokenization | — |
+| | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
+| | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, etc. | `linear` |
+| | `--gradient_checkpointing` | Use gradient checkpointing (saves memory) | `False` |
+| | `--seed` | Random seed | `42` |
+| **Data** | `--dataset_mixer_list` | List of datasets (local or HF) to sample from | — |
+| | `--dataset_mixer_list_splits` | Dataset splits for training | `["train"]` |
+| | `--chat_template_name` | Chat template to use | `None` |
+| | `--packing` | Use packing/padding-free collation | `False` |
+| **Parallelism** | `--sequence_parallel_size` | Ulysses sequence parallelism degree | `1` |
+| **LoRA** | `--use_lora` | Use LoRA for parameter-efficient training | `False` |
+| | `--lora_rank` | Rank of LoRA | `64` |
+| | `--lora_alpha` | Alpha parameter of LoRA | `16` |
+| **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
+| | `--checkpointing_steps` | Save every N steps or `epoch` | — |
+| | `--resume_from_checkpoint` | Resume from checkpoint folder | `None` |
+| **Logging** | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+| | `--logging_steps` | Log training loss every N steps | — |
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3-8B-SFT` (8 Nodes)
 

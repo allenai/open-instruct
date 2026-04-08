@@ -8,7 +8,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
-       --cluster ai2/augusta \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker integration test." \
@@ -22,6 +21,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --no-host-networking \
        --gpus 1 \
+       --no_auto_dataset_cache \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \

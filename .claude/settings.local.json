@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:wandb.ai)",
+      "Bash(python -c:*)",
+      "Bash(python3:*)",
+      "Bash(uv run python3:*)",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}
