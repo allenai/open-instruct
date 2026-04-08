@@ -10,11 +10,14 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 import hashlib
 import io
 import logging
 import os
+import subprocess
 import tempfile
+import threading
 
 import docker as docker_sdk
 from datasets import load_dataset
@@ -63,6 +66,7 @@ def main():
     parser.add_argument("--output-dataset", default="hamishivi/swerl-tmax-skill-taxonomy-1k")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=None)
+    parser.add_argument("--workers", type=int, default=8, help="Parallel build+push workers")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -92,38 +96,32 @@ def main():
 
     logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
 
-    # Build and push each unique image
-    for content_hash, (dockerfile_content, setup_script) in hash_to_dockerfile.items():
+    # Build and push images (parallel)
+    lock = threading.Lock()
+
+    def build_one(content_hash: str, dockerfile_content: str, setup_script: str) -> None:
         image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
         tasks = hash_to_tasks[content_hash]
 
-        if args.dry_run:
-            logger.info(f"[DRY RUN] Would build {image_tag} for {len(tasks)} tasks")
-            for t in tasks:
-                task_to_image[t] = image_tag
-            continue
-
-        # Skip if image already exists locally
+        # Skip if image already exists on DockerHub
         try:
-            client.images.get(image_tag)
-            logger.info(f"Skipping {image_tag} (exists locally)")
-            for t in tasks:
-                task_to_image[t] = image_tag
-            continue
-        except docker_sdk.errors.ImageNotFound:
+            check = subprocess.run(
+                ["docker", "manifest", "inspect", image_tag],
+                capture_output=True, timeout=15,
+            )
+            if check.returncode == 0:
+                logger.info(f"Skipping {image_tag} (exists on registry)")
+                with lock:
+                    for t in tasks:
+                        task_to_image[t] = image_tag
+                return
+        except Exception:
             pass
 
-        # Skip if image already exists on DockerHub (avoids rebuild + disk usage)
-        try:
-            client.images.get_registry_data(image_tag)
-            logger.info(f"Skipping {image_tag} (exists on registry)")
-            for t in tasks:
-                task_to_image[t] = image_tag
-            continue
-        except docker_sdk.errors.APIError:
-            pass
+        # Each worker needs its own Docker client
+        worker_client = docker_sdk.from_env(timeout=300)
 
-        logger.info(f"Building {image_tag} for {len(tasks)} tasks...")
+        logger.info(f"Building {image_tag}...")
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 with open(os.path.join(tmpdir, "Dockerfile"), "w") as f:
@@ -131,24 +129,48 @@ def main():
                 with open(os.path.join(tmpdir, "setup.sh"), "w") as f:
                     f.write(setup_script)
 
-                image, build_logs = client.images.build(
+                image, build_logs = worker_client.images.build(
                     path=tmpdir,
                     tag=image_tag,
                     rm=True,
                 )
             logger.info(f"Built {image_tag}")
 
-            logger.info(f"Pushing {image_tag}...")
-            client.images.push(args.registry + "/" + args.repo_prefix, tag=content_hash)
+            worker_client.images.push(args.registry + "/" + args.repo_prefix, tag=content_hash)
             logger.info(f"Pushed {image_tag}")
 
-            for t in tasks:
-                task_to_image[t] = image_tag
+            # Clean up local image to save disk
+            try:
+                worker_client.images.remove(image_tag, force=True)
+            except Exception:
+                pass
+
+            with lock:
+                for t in tasks:
+                    task_to_image[t] = image_tag
 
         except Exception as e:
             logger.error(f"Failed to build {image_tag}: {e}")
+            with lock:
+                for t in tasks:
+                    task_to_image[t] = "ubuntu:22.04"
+
+    if args.dry_run:
+        for content_hash in hash_to_dockerfile:
+            image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
+            tasks = hash_to_tasks[content_hash]
+            logger.info(f"[DRY RUN] Would build {image_tag} for {len(tasks)} tasks")
             for t in tasks:
-                task_to_image[t] = "ubuntu:22.04"  # fallback
+                task_to_image[t] = image_tag
+    else:
+        items = list(hash_to_dockerfile.items())
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = [
+                executor.submit(build_one, ch, df, ss)
+                for ch, (df, ss) in items
+            ]
+            for f in concurrent.futures.as_completed(futures):
+                f.result()  # raise exceptions
 
     # Update the HF dataset with image tags
     logger.info(f"Updating dataset {args.output_dataset} with image tags...")
