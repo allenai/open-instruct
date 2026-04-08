@@ -5,7 +5,7 @@ for LR in 1e-6
 do
     EXP_NAME=olmo3-7b-DPO-1115-newb-tpc-d5-lbc100-${LR}-hpz1
     uv run python mason.py \
-       --cluster ai2/augusta \
+       --cluster ai2/jupiter \
        --gs_model_name olmo3-7b-instruct-SFT-1115 \
         --workspace ai2/olmo-instruct \
         --priority urgent \
@@ -46,13 +46,8 @@ do
         --zero_hpz_partition_size 1 \
         --learning_rate $LR \
         --lr_scheduler_type linear \
-        --warmup_ratio 0.1 \
         --weight_decay 0.0 \
-        --num_epochs 1 \
         --logging_steps 1 \
-        --loss_type dpo_norm \
-        --beta 5 \
-        --use_flash_attn \
         --gradient_checkpointing \
         --chat_template_name olmo123 \
         --with_tracking \

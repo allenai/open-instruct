@@ -29,6 +29,7 @@ uv run python mason.py \
        --secret SERPER_API_KEY=${BEAKER_USER}_SERPER_API_KEY \
        --secret JINA_API_KEY=${BEAKER_USER}_JINA_API_KEY \
        --gpus 8 \
+       --no_auto_dataset_cache \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \
@@ -68,7 +69,7 @@ uv run python mason.py \
     --lr_scheduler_type constant \
     --save_freq 100 \
     --try_launch_beaker_eval_jobs_on_weka False \
-    --max_tool_calls 5 \
+    --max_steps 5 \
     --vllm_enable_prefix_caching \
     --tools python serper_search jina_browse \
     --tool_call_names code search browse \

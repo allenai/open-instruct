@@ -9,7 +9,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
-       --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
@@ -34,7 +33,8 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-1.7B \
+    --model_name_or_path Qwen/Qwen3-0.6B \
+    --add_bos \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
