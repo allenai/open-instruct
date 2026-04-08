@@ -1,7 +1,6 @@
 # Note, the exact model was trained on TPUs in a different repo
 model_name_or_path: meta-llama/Llama-2-7b
 model_revision: main
-use_flash_attn: true
 tokenizer_name: meta-llama/Llama-2-7b
 use_slow_tokenizer: true
 dataset_name: allenai/tulu-v2-sft-mixture

@@ -48,6 +48,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from typing import Any, Literal
@@ -129,7 +130,7 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     rich_text = Text()
     for i, token in enumerate(tokens):
         color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
+        decoded_token = tokenizer.decode(int(token))
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
 
@@ -142,7 +143,7 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
     for i in range(min(len(tokens), len(masks))):
         token = tokens[i]
         color = COLORS[masks[i] % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
+        decoded_token = tokenizer.decode(int(token))
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
 
@@ -632,6 +633,18 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "qwen_instruct_user_boxed_math": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n\nPlease reason step by step, and put your final answer within \\\\boxed{}<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 
 
@@ -916,6 +929,7 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
+MASKED_TOKEN_VALUE = -100
 DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
@@ -936,8 +950,8 @@ TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v5: Normalized env_config into canonical payloads in preprocessing.
-DATASET_CACHE_VERSION = "v5"
+# to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
+DATASET_CACHE_VERSION = "v6"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1058,8 +1072,9 @@ def sft_tokenize_v1(
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    # return_dict=False: transformers >= 5.0 defaults to returning a dict; we need a plain list of ints.
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1073,8 +1088,8 @@ def sft_tokenize_mask_out_prompt_v1(
     """mask out the prompt tokens by manipulating labels"""
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
@@ -1097,8 +1112,72 @@ def sft_filter_v1(
     if max_token_length is not None:
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
-    contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+    contain_some_labels = any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+
+
+def mask_labels(
+    labels: torch.Tensor,
+    messages: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    should_mask: Callable[[int, dict[str, Any], list[dict[str, Any]]], bool],
+) -> None:
+    """Mask spans in ``labels`` by setting them to -100.
+
+    ``should_mask(message_idx, message, messages)`` is called for each message
+    and should return True if that message's tokens should be masked (i.e. excluded
+    from the loss).
+
+    Some chat templates (e.g. Qwen3.5) crash when apply_chat_template receives a
+    prefix with only system/tool turns and no user turn.  Masking is deferred until
+    the prefix contains a user turn, then everything from position 0 is masked in
+    one shot.
+    """
+    chat_template_kwargs: dict[str, Any] = {
+        "tokenize": True,
+        "return_tensors": "pt",
+        "return_dict": False,
+        "padding": False,
+        "truncation": max_seq_length is not None,
+        "max_length": max_seq_length,
+    }
+
+    deferred_from_zero = False
+    seen_user = False
+    for message_idx, message in enumerate(messages):
+        if message["role"] == "user":
+            seen_user = True
+
+        if not should_mask(message_idx, message, messages):
+            continue
+
+        # Defer: can't call apply_chat_template on a prefix with no user turn.
+        if not seen_user:
+            deferred_from_zero = True
+            continue
+
+        # Compute start of this message's token span.
+        if message_idx == 0 or deferred_from_zero:
+            # First message or catching up after deferred system/tool turns — start at 0.
+            message_start_idx = 0
+            deferred_from_zero = False
+        else:
+            message_start_idx = tokenizer.apply_chat_template(
+                conversation=messages[:message_idx], add_generation_prompt=False, **chat_template_kwargs
+            ).shape[1]
+
+        # Compute end of this message's token span. If the next turn is an
+        # assistant turn, include the generation prompt header in the masked
+        # region so it's excluded from the loss.
+        next_is_assistant = message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant"
+        message_end_idx = tokenizer.apply_chat_template(
+            conversation=messages[: message_idx + 1], add_generation_prompt=next_is_assistant, **chat_template_kwargs
+        ).shape[1]
+
+        labels[:, message_start_idx:message_end_idx] = MASKED_TOKEN_VALUE
+        if max_seq_length and message_end_idx >= max_seq_length:
+            break
 
 
 def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
@@ -1110,6 +1189,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
+        return_dict=False,
         padding=False,
         truncation=True,
         max_length=max_seq_length,
@@ -1118,52 +1198,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
-    # mask the non-assistant part for avoiding loss
-    for message_idx, message in enumerate(messages):
-        if message["role"] != "assistant":
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
-                message_start_idx = 0
-            else:
-                message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # next, we calculate the end index of this non-assistant message
-            if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=True,
-                ).shape[1]
-            else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # set the label to -100 for the non-assistant part
-            labels[:, message_start_idx:message_end_idx] = -100
-            if max_seq_length and message_end_idx >= max_seq_length:
-                break
+    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
@@ -1180,6 +1215,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
+        return_dict=False,
         padding=False,
         truncation=True,
         max_length=max_seq_length,
@@ -1188,52 +1224,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
-    # mask all turns but the last for avoiding loss
-    for message_idx, _message in enumerate(messages):
-        if message_idx < len(messages) - 1:
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
-                message_start_idx = 0
-            else:
-                message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # next, we calculate the end index of this non-assistant message
-            if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=True,
-                ).shape[1]
-            else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # set the label to -100 for the non-assistant part
-            labels[:, message_start_idx:message_end_idx] = -100
-            if max_seq_length and message_end_idx >= max_seq_length:
-                break
+    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, _msg, msgs: idx < len(msgs) - 1)
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
@@ -1242,7 +1233,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
 
 
 def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
-    return any(x != -100 for x in row[LABELS_KEY])
+    return any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
 
 
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -1250,15 +1241,15 @@ def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     prompt = row["chosen"][:-1]
 
     # Tokenize prompt
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
     row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
 
     # Tokenize chosen completion
-    row[CHOSEN_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["chosen"])
+    row[CHOSEN_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["chosen"], return_dict=False)
     row[CHOSEN_ATTENTION_MASK_KEY] = [1] * len(row[CHOSEN_INPUT_IDS_KEY])
 
     # Tokenize rejected completion
-    row[REJECTED_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["rejected"])
+    row[REJECTED_INPUT_IDS_KEY] = tokenizer.apply_chat_template(row["rejected"], return_dict=False)
     row[REJECTED_ATTENTION_MASK_KEY] = [1] * len(row[REJECTED_INPUT_IDS_KEY])
 
     return row
@@ -1357,7 +1348,9 @@ def preference_tulu_tokenize_and_truncate_v1_2(
 
 
 def preference_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
-    return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
+    return any(x != MASKED_TOKEN_VALUE for x in row[CHOSEN_LABELS_KEY]) and any(
+        x != MASKED_TOKEN_VALUE for x in row[REJECTED_LABELS_KEY]
+    )
 
 
 def rlvr_tokenize_v1(
@@ -1392,9 +1385,10 @@ def rlvr_tokenize_v1(
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
+        return_dict=False,
         tools=tools_for_template,  # type: ignore[arg-type]
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1413,8 +1407,8 @@ def rlvr_tokenize_v2(
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough
     if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
@@ -1491,6 +1485,7 @@ def rlvr_tokenize_v3(
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
+        return_dict=False,
         tools=tools_for_template,  # type: ignore[arg-type]
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
@@ -1531,7 +1526,7 @@ def rlvr_filter_v1(
     if max_token_length is not None:
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
-    contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+    contain_some_labels = any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
@@ -1715,6 +1710,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
             desc=f"Normalizing {ENV_CONFIG_KEY} for {dc.dataset_name}",
         )
 
+    tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
+    tc_json = json.dumps(tc_dict, sort_keys=True)
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1724,7 +1721,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}".encode()
         ).hexdigest()[:16]
 
         # perform the transformation
@@ -1831,6 +1828,8 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        if "index" in combined_dataset.column_names:
+            combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
             return combined_dataset
@@ -1963,7 +1962,7 @@ class LocalDatasetTransformationCache:
 
                 def count_tokens(sample):
                     token_count = len(sample[INPUT_IDS_KEY])
-                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != -100)
+                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != MASKED_TOKEN_VALUE)
                     return {"token_count": token_count, "label_token_count": trainable_tokens}
 
                 token_count_dataset = dataset.map(count_tokens, batched=False)
@@ -1978,6 +1977,8 @@ class LocalDatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        if "index" in combined_dataset.column_names:
+            combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
         # Prepare return statistics
@@ -2039,11 +2040,11 @@ def load_dataset_configs(
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
-        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * (len(dataset_mixer_list) // 2)
     else:
-        if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+        if len(dataset_mixer_list_splits) != len(dataset_mixer_list) // 2:
             raise ValueError(
-                f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
+                f"dataset_mixer_list_splits length must be half of dataset_mixer_list (since mixer list alternates [dataset, amount]): {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)//2=}"
             )
     assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
     for i in range(0, len(dataset_mixer_list), 2):
@@ -2052,16 +2053,13 @@ def load_dataset_configs(
         # Parse amount: strings with "." become floats (proportions), without become ints (counts).
         # IMPORTANT: "1" = 1 sample, "1.0" = 100% of dataset. This is a common mistake!
         frac_or_num_samples = float(frac_or_num_samples) if "." in frac_or_num_samples else int(frac_or_num_samples)
-        # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
-        # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
-        # If different splits per dataset are needed, use dataset_mixer_list_splits[i // 2] instead.
         assert i % 2 == 0, f"Index {i} must be even"
-        assert i < len(dataset_mixer_list_splits), (
-            f"Index {i} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
+        assert (i // 2) < len(dataset_mixer_list_splits), (
+            f"Index {i // 2} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
         )
         dataset_config = DatasetConfig(
             dataset_name=dataset_name,
-            dataset_split=dataset_mixer_list_splits[i],
+            dataset_split=dataset_mixer_list_splits[i // 2],
             dataset_revision="main",
             transform_fn=dataset_transform_fn,
             transform_fn_args=transform_fn_args,

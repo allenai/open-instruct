@@ -7,20 +7,20 @@ import torch
 
 from open_instruct import dpo_utils
 from open_instruct.dataset_transformation import TokenizerConfig
-from open_instruct.dpo_utils import DPOLossType, ExperimentConfig
+from open_instruct.dpo_utils import DPOExperimentConfig, DPOLossType
 
 logging.basicConfig(level=logging.INFO)
 
 
-def make_test_args(**overrides) -> ExperimentConfig:
-    """Create an ExperimentConfig with test defaults."""
+def make_test_args(**overrides) -> DPOExperimentConfig:
+    """Create a DPOExperimentConfig with test defaults."""
     defaults = {
         "model_name_or_path": "allenai/OLMo-2-1124-7B",
         "mixer_list": ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"],
         "config_hash": "test_dataset_config_hash",
     }
     defaults.update(overrides)
-    return ExperimentConfig(**defaults)
+    return DPOExperimentConfig(**defaults)
 
 
 class TestDPOLoss(unittest.TestCase):
