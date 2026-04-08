@@ -1639,7 +1639,8 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
-    base_env_config: EnvConfig,
+    max_possible_score: float,
+    base_env_config: EnvConfig | None = None,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1649,17 +1650,30 @@ def maybe_evaluate(
     """
     if eval_dataset is None:
         return True  # No eval to do, so consider it "successful"
+    if base_env_config is None:
+        base_env_config = EnvConfig()
+    expected_eval_results = len(eval_dataset)
+    if training_step < args.num_training_steps and evaluation_inference_results_Q.qsize() < expected_eval_results:
+        logger.info(
+            "[Main Thread] Skipping eval collection at step %s: only %s/%s results are ready.",
+            training_step,
+            evaluation_inference_results_Q.qsize(),
+            expected_eval_results,
+        )
+        return False
 
     try:
-        # timeout 0.01 if this is not the last training step
-        # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if training_step < args.num_training_steps else 100
+        # Use a short timeout during training so eval collection never blocks rollout progress.
+        # At the final step, wait for the configured eval timeout budget to drain the queue.
+        timeout = 0.01
+        if training_step >= args.num_training_steps:
+            timeout = 60 * (args.eval_timeout_minutes or args.backend_timeout)
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=len(eval_dataset),
+            num_prompts=expected_eval_results,
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1682,7 +1696,7 @@ def maybe_evaluate(
         eval_reward_metrics.pop("eval/model_step_max", None)
         model_step_mean = eval_reward_metrics.pop("eval/model_step_mean")
         eval_reward_metrics.pop("eval/model_step_span", None)
-        model_step_values = eval_reward_metrics.pop("eval/model_step_values", None)
+        eval_reward_metrics.pop("eval/model_step_values", None)
         eval_k = eval_generation_config.n
         scores = np.array(eval_batch.scores)
         pass_at_by_k: dict[int, float] = {}
@@ -1695,7 +1709,14 @@ def maybe_evaluate(
             num_correct_per_prompt = (scores_per_prompt >= threshold).sum(axis=1)
             pass_at_ks = [2**i for i in range(eval_k.bit_length()) if 2**i <= eval_k]
             per_prompt_pass_at_by_k = np.asarray(
-                [estimate_pass_at_k_array(eval_k, num_correct_per_prompt, k) for k in pass_at_ks], dtype=float
+                [
+                    [
+                        grpo_utils.estimate_pass_at_k(eval_k, int(num_correct), k)
+                        for num_correct in num_correct_per_prompt
+                    ]
+                    for k in pass_at_ks
+                ],
+                dtype=float,
             ).T
             for col, k in enumerate(pass_at_ks):
                 pass_at_by_k[k] = float(per_prompt_pass_at_by_k[:, col].mean())
@@ -2179,6 +2200,7 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
+            streaming_config.max_possible_score,
             base_env_config,
             actor_manager,
         )

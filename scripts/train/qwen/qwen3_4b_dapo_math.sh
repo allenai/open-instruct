@@ -6,7 +6,7 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
-CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
+CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres ai2/saturn}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
@@ -19,6 +19,7 @@ uv run mason.py \
     --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 1 \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
