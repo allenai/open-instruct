@@ -70,7 +70,9 @@ def make_harbor_trial_config(
 
     return TrialConfig(
         task=task_cfg,
-        agent=AgentConfig(name=agent_name, model_name=f"hosted_vllm/{actor.model_name}", kwargs=merged_kwargs),
+        agent=AgentConfig(
+            name=agent_name, model_name=f"hosted_vllm/{actor.model_name.split('/')[-1]}", kwargs=merged_kwargs
+        ),
         environment=EnvironmentConfig(type=env_type),
     )
 
