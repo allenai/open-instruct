@@ -728,6 +728,230 @@ def add_prompt_to_generator(
     )
 
 
+@dataclass
+class ProcessedResult:
+    """All list fields have length generation_config.n (one per sample)."""
+
+    result: data_types.GenerationResult
+    queries: list[list[int]]
+    ground_truths: list[list[int]]
+    datasets: list[str]
+    raw_queries: list[str]
+    active_tools: list[list[str] | None]
+    decoded_responses: list[str]
+    reward_scores: list[float]
+    reward_metrics: dict[str, Any]
+    percent_solved: float
+
+
+def process_single_result(
+    result: data_types.GenerationResult,
+    generation_config: vllm.SamplingParams,
+    tokenizer: PreTrainedTokenizer,
+    dataset: Dataset,
+    max_possible_score: float,
+    no_resampling_pass_rate: float | None,
+    iter_dataloader: HFDataLoader | None,
+    filter_zero_std_samples: bool,
+    replenish_prompts: bool,
+    param_prompt_Q: ray_queue.Queue | None,
+    base_env_config: EnvConfig,
+) -> ProcessedResult | None:
+    assert result.index is not None
+    assert result.logprobs is not None
+    assert result.reward_scores is not None
+    assert result.start_time is not None
+    assert result.token_statistics is not None
+    assert len(result.responses) == generation_config.n, (
+        f"Mismatch: individual prompt result has {len(result.responses)} responses "
+        f"but expected {generation_config.n} samples per prompt. "
+        f"Index: {result.index}, Prompt ID: {result.prompt_id}"
+    )
+
+    example = dataset[result.index]
+    query = example[INPUT_IDS_PROMPT_KEY]
+    ground_truth = example[GROUND_TRUTHS_KEY]
+    dataset_name = example[VERIFIER_SOURCE_KEY]
+    raw_query = example[RAW_PROMPT_KEY]
+    sample_active_tools = example.get(TOOLS_COLUMN_KEY)
+
+    if replenish_prompts:
+        assert iter_dataloader is not None
+        assert param_prompt_Q is not None
+        example = next(iter_dataloader)
+        add_prompt_to_generator(
+            example,
+            iter_dataloader._epoch,
+            param_prompt_Q,
+            generation_config,
+            is_eval=False,
+            base_env_config=base_env_config,
+        )
+
+    for i in range(len(result.finish_reasons)):
+        if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
+            result.responses[i].append(tokenizer.eos_token_id)
+            result.masks[i].append(1)
+            result.logprobs[i].append(float("nan"))
+
+    decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
+
+    percent_solved = np.mean(result.reward_scores).item() / max_possible_score
+    if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+        assert iter_dataloader is not None
+        iter_dataloader.exclude_index(result.index)
+
+    if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+        return None
+
+    return ProcessedResult(
+        result=result,
+        queries=repeat_each([query], generation_config.n),
+        ground_truths=repeat_each([ground_truth], generation_config.n),
+        datasets=repeat_each([dataset_name], generation_config.n),
+        raw_queries=repeat_each([raw_query], generation_config.n),
+        active_tools=repeat_each([sample_active_tools], generation_config.n),
+        decoded_responses=decoded_responses,
+        reward_scores=list(result.reward_scores),
+        reward_metrics=result.reward_metrics or {},
+        percent_solved=percent_solved,
+    )
+
+
+def combine_processed_results(
+    processed_results: list[ProcessedResult], generation_config: vllm.SamplingParams, actor_manager=None
+) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics] | tuple[None, None, None, None]:
+    if len(processed_results) == 0:
+        return None, None, None, None
+
+    all_queries: list[list[int]] = []
+    all_ground_truths: list[list[int]] = []
+    all_datasets: list[str] = []
+    all_raw_queries: list[str] = []
+    all_decoded_responses: list[str] = []
+    all_reward_metrics: list[dict] = []
+    all_active_tools: list[list[str] | None] = []
+    all_scores: list[float] = []
+    all_percent_solved: list[float] = []
+
+    combined_responses: list[list[int]] = []
+    combined_finish_reasons: list[str] = []
+    combined_masks: list[list[int]] = []
+    combined_num_calls: list[int] = []
+    combined_timeouts: list[int] = []
+    combined_tool_errors: list[str] = []
+    combined_tool_outputs: list[str] = []
+    combined_tool_runtimes: list[float] = []
+    combined_tool_calleds: list[bool] = []
+    combined_tool_call_stats: list = []
+    combined_rollout_states: list[dict] = []
+    combined_logprobs: list[list[float]] = []
+
+    earliest_start_time = float("inf")
+    prompt_lengths: list[int] = []
+    response_lengths: list[int] = []
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+    max_generation_time = 0.0
+
+    for pr in processed_results:
+        result = pr.result
+        assert result.logprobs is not None
+        assert result.start_time is not None
+        assert result.token_statistics is not None
+        all_queries.extend(pr.queries)
+        all_ground_truths.extend(pr.ground_truths)
+        all_datasets.extend(pr.datasets)
+        all_raw_queries.extend(pr.raw_queries)
+        all_active_tools.extend(pr.active_tools)
+        all_decoded_responses.extend(pr.decoded_responses)
+        all_scores.extend(pr.reward_scores)
+        all_reward_metrics.append(pr.reward_metrics)
+        all_percent_solved.append(pr.percent_solved)
+
+        combined_responses.extend(result.responses)
+        combined_finish_reasons.extend(result.finish_reasons)
+        combined_masks.extend(result.masks)
+        combined_num_calls.extend(result.request_info.num_calls)
+        combined_timeouts.extend(result.request_info.timeouts)
+        combined_tool_errors.extend(result.request_info.tool_errors)
+        combined_tool_outputs.extend(result.request_info.tool_outputs)
+        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
+        combined_tool_calleds.extend(result.request_info.tool_calleds)
+        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_rollout_states.extend(result.request_info.rollout_states)
+        combined_logprobs.extend(result.logprobs)
+
+        earliest_start_time = min(earliest_start_time, result.start_time)
+        prompt_lengths.append(len(pr.queries[0]))
+        for response in result.responses:
+            response_lengths.append(len(response))
+
+        total_prompt_tokens += result.token_statistics.num_prompt_tokens
+        total_response_tokens += result.token_statistics.num_response_tokens
+        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+
+    accumulated_stats = data_types.TokenStatistics(
+        num_prompt_tokens=total_prompt_tokens,
+        num_response_tokens=total_response_tokens,
+        generation_time=max_generation_time,
+        earliest_start_time=earliest_start_time,
+    )
+
+    combined_request_info = data_types.RequestInfo(
+        num_calls=combined_num_calls,
+        timeouts=combined_timeouts,
+        tool_errors=combined_tool_errors,
+        tool_outputs=combined_tool_outputs,
+        tool_runtimes=combined_tool_runtimes,
+        tool_calleds=combined_tool_calleds,
+        tool_call_stats=combined_tool_call_stats,
+        rollout_states=combined_rollout_states,
+    )
+
+    combined_result = data_types.GenerationResult(
+        responses=combined_responses,
+        finish_reasons=combined_finish_reasons,
+        masks=combined_masks,
+        request_info=combined_request_info,
+        index=None,
+        prompt_id=processed_results[0].result.prompt_id,
+        token_statistics=accumulated_stats,
+        logprobs=combined_logprobs,
+    )
+
+    if actor_manager is not None:
+        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
+
+    batch = Batch(
+        queries=all_queries,
+        ground_truths=all_ground_truths,
+        datasets=all_datasets,
+        raw_queries=all_raw_queries,
+        decoded_responses=all_decoded_responses,
+        indices=None,
+        scores=all_scores,
+        active_tools=all_active_tools if all_active_tools else None,
+    )
+
+    combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    percent_solved_mean = float(np.mean(all_percent_solved)) if all_percent_solved else 0.0
+
+    batch_stats = BatchStatistics(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        filtered_prompts=0,
+        filtered_prompts_zero=0,
+        filtered_prompts_solved=0,
+        filtered_prompts_nonzero=0,
+        percent_solved_mean=percent_solved_mean,
+        percent_solved_hist=np.array(all_percent_solved),
+        no_resampled_prompts=0,
+        total_prompts=len(processed_results),
+    )
+    return combined_result, batch, combined_reward_metrics, batch_stats
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     generation_config: vllm.SamplingParams,
@@ -760,16 +984,7 @@ def accumulate_inference_batches(
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
-    results = []
-    all_queries = []
-    all_ground_truths = []
-    all_datasets = []
-    all_raw_queries = []
-    all_decoded_responses = []
-    all_reward_metrics = []
-    all_active_tools = []
-    all_scores = []
-    all_percent_solved = []
+    processed_results: list[ProcessedResult] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -808,60 +1023,24 @@ def accumulate_inference_batches(
         if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
 
-        assert len(result.responses) == generation_config.n, (
-            f"Mismatch: individual prompt result has {len(result.responses)} responses "
-            f"but expected {generation_config.n} samples per prompt. "
-            f"Index: {result.index}, Prompt ID: {result.prompt_id}"
+        processed = process_single_result(
+            result=result,
+            generation_config=generation_config,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            max_possible_score=max_possible_score,
+            no_resampling_pass_rate=no_resampling_pass_rate,
+            iter_dataloader=iter_dataloader,
+            filter_zero_std_samples=filter_zero_std_samples,
+            replenish_prompts=replenish_prompts,
+            param_prompt_Q=param_prompt_Q,
+            base_env_config=base_env_config,
         )
 
-        example = dataset[result.index]
-        query = example[INPUT_IDS_PROMPT_KEY]
-        ground_truth = example[GROUND_TRUTHS_KEY]
-        dataset_name = example[VERIFIER_SOURCE_KEY]
-        raw_query = example[RAW_PROMPT_KEY]
-        sample_active_tools = example.get(TOOLS_COLUMN_KEY)
-
-        if replenish_prompts:
-            assert iter_dataloader is not None
-            assert param_prompt_Q is not None
-            example = next(iter_dataloader)
-            add_prompt_to_generator(
-                example,
-                iter_dataloader._epoch,
-                param_prompt_Q,
-                generation_config,
-                is_eval=False,
-                base_env_config=base_env_config,
-            )
-
-        for i in range(len(result.finish_reasons)):
-            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
-
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
-
-        k_queries = repeat_each([query], generation_config.n)
-        k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset_name], generation_config.n)
-        k_raw_queries = repeat_each([raw_query], generation_config.n)
-        k_active_tools = repeat_each([sample_active_tools], generation_config.n)
-
-        percent_solved = np.mean(result.reward_scores).item() / max_possible_score
-        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-            assert iter_dataloader is not None
-            iter_dataloader.exclude_index(result.index)
-            total_no_resampled += 1
-            logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
-            )
-
-        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+        if processed is None:
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
-
             total_filtered_prompts += 1
             if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
@@ -869,138 +1048,42 @@ def accumulate_inference_batches(
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
-            logging.debug(
+            logger.debug(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
             continue
-        else:
-            num_prompts_sampled += 1
-            progress_bar.update(1)
 
-        results.append(result)
-        all_queries.extend(k_queries)
-        all_ground_truths.extend(k_ground_truths)
-        all_datasets.extend(k_datasets)
-        all_raw_queries.extend(k_raw_queries)
-        all_active_tools.extend(k_active_tools)
-        all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(result.reward_scores)
-        all_reward_metrics.append(result.reward_metrics)
-        all_percent_solved.append(percent_solved)
+        if no_resampling_pass_rate is not None and processed.percent_solved >= no_resampling_pass_rate:
+            total_no_resampled += 1
+            logger.debug(
+                f"[Data Preparation Thread] Prompt solved at {processed.percent_solved}, "
+                f"will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
 
-    if len(results) == 0:
-        logging.warning(
+        num_prompts_sampled += 1
+        progress_bar.update(1)
+        processed_results.append(processed)
+
+    if len(processed_results) == 0:
+        logger.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
             f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
         )
         return None, None, None, None
 
-    combined_responses = []
-    combined_finish_reasons = []
-    combined_masks = []
-    combined_num_calls = []
-    combined_timeouts = []
-    combined_tool_errors = []
-    combined_tool_outputs = []
-    combined_tool_runtimes = []
-    combined_tool_calleds = []
-    combined_tool_call_stats = []
-    combined_rollout_states = []
-    combined_logprobs = []
-
-    earliest_start_time = float("inf")
-    prompt_lengths = []
-    response_lengths = []
-
-    total_prompt_tokens = 0
-    total_response_tokens = 0
-    max_generation_time = 0
-
-    for i, result in enumerate(results):
-        combined_responses.extend(result.responses)
-        combined_finish_reasons.extend(result.finish_reasons)
-        combined_masks.extend(result.masks)
-        combined_num_calls.extend(result.request_info.num_calls)
-        combined_timeouts.extend(result.request_info.timeouts)
-        combined_tool_errors.extend(result.request_info.tool_errors)
-        combined_tool_outputs.extend(result.request_info.tool_outputs)
-        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
-        combined_tool_calleds.extend(result.request_info.tool_calleds)
-        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
-        combined_rollout_states.extend(result.request_info.rollout_states)
-
-        combined_logprobs.extend(result.logprobs)
-
-        earliest_start_time = min(earliest_start_time, result.start_time)
-
-        prompt_lengths.append(len(all_queries[i * generation_config.n]))
-
-        for response in result.responses:
-            response_lengths.append(len(response))
-
-        total_prompt_tokens += result.token_statistics.num_prompt_tokens
-        total_response_tokens += result.token_statistics.num_response_tokens
-        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
-
-    accumulated_stats = data_types.TokenStatistics(
-        num_prompt_tokens=total_prompt_tokens,
-        num_response_tokens=total_response_tokens,
-        generation_time=max_generation_time,
-        earliest_start_time=earliest_start_time,
+    combined_result, batch, combined_reward_metrics, batch_stats = combine_processed_results(
+        processed_results, generation_config, actor_manager
     )
-
-    combined_request_info = data_types.RequestInfo(
-        num_calls=combined_num_calls,
-        timeouts=combined_timeouts,
-        tool_errors=combined_tool_errors,
-        tool_outputs=combined_tool_outputs,
-        tool_runtimes=combined_tool_runtimes,
-        tool_calleds=combined_tool_calleds,
-        tool_call_stats=combined_tool_call_stats,
-        rollout_states=combined_rollout_states,
-    )
-
-    combined_result = data_types.GenerationResult(
-        responses=combined_responses,
-        finish_reasons=combined_finish_reasons,
-        masks=combined_masks,
-        request_info=combined_request_info,
-        index=None,
-        prompt_id=results[0].prompt_id,
-        token_statistics=accumulated_stats,
-        logprobs=combined_logprobs,
-    )
-
-    if actor_manager is not None:
-        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
-
-    batch = Batch(
-        queries=all_queries,
-        ground_truths=all_ground_truths,
-        datasets=all_datasets,
-        raw_queries=all_raw_queries,
-        decoded_responses=all_decoded_responses,
-        indices=None,
-        scores=all_scores,
-        active_tools=all_active_tools if all_active_tools else None,
-    )
-
-    combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
-    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
-
-    batch_stats = BatchStatistics(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        filtered_prompts=total_filtered_prompts,
-        filtered_prompts_zero=filtered_prompt_zero,
-        filtered_prompts_solved=filtered_prompt_solved,
-        filtered_prompts_nonzero=filtered_prompt_nonzero,
-        percent_solved_mean=percent_solved_mean,
-        percent_solved_hist=np.array(all_percent_solved),
-        no_resampled_prompts=total_no_resampled,
-        total_prompts=len(results),
-    )
+    assert combined_result is not None
+    assert batch is not None
+    assert combined_reward_metrics is not None
+    assert batch_stats is not None
+    batch_stats.filtered_prompts = total_filtered_prompts
+    batch_stats.filtered_prompts_zero = filtered_prompt_zero
+    batch_stats.filtered_prompts_solved = filtered_prompt_solved
+    batch_stats.filtered_prompts_nonzero = filtered_prompt_nonzero
+    batch_stats.no_resampled_prompts = total_no_resampled
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
