@@ -228,6 +228,7 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertAlmostEqual(result.score, 2 / 3)
+        self.assertEqual(result.metadata.get("manufactoria_per_test_passed"), [1.0])
 
     async def test_all_pass_scoring(self):
         verifier = ManufactoriaVerifier(
@@ -253,6 +254,7 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.score, 0.0)
+        self.assertEqual(result.metadata.get("manufactoria_per_test_passed"), [1.0])
 
 
 class TestGSM8KVerifier(unittest.TestCase):

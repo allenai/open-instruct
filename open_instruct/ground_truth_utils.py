@@ -1313,6 +1313,11 @@ class ManufactoriaVerifier(VerifierFunction):
             logger.warning("Manufactoria verifier expected a non-empty test case list")
             return VerificationResult(score=0.0)
 
+        num_tests = len(test_cases)
+
+        def _zeros_metadata() -> dict[str, Any]:
+            return {"manufactoria_per_test_passed": [0.0] * num_tests}
+
         payload = {
             "dsl": self.extract_manufactoria_code(prediction),
             "test_cases": test_cases,
@@ -1343,6 +1348,8 @@ class ManufactoriaVerifier(VerifierFunction):
                     pass_rate_score = sum(passes) / len(passes)
                 else:
                     pass_rate_score = all_pass_score
+                    ap = bool(result["all_passed"])
+                    passes = [ap] * num_tests
             elif "results" in result and isinstance(result["results"], list) and result["results"]:
                 raw_results = result["results"]
                 if isinstance(raw_results[0], dict):
@@ -1353,16 +1360,30 @@ class ManufactoriaVerifier(VerifierFunction):
                 all_pass_score = 1.0 if pass_rate_score == 1.0 else 0.0
             else:
                 logger.warning(f"Unexpected Manufactoria API response format: {result}")
-                return VerificationResult(score=0.0)
+                return VerificationResult(score=0.0, metadata=_zeros_metadata())
+
+            aligned = list(passes)
+            if len(aligned) != num_tests:
+                logger.warning(
+                    "Manufactoria API returned %s test results but label has %s tests; padding/truncating per-test metadata",
+                    len(aligned),
+                    num_tests,
+                )
+                if len(aligned) < num_tests:
+                    aligned = aligned + [False] * (num_tests - len(aligned))
+                else:
+                    aligned = aligned[:num_tests]
+
+            per_test = [1.0 if p else 0.0 for p in aligned]
 
             if self.verifier_config.manufactoria_scoring_mode == "pass_rate":
                 score = pass_rate_score
             else:
                 score = all_pass_score
-            return VerificationResult(score=score)
+            return VerificationResult(score=score, metadata={"manufactoria_per_test_passed": per_test})
         except Exception as e:
             logger.warning(f"Error verifying Manufactoria code sample: {e}")
-            return VerificationResult(score=0.0)
+            return VerificationResult(score=0.0, metadata=_zeros_metadata())
 
     def __call__(
         self,
@@ -1686,6 +1707,8 @@ async def apply_verifiable_reward(
             return reward_fn_mapping.get("gsm8k")
         if dataset_key.startswith("math"):
             return reward_fn_mapping.get("math")
+        if dataset_key.startswith("manufactoria"):
+            return reward_fn_mapping.get("manufactoria")
         return None
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(
@@ -1719,6 +1742,7 @@ async def apply_verifiable_reward(
 
     response_rewards = [0] * len(responses)
     response_per_func_rewards = [{} for _ in range(len(responses))]
+    per_response_per_test: list[list[float] | None] = [None] * len(responses)
     fallback_used_counts: Counter[str] = Counter()
     fallback_correct_counts: Counter[str] = Counter()
 
@@ -1736,6 +1760,15 @@ async def apply_verifiable_reward(
         )
 
         result_metadata = getattr(result, "metadata", {}) or {}
+        per_test_passed = result_metadata.get("manufactoria_per_test_passed")
+        if per_test_passed is not None:
+            vec = [float(x) for x in per_test_passed]
+            prev = per_response_per_test[response_idx]
+            if prev is None:
+                per_response_per_test[response_idx] = vec
+            else:
+                per_response_per_test[response_idx] = prev + vec
+
         if result_metadata.get("llm_judge_fallback_used"):
             verifier_name = result_metadata.get("llm_judge_fallback_primary_verifier", dataset)
             fallback_used_counts[verifier_name] += 1
@@ -1743,7 +1776,7 @@ async def apply_verifiable_reward(
                 result_metadata.get("llm_judge_correct_when_primary_wrong", 0)
             )
 
-    extra_metrics: dict[str, float] = {}
+    extra_metrics: dict[str, Any] = {}
     total_fallback_uses = sum(fallback_used_counts.values())
     total_fallback_correct = sum(fallback_correct_counts.values())
     if total_fallback_uses > 0:
@@ -1761,6 +1794,9 @@ async def apply_verifiable_reward(
             extra_metrics[f"objective/{verifier_name}_llm_judge_correct_when_primary_wrong_rate"] = (
                 correct_count / used_count
             )
+
+    if any(x is not None for x in per_response_per_test):
+        extra_metrics["_internal_per_response_per_test_passed"] = per_response_per_test
 
     return response_rewards, response_per_func_rewards, extra_metrics
 
@@ -1837,6 +1873,9 @@ class RewardConfig:
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
 
+                verifier_metrics = dict(verifier_metrics)
+                internal_per_test = verifier_metrics.pop("_internal_per_response_per_test_passed", None)
+
                 for i in range(len(verifiable_rewards)):
                     if not self.only_reward_good_outputs or (good_outputs[i] and self.only_reward_good_outputs):
                         turn_rewards = list(rollout_states[i].get("rewards", []))
@@ -1868,6 +1907,19 @@ class RewardConfig:
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
                 metrics.update(verifier_metrics)
+
+                if internal_per_test is not None:
+                    rows = [r for r in internal_per_test if r is not None]
+                    if rows:
+                        if not all(len(r) == len(rows[0]) for r in rows):
+                            logger.warning(
+                                "Per-test Manufactoria pass lists differ in length across rollouts (%s); "
+                                "skipping _per_prompt_per_test_pass_rate",
+                                [len(r) for r in rows],
+                            )
+                        else:
+                            arr = np.array(rows, dtype=float)
+                            metrics["_per_prompt_per_test_pass_rate"] = arr.mean(axis=0).tolist()
 
             if self.non_stop_penalty:
                 assert len(finish_reasons) == len(scores)

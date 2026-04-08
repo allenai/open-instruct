@@ -1586,9 +1586,16 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
+        table_rows = metrics.pop("val/train_test_solve_rate_table_rows", None)
+        if table_rows:
+            metrics["val/train_test_solve_rate_table"] = wandb.Table(dataframe=pd.DataFrame(table_rows))
         # Convert array/list metrics to wandb histograms for logging
-        for key, value in metrics.items():
+        for key, value in list(metrics.items()):
+            if isinstance(value, wandb.Table):
+                continue
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
+                if isinstance(value, list) and isinstance(value[0], tuple):
+                    continue
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=training_step)
 
@@ -1861,6 +1868,35 @@ def maybe_evaluate(
                 dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
             for dataset_name, rates in dataset_to_solve_rates.items():
                 eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
+
+        if eval_batch_stats is not None and eval_batch_stats.per_prompt_test_records:
+            eval_test_triples: list[tuple[int, int, float]] = []
+            eval_test_table_rows: list[dict[str, Any]] = []
+            for prompt_index, rates, diff_list in eval_batch_stats.per_prompt_test_records:
+                for test_index, rate in enumerate(rates):
+                    eval_test_triples.append((prompt_index, test_index, float(rate)))
+                    erow: dict[str, Any] = {
+                        "prompt_index": prompt_index,
+                        "test_index": test_index,
+                        "solve_rate": float(rate),
+                    }
+                    if diff_list is not None:
+                        erow["difficulty"] = int(diff_list[test_index])
+                    eval_test_table_rows.append(erow)
+            eval_metrics["eval/test_solve_rate_by_prompt_and_test_index"] = eval_test_triples
+            eval_metrics["eval/test_solve_rate_by_prompt_and_test_index_count"] = len(eval_test_triples)
+            for q in (1, 2, 3, 4):
+                bucket_rates = [
+                    float(rates[i])
+                    for _pidx, rates, diff_list in eval_batch_stats.per_prompt_test_records
+                    if diff_list is not None
+                    for i, d in enumerate(diff_list)
+                    if d == q
+                ]
+                if bucket_rates:
+                    eval_metrics[f"eval/test_solve_rate_mean_difficulty_q{q}"] = float(np.mean(bucket_rates))
+            if args.with_tracking and eval_test_table_rows:
+                eval_metrics["eval/test_solve_rate_table"] = wandb.Table(dataframe=pd.DataFrame(eval_test_table_rows))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens

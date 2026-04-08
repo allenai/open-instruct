@@ -237,6 +237,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
+            per_prompt_test_records=[],
         )
 
         with (
@@ -312,6 +313,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
+            per_prompt_test_records=[],
         )
 
         with (
@@ -390,6 +392,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=["subset_a"],
             filtered_prompt_datasets_solved=["subset_b"],
             filtered_prompt_datasets_nonzero=["subset_b"],
+            per_prompt_test_records=[],
         )
 
         with (
@@ -421,6 +424,79 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/filtered_prompts_solved/subset_b"], 1)
         self.assertEqual(logged["eval/filtered_prompts_nonzero/subset_a"], 0)
         self.assertEqual(logged["eval/filtered_prompts_nonzero/subset_b"], 1)
+
+    def test_logs_per_test_solve_metrics_when_batch_has_records(self):
+        args = SimpleNamespace(
+            num_training_steps=200,
+            with_tracking=False,
+            backend_timeout=120,
+            eval_only=False,
+            eval_timeout_minutes=None,
+        )
+        eval_dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [[1, 2, 3], [1, 2, 3]],
+                GROUND_TRUTHS_KEY: ["42", "42"],
+                VERIFIER_SOURCE_KEY: ["subset/a", "subset b"],
+                RAW_PROMPT_KEY: ["prompt_a", "prompt_b"],
+                "index": [0, 1],
+            }
+        )
+        eval_queue = _QueueWithSize(size=2)
+        eval_generation_config = SimpleNamespace(n=4)
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["prompt"] * 8
+        tokenizer.pad_token = "<pad>"
+
+        eval_result = SimpleNamespace(
+            responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
+            finish_reasons=["stop"] * 8,
+            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
+        )
+        eval_batch = SimpleNamespace(
+            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            queries=[[1, 2, 3]] * 8,
+            decoded_responses=[f"resp_{i}" for i in range(8)],
+            ground_truths=["42"] * 8,
+            active_tools=None,
+        )
+        eval_batch_stats = SimpleNamespace(
+            percent_solved_hist=np.array([0.25, 0.25]),
+            prompt_indices=[0, 1],
+            prompt_datasets=["subset_a", "subset_b"],
+            filtered_prompt_datasets=[],
+            filtered_prompt_datasets_zero=[],
+            filtered_prompt_datasets_solved=[],
+            filtered_prompt_datasets_nonzero=[],
+            per_prompt_test_records=[(0, [0.5, 1.0], [1, 4]), (1, [0.0, 0.25], [2, 3])],
+        )
+
+        with (
+            patch(
+                "open_instruct.grpo_fast.accumulate_inference_batches",
+                return_value=(eval_result, eval_batch, {"model_step_mean": 100.0}, eval_batch_stats),
+            ),
+            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_fast.print_rich_table"),
+        ):
+            maybe_evaluate(
+                args=args,
+                training_step=100,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=tokenizer,
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                max_possible_score=1.0,
+            )
+
+        logged = mock_print_metrics.call_args.args[0]
+        self.assertEqual(logged["eval/test_solve_rate_by_prompt_and_test_index_count"], 4)
+        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q1"], 0.5)
+        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q2"], 0.0)
+        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q3"], 0.25)
+        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q4"], 1.0)
 
     def test_final_step_uses_default_eval_timeout_minutes(self):
         args = SimpleNamespace(

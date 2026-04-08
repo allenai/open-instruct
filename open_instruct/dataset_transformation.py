@@ -874,6 +874,7 @@ GET_TOKENIZER_FN = {
 
 DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
+DIFFICULTY_KEY = "difficulty"
 VERIFIER_SOURCE_KEY = "dataset"
 RAW_PROMPT_KEY = "prompt"
 
