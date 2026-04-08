@@ -130,6 +130,32 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
+
+def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
+    if checkpoint_state is None:
+        return None
+
+    data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
+    if data_prep_actor_state is None:
+        return None
+
+    resume_state = dict(data_prep_actor_state)
+    last_consumed_step = resume_state.get("last_consumed_step")
+    if last_consumed_step is None:
+        trainer_training_step = checkpoint_state.get("training_step")
+        if trainer_training_step is None:
+            raise ValueError("Checkpoint is missing both data prep actor progress and training_step")
+        last_consumed_step = trainer_training_step - 1
+        logger.warning(
+            "Checkpoint is missing data_prep_actor_state.last_consumed_step; "
+            "falling back to training_step-derived resume state"
+        )
+
+    resume_state["last_consumed_step"] = last_consumed_step
+    resume_state["training_step"] = last_consumed_step + 1
+    return resume_state
+
+
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
@@ -183,7 +209,7 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-    ) -> int:
+    ) -> dict[str, Any]:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -284,6 +310,7 @@ class PolicyTrainerRayProcess(RayProcess):
             mpu=self.mpu,
         )
         optimization_steps_done = 0
+        checkpoint_state = None
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
@@ -304,6 +331,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
                 rng_states = states["rng_states"]
@@ -397,7 +425,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.dataloader = iter(self._streaming_dataloader)
 
-        return optimization_steps_done
+        return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -1190,13 +1218,19 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     base_env_config: EnvConfig,
-    data_prep_actor_state: dict | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
-    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
+    ModelGroup,
+    list[vllm_utils.LLMRayActor],
+    int,
+    int,
+    ray.actor.ActorHandle,
+    utils.ModelDims,
+    ray.actor.ActorHandle,
+    dict[str, Any] | None,
 ]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -1236,7 +1270,7 @@ def create_model_and_optimizer(
         tool_names=tools_config.tool_call_names if tools_config else [],
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
-        initial_state=data_prep_actor_state,
+        initial_state=None,
         base_env_config=base_env_config,
     )
 
@@ -1318,7 +1352,8 @@ def create_model_and_optimizer(
 
     # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0] + 1
+    resume_training_step = results[0]["optimization_steps_done"] + 1
+    checkpoint_state = results[0]["checkpoint_state"]
     episode = (
         (resume_training_step - 1)
         * streaming_config.num_unique_prompts_rollout
@@ -1326,13 +1361,34 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
+    data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
+    if data_prep_actor_state is not None:
+        ray_get_with_progress(
+            [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
+        )
+        logger.info(
+            "Restored data prep actor state from checkpoint "
+            f"with training_step={data_prep_actor_state['training_step']}"
+        )
+
+    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
+
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
         desc="Setting up model update group",
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
+    return (
+        policy_group,
+        vllm_engines,
+        resume_training_step,
+        episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+        checkpoint_state,
+    )
 
 
 def create_generation_configs(
@@ -2234,58 +2290,37 @@ def main(
     # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config, vllm_config)
 
-    checkpoint_state = None
-    data_prep_actor_state = None
-    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        # Find the latest checkpoint tag from the 'latest' file written by DeepSpeed/calibrate_checkpoint_state_dir
-        latest_file = os.path.join(args.checkpoint_state_dir, "latest")
-        checkpoint_path = None
-        if os.path.exists(latest_file):
-            with open(latest_file) as f:
-                tag = f.read().strip()
-            # DeepSpeed saves rank-0 model states (including client_state) in this file
-            candidate = os.path.join(args.checkpoint_state_dir, tag, "mp_rank_00_model_states.pt")
-            if os.path.exists(candidate):
-                checkpoint_path = candidate
-        if checkpoint_path is None:
-            # Fallback: search for any model states file in the checkpoint directory
-            matches = sorted(pathlib.Path(args.checkpoint_state_dir).rglob("mp_rank_00_model_states.pt"))
-            if matches:
-                checkpoint_path = str(matches[-1])
-        if checkpoint_path is not None and os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
-            data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
-            if data_prep_actor_state:
-                # Use trainer's authoritative training_step for DataPreparationActor.
-                # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
-                data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
-
     base_env_config = build_base_env_config(tools_config, pools)
-    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            prompt_Q,
-            evaluation_inference_results_Q,
-            streaming_config,
-            vllm_config,
-            train_dataset,
-            eval_dataset,
-            reward_config,
-            generation_configs["train"],
-            base_env_config,
-            data_prep_actor_state,
-            tool_definitions,
-            tools_config,
-            pools,
-            tool_stop_sequences,
-        )
+    (
+        policy_group,
+        vllm_engines,
+        resume_training_step,
+        episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+        checkpoint_state,
+    ) = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        prompt_Q,
+        evaluation_inference_results_Q,
+        streaming_config,
+        vllm_config,
+        train_dataset,
+        eval_dataset,
+        reward_config,
+        generation_configs["train"],
+        base_env_config,
+        tool_definitions,
+        tools_config,
+        pools,
+        tool_stop_sequences,
     )
 
     if checkpoint_state:
