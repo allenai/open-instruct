@@ -27,7 +27,7 @@ class _QueueWithSize:
 
 class TestCreateGenerationConfigs(unittest.TestCase):
     def test_eval_uses_pass_at_k_and_eval_response_length(self):
-        args = grpo_utils.ExperimentConfig(eval_pass_at_k=8)
+        args = grpo_utils.GRPOExperimentConfig(eval_pass_at_k=8)
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(response_length=256, eval_response_length=512)
         vllm_config = data_loader_lib.VLLMConfig()
 

@@ -15,6 +15,7 @@
 # isort: off
 import contextlib
 import os
+import warnings
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -37,7 +38,7 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKwargs, ParallelismConfig, set_seed
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, snapshot_download
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -45,7 +46,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -98,9 +99,6 @@ class FlatArguments:
     )
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    use_flash_attn: bool = field(
-        default=True, metadata={"help": "Whether to use flash attention in the model training"}
     )
     model_revision: str | None = field(
         default=None,
@@ -334,8 +332,6 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
-        if self.sequence_parallel_size > 1 and not self.use_flash_attn:
-            raise ValueError("Sequence parallelism requires flash attention (--use_flash_attn).")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
         if self.final_lr_ratio is not None:
@@ -394,7 +390,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_2"
+                sp_seq_length_is_variable=True, sp_attn_implementation=model_utils.detect_hf_attn_implementation()
             ),
         )
 
@@ -524,6 +520,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.cache_dataset_only:
         return
 
+    # Pre-download model files on main process to avoid race conditions
+    # when multiple ranks on a shared filesystem all try to access the
+    # HF hub cache concurrently.
+    model_path = args.config_name or args.model_name_or_path
+    if model_path and accelerator.is_main_process:
+        snapshot_download(model_path, revision=args.model_revision)
+    accelerator.wait_for_everyone()
+
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(
@@ -563,7 +567,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=model_utils.detect_hf_attn_implementation(),
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -578,7 +582,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=model_utils.detect_hf_attn_implementation(),
                 # liger-kernel specific args
                 fused_linear_cross_entropy=True,
             )
@@ -591,7 +595,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=model_utils.detect_hf_attn_implementation(),
             )
     else:
         logger.info("Training new model from scratch")
@@ -1027,6 +1031,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
 
 if __name__ == "__main__":
+    warnings.warn(
+        "finetune.py is deprecated. Use the OLMo-core SFT implementation instead: "
+        "https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft",
+        DeprecationWarning,
+        stacklevel=1,
+    )
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
