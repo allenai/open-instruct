@@ -7,7 +7,7 @@
 
 
 # Workflow
-- When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
+- When creating a PR, add a changelog fragment to `changelog.d/<PR#>.<type>` (e.g., `changelog.d/123.added`) with a one-line description including the PR URL. Valid types: `added`, `changed`, `deprecated`, `fixed`. Do not edit `CHANGELOG.md` directly.
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.

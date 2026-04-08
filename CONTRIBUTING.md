@@ -64,6 +64,32 @@ If you cloned the repository before installing Git LFS, you will have pointer fi
 
 Track new large or binary test data files with `git lfs track "path/to/file"` and commit the updated `.gitattributes`. CI is configured to fetch LFS objects automatically, so no workflow changes are needed.
 
+## Changelog
+
+We use [towncrier](https://github.com/twisted/towncrier) to manage changelog entries. Instead of editing `CHANGELOG.md` directly, each PR adds a small fragment file to `changelog.d/`.
+
+### Adding a changelog entry
+
+Create a file in `changelog.d/` named `<PR-number>.<type>`, where `<type>` is one of: `added`, `changed`, `deprecated`, `fixed`.
+
+For example, for PR #1600 that adds a new feature:
+
+```
+changelog.d/1600.added
+```
+
+With contents:
+
+```
+Add support for new model architecture (https://github.com/allenai/open-instruct/pull/1600).
+```
+
+CI will fail if you change files under `open_instruct/` without adding a fragment. Bypass with `CHANGELOG=<reason>` in the PR body.
+
+### Building the changelog
+
+At release time, run `uv run towncrier build --yes` to compile all fragments into `CHANGELOG.md`.
+
 ## Running Tests
 
 **Unit tests**: `uv run pytest` runs the tests in `tests/` (test_environments.py, test_generic_sandbox.py, test_merge_models.py).
@@ -76,7 +102,7 @@ Track new large or binary test data files with `git lfs track "path/to/file"` an
 
 Four GitHub Actions workflows run on PRs:
 
-1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also verifies that `CHANGELOG.md` was updated for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body).
+1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also verifies that a changelog fragment exists in `changelog.d/` for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body). See the Changelog section below for details.
 
 2. **Unit Tests** (`tests.yml` → `unit-tests` job): Runs `uv run pytest` on an Ubuntu runner. 20-minute timeout.
 
