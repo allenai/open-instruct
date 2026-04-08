@@ -67,12 +67,10 @@ from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
-from requests.adapters import HTTPAdapter
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
-from urllib3.util.retry import Retry
 
 from open_instruct import data_types, logger_utils
 from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
@@ -681,7 +679,9 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
+    def parse_yaml_and_args(
+        self, yaml_arg: str, other_args: list[str] | None = None, allow_extra_keys: bool = False
+    ) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.
 
@@ -694,7 +694,7 @@ class ArgumentParserPlus(HfArgumentParser):
         Returns:
             [`List[dataclass]`]: a list of dataclasses with the values from the YAML file and the command line
         """
-        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg))
+        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg), allow_extra_keys=allow_extra_keys)
 
         outputs = []
         # strip other args list into dict of key-value pairs
@@ -738,14 +738,16 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> DataClassType | tuple[DataClassType]:
+    def parse(self, allow_extra_keys: bool = False) -> DataClassType | tuple[DataClassType]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
-            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]))
+            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]), allow_extra_keys=allow_extra_keys)
         # parse command line args and yaml file
         elif len(sys.argv) > 2 and sys.argv[1].endswith(".yaml"):
-            output = self.parse_yaml_and_args(os.path.abspath(sys.argv[1]), sys.argv[2:])
+            output = self.parse_yaml_and_args(
+                os.path.abspath(sys.argv[1]), sys.argv[2:], allow_extra_keys=allow_extra_keys
+            )
         # parse command line args only
         else:
             output = self.parse_args_into_dataclasses()
@@ -924,6 +926,44 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     )
 
 
+def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
+    latest_path = os.path.join(checkpoint_state_dir, "latest")
+    if not os.path.isfile(latest_path):
+        return
+
+    with open(latest_path) as f:
+        latest_checkpoint_tag = f.read().strip()
+
+    if not latest_checkpoint_tag or os.path.basename(latest_checkpoint_tag) != latest_checkpoint_tag:
+        return
+
+    latest_checkpoint_dir = os.path.join(checkpoint_state_dir, latest_checkpoint_tag)
+    if not os.path.isdir(latest_checkpoint_dir):
+        raise ValueError(f"Invalid checkpoint: {latest_checkpoint_dir} does not exist")
+
+    latest_universal_tag = f"ds_universal_{latest_checkpoint_tag}"
+    latest_universal_path = os.path.join(checkpoint_state_dir, "latest_universal")
+    latest_universal_dir = os.path.join(checkpoint_state_dir, latest_universal_tag)
+    if os.path.isdir(latest_universal_dir):
+        with open(latest_universal_path, "w") as f:
+            f.write(latest_universal_tag)
+        return
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "deepspeed.checkpoint.ds_to_universal",
+            "--input_folder",
+            latest_checkpoint_dir,
+            "--output_folder",
+            latest_universal_dir,
+            "--inject_missing_state",
+        ],
+        check=True,
+    )
+
+
 # ----------------------------------------------------------------------------
 # Ai2 user utilities
 @dataclass
@@ -937,20 +977,6 @@ class BeakerRuntimeConfig:
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
-
-
-def configure_hf_hub_retry(total: int = 5, backoff_factor: float = 1) -> None:
-    """Configure HF Hub HTTP retries with exponential backoff on 429/5xx."""
-
-    def backend_factory() -> requests.Session:
-        session = requests.Session()
-        retries = Retry(total=total, backoff_factor=backoff_factor, status_forcelist=[429, 500, 502, 503, 504])
-        adapter = HTTPAdapter(max_retries=retries)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        return session
-
-    huggingface_hub.configure_http_backend(backend_factory=backend_factory)
 
 
 def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
@@ -1852,6 +1878,7 @@ class ModelDims:
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        config = config.get_text_config()
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)
