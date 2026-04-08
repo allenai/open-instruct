@@ -1,0 +1,451 @@
+"""Generate pass@k completions for Manufactoria RLVR datasets (e.g. has_train / has_test) and optionally push to HF Hub.
+
+Adds a `difficulty` column: length-N list (one entry per ground-truth test), integers 1–4, quartiles within
+that prompt from per-test solve rates across the k completions (1 = hardest tests for this model, 4 = easiest).
+Use one dataset repo instead of separate pass-rate bucket subsets.
+
+Requires a running Manufactoria API (same as training). Set MANUFACTORIA_API_URL or pass --manufactoria-api-url.
+
+Example (local):
+  export MANUFACTORIA_API_URL=http://localhost:1235
+  uv run python scripts/data/rlvr/manufactoria_pass_at_k_dataset.py \\
+    --dataset manufactoria/has_test \\
+    --split train \\
+    --model Qwen/Qwen3-4B-Instruct-2507 \\
+    --chat-template from_model \\
+    --num-samples 32 \\
+    --max-tokens 8192 \\
+    --tensor-parallel-size 1 \\
+    --num-engines 8
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from typing import Any
+
+import numpy as np
+import ray
+from datasets import Dataset, load_dataset
+from ray.util.placement_group import placement_group
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
+
+from open_instruct import logger_utils
+from open_instruct.dataset_transformation import CHAT_TEMPLATES, DIFFICULTY_KEY
+from open_instruct.ground_truth_utils import ManufactoriaVerifier, ManufactoriaVerifierConfig
+from open_instruct.utils import max_num_processes
+
+logger = logger_utils.setup_logger(__name__)
+
+_DEFAULT_MANUFACTORIA_URL = os.environ.get("MANUFACTORIA_API_URL", "http://localhost:1235") + "/test_solution"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate pass@k Manufactoria completions and build a Hub dataset.")
+    parser.add_argument(
+        "--dataset", default="manufactoria/has_train", help="Input HF dataset (e.g. manufactoria/has_test)"
+    )
+    parser.add_argument("--split", default="train", help="Input split name")
+    parser.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507", help="Model used for generation")
+    parser.add_argument(
+        "--chat-template",
+        default="from_model",
+        help="Chat template: 'from_model' uses the tokenizer checkpoint template, or a key from CHAT_TEMPLATES",
+    )
+    parser.add_argument("--num-samples", type=int, default=32, help="Completions per prompt (k)")
+    parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
+    parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling")
+    parser.add_argument("--max-tokens", type=int, default=8192, help="Max new tokens per completion")
+    parser.add_argument("--tensor-parallel-size", type=int, default=1, help="vLLM tensor parallel size")
+    parser.add_argument(
+        "--num-engines",
+        "--num_engines",
+        dest="num_engines",
+        type=int,
+        default=1,
+        help="Number of independent vLLM engines (Ray workers) for data-parallel generation",
+    )
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="vLLM GPU memory utilization")
+    parser.add_argument("--seed", type=int, default=1, help="Random seed")
+    parser.add_argument("--limit", type=int, default=None, help="Optional max rows to process")
+    parser.add_argument(
+        "--manufactoria-api-url",
+        default=_DEFAULT_MANUFACTORIA_URL,
+        help="Manufactoria test_solution endpoint (default: $MANUFACTORIA_API_URL/test_solution)",
+    )
+    parser.add_argument("--manufactoria-max-execution-time", type=float, default=1.0, help="Per-test API time limit")
+    parser.add_argument(
+        "--manufactoria-scoring-mode",
+        default="pass_rate",
+        choices=["all_pass", "pass_rate"],
+        help="Verifier scoring mode (match training; qwen3_4b_phase1_has_8gpu uses pass_rate)",
+    )
+    parser.add_argument(
+        "--pass-score-threshold",
+        type=float,
+        default=1.0,
+        help="Count a completion as correct if verifier score >= this (1.0 = all tests passed for pass_rate mode)",
+    )
+    parser.add_argument(
+        "--score-threads",
+        type=int,
+        default=32,
+        help="Max parallel HTTP verifier calls per prompt when scoring completions",
+    )
+    parser.add_argument(
+        "--save-local-dir",
+        default="/tmp/manufactoria_pass_at_k_outputs",
+        help="Base directory for saving generated dataset artifacts before push",
+    )
+    parser.add_argument(
+        "--push-to-hub",
+        default="",
+        help=(
+            "HF dataset repo id to push (e.g. your-org/manufactoria-has-train-qwen3-4b-instruct-pass32). "
+            "Empty string skips push. The qwen3_4b shell wrapper sets defaults for train/test."
+        ),
+    )
+    parser.add_argument("--private", action="store_true", help="Push dataset as private (default public)")
+    parser.add_argument(
+        "--no-difficulty",
+        action="store_true",
+        help=f"Do not add {DIFFICULTY_KEY!r} (per-test quartiles 1–4 from pass@k rollouts)",
+    )
+    return parser.parse_args()
+
+
+def normalize_manufactoria_ground_truth(raw: Any) -> Any:
+    """Match RLVR layout: list of tests, or wrapped [[tests...]] after tokenization."""
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+        return normalize_manufactoria_ground_truth(parsed)
+    if isinstance(raw, list):
+        if len(raw) == 1 and isinstance(raw[0], list):
+            return raw[0]
+        return raw
+    return raw
+
+
+def build_prompts(ds: Dataset, model_name: str, chat_template_name: str) -> list[str]:
+    tok = AutoTokenizer.from_pretrained(model_name)
+    if chat_template_name != "from_model":
+        if chat_template_name not in CHAT_TEMPLATES:
+            raise ValueError(f"Unknown chat template: {chat_template_name}. Use from_model or a CHAT_TEMPLATES key.")
+        tok.chat_template = CHAT_TEMPLATES[chat_template_name]
+    elif not getattr(tok, "chat_template", None):
+        raise ValueError("Tokenizer has no chat_template; set --chat-template to a CHAT_TEMPLATES key.")
+
+    prompts = []
+    for sample in ds:
+        if "messages" not in sample:
+            raise KeyError('Expected column "messages" in dataset rows')
+        prompts.append(tok.apply_chat_template(sample["messages"], add_generation_prompt=True, tokenize=False))
+    return prompts
+
+
+def _generate_completions_single_engine(
+    prompts: list[str],
+    model: str,
+    tensor_parallel_size: int,
+    gpu_memory_utilization: float,
+    sampling_params: SamplingParams,
+) -> list[list[str]]:
+    llm = LLM(
+        model=model,
+        tensor_parallel_size=tensor_parallel_size,
+        dtype="bfloat16",
+        gpu_memory_utilization=gpu_memory_utilization,
+        enable_prefix_caching=True,
+    )
+    outputs = llm.generate(prompts, sampling_params)
+    return [[completion.text for completion in request_output.outputs] for request_output in outputs]
+
+
+def _split_evenly(items: list[str], num_chunks: int) -> list[tuple[int, list[str]]]:
+    base, extra = divmod(len(items), num_chunks)
+    chunks = []
+    start = 0
+    for chunk_idx in range(num_chunks):
+        chunk_size = base + (1 if chunk_idx < extra else 0)
+        end = start + chunk_size
+        chunks.append((start, items[start:end]))
+        start = end
+    return chunks
+
+
+@ray.remote
+def _generate_completions_chunk(
+    prompt_offset: int,
+    prompts: list[str],
+    model: str,
+    tensor_parallel_size: int,
+    gpu_memory_utilization: float,
+    sampling_params_kwargs: dict,
+) -> tuple[int, list[list[str]]]:
+    os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+    llm = LLM(
+        model=model,
+        tensor_parallel_size=tensor_parallel_size,
+        distributed_executor_backend="uni" if tensor_parallel_size == 1 else "mp",
+        dtype="bfloat16",
+        gpu_memory_utilization=gpu_memory_utilization,
+        enable_prefix_caching=True,
+    )
+    outputs = llm.generate(prompts, SamplingParams(**sampling_params_kwargs))
+    completions = [[completion.text for completion in request_output.outputs] for request_output in outputs]
+    return prompt_offset, completions
+
+
+def _generate_completions_multi_engine(
+    prompts: list[str],
+    model: str,
+    num_engines: int,
+    tensor_parallel_size: int,
+    gpu_memory_utilization: float,
+    sampling_params: SamplingParams,
+) -> list[list[str]]:
+    started_ray = not ray.is_initialized()
+    if started_ray:
+        ray.init(ignore_reinit_error=True, runtime_env={"env_vars": dict(os.environ)})
+
+    pg = placement_group(
+        [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)], strategy="PACK"
+    )
+    ray.get(pg.ready())
+
+    try:
+        chunks = [(offset, chunk) for offset, chunk in _split_evenly(prompts, num_engines) if chunk]
+        sampling_params_kwargs = dict(
+            n=sampling_params.n,
+            temperature=sampling_params.temperature,
+            top_p=sampling_params.top_p,
+            max_tokens=sampling_params.max_tokens,
+            seed=sampling_params.seed,
+        )
+
+        futures = []
+        for bundle_index, (offset, chunk) in enumerate(chunks):
+            scheduling_strategy = PlacementGroupSchedulingStrategy(
+                placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=bundle_index
+            )
+            futures.append(
+                _generate_completions_chunk.options(
+                    num_cpus=tensor_parallel_size,
+                    num_gpus=tensor_parallel_size,
+                    scheduling_strategy=scheduling_strategy,
+                ).remote(
+                    prompt_offset=offset,
+                    prompts=chunk,
+                    model=model,
+                    tensor_parallel_size=tensor_parallel_size,
+                    gpu_memory_utilization=gpu_memory_utilization,
+                    sampling_params_kwargs=sampling_params_kwargs,
+                )
+            )
+
+        completions_by_prompt: list[list[str] | None] = [None] * len(prompts)
+        for offset, chunk_completions in ray.get(futures):
+            for idx, completion_list in enumerate(chunk_completions):
+                completions_by_prompt[offset + idx] = completion_list
+
+        if any(completions is None for completions in completions_by_prompt):
+            raise RuntimeError("Some prompt completions were not returned by the multi-engine generation path.")
+
+        return completions_by_prompt
+    finally:
+        ray.util.remove_placement_group(pg)
+        if started_ray:
+            ray.shutdown()
+
+
+def _num_tests_in_label(label: Any) -> int:
+    if isinstance(label, list):
+        return len(label)
+    return 0
+
+
+def _align_per_test_pass(vec: list[float] | None, n_tests: int) -> list[float]:
+    if n_tests <= 0:
+        return []
+    if not vec:
+        return [0.0] * n_tests
+    out = [float(x) for x in vec]
+    if len(out) < n_tests:
+        out.extend([0.0] * (n_tests - len(out)))
+    elif len(out) > n_tests:
+        out = out[:n_tests]
+    return out
+
+
+def per_test_solve_rates_to_difficulty_quartiles(rates: list[float]) -> list[int]:
+    """Map per-test solve rates (length N) to quartiles 1–4 within this prompt (low rate → 1, high → 4)."""
+    n = len(rates)
+    if n == 0:
+        return []
+    arr = np.asarray(rates, dtype=float)
+    order = np.argsort(arr, kind="stable")
+    difficulty = np.empty(n, dtype=int)
+    chunks = np.array_split(order, 4)
+    for quartile, chunk in enumerate(chunks):
+        if chunk.size == 0:
+            continue
+        difficulty[chunk] = quartile + 1
+    return difficulty.tolist()
+
+
+def _score_completions(
+    verifier: ManufactoriaVerifier,
+    label: Any,
+    completions: list[str],
+    threshold: float,
+    max_workers: int,
+    with_difficulty: bool,
+) -> tuple[int, list[int]]:
+    n_tests = _num_tests_in_label(label)
+
+    def score_one(text: str) -> tuple[int, list[float] | None]:
+        result = verifier([], text, label)
+        passed = int(float(result.score) >= threshold - 1e-8)
+        if not with_difficulty or n_tests <= 0:
+            return passed, None
+        meta = getattr(result, "metadata", {}) or {}
+        pt = meta.get("manufactoria_per_test_passed")
+        vec = _align_per_test_pass(pt, n_tests)
+        return passed, vec
+
+    workers = min(max_workers, max(1, len(completions)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(score_one, completions))
+
+    pass_count = sum(r[0] for r in results)
+    if not with_difficulty or n_tests <= 0:
+        return pass_count, []
+
+    matrix = np.array([r[1] for r in results], dtype=float)
+    rates = matrix.mean(axis=0).tolist()
+    difficulty = per_test_solve_rates_to_difficulty_quartiles(rates)
+    return pass_count, difficulty
+
+
+def main() -> None:
+    args = parse_args()
+    if args.num_engines < 1:
+        raise ValueError(f"--num-engines must be >= 1, got {args.num_engines}")
+
+    logger.info("Loading dataset %s[%s]", args.dataset, args.split)
+    ds = load_dataset(args.dataset, split=args.split, num_proc=max_num_processes())
+    if args.limit is not None:
+        ds = ds.select(range(min(args.limit, len(ds))))
+
+    prompts = build_prompts(ds, args.model, args.chat_template)
+
+    logger.info(
+        "Initializing vLLM model=%s engines=%d tp=%d rows=%d samples=%d",
+        args.model,
+        args.num_engines,
+        args.tensor_parallel_size,
+        len(ds),
+        args.num_samples,
+    )
+    sampling_params = SamplingParams(
+        n=args.num_samples, temperature=args.temperature, top_p=args.top_p, max_tokens=args.max_tokens, seed=args.seed
+    )
+
+    logger.info("Generating completions")
+    if args.num_engines == 1:
+        completions_by_prompt = _generate_completions_single_engine(
+            prompts=prompts,
+            model=args.model,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            sampling_params=sampling_params,
+        )
+    else:
+        completions_by_prompt = _generate_completions_multi_engine(
+            prompts=prompts,
+            model=args.model,
+            num_engines=args.num_engines,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            sampling_params=sampling_params,
+        )
+
+    verifier = ManufactoriaVerifier(
+        ManufactoriaVerifierConfig(
+            manufactoria_api_url=args.manufactoria_api_url,
+            manufactoria_max_execution_time=args.manufactoria_max_execution_time,
+            manufactoria_scoring_mode=args.manufactoria_scoring_mode,
+        )
+    )
+
+    rows: list[dict] = []
+    logger.info("Scoring completions via Manufactoria API (%s)", args.manufactoria_api_url)
+    for sample, completions in zip(ds, completions_by_prompt):
+        if "ground_truth" not in sample:
+            raise KeyError('Expected column "ground_truth" in dataset rows')
+        label = normalize_manufactoria_ground_truth(sample["ground_truth"])
+        with_difficulty = not args.no_difficulty
+        pass_count, difficulty = _score_completions(
+            verifier,
+            label,
+            completions,
+            args.pass_score_threshold,
+            args.score_threads,
+            with_difficulty=with_difficulty,
+        )
+
+        row = {
+            **sample,
+            "completions": completions,
+            "pass_count": pass_count,
+            "pass_rate": f"{pass_count}/{args.num_samples}",
+            "num_samples": args.num_samples,
+            "generator_model": args.model,
+            "generator_chat_template": args.chat_template,
+            "generator_temperature": args.temperature,
+            "generator_top_p": args.top_p,
+            "generator_max_tokens": args.max_tokens,
+            "generator_manufactoria_scoring_mode": args.manufactoria_scoring_mode,
+            "generator_pass_score_threshold": args.pass_score_threshold,
+        }
+        row[DIFFICULTY_KEY] = difficulty
+        rows.append(row)
+
+    out_ds = Dataset.from_list(rows)
+    logger.info("Built output dataset with %d rows and columns: %s", len(out_ds), out_ds.column_names)
+
+    safe_ds_name = args.dataset.replace("/", "__")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    local_output_dir = os.path.join(args.save_local_dir, f"{safe_ds_name}_{args.split}_{timestamp}")
+    os.makedirs(local_output_dir, exist_ok=True)
+    out_ds.save_to_disk(local_output_dir)
+    local_jsonl_path = os.path.join(local_output_dir, f"{args.split}.jsonl")
+    out_ds.to_json(local_jsonl_path)
+    logger.info("Saved local dataset artifacts to %s (jsonl: %s)", local_output_dir, local_jsonl_path)
+
+    if args.push_to_hub:
+        logger.info("Pushing dataset to hub: %s (split=%s)", args.push_to_hub, args.split)
+        try:
+            out_ds.push_to_hub(args.push_to_hub, split=args.split, private=args.private)
+            logger.info("Finished pushing dataset")
+        except Exception:
+            logger.exception(
+                "Push failed. Local artifacts are available at %s and can be reused for a later push.",
+                local_output_dir,
+            )
+            raise
+    else:
+        logger.info("Skipping push_to_hub (empty --push-to-hub)")
+
+
+if __name__ == "__main__":
+    main()
