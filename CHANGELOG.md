@@ -81,6 +81,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Fix GRPO data prep actor checkpoint resume so resumed runs restore data prep client state and continue from the next unseen learner step (https://github.com/allenai/open-instruct/pull/1523).
+- Fixed dataset cache hashing to include chat template source/content and tokenizer template metadata so dataset caches invalidate when chat templates change (https://github.com/allenai/open-instruct/pull/1497).
 - Fixed `dataset_mixer_list_splits` validation in `dataset_transformation` when multiple splits are provided, and prevent `combined_dataset` index-column conflicts by dropping an existing `index` column before adding a new one (https://github.com/allenai/open-instruct/pull/1494).
 - Fixed GSM8K reward verification for signed final answers by preserving explicit `+` and `-` signs when extracting the last numeric prediction, including boxed negative answers (https://github.com/allenai/open-instruct/pull/1530).
 - Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
