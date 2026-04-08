@@ -1548,6 +1548,7 @@ def harbor_tokenize_v1(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     harbor_task_path_key: str = "harbor_task_path",
+    harbor_task_dataset: str | None = None,
     system_prompt_override: str | None = None,
     **_kwargs: Any,
 ):
@@ -1559,15 +1560,23 @@ def harbor_tokenize_v1(
     ``harbor_task_path_key`` is set to) and optionally ``messages``.
 
     **OpenThoughts-TBLite format** — row has ``task_name`` and
-    ``instruction``.  ``task_name`` is used as the Harbor task path and
-    ``instruction`` is wrapped into a single-turn user message.
+    ``instruction``.  ``task_name`` is prefixed with ``harbor_task_dataset``
+    (e.g. ``openthoughts-tblite``) to form a Harbor package name like
+    ``openthoughts-tblite/application-debug``.  ``instruction`` is wrapped
+    into a single-turn user message.
 
     The prompt is tokenized for the pipeline interface (Harbor's agent reads
     ``instruction.md`` directly, but the pipeline still needs prompt tokens).
     Rewards come from Harbor's verifier at runtime, so ``ground_truths``
     are set to a sentinel value.
     """
-    task_path = row.get(harbor_task_path_key) or row.get("task_name")
+    task_path = row.get(harbor_task_path_key)
+    if task_path is None:
+        task_name = row.get("task_name")
+        if task_name is not None and harbor_task_dataset:
+            task_path = f"{harbor_task_dataset}/{task_name}"
+        else:
+            task_path = task_name
     if task_path is None:
         raise ValueError(f"Row missing '{harbor_task_path_key}' and 'task_name' — one is required for Harbor training")
 

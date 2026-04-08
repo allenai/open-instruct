@@ -65,8 +65,11 @@ def make_harbor_trial_config(
     if agent_kwargs:
         merged_kwargs.update(agent_kwargs)
 
+    is_local = task_path.startswith("/") or task_path.startswith(".")
+    task_cfg = TaskConfig(path=task_path) if is_local else TaskConfig(name=task_path)
+
     return TrialConfig(
-        task=TaskConfig(path=task_path),
+        task=task_cfg,
         agent=AgentConfig(name=agent_name, model_name=f"hosted_vllm/{actor.model_name}", kwargs=merged_kwargs),
         environment=EnvironmentConfig(type=env_type),
     )

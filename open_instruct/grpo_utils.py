@@ -95,6 +95,9 @@ class GRPOExperimentConfig(
     """JSON string of extra kwargs passed through to the Harbor agent config (e.g. '{"timeout": 300}')."""
     harbor_environment: str = "docker"
     """Harbor environment provider: 'docker' or 'daytona'."""
+    harbor_task_dataset: str | None = None
+    """Harbor dataset name for package-based tasks (e.g. 'openthoughts-tblite').
+    When set, task_name from the dataset is prefixed to form 'dataset/task_name'."""
 
     # Ray
     single_gpu_mode: bool = False

@@ -72,4 +72,5 @@ uv run python mason.py \
     --vllm_enable_prefix_caching \
     --use_harbor \
     --harbor_agent_name terminus-2 \
-    --harbor_environment docker
+    --harbor_environment docker \
+    --harbor_task_dataset openthoughts-tblite

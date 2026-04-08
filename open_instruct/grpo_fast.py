@@ -1053,12 +1053,15 @@ def setup_datasets(
             system_prompt_override = f.read().strip()
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
+    tokenizer_transform_args = {
+        "system_prompt_override": system_prompt_override,
+        "tool_definitions": tool_definitions,
+        "pass_tools_to_chat_template": pass_tools_to_chat_template,
+    }
+    if args.use_harbor and hasattr(args, "harbor_task_dataset") and args.harbor_task_dataset:
+        tokenizer_transform_args["harbor_task_dataset"] = args.harbor_task_dataset
     transform_fn_args = [
-        {
-            "system_prompt_override": system_prompt_override,
-            "tool_definitions": tool_definitions,
-            "pass_tools_to_chat_template": pass_tools_to_chat_template,
-        },
+        tokenizer_transform_args,
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
