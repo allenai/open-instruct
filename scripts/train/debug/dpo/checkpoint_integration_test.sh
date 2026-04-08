@@ -12,7 +12,6 @@ EXP_NAME_RUN2="dpo-cache-ckpt-integ-run2-${TIMESTAMP}"
 COMMON_ARGS=(
     --model_name_or_path "$MODEL_NAME"
     --tokenizer_name "$MODEL_NAME"
-    --use_flash_attn false
     --max_seq_length 1024
     --per_device_train_batch_size 1
     --gradient_accumulation_steps 4

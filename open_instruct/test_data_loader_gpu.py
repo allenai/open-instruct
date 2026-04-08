@@ -374,6 +374,45 @@ class TestHFDataLoader(unittest.TestCase):
                 f"Failed for padding_amount={padding_amount}",
             )
 
+    def test_global_num_tokens_prefixed_attention_mask(self):
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(10),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=2,
+            work_dir=tempfile.gettempdir(),
+        )
+        batch = {"chosen_attention_mask": torch.ones(1, 64), "rejected_attention_mask": torch.ones(1, 48)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
+
+    def test_global_num_tokens_cu_seq_lens(self):
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(10),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=2,
+            work_dir=tempfile.gettempdir(),
+        )
+        batch = {
+            "chosen_cu_seq_lens_k": torch.tensor([0, 30, 64]),
+            "rejected_cu_seq_lens_k": torch.tensor([0, 20, 48]),
+        }
+        self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
+
+    def test_global_num_tokens_fallback_input_ids(self):
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(10),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=2,
+            work_dir=tempfile.gettempdir(),
+        )
+        batch = {"chosen_input_ids": torch.zeros(1, 64), "rejected_input_ids": torch.zeros(1, 48)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
+
     @parameterized.parameterized.expand(
         [
             ("size_17_batch_4", 17, 4),

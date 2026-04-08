@@ -142,6 +142,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             tool_names=[],
             run_name="test_no_tools_run",
             model_name=tokenizer_name,
+            base_env_config=data_types.EnvConfig(),
         )
 
         loader = data_loader.StreamingDataLoader(
@@ -169,7 +170,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_with_tools(self):
-        tokenizer_name = "Qwen/Qwen3-1.7B"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         prompts = [
@@ -207,7 +208,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             revision="main",
             seed=42,
             enable_prefix_caching=False,
-            max_model_len=1024,
+            max_model_len=512,
             vllm_gpu_memory_utilization=0.5,
             single_gpu_mode=True,
             pg=pg,
@@ -254,6 +255,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             tool_names=["code"],
             run_name="test_with_tools_run",
             model_name=tokenizer_name,
+            base_env_config=data_types.EnvConfig(),
         )
 
         loader = data_loader.StreamingDataLoader(

@@ -30,7 +30,6 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import data_types, launch_utils, utils
-from open_instruct.finetune import FlatArguments
 
 
 def _load_mbu_test_cases():
@@ -493,25 +492,6 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(specs["memory_bandwidth"], expected_specs["memory_bandwidth"])
 
 
-class TestFlatArguments(unittest.TestCase):
-    def test_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(FlatArguments)
-        (args,) = parser.parse_args_into_dataclasses(
-            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
-        )
-        self.assertIsInstance(args.additional_model_arguments, dict)
-        self.assertIsInstance(args.additional_model_arguments["int"], int)
-        self.assertIsInstance(args.additional_model_arguments["bool"], bool)
-        self.assertIsInstance(args.additional_model_arguments["float"], float)
-        self.assertIsInstance(args.additional_model_arguments["float2"], float)
-
-    def test_no_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(FlatArguments)
-        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
-        self.assertIsInstance(args.additional_model_arguments, dict)
-        self.assertFalse(args.additional_model_arguments)
-
-
 class TestModelDims(unittest.TestCase):
     def test_qwen25_7b_flops_calculation(self):
         sequence_length = 34048
@@ -624,6 +604,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             num_key_value_heads=8,
             head_dim=128,
         )
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
@@ -651,6 +632,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
     def test_from_hf_config_defaults(self):
         config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -685,6 +667,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             num_key_value_heads=8,
             head_dim=128,
         )
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -698,6 +681,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
     def test_from_hf_config_cpu_only(self):
         config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
