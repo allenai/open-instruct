@@ -200,7 +200,7 @@ async def process_request_harbor(actor: LLMRayActor, sub_request_id: str, sampli
     )
 
     start_time = time.perf_counter()
-    trial = Trial(config=trial_config)
+    trial = await Trial.create(config=trial_config)
     trial_result = await trial.run()
     generation_time = time.perf_counter() - start_time
 
