@@ -3,9 +3,8 @@
 # Runs 1 training node (8 GPUs) + 1 inference node (8 GPUs)
 # using Harbor's Docker backend with Terminus-2 for agent rollouts.
 #
-# Dataset: open-thoughts/OpenThoughts-TBLite (100 terminal-agent tasks).
-# The harbor_tokenize_v1 transform maps task_name → harbor_task_path
-# and instruction → prompt.
+# The repo is cloned to /tmp/tblite/ on every node so Harbor can find
+# the task directories (instruction.md, task.toml, environment/, tests/).
 #
 # Prerequisites:
 #   - The Docker image must have `harbor` installed (`pip install harbor`).
@@ -34,10 +33,10 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list NousResearch/openthoughts-tblite 1.0 \
+       -- git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --dataset_mixer_list ai2-adapt-dev/openthoughts-tblite-harbor 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list NousResearch/openthoughts-tblite 8 \
+    --dataset_mixer_eval_list ai2-adapt-dev/openthoughts-tblite-harbor 8 \
     --dataset_mixer_eval_list_splits train \
     --dataset_transform_fn harbor_tokenize_v1 rlvr_max_length_filter_v1 \
     --max_prompt_token_length 2048 \
@@ -72,5 +71,4 @@ uv run python mason.py \
     --vllm_enable_prefix_caching \
     --use_harbor \
     --harbor_agent_name terminus-2 \
-    --harbor_environment docker \
-    --harbor_task_dataset openthoughts-tblite
+    --harbor_environment docker
