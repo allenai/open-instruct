@@ -305,9 +305,9 @@ def load_ref_policy(
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
         attn_implementation=olmo_core_attn_to_hf(model_config.attn_implementation),
-        use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
+    ref_policy.config.use_cache = False
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
