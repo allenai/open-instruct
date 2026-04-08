@@ -1727,14 +1727,17 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    template_source_hash = None
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        template_source_hash = hashlib.sha256(CHAT_TEMPLATES[tc.chat_template_name].encode()).hexdigest()
+    chat_template = getattr(tc.tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()
     combined_dict = {
         "cache_version": DATASET_CACHE_VERSION,
         "dataset_configs": dc_dicts,
         "tokenizer_config": tc_dict,
-        "chat_template_source_hash": template_source_hash,
+        "chat_template_hash": chat_template_hash,
     }
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
