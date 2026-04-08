@@ -1942,9 +1942,8 @@ def run_training(
                 client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
 
                 # Save DataPreparationActor state
-                client_state["data_prep_actor_state"] = ray.get(
-                    ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME).get_state.remote()
-                )
+                data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+                client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
 
                 ray_get_with_progress(
                     [
