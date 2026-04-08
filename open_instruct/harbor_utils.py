@@ -26,7 +26,7 @@ logger = logger_utils.setup_logger(__name__)
 try:
     from harbor.models.environment_type import EnvironmentType
     from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TaskConfig, TrialConfig
-    from harbor.trial import Trial
+    from harbor.trial.trial import Trial
 
     _harbor_available = True
 except ImportError:
