@@ -733,23 +733,6 @@ def add_prompt_to_generator(
     )
 
 
-@dataclass
-class ProcessedResult:
-    """All list fields have length generation_config.n (one per sample)."""
-
-    result: data_types.GenerationResult
-    queries: list[list[int]]
-    ground_truths: list[list[int]]
-    datasets: list[str]
-    raw_queries: list[str]
-    active_tools: list[list[str] | None]
-    decoded_responses: list[str]
-    reward_scores: list[float]
-    reward_metrics: dict[str, Any]
-    percent_solved: float
-
-
-
 def process_single_result(
     result: data_types.GenerationResult,
     generation_config: vllm.SamplingParams,
@@ -762,7 +745,7 @@ def process_single_result(
     replenish_prompts: bool,
     param_prompt_Q: ray_queue.Queue | None,
     base_env_config: EnvConfig,
-) -> ProcessedResult | None:
+) -> replay_buffer_lib.ProcessedResult | None:
     assert result.index is not None
     assert result.logprobs is not None
     assert result.reward_scores is not None
@@ -810,7 +793,7 @@ def process_single_result(
     if filter_zero_std_samples and np.std(result.reward_scores) == 0:
         return None
 
-    return ProcessedResult(
+    return replay_buffer_lib.ProcessedResult(
         result=result,
         queries=repeat_each([query], generation_config.n),
         ground_truths=repeat_each([ground_truth], generation_config.n),
@@ -825,7 +808,9 @@ def process_single_result(
 
 
 def combine_processed_results(
-    processed_results: list[ProcessedResult], generation_config: vllm.SamplingParams, actor_manager=None
+    processed_results: list[replay_buffer_lib.ProcessedResult],
+    generation_config: vllm.SamplingParams,
+    actor_manager=None,
 ) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics] | tuple[None, None, None, None]:
     if len(processed_results) == 0:
         return None, None, None, None
@@ -990,7 +975,7 @@ def accumulate_inference_batches(
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
-    processed_results: list[ProcessedResult] = []
+    processed_results: list[replay_buffer_lib.ProcessedResult] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
