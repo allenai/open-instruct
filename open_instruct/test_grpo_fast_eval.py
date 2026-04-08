@@ -1,8 +1,10 @@
+import math
 import unittest
 from queue import Empty
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import numpy as np
 from datasets import Dataset
 
 from open_instruct import data_loader as data_loader_lib
@@ -14,7 +16,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import create_generation_configs, get_vllm_max_model_len, maybe_evaluate
+from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
 
 
 class _QueueWithSize:
@@ -26,6 +28,12 @@ class _QueueWithSize:
 
 
 class TestCreateGenerationConfigs(unittest.TestCase):
+    def test_eval_response_length_defaults_to_response_length(self):
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(
+            max_prompt_token_length=128, response_length=128, pack_length=512
+        )
+        self.assertEqual(streaming_config.eval_response_length, streaming_config.response_length)
+
     def test_eval_uses_pass_at_k_and_eval_response_length(self):
         args = grpo_utils.GRPOExperimentConfig(eval_pass_at_k=8)
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(response_length=256, eval_response_length=512)
@@ -42,8 +50,10 @@ class TestCreateGenerationConfigs(unittest.TestCase):
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(
             max_prompt_token_length=1024, response_length=256, eval_response_length=512, pack_length=1536
         )
-
-        self.assertEqual(get_vllm_max_model_len(streaming_config), 1536)
+        max_model_len = streaming_config.max_prompt_token_length + max(
+            streaming_config.response_length, streaming_config.eval_response_length
+        )
+        self.assertEqual(max_model_len, 1536)
 
 
 class TestMaybeEvaluate(unittest.TestCase):
@@ -148,6 +158,44 @@ class TestMaybeEvaluate(unittest.TestCase):
         logged = mock_print_metrics.call_args.args[0]
         self.assertEqual(logged["eval/pass_at_1"], 0.5)
         self.assertEqual(logged["eval/pass_at_2"], 1.0)
+        self.assertEqual(logged["eval/pass_at_1_unbiased"], 0.5)
+        self.assertEqual(logged["eval/pass_at_2_unbiased"], 1.0)
+
+
+class TestComputePassAtKMetrics(unittest.TestCase):
+    def test_formula_matches_one_minus_comb_ratio_single_prompt(self):
+        n, c, k = 8, 3, 4
+        wrong = n - c
+        expected = 1.0 - math.comb(wrong, k) / math.comb(n, k)
+        correct = np.zeros((1, n), dtype=bool)
+        correct[0, :c] = True
+        m = grpo_utils.compute_pass_at_k_metrics(correct)
+        self.assertAlmostEqual(m["eval/pass_at_4_unbiased"], expected)
+        self.assertAlmostEqual(m["eval/pass_at_1"], c / n)
+
+    def test_two_prompts_n2_matches_maybe_evaluate_mock(self):
+        correct = np.array([[True, False], [False, True]])
+        m = grpo_utils.compute_pass_at_k_metrics(correct)
+        self.assertAlmostEqual(m["eval/pass_at_1"], 0.5)
+        self.assertAlmostEqual(m["eval/pass_at_2"], 1.0)
+        self.assertAlmostEqual(m["eval/pass_at_1_unbiased"], 0.5)
+        self.assertAlmostEqual(m["eval/pass_at_2_unbiased"], 1.0)
+
+    def test_all_correct(self):
+        m = grpo_utils.compute_pass_at_k_metrics(np.ones((1, 4), dtype=bool))
+        self.assertEqual(m["eval/pass_at_1"], 1.0)
+        self.assertEqual(m["eval/pass_at_2_unbiased"], 1.0)
+
+    def test_all_wrong_when_k_fits(self):
+        m = grpo_utils.compute_pass_at_k_metrics(np.zeros((1, 4), dtype=bool))
+        self.assertEqual(m["eval/pass_at_1"], 0.0)
+        self.assertEqual(m["eval/pass_at_2_unbiased"], 0.0)
+
+    def test_fewer_than_k_wrong_returns_one(self):
+        """Any k-subset must include a correct completion (here k=2, only one wrong)."""
+        m = grpo_utils.compute_pass_at_k_metrics(np.array([[True, True, True, False]]))
+        self.assertEqual(m["eval/pass_at_1"], 0.75)
+        self.assertEqual(m["eval/pass_at_2_unbiased"], 1.0)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
 import enum
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -18,6 +20,43 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+
+def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
+    """Average pass@1 plus unbiased pass@k (Chen et al.) for k in 1, 2, 4, ... <= n.
+
+    ``correct_per_prompt`` is shape ``(num_prompts, num_completions)``; truthy entries mark correct
+    completions.
+
+    ``eval/pass_at_1`` is the average over prompts of ``c/n``, where ``c`` is the number of correct
+    completions for that prompt and ``n`` is the number of samples (same as ``eval/pass_at_1_unbiased``).
+    When ``n > 1``, ``eval/pass_at_{n}`` is the fraction with at least one correct completion.
+    ``eval/pass_at_{k}_unbiased`` uses ``1 - C(n-c, k) / C(n, k)`` per prompt (averaged), when there
+    are at least k incorrect completions; otherwise 1.0.
+    """
+    arr = np.asarray(correct_per_prompt, dtype=bool)
+    if arr.ndim != 2 or arr.shape[1] < 1:
+        return {}
+    num_samples = int(arr.shape[1])
+    c_arr = arr.sum(axis=1).astype(np.int64).reshape(-1)
+    metrics: dict[str, float] = {
+        "eval/pass_at_1": float((c_arr.astype(np.float64) / num_samples).mean()),
+    }
+    if num_samples > 1:
+        metrics[f"eval/pass_at_{num_samples}"] = float((c_arr > 0).mean())
+    k_pow = 1
+    while k_pow <= num_samples:
+        estimates: list[float] = []
+        for c in c_arr:
+            c_int = int(c)
+            wrong = num_samples - c_int
+            if wrong >= k_pow:
+                estimates.append(1.0 - math.comb(wrong, k_pow) / math.comb(num_samples, k_pow))
+            else:
+                estimates.append(1.0)
+        metrics[f"eval/pass_at_{k_pow}_unbiased"] = float(np.mean(estimates))
+        k_pow *= 2
+    return metrics
 
 
 class GRPOLossType(enum.StrEnum):
