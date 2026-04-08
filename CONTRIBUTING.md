@@ -66,16 +66,16 @@ Track new large or binary test data files with `git lfs track "path/to/file"` an
 
 ## Changelog
 
-We use [towncrier](https://github.com/twisted/towncrier) to manage changelog entries. Instead of editing `CHANGELOG.md` directly, each PR adds a small fragment file to `changelog.d/`.
+We use [towncrier](https://github.com/twisted/towncrier) to manage changelog entries. Instead of editing `CHANGELOG.md` directly, each PR adds a small fragment file to `changelog/`.
 
 ### Adding a changelog entry
 
-Create a file in `changelog.d/` named `<PR-number>.<type>`, where `<type>` is one of: `added`, `changed`, `deprecated`, `fixed`.
+Create a file in `changelog/` named `<PR-number>.<type>.md`, where `<type>` is one of: `added`, `changed`, `deprecated`, `fixed`.
 
 For example, for PR #1600 that adds a new feature:
 
 ```
-changelog.d/1600.added
+changelog/1600.added.md
 ```
 
 With contents:
@@ -102,7 +102,7 @@ At release time, run `uv run towncrier build --yes` to compile all fragments int
 
 Four GitHub Actions workflows run on PRs:
 
-1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also verifies that a changelog fragment exists in `changelog.d/` for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body). See the Changelog section below for details.
+1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also verifies that a changelog fragment exists in `changelog/` for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body). See the Changelog section below for details.
 
 2. **Unit Tests** (`tests.yml` → `unit-tests` job): Runs `uv run pytest` on an Ubuntu runner. 20-minute timeout.
 

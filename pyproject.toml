@@ -230,9 +230,9 @@ include = [
 exclude = ["scripts/", "decontamination/", "human_eval/"]
 
 [tool.towncrier]
-directory = "changelog.d"
+directory = "changelog"
 filename = "CHANGELOG.md"
-template = "changelog.d/_template.md.jinja"
+template = "changelog/_template.md.jinja"
 title_format = ""
 underlines = ["", "", ""]
 issue_format = "[#{issue}](https://github.com/allenai/open-instruct/pull/{issue})"

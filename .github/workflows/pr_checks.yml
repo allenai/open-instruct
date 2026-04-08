@@ -40,10 +40,10 @@ jobs:
           exit 0
         fi
 
-        FRAGMENTS=$(git diff --name-only $(git merge-base origin/main HEAD) | grep '^changelog.d/' | grep -v '.gitkeep' || true)
+        FRAGMENTS=$(git diff --name-only $(git merge-base origin/main HEAD) | grep '^changelog/' | grep -v '.gitkeep' || true)
         if [ -z "$FRAGMENTS" ]; then
           echo "ERROR: Changes to open_instruct/ detected but no changelog fragment found."
-          echo "Please add a file to changelog.d/ named <PR#>.<type> (e.g. ${PR_NUMBER}.added)"
+          echo "Please add a file to changelog/ named <PR#>.<type>.md (e.g. ${PR_NUMBER}.added.md)"
           echo "Valid types: added, changed, deprecated, fixed"
           exit 1
         fi
