@@ -1,3 +1,4 @@
+#!/bin/bash
 
 # 7B full sweep
 for epoch in 2; do
@@ -73,7 +74,6 @@ python scripts/submit_finetune_job.py \
     --learning_rate $lr \
     --num_train_epochs $epoch \
     --hf_metadata_dataset allenai/olmo-instruct-evals
-done
 done
 done
 done
@@ -350,7 +350,6 @@ python scripts/submit_dpo_job.py \
     --seed $seed \
     --hf_metadata_dataset allenai/olmo-instruct-evals
 done
-done
 
 # 7b RM
 python mason.py \
@@ -404,7 +403,6 @@ python scripts/submit_dpo_job.py \
     --tokenizer_revision 1208_bsz64_13b_finetune_epoch_2_lr_5e-6_loss_type_sum__1__1733711678 \
     --learning_rate $lr \
     --hf_metadata_dataset allenai/olmo-instruct-evals
-done
 done
 
 # 13b RM

@@ -15,6 +15,7 @@
 # isort: off
 import contextlib
 import os
+import warnings
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -36,8 +37,8 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import InitProcessGroupKwargs, set_seed
-from huggingface_hub import HfApi
+from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKwargs, ParallelismConfig, set_seed
+from huggingface_hub import HfApi, snapshot_download
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -45,7 +46,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -98,9 +99,6 @@ class FlatArguments:
     )
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    use_flash_attn: bool = field(
-        default=True, metadata={"help": "Whether to use flash attention in the model training"}
     )
     model_revision: str | None = field(
         default=None,
@@ -298,8 +296,6 @@ class FlatArguments:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
 
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
@@ -319,6 +315,12 @@ class FlatArguments:
     )
     verbose: bool = field(
         default=False, metadata={"help": "Optionally print additional statistics at each reporting period"}
+    )
+    sequence_parallel_size: int = field(
+        default=1,
+        metadata={
+            "help": "Degree of Ulysses sequence parallelism. 1 means disabled. Requires DeepSpeed ZeRO-3 and flash attention."
+        },
     )
 
     def __post_init__(self):
@@ -350,6 +352,18 @@ class FlatArguments:
                 setattr(self, dict_feld, loaded_dict)
 
 
+def _create_scheduler(args: FlatArguments, optimizer, num_training_steps: int):
+    num_warmup_steps = int(num_training_steps * args.warmup_ratio)
+    if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
+        num_training_steps = (num_training_steps - args.final_lr_ratio * num_warmup_steps) / (1 - args.final_lr_ratio)
+    return get_scheduler(
+        name=args.lr_scheduler_type,
+        optimizer=optimizer,
+        num_training_steps=num_training_steps,
+        num_warmup_steps=num_warmup_steps,
+    )
+
+
 def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -363,8 +377,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
 
+    parallelism_config = None
+    if args.sequence_parallel_size > 1 and not args.cache_dataset_only:
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        if world_size % args.sequence_parallel_size != 0:
+            raise ValueError(
+                f"WORLD_SIZE ({world_size}) must be divisible by sequence_parallel_size ({args.sequence_parallel_size})"
+            )
+        dp_shard_size = world_size // args.sequence_parallel_size
+        parallelism_config = ParallelismConfig(
+            sp_backend="deepspeed",
+            sp_size=args.sequence_parallel_size,
+            dp_shard_size=dp_shard_size,
+            sp_handler=DeepSpeedSequenceParallelConfig(
+                sp_seq_length_is_variable=True, sp_attn_implementation=model_utils.detect_hf_attn_implementation()
+            ),
+        )
+
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
+        parallelism_config=parallelism_config,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
@@ -390,10 +422,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Set up runtime variables
 
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
@@ -411,8 +439,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
+        beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
@@ -426,6 +453,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
         if accelerator.is_main_process and is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
@@ -440,7 +468,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+        if accelerator.is_main_process:
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -491,6 +520,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.cache_dataset_only:
         return
 
+    # Pre-download model files on main process to avoid race conditions
+    # when multiple ranks on a shared filesystem all try to access the
+    # HF hub cache concurrently.
+    model_path = args.config_name or args.model_name_or_path
+    if model_path and accelerator.is_main_process:
+        snapshot_download(model_path, revision=args.model_revision)
+    accelerator.wait_for_everyone()
+
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(
@@ -530,10 +567,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=model_utils.detect_hf_attn_implementation(),
             )
         elif args.use_liger_kernel:
-            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
 
             logger.info("Attempting to apply liger-kernel. fused_linear_cross_entropy=True")
 
@@ -545,7 +582,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=model_utils.detect_hf_attn_implementation(),
                 # liger-kernel specific args
                 fused_linear_cross_entropy=True,
             )
@@ -558,7 +595,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=model_utils.detect_hf_attn_implementation(),
             )
     else:
         logger.info("Training new model from scratch")
@@ -582,6 +619,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+        elif args.gradient_checkpointing:
+            # Enable gradient checkpointing for LoRA (non-QLoRA) too
+            model.gradient_checkpointing_enable()
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -601,7 +641,24 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
     else:
-        collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
+        base_collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
+        if args.sequence_parallel_size > 1:
+            sp = args.sequence_parallel_size
+
+            def collate_fn(features):
+                batch = base_collate_fn(features)
+                batch.pop("index", None)
+                # Pad seq dim to be divisible by SP size so the adapter can split evenly.
+                seq_len = next(iter(batch.values())).shape[1]
+                remainder = seq_len % sp
+                if remainder != 0:
+                    pad_len = sp - remainder
+                    for k in batch:
+                        pad_value = -100 if k == "labels" else 0
+                        batch[k] = torch.nn.functional.pad(batch[k], (0, pad_len), value=pad_value)
+                return batch
+        else:
+            collate_fn = base_collate_fn
 
     accelerator.print("Creating dataloader")
     train_dataloader = DataLoader(
@@ -619,7 +676,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
     if args.use_qlora:
-        from bitsandbytes.optim import AdamW
+        from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
         optimizer = AdamW(
             optimizer_grouped_parameters,
@@ -652,20 +709,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     num_training_steps_for_scheduler = (
         args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )
+    lr_scheduler = _create_scheduler(args, optimizer, num_training_steps_for_scheduler)
 
-    num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
-    if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
-        # Correct num_training_steps_for_scheduler to respect final_lr_ratio for a linear scheduler
-        num_training_steps_for_scheduler = (
-            num_training_steps_for_scheduler - args.final_lr_ratio * num_warmup_steps
-        ) / (1 - args.final_lr_ratio)
-
-    lr_scheduler = get_scheduler(
-        name=args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_training_steps=num_training_steps_for_scheduler,
-        num_warmup_steps=num_warmup_steps,
-    )
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
@@ -675,8 +720,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
-    # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+
+    if args.sequence_parallel_size > 1:
+        # SP changes the dataloader length post-prepare. Recreate the scheduler using
+        # the post-prepare max_train_steps. Multiply by gradient_accumulation_steps because
+        # the scheduler is called every micro-batch (not just on optimizer steps).
+        lr_scheduler = _create_scheduler(args, optimizer, args.max_train_steps * args.gradient_accumulation_steps)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -684,7 +734,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         checkpointing_steps = int(checkpointing_steps)
 
     # Train!
-    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+    dp_world_size = accelerator.num_processes // args.sequence_parallel_size
+    total_batch_size = args.per_device_train_batch_size * dp_world_size * args.gradient_accumulation_steps
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
@@ -734,7 +785,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
-        train_dataloader.set_epoch(epoch)
+        # UlyssesSPDataLoaderAdapter wraps the real dataloader but doesn't proxy set_epoch
+        getattr(train_dataloader, "dl", train_dataloader).set_epoch(epoch)
         total_loss = 0
         total_aux_loss = 0
         if last_checkpoint_path and resume_batch_idx and not skipped_batches:
@@ -745,6 +797,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         for batch in active_dataloader:
+            batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
+            if args.sequence_parallel_size > 1 and "shift_labels" not in batch:
+                raise ValueError(
+                    "`shift_labels` not found in batch with sequence parallelism enabled. "
+                    "Check that UlyssesSPDataLoaderAdapter is wrapping the dataloader correctly."
+                )
+            if "shift_labels" in batch and "labels" not in batch:
+                batch["labels"] = batch["shift_labels"]
             pred_tokens_in_batch = (batch["labels"] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
@@ -767,11 +827,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
                     total_aux_loss += outputs.aux_loss.detach().float()
                 else:
-                    # Standard forward pass
                     outputs = model(**batch, use_cache=False)
 
                 loss = outputs.loss
                 del outputs
+
+                if args.sequence_parallel_size > 1:
+                    sp_group = accelerator.torch_device_mesh["sp"].get_group()
+                    losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
+                    labels_for_counting = batch["shift_labels"]
+                    good_tokens = (labels_for_counting != -100).view(-1).sum().float()
+                    good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                        good_tokens.unsqueeze(0), group=sp_group
+                    )
+                    total_loss_sp = sum(
+                        losses_per_rank[rank] * good_tokens_per_rank[rank]
+                        for rank in range(args.sequence_parallel_size)
+                        if good_tokens_per_rank[rank] > 0
+                    )
+                    total_good_tokens = sum(good_tokens_per_rank)
+                    loss = total_loss_sp / torch.clamp(total_good_tokens, min=1)
 
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
@@ -889,7 +964,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         current_step=completed_steps,
                         total_steps=args.max_train_steps,
                         start_time=start_time,
-                        wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+                        wandb_url=wandb_tracker.run.url
+                        if wandb_tracker is not None and accelerator.is_main_process
+                        else None,
                     )
                     total_loss = 0
                     total_aux_loss = 0
@@ -933,7 +1010,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         args.try_auto_save_to_beaker
         and accelerator.is_main_process
         and is_beaker_job()
-        and len(beaker_config.beaker_dataset_id_urls) > 0
+        and len(maybe_get_beaker_config().beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
@@ -943,9 +1020,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+            wandb_url=wandb_tracker.run.url if wandb_tracker is not None else None,
             oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
         )
     if args.push_to_hub and accelerator.is_main_process:
         push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
@@ -955,6 +1031,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
 
 if __name__ == "__main__":
+    warnings.warn(
+        "finetune.py is deprecated. Use the OLMo-core SFT implementation instead: "
+        "https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft",
+        DeprecationWarning,
+        stacklevel=1,
+    )
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))

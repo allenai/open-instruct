@@ -1,3 +1,4 @@
+#!/bin/bash
 
 # 1B full sweep
 for epoch in 2; do
@@ -91,7 +92,6 @@ python mason.py \
     --hf_metadata_dataset allenai/2025-1-olmoe-instruct-evals \
     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
     --tokenizer_name /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
-    --use_flash_attn \
     --use_slow_tokenizer False \
     --dataset_mixer_list \
         allenai/tulu-3-sft-olmo-2-mixture 1.0 \
@@ -136,7 +136,6 @@ python mason.py \
     --model_revision 0119_node8_finetune_olmoe_1b_epoch_2_lr_1.75e-5_loss_type_sum__7__1737296656 \
     --tokenizer_name allenai/open_instruct_dev \
     --tokenizer_revision 0119_node8_finetune_olmoe_1b_epoch_2_lr_1.75e-5_loss_type_sum__7__1737296656 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --dataset_mixer_list \
         allenai/tulu-3-pref-personas-instruction-following 1.0 \
@@ -197,7 +196,6 @@ python mason.py \
     --model_revision 0119_node8_finetune_olmoe_1b_epoch_2_lr_1.75e-5_loss_type_sum__7__1737296656 \
     --tokenizer_name allenai/open_instruct_dev \
     --tokenizer_revision 0119_node8_finetune_olmoe_1b_epoch_2_lr_1.75e-5_loss_type_sum__7__1737296656 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --dataset_mixer_list \
         allenai/tulu-3-pref-personas-instruction-following 1.0 \
@@ -252,7 +250,6 @@ python mason.py \
     --model_revision 0125_node8_sft_olmoe_1b_lr_2e-5_bsz_128__42__1737671611 \
     --tokenizer_name allenai/open_instruct_dev \
     --tokenizer_revision 0125_node8_sft_olmoe_1b_lr_2e-5_bsz_128__42__1737671611 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --dataset_mixer_list \
         allenai/tulu-3-pref-personas-instruction-following 1.0 \
@@ -343,7 +340,6 @@ python mason.py \
     --model_revision 0125_node8_sft_olmoe_1b_lr_2e-5_bsz_128__42__1737671611 \
     --tokenizer_name allenai/open_instruct_dev \
     --tokenizer_revision 0125_node8_sft_olmoe_1b_lr_2e-5_bsz_128__42__1737671611 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --dataset_mixer_list \
         allenai/tulu-3-pref-personas-instruction-following 1.0 \
@@ -605,7 +601,6 @@ done
 #     --deepspeed_multinode_launcher standard open_instruct/finetune1.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         allenai/tulu-3-sft-olmo-2-mixture 1.0 \
@@ -642,7 +637,6 @@ done
 #     open_instruct/finetune1.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         allenai/tulu-3-sft-olmo-2-mixture 1.0 \
@@ -669,7 +663,6 @@ done
 # python -i open_instruct/finetune1.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn False \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         allenai/tulu-3-sft-olmo-2-mixture 1.0 \
@@ -695,7 +688,6 @@ done
 # python -i open_instruct/dpo_tune_cache1.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn False \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
@@ -722,7 +714,6 @@ done
 # python -i open_instruct/finetune.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn False \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         allenai/tulu-3-sft-olmo-2-mixture 1.0 \
@@ -773,7 +764,6 @@ done
 # python -i open_instruct/finetune.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn False \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         ai2-adapt-dev/oasst1_converted  1.0 \
@@ -816,7 +806,6 @@ done
 # python -i open_instruct/finetune1.py \
 #     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/OLMoE/a0125/olmoe-8x1b-newhp-newds-dolmino-soup-seed-42-43-44/step23842-hf \
 #     --model_revision main \
-#     --use_flash_attn False \
 #     --use_slow_tokenizer False \
 #     --dataset_mixer_list \
 #         ai2-adapt-dev/oasst1_converted  1.0 \
@@ -859,7 +848,6 @@ done
 
 # python -i open_instruct/dpo_tune_cache1.py \
 #     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
-#     --use_flash_attn False \
 #     --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
 #     --max_seq_length 2048 \
 #     --preprocessing_num_workers 16 \

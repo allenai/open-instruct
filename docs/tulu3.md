@@ -32,7 +32,6 @@ accelerate launch \
     --model_name_or_path meta-llama/Llama-3.1-8B \
     --tokenizer_name meta-llama/Llama-3.1-8B \
     --use_slow_tokenizer \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --preprocessing_num_workers 128 \
     --per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
@@ -96,7 +95,6 @@ accelerate launch \
     --model_name_or_path meta-llama/Llama-3.1-70B \
     --tokenizer_name meta-llama/Llama-3.1-70B \
     --use_slow_tokenizer \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --preprocessing_num_workers 128 \
     --per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
@@ -138,7 +136,6 @@ accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf open_instruct/dpo_tune.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
-    --use_flash_attn \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
@@ -148,7 +145,7 @@ accelerate launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --output_dir output/dpo_8b \
     --with_tracking \
     --report_to wandb \
@@ -194,7 +191,6 @@ accelerate launch \
     --deepspeed_multinode_launcher standard open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-70B-SFT \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-70B-SFT \
-    --use_flash_attn \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size $PER_DEVICE_TRAIN_BATCH_SIZE \
@@ -203,7 +199,7 @@ accelerate launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --output_dir output/dpo_70b \
     --with_tracking \
     --report_to wandb \
@@ -246,7 +242,6 @@ accelerate launch --mixed_precision bf16 \
     --deepspeed_multinode_launcher standard open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-405B-SFT \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-70B-SFT \
-    --use_flash_attn \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size 1 \
@@ -255,7 +250,7 @@ accelerate launch --mixed_precision bf16 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --output_dir output_405b \
     --with_tracking \
     --report_to wandb \
@@ -466,6 +461,8 @@ TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \
 
 
 ### (NEW) Llama-3.1-Tulu-3.1-8B Reproduction
+
+> **Note**: These commands use the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py) script, which has since been removed. The experiments were run at commit [`745bf58d321c`](https://github.com/allenai/open-instruct/tree/745bf58d321c). They are preserved here for historical reference.
 
 This is the exact command which produced [allenai/Llama-3.1-Tulu-3.1-8B](https://huggingface.co/allenai/Llama-3.1-Tulu-3.1-8B), which uses 2 nodes (16 GPUs)
 

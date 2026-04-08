@@ -29,3 +29,8 @@ Get experiment logs on failure:
 ```bash
 beaker experiment logs 01KCW39T5JBZTYV69BXHWJJ83P
 ```
+
+Stream logs in real-time for running experiments:
+```bash
+beaker experiment logs --follow 01KCW39T5JBZTYV69BXHWJJ83P
+```

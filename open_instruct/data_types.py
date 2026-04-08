@@ -1,5 +1,5 @@
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -20,6 +20,15 @@ class TokenStatistics:
 
 
 @dataclass
+class ToolCallStats:
+    """Statistics for a single tool call."""
+
+    tool_name: str
+    success: bool
+    runtime: float
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -29,6 +38,9 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
+    tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
+    rollout_states: list[dict] = field(default_factory=list)
+    """Per-sample rollout state dicts (rewards, step_count, done, info) — always present."""
 
 
 @dataclass
@@ -49,6 +61,24 @@ class GenerationResult:
 
 
 @dataclass
+class EnvConfigEntry:
+    """Entry for a single environment configuration."""
+
+    env_name: str
+    is_text_env: bool
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EnvConfig:
+    """Wrapper for environment configuration + related metadata."""
+
+    max_steps: int = 100
+    env_configs: dict[str, EnvConfigEntry] = field(default_factory=dict)
+    """Mapping from env_name to its configuration entry."""
+
+
+@dataclass
 class PromptRequest:
     """Container for prompt requests sent via Ray queues.
 
@@ -62,6 +92,9 @@ class PromptRequest:
     index: int
     prompt_id: str
     is_eval: bool = False
+    active_tools: list[str] | None = None
+    """List of tool names that are active for this sample. If None, all tools are active."""
+    env_config: EnvConfig = field(default_factory=EnvConfig)
 
 
 @dataclass
@@ -80,3 +113,12 @@ class CollatedBatchData:
 
     def __len__(self) -> int:
         return len(self.query_responses)
+
+    def to(self, device: torch.device, non_blocking: bool = True) -> "CollatedBatchData":
+        return dataclasses.replace(
+            self,
+            **{
+                f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
+                for f in dataclasses.fields(self)
+            },
+        )

@@ -1,3 +1,4 @@
+#!/bin/bash
 RAW_MODEL_PATH=$1
 model_size=$2
 og_name=$3

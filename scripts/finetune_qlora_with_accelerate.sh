@@ -1,3 +1,4 @@
+#!/bin/bash
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 MODEL_SIZE=70B
@@ -16,7 +17,6 @@ accelerate launch \
     --gradient_checkpointing \
     --use_qlora \
     --use_lora \
-    --use_flash_attn \
     --lora_rank 64 \
     --lora_alpha 16 \
     --lora_dropout 0.1 \

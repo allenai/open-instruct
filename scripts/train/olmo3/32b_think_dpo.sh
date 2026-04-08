@@ -1,3 +1,4 @@
+#!/bin/bash
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/
 NUM_NODES=16
@@ -5,7 +6,7 @@ for LR in 7e-8 8e-8 9e-8
 do
     EXP_NAME="olmo3-32b-DPO-8k-0.6b-200k-lucafilt-s42-${LR}"
     uv run python mason.py \
-        --cluster ai2/augusta \
+        --cluster ai2/jupiter \
         --gs_model_name olmo3-merge-32b-1e-4-5e-5 \
         --workspace ai2/olmo-instruct \
         --priority urgent \
@@ -32,24 +33,18 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
+        --mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
         --max_train_samples 200000 \
-        --dataset_skip_cache \
+        --skip_cache \
         --zero_stage 3 \
         --max_seq_length 8192 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 1 \
         --learning_rate $LR \
         --lr_scheduler_type linear \
-        --warmup_ratio 0.1 \
         --weight_decay 0.0 \
-        --num_train_epochs 1 \
         --logging_steps 1 \
-        --dpo_loss_type dpo_norm \
-        --dpo_beta 5 \
-        --use_flash_attn \
         --gradient_checkpointing \
-        --report_to wandb \
         --chat_template_name olmo123 \
         --with_tracking \
         --log_grad_norm True \

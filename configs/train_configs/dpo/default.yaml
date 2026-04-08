@@ -1,6 +1,5 @@
 model_name_or_path: allenai/tulu-2-7b
 model_revision: main
-use_flash_attn: true
 gradient_checkpointing: true
 tokenizer_name: allenai/tulu-2-7b
 use_slow_tokenizer: true
@@ -13,11 +12,9 @@ learning_rate: 5.0e-7
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.0
-num_train_epochs: 3
+num_epochs: 3
 output_dir: output/dpo_7b_recreate2/
 with_tracking: true
-report_to:
-  - wandb
 logging_steps: 1
 checkpointing_steps: 1000
 keep_last_n_checkpoints: 3

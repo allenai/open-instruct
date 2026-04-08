@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from open_instruct.dpo_tune_cache import FlatArguments
 
 # script for mixing and saving data
+from open_instruct.dpo_utils import DPOExperimentConfig
 from open_instruct.utils import ArgumentParserPlus, get_datasets
 
 # Run as module for local imports, e.g.:
@@ -25,9 +25,9 @@ from open_instruct.utils import ArgumentParserPlus, get_datasets
 
 
 def main() -> None:
-    parser = ArgumentParserPlus((FlatArguments,))  # type: ignore[arg-type]
+    parser = ArgumentParserPlus((DPOExperimentConfig,))  # type: ignore[arg-type]
     (args,) = parser.parse()  # type: ignore[misc]
-    assert isinstance(args, FlatArguments)
+    assert isinstance(args, DPOExperimentConfig)
 
     # assert that data_mixer is not none in config
     assert args.dataset_mixer is not None, "data_mixer is required in config"

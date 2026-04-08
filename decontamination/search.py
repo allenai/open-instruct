@@ -6,7 +6,7 @@ from collections import defaultdict
 import spacy
 import torch
 import yaml
-from datasets import Dataset, load_dataset
+from datasets import Dataset, get_dataset_config_names, load_dataset
 from elasticsearch import Elasticsearch
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -290,9 +290,6 @@ def main():
             except ValueError:
                 query_dataset = []
                 if args.subset is None:
-                    # Dataset has multiple subsets. We want to concatenate all of them.
-                    from datasets import get_dataset_config_names
-
                     for subset in get_dataset_config_names(dataset):
                         query_dataset.extend(
                             list(

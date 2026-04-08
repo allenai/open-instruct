@@ -1,3 +1,4 @@
+#!/bin/bash
 python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
@@ -28,7 +29,6 @@ python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \

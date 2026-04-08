@@ -1,3 +1,4 @@
+#!/bin/bash
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 NUM_GPUS=8
@@ -14,7 +15,6 @@ accelerate launch \
     --model_name_or_path allenai/tulu-2-7b \
     --use_qlora \
     --use_lora \
-    --use_flash_attn \
     --lora_rank 64 \
     --lora_alpha 16 \
     --lora_dropout 0.1 \
@@ -29,10 +29,9 @@ accelerate launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
-    --num_train_epochs 5 \
+    --num_epochs 5 \
     --output_dir output/tulu_v2_dpo_qlora/ \
     --with_tracking \
-    --report_to tensorboard \
     --logging_steps 1 &&
 
 python open_instruct/merge_lora.py \

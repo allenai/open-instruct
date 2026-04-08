@@ -1,7 +1,6 @@
 model_name_or_path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-70B-v3.9-nc-2e-6-2_ep-fixed/
 tokenizer_name: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-70B-v3.9-nc-2e-6-2_ep-fixed/
 model_revision: main
-use_flash_attn: true
 gradient_checkpointing: true
 dataset_mixer:
   ai2-adapt-dev/sft_v3.9_used_off_policy: 1.0
@@ -20,13 +19,11 @@ learning_rate: 2.0e-7
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.0
-num_train_epochs: 1
+num_epochs: 1
 output_dir: /output
 with_tracking: true
-report_to:
-  - wandb
 logging_steps: 1
 use_lora: false
-dpo_loss_type: dpo_norm
-dpo_beta: 5
+loss_type: dpo_norm
+beta: 5
 checkpointing_steps: epoch

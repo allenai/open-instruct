@@ -13,7 +13,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -33,8 +33,6 @@ python mason.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 4 \
-    --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 2.0 \
     --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
@@ -69,7 +67,6 @@ python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
-    --clip_higher 0.272 \
     --keep_last_n_checkpoints -1 \
     --mask_truncated_completions True \
     --oe_eval_max_length 16384 \
@@ -78,4 +75,4 @@ python mason.py \
     --oe_eval_tasks $EVALS \
     --eval_on_step_0 True \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
-    --output_dir /output/olmo3-7b-rlzero-code/checkpoints $@
+    --output_dir /output/olmo3-7b-rlzero-code/checkpoints "$@"

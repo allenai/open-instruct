@@ -1,3 +1,4 @@
+#!/bin/bash
 # you need 8 GPUs for full finetuning
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
@@ -15,7 +16,6 @@ accelerate launch \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/tulu-2-7b \
-    --use_flash_attn \
     --gradient_checkpointing \
     --tokenizer_name allenai/tulu-2-7b \
     --use_slow_tokenizer \
@@ -28,8 +28,7 @@ accelerate launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0. \
-    --num_train_epochs 3 \
+    --num_epochs 3 \
     --output_dir ~/dpo_7b_recreate2 \
     --with_tracking \
-    --report_to tensorboard \
     --logging_steps 1

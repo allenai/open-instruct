@@ -71,14 +71,21 @@ nav:
   - Get Started:
     - get_started/installation.md
     - get_started/ai2_internal_setup.md
+  - Models:
+    - olmo3.md
+    - olmo2.md
+    - tulu3.md
+    - tulu1_tulu2.md
   - Training:
     - algorithms/dataset_transformation.md
-    - algorithms/trained_model.md
+    - algorithms/trained_model_location.md
     - algorithms/finetune.md
     - algorithms/dpo.md
     - algorithms/grpo.md
-    - algorithms/ppo.md
+    - algorithms/olmo_core_sharding.md
+    - algorithms/tool_training.md
     - algorithms/reward_modeling.md
+    - slack-alerts.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md
 

@@ -15,7 +15,7 @@ from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import rl_utils, utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -32,7 +32,7 @@ class TestGrpoFastBase(unittest.TestCase):
         tracked_resources = {}
         try:
             # Try to access resource tracker directly
-            from multiprocessing.resource_tracker import _resource_tracker
+            from multiprocessing.resource_tracker import _resource_tracker  # noqa: PLC0415
 
             if hasattr(_resource_tracker, "_cache"):
                 for name, rtype in list(_resource_tracker._cache.items()):
@@ -42,7 +42,7 @@ class TestGrpoFastBase(unittest.TestCase):
         except Exception:
             # Alternative approach: check via resource_tracker module
             try:
-                import multiprocessing.resource_tracker as rt
+                import multiprocessing.resource_tracker as rt  # noqa: PLC0415
 
                 if hasattr(rt, "getfd"):
                     # This is a hack to get the cache info
@@ -232,11 +232,17 @@ class TestGrpoFastBase(unittest.TestCase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir="/tmp",
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False)
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         return prompt_Q, inference_results_Q, mock_dataset
 
@@ -481,6 +487,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
             dataset=mock_dataset,
+            base_env_config=EnvConfig(),
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -525,6 +532,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
                     dataset=mock_dataset,
+                    base_env_config=EnvConfig(),
                 )
                 completed.set()
             except Exception:
@@ -556,11 +564,17 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir="/tmp",
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False)
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
 
@@ -587,11 +601,17 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir="/tmp",
+            collator=data_loader_lib.single_example_collator,
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False)
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         request_count = 0
         while not prompt_Q.empty():
@@ -714,6 +734,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
             dataset=mock_dataset,
+            base_env_config=EnvConfig(),
             filter_zero_std_samples=True,
         )
 

@@ -77,6 +77,7 @@ import json
 import os
 import re  # Added for parsing retry-after
 import time
+import traceback
 
 import boto3  # Added for S3
 import requests
@@ -407,8 +408,6 @@ Output should be a JSON object with this structure:
         except Exception as e:
             print(f"Error parsing or processing result for item {i}: {e}")
             print(f"Original OpenAI response string: {result.get('openai_response', 'N/A')}")
-            import traceback
-
             print(f"Traceback:\n{traceback.format_exc()}")
 
     print(f"After filtering, {len(new_results)} results out of {len(results)} remain")

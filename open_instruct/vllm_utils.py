@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
@@ -33,6 +33,7 @@ from typing import Any
 import aiohttp
 import backoff
 import datasets
+import deepspeed
 import openai
 import ray
 import torch
@@ -42,6 +43,7 @@ import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
@@ -52,25 +54,82 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
-from vllm.utils import FlexibleArgumentParser
+from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
+from vllm.v1.kv_cache_interface import MambaSpec
 
-from open_instruct import logger_utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct import logger_utils, utils
+from open_instruct.data_types import (
+    EnvConfig,
+    EnvConfigEntry,
+    GenerationResult,
+    PromptRequest,
+    RequestInfo,
+    TokenStatistics,
+    ToolCallStats,
+)
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
+from open_instruct.environments.base import EnvCall, RolloutState, StepResult
+from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
-from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
+#
+# vLLM's MambaSpec.dtypes field is typed as tuple[torch.dtype] (fixed-length,
+# exactly 1 element). Hybrid models like Olmo-Hybrid-Instruct-DPO-7B have
+# Mamba layers with 2 state tensors of different dtypes, producing a 2-element
+# tuple. When the EngineCore subprocess serializes collective_rpc results back
+# to the client via msgspec, the fixed-length tuple type is enforced and the
+# deserialization fails:
+#   msgspec.ValidationError: Expected `array` of length 1, got 2 - at `$.dtypes`
+#
+# The client-side decoder (in serial_utils._convert_result) dynamically imports
+# MambaSpec and calls msgspec.convert(data, MambaSpec), which checks the live
+# type annotations. By widening dtypes to tuple[torch.dtype, ...] (variable-
+# length), msgspec accepts any number of dtypes during deserialization.
+#
+# Upstream fix: change dtypes annotation in vllm/v1/kv_cache_interface.py.
+# ---------------------------------------------------------------------------
+MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
+MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
+
 NUM_PREFETCH_WORKERS = 2
-NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
+VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
+    model_config = vllm_config.model_config
+    hidden_size = model_config.get_hidden_size()
+    intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+    sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
+    num_layers = model_config.get_num_layers(vllm_config.parallel_config)
+    num_sliding_window_layers = 0
+
+    if sliding_window is not None:
+        layer_types = getattr(model_config.hf_text_config, "layer_types", None)
+        num_sliding_window_layers = layer_types.count("sliding_attention") if layer_types is not None else num_layers
+
+    return utils.ModelDims(
+        num_layers=num_layers,
+        hidden_size=hidden_size,
+        intermediate_size=intermediate_size,
+        vocab_size=model_config.get_vocab_size(),
+        num_attn_heads=model_config.hf_text_config.num_attention_heads,
+        num_kv_heads=model_config.hf_text_config.num_key_value_heads,
+        head_dim=model_config.get_head_size(),
+        sliding_window=sliding_window,
+        num_sliding_window_layers=num_sliding_window_layers,
+        device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+    )
 
 
 @dataclasses.dataclass
@@ -78,6 +137,7 @@ class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
     max_tokens: int = 256
+    min_tokens: int = 0
     n: int = 1
     stop: list[str] | None = None
     seed: int | None = None
@@ -92,12 +152,8 @@ class CompletionOutput:
     finish_reason: str
     cumulative_logprob: float = 0.0
     mask: list[int] | None = None
-    num_calls: int = 0
-    timeout: bool = False
-    tool_error: str = ""
-    tool_output: str = ""
-    tool_runtime: float = 0.0
-    tool_called: bool = False
+    rollout_state: dict = dataclasses.field(default_factory=dict)
+    """Rollout state dict — rewards, step_count, done, tool_output, tool_error, etc."""
 
 
 @dataclasses.dataclass
@@ -106,6 +162,50 @@ class RequestOutput:
     prompt_token_ids: list[int]
     outputs: list[CompletionOutput]
     finished: bool = True
+
+
+def process_tool_tokens(
+    tool_outputs: list[str],
+    tool_parser: ToolParser,
+    tokenizer,
+    current_prompt_len: int,
+    current_response_len: int,
+    max_model_len: int,
+    max_tokens: int,
+    mask_tool_use: bool,
+    role: str = "tool",
+) -> tuple[list[int], list[float], list[int], int]:
+    """Format, tokenize, and truncate tool outputs.
+
+    Args:
+        tool_outputs: Raw outputs from tool calls.
+        tool_parser: Parser to format tool outputs.
+        tokenizer: Tokenizer to encode formatted output.
+        current_prompt_len: Current length of the prompt (for truncation).
+        current_response_len: Current length of the response (for truncation).
+        max_model_len: Maximum model sequence length.
+        max_tokens: Maximum response tokens.
+        mask_tool_use: Whether to mask tool tokens in loss computation.
+        role: Chat role for formatting (e.g. "tool", "user" for text envs).
+
+    Returns:
+        Tuple of (tokens, logprobs, masks, excess).
+    """
+    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
+    tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
+
+    tokens, excess = truncate_tool_output_tokens(
+        tokens,
+        current_prompt_len=current_prompt_len,
+        current_response_len=current_response_len,
+        max_model_len=max_model_len,
+        max_tokens=max_tokens,
+    )
+
+    logprobs = [0.0] * len(tokens)
+    masks = [0 if mask_tool_use else 1] * len(tokens)
+
+    return tokens, logprobs, masks, excess
 
 
 def assert_threaded_actor(instance):
@@ -198,45 +298,14 @@ def split_request_id(full_request_id: str) -> dict:
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
-def get_triggered_tool(
-    output_text: str,
-    tools: dict[str, Tool],
-    max_tool_calls: dict[str, int],
-    num_calls: int,
-    sampling_params: SamplingConfig,
-) -> tuple[Tool | None, str | None]:
-    """Check if any tool was triggered and return the tool and stop_str if found.
-
-    Args:
-        output_text: The generated text to check for tool triggers
-        tools: Dictionary mapping stop strings to Tool instances
-        max_tool_calls: Dictionary mapping stop strings to their call limits
-        num_calls: Current number of tool calls for this request
-        sampling_params: Sampling parameters containing stop strings
-
-    Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
-    """
-    if not sampling_params.stop:
-        return None, None
-
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and output_text.endswith(stop_str):
-            if num_calls < max_tool_calls.get(stop_str, 0):
-                return tools[stop_str], stop_str
-            else:
-                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None, None
-
-
-def process_completed_request(request_id, outs, current_time, tools, request_metadata):
+def process_completed_request(request_id, outs, current_time, use_tools, request_metadata):
     """Process a completed request with all its samples and return the result.
 
     Args:
         request_id: The base request ID
         outs: List of RequestOutput objects for all sub-requests
         current_time: Current timestamp for performance metrics
-        tools: Dictionary of available tools (may be None or empty)
+        use_tools: Boolean indicating if tools were used
         request_metadata: Dictionary containing metadata for all requests
 
     Returns:
@@ -253,7 +322,6 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
 
     response_ids = [list(out.token_ids) for out in final_output.outputs]
     finish_reasons = [out.finish_reason for out in final_output.outputs]
-    use_tools = bool(tools)
 
     logprobs = []
     for idx, out in enumerate(final_output.outputs):
@@ -262,18 +330,18 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         )
         logprobs.append(out.logprobs)
 
-    # Extract attributes based on whether tools are used
     if use_tools:
-        # Extract tool-specific attributes from outputs
+        rollout_states = [out.rollout_state for out in final_output.outputs]
         masks = [getattr(out, "mask", [1] * len(out.token_ids)) for out in final_output.outputs]
-        num_calls = [getattr(out, "num_calls", 0) for out in final_output.outputs]
-        timeouts = [getattr(out, "timeout", False) for out in final_output.outputs]
-        tool_errors = [getattr(out, "tool_error", "") for out in final_output.outputs]
-        tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
-        tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
-        tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
+        num_calls = [rs.get("step_count", 0) for rs in rollout_states]
+        timeouts = [rs.get("timeout", False) for rs in rollout_states]
+        tool_errors = [rs.get("tool_error", "") for rs in rollout_states]
+        tool_outputs = [rs.get("tool_output", "") for rs in rollout_states]
+        tool_runtimes = [rs.get("tool_runtime", 0.0) for rs in rollout_states]
+        tool_calleds = [rs.get("step_count", 0) > 0 for rs in rollout_states]
+        tool_call_stats = [[ToolCallStats(**s) for s in rs.get("tool_call_stats", [])] for rs in rollout_states]
     else:
-        # Use default values when tools are not used
+        rollout_states = [{} for _ in response_ids]
         masks = [[1] * len(resp) for resp in response_ids]
         num_calls = [0] * len(response_ids)
         timeouts = [False] * len(response_ids)
@@ -281,6 +349,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         tool_outputs = [""] * len(response_ids)
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
+        tool_call_stats = [[] for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -293,6 +362,8 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             tool_outputs=tool_outputs,
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
+            tool_call_stats=tool_call_stats,
+            rollout_states=rollout_states,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
@@ -364,10 +435,6 @@ def init_process_group(
         # different systems (e.g. RPC) in case the store is multi-tenant.
         store = PrefixStore(group_name, store)
 
-    # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
-    # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
-    # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -375,7 +442,7 @@ def init_process_group(
         backend,
         store,
         group_name=group_name,
-        **{pg_options_param_name: pg_options},
+        backend_options=pg_options,
         timeout=timeout,
         device_id=device_id,
     )
@@ -389,7 +456,9 @@ def init_process_group(
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
-        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=2.0)) as response,
+        session.get(
+            f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=VLLM_HEALTH_CHECK_TIMEOUT_S)
+        ) as response,
     ):
         if response.status != 200:
             raise RuntimeError(f"vLLM server health check failed with status {response.status}")
@@ -417,6 +486,8 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
+        "active_tools": request.active_tools,
+        "env_config": request.env_config,
     }
 
     for j in range(request.generation_config.n):
@@ -428,10 +499,16 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
-def _create_server_args(model_path: str) -> argparse.Namespace:
+FALLBACK_CHAT_TEMPLATE = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+
+
+def _create_server_args(model_path: str, has_chat_template: bool) -> argparse.Namespace:
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
-    args = parser.parse_args(["--model", model_path])
+    cli_args = ["--model", model_path]
+    if not has_chat_template:
+        cli_args.extend(["--chat-template", FALLBACK_CHAT_TEMPLATE])
+    args = parser.parse_args(cli_args)
     args.disable_fastapi_docs = True
     return args
 
@@ -444,7 +521,7 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
         actor.request_outputs[base_request_id] = {
             "outputs": [],
             "expected_n": expected_n,
-            "tools": sub_request["tools"],
+            "use_tools": sub_request["use_tools"],
         }
 
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
@@ -464,7 +541,7 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
         base_request_id,
         ordered_outs,
         current_time,
-        actor.request_outputs[base_request_id]["tools"],
+        actor.request_outputs[base_request_id]["use_tools"],
         actor.request_metadata,
     )
 
@@ -507,9 +584,13 @@ class LLMRayActor:
     def __init__(
         self,
         *args,
-        tools: dict[str, Tool] | None = None,
-        max_tool_calls: dict[str, int] | None = None,
+        tool_parser_type: str = "legacy",
+        tool_definitions: list[dict] | None = None,
+        tool_stop_sequences: list[str] | None = None,
+        max_steps: int = 5,
+        per_turn_max_tokens: int | None = None,
         mask_tool_use: bool = True,
+        pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -522,8 +603,17 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
+        self._tool_definitions = tool_definitions
+        self._tool_stop_sequences = tool_stop_sequences
         self._init_config(
-            tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+            max_steps,
+            per_turn_max_tokens,
+            mask_tool_use,
+            pools,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -534,20 +624,24 @@ class LLMRayActor:
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
+        # comes after executor as it requires tokenizer access.
+        self._init_tool_parser(tool_parser_type)
 
     def _init_config(
         self,
-        tools: dict[str, Tool] | None,
-        max_tool_calls: dict[str, int] | None,
+        max_steps: int,
+        per_turn_max_tokens: int | None,
         mask_tool_use: bool,
+        pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
         eval_dataset,
     ) -> None:
-        self.tools = tools or {}
-        self.max_tool_calls = max_tool_calls or {}
+        self.max_steps = max_steps
+        self.per_turn_max_tokens = per_turn_max_tokens
         self.mask_tool_use = mask_tool_use
+        self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -562,6 +656,7 @@ class LLMRayActor:
             {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
         )
         self.reward_fn = reward_config.build() if reward_config else None
+        self.tool_parser: ToolParser  # Set in _init_tool_parser
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -575,10 +670,18 @@ class LLMRayActor:
         self._should_stop_value = False
 
     def _init_executor(self) -> None:
-        max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
+        max_workers = NUM_PREFETCH_WORKERS
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
+
+    def _init_tool_parser(self, tool_parser_type: str) -> None:
+        self.tool_parser = create_tool_parser(
+            parser_type=tool_parser_type,
+            tokenizer=self.llm_engine.tokenizer,
+            tool_definitions=self._tool_definitions,
+            stop_sequences=self._tool_stop_sequences,
+        )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -591,7 +694,7 @@ class LLMRayActor:
             # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in ray.get_gpu_ids())
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
@@ -600,6 +703,10 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
+        # Force vLLM-native generation defaults at the engine level so
+        # model-provided HF generation_config (e.g., max_new_tokens=2048)
+        # cannot cap request max_tokens via OpenAI serving defaults.
+        kwargs["generation_config"] = "vllm"
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
@@ -616,9 +723,12 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            tokenizer = engine_client.tokenizer
+            inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
+            has_chat_template = getattr(inner_tokenizer, "chat_template", None) is not None
+            args = _create_server_args(engine_client.vllm_config.model_config.model, has_chat_template)
             app = build_app(args)
-            await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
+            await init_app_state(engine_client, app.state, args)
 
             # Create a socket and bind to port 0 to let the OS assign an available port.
             # We pass the socket to serve_http to avoid race conditions where another
@@ -669,8 +779,7 @@ class LLMRayActor:
         logger.info("vLLM OpenAI API server is ready")
 
     def get_model_dims(self):
-        """Get only the model dimensions without loading weights."""
-        return ModelDims.from_vllm_config(self.llm_engine.vllm_config)
+        return model_dims_from_vllm_config(self.llm_engine.vllm_config)
 
     def _should_stop(self) -> bool:
         if self.actor_manager is None:
@@ -738,18 +847,15 @@ class LLMRayActor:
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+    def update_weights_batch(self, param_metadata: list[tuple[str, str, tuple[int, ...]]]) -> None:
+        for name, dtype, _ in param_metadata:
+            self._prepare_weight_update(name, dtype)
+        return self._run_async(self.llm_engine.collective_rpc("update_weights_batch", args=(param_metadata,)))
 
-    def update_weight_cuda_ipc(
-        self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
-    ) -> None:
+    def update_weight_cuda_ipc(self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any]) -> None:
         self._prepare_weight_update(name, dtype)
         return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
+            self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles))
         )
 
     def reset_prefix_cache(self) -> None:
@@ -783,7 +889,7 @@ class LLMRayActor:
         kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
 
         kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
-            vllm_config, kv_cache_groups, kv_cache_specs[0], available_memory
+            vllm_config, kv_cache_groups, available_memory
         )
 
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
@@ -791,129 +897,314 @@ class LLMRayActor:
         return int(max_concurrency)
 
 
+def _register_tool_dispatch(
+    pool_name: str,
+    target_actor: Any,
+    target_tools: list[dict[str, Any]] | None,
+    target_response_role: str,
+    existing_actor_map: dict[str, Any],
+) -> tuple[dict[str, Any], set[str], dict[str, str]]:
+    """Map individual tool names exposed by a pool actor for dispatch.
+
+    Returns (actor_map entries, tool names, response_role entries) to merge
+    into the caller's tables.  Raises on name clashes with existing actors.
+    """
+    actor_map: dict[str, Any] = {}
+    tool_names: set[str] = set()
+    response_roles: dict[str, str] = {}
+    if not target_tools:
+        return actor_map, tool_names, response_roles
+    for tool_def in target_tools:
+        name = tool_def["function"]["name"]
+        existing = existing_actor_map.get(name)
+        if existing is not None and existing != target_actor:
+            raise ValueError(
+                f"Target '{pool_name}' exposes tool name '{name}' that clashes with "
+                "another active target. Rename one side to avoid ambiguous dispatch."
+            )
+        actor_map[name] = target_actor
+        tool_names.add(name)
+        response_roles[name] = target_response_role
+    return actor_map, tool_names, response_roles
+
+
+@dataclasses.dataclass
+class PoolSetup:
+    """Result of acquiring and resetting all configured tool/env pools for a request."""
+
+    acquired: dict[str, tuple[Any, Any]]
+    actor_map: dict[str, Any]
+    allowed_tools: set[str]
+    tool_response_roles: dict[str, str]
+    active_env_names: list[str]
+    text_env_names: list[str]
+
+
+async def _acquire_and_reset_pools(
+    pools: dict[str, Any], configured_tools: set[str], env_config: EnvConfig, allowed_tools: set[str]
+) -> PoolSetup:
+    """Acquire an actor from each pool and reset it with per-env kwargs.
+
+    Populates the actor dispatch map (pool names + individual tool names)
+    and discovers text environments.
+    """
+    acquired: dict[str, tuple[Any, Any]] = {}
+    actor_map: dict[str, Any] = {}
+    tool_response_roles: dict[str, str] = {}
+    active_env_names: list[str] = []
+    text_env_names: list[str] = []
+
+    for pool_name in sorted(configured_tools):
+        pool = pools.get(pool_name)
+        if pool is None:
+            raise ValueError(f"No pool for target '{pool_name}'. Available: {list(pools.keys())}")
+
+        target_actor = await pool.acquire.remote()
+        acquired[pool_name] = (pool, target_actor)
+        actor_map[pool_name] = target_actor
+        active_env_names.append(pool_name)
+
+        entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
+        _, target_tools = await target_actor.reset.remote(**entry.kwargs)
+        target_response_role = await target_actor.get_response_role.remote()
+        tool_response_roles[pool_name] = target_response_role
+
+        new_actors, new_tools, new_roles = _register_tool_dispatch(
+            pool_name, target_actor, target_tools, target_response_role, actor_map
+        )
+        actor_map.update(new_actors)
+        allowed_tools.update(new_tools)
+        tool_response_roles.update(new_roles)
+
+        if entry.is_text_env:
+            text_env_names.append(pool_name)
+            allowed_tools.add(pool_name)
+
+    if len(text_env_names) > 1:
+        raise ValueError(f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}")
+
+    unresolved = allowed_tools - set(actor_map.keys())
+    if unresolved:
+        raise ValueError(
+            f"Some allowed tools have no active dispatch target: {sorted(unresolved)}. "
+            f"Active targets: {sorted(actor_map.keys())}"
+        )
+
+    return PoolSetup(
+        acquired=acquired,
+        actor_map=actor_map,
+        allowed_tools=allowed_tools,
+        tool_response_roles=tool_response_roles,
+        active_env_names=active_env_names,
+        text_env_names=text_env_names,
+    )
+
+
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
-    """Process a single async request with tool support, awaiting tools inline."""
+    """Process a single async request with tool/environment support."""
     await _check_health(actor.server_port)
-    response_tokens = []
-    response_logprobs = []
-    response_masks = []
+
+    response_tokens: list[int] = []
+    response_logprobs: list[float] = []
+    response_masks: list[int] = []
     cumulative_logprob = 0.0
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
+    rollout = RolloutState()
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
-    original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    request_metadata = actor.request_metadata[base_request_id]
+    original_prompt = request_metadata["prompt_token_ids"]
+    active_tools = request_metadata["active_tools"]
+    env_config: EnvConfig = request_metadata.get("env_config", EnvConfig())
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
-    current_max_tokens = sampling_params.max_tokens
 
-    while True:
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        api_response = await actor.client.completions.create(
-            model=actor.model_name,
-            prompt=current_prompt,
-            extra_body={
-                "return_token_ids": True,
-                "cache_salt": base_request_id,
-                "include_stop_str_in_output": True,
-                "skip_special_tokens": False,
-            },
-            **dataclasses.asdict(current_sampling_params),
-        )
+    configured_tools = set(actor.pools.keys())
+    allowed_tools = configured_tools & set(active_tools) if active_tools is not None else set(configured_tools)
 
-        output = api_response.choices[0]
-        model_tokens = list(output.token_ids)
+    max_steps = env_config.max_steps
 
-        response_tokens.extend(model_tokens)
-        current_prompt.extend(model_tokens)
+    output = None
+    pool_setup = PoolSetup(
+        acquired={},
+        actor_map={},
+        allowed_tools=allowed_tools,
+        tool_response_roles={},
+        active_env_names=[],
+        text_env_names=[],
+    )
+    try:
+        unknown_targets = set(env_config.env_configs) - configured_tools
+        if unknown_targets:
+            raise ValueError(
+                f"env_config references envs/tools that are not configured: {sorted(unknown_targets)}. "
+                f"Available envs/tools: {sorted(configured_tools)}"
+            )
 
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for logprob in output.logprobs.token_logprobs:
-            response_logprobs.append(logprob)
-            cumulative_logprob += logprob
+        pool_setup = await _acquire_and_reset_pools(actor.pools, configured_tools, env_config, allowed_tools)
+        actor_map = pool_setup.actor_map
+        allowed_tools = pool_setup.allowed_tools
+        tool_response_roles = pool_setup.tool_response_roles
+        text_env_names = pool_setup.text_env_names
 
-        response_masks.extend([1] * len(model_tokens))
+        while rollout.step_count < max_steps:
+            if rollout.done:
+                break
 
-        if not actor.tools or not actor.max_tool_calls:
-            break
+            remaining_budget = sampling_params.max_tokens - len(response_masks)
+            remaining_room = max_model_len - len(current_prompt)
+            per_turn_budget = actor.per_turn_max_tokens if actor.per_turn_max_tokens is not None else remaining_budget
+            current_max_tokens = max(1, min(remaining_budget, remaining_room, per_turn_budget))
+            if remaining_budget <= 0 or remaining_room <= 0:
+                break
 
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
-            break
+            current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            params_dict = dataclasses.asdict(current_sampling_params)
+            min_tokens = params_dict.pop("min_tokens", 0)
+            api_response = await actor.client.completions.create(
+                model=actor.model_name,
+                prompt=current_prompt,
+                extra_body={
+                    "return_token_ids": True,
+                    "cache_salt": base_request_id,
+                    "include_stop_str_in_output": True,
+                    "skip_special_tokens": False,
+                    "min_tokens": min_tokens,
+                },
+                **params_dict,
+            )
 
-        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
+            output = api_response.choices[0]
+            model_tokens = list(output.token_ids)
+            response_tokens.extend(model_tokens)
+            current_prompt.extend(model_tokens)
 
-        loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+            assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+            for logprob in output.logprobs.token_logprobs:
+                response_logprobs.append(logprob)
+                cumulative_logprob += logprob
+            response_masks.extend([1] * len(model_tokens))
 
-        tool_called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        tool_error += "" if tool_result.error is None else tool_result.error
-        tool_output += tool_result.output
-        tool_runtime += tool_result.runtime
+            tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in allowed_tools]
 
-        tool_tokens = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-        )
+            # Text envs: inject a shadow tool call so dispatch handles it uniformly
+            for text_env_name in text_env_names:
+                tool_calls.append(EnvCall(id="", name=text_env_name, args={"text": output.text}))
 
-        tool_tokens, excess = truncate_tool_output_tokens(
-            tool_tokens,
-            current_prompt_len=len(current_prompt),
-            current_response_len=len(response_masks),
-            max_model_len=max_model_len,
-            max_tokens=sampling_params.max_tokens,
-        )
+            if not tool_calls:
+                break
 
-        response_tokens.extend(tool_tokens)
-        response_logprobs.extend([0.0] * len(tool_tokens))
-        response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
-        current_prompt.extend(tool_tokens)
+            observations: list[tuple[str, str]] = []
+            for tc in tool_calls:
+                if rollout.step_count >= max_steps:
+                    break
 
-        current_max_tokens = sampling_params.max_tokens - len(response_masks)
-        if excess > 0 or current_max_tokens <= 0:
-            break
+                target = actor_map.get(tc.name)
+                if target is None:
+                    raise ValueError(
+                        f"Model called tool '{tc.name}' but no active dispatch target exists. "
+                        f"Available targets: {sorted(actor_map.keys())}"
+                    )
 
-    if output.finish_reason == "stop" and len(response_tokens) == 0:
+                rollout.step_count += 1
+
+                try:
+                    step_result: StepResult = await target.step.remote(
+                        EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
+                    )
+                    observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
+                    rollout.tool_output += step_result.result
+                    rollout.rewards.append(step_result.reward)
+                    if step_result.done:
+                        rollout.done = True
+                    meta = step_result.metadata or {}
+                    rollout.timeout = rollout.timeout or meta.get("timeout", False)
+                    rollout.tool_error += meta.get("error", "")
+                    rollout.tool_runtime += meta.get("runtime", 0.0)
+                    rollout.tool_call_stats.append(
+                        ToolCallStats(
+                            tool_name=tc.name,
+                            success=not meta.get("error") and not meta.get("timeout", False),
+                            runtime=meta.get("runtime", 0.0),
+                        )
+                    )
+                except Exception as e:
+                    error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
+                    logger.warning(error_msg)
+                    observations.append((error_msg, "tool"))
+                    rollout.tool_error += error_msg
+                    rollout.rewards.append(0.0)
+                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
+
+                if rollout.done:
+                    break
+
+            if observations:
+                exceeded_context_budget = False
+                for observation, response_role in observations:
+                    tokens, logprobs, masks, excess = process_tool_tokens(
+                        [observation],
+                        actor.tool_parser,
+                        actor.llm_engine.tokenizer,
+                        len(current_prompt),
+                        len(response_masks),
+                        max_model_len,
+                        sampling_params.max_tokens,
+                        actor.mask_tool_use,
+                        role=response_role,
+                    )
+                    response_tokens.extend(tokens)
+                    response_logprobs.extend(logprobs)
+                    response_masks.extend(masks)
+                    current_prompt.extend(tokens)
+                    if excess > 0:
+                        exceeded_context_budget = True
+                        break
+                if exceeded_context_budget:
+                    break
+    finally:
+        env_metrics: dict[str, dict[str, float]] = {}
+        for env_name in pool_setup.active_env_names:
+            if env_name in pool_setup.acquired:
+                _, env_act = pool_setup.acquired[env_name]
+                env_metrics[env_name] = await env_act.get_metrics.remote()
+        if len(env_metrics) == 1:
+            env_name, metrics = next(iter(env_metrics.items()))
+            rollout.info["env_name"] = env_name
+            rollout.info.update(metrics)
+        elif env_metrics:
+            rollout.info["env_metrics"] = env_metrics
+        for pool, acq_actor in pool_setup.acquired.values():
+            pool.release.remote(acq_actor)
+
+    if len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
         response_tokens.append(eos_token_id)
         response_masks.append(1)
         response_logprobs.append(float("nan"))
+
+    finish_reason = output.finish_reason if output else "stop"
 
     complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         token_ids=response_tokens,
         cumulative_logprob=cumulative_logprob,
         logprobs=response_logprobs,
-        finish_reason=output.finish_reason,
+        finish_reason=finish_reason,
+        mask=response_masks,
+        rollout_state=dataclasses.asdict(rollout),
     )
-    if actor.tools:
-        complete_output.mask = response_masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
 
     actor.active_tasks.pop(sub_request_id, None)
-
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "expected_n": request_metadata["original_sampling_params"].n,
             "request_output": RequestOutput(
                 request_id=sub_request_id,
-                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
+                prompt_token_ids=request_metadata["prompt_token_ids"],
                 outputs=[complete_output],
             ),
-            "tools": actor.tools,
+            "use_tools": bool(actor.pools),
         }
     )
 
@@ -950,9 +1241,13 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
-    tools: dict[str, Tool] | None = None,
-    max_tool_calls: tuple[int, ...] = (5,),
+    tool_parser_type: str = "legacy",
+    tool_definitions: list[dict] | None = None,
+    tool_stop_sequences: list[str] | None = None,
+    max_steps: int = 5,
+    per_turn_max_tokens: int | None = None,
     mask_tool_use: bool = True,
+    pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -961,34 +1256,28 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    trust_remote_code: bool = False,
+    vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
-    if tools:
-        assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
-            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
-        )
-        # tool key is the end_str
-        if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
-        else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
-    else:
-        max_tool_calls_dict = {}
-
     vllm_engines = []
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
+    # Using "ray" executor causes placement group context loss in vLLM v1's
+    # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
     use_hybrid_engine = pg is not None
-    num_gpus = int(tensor_parallel_size == 1)
-    if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
-        # every worker will use 0.5 GPU, so that we can schedule
-        # 2 instances on the same GPUs.
-        num_gpus = 0.5
+    if tensor_parallel_size != 1 and use_hybrid_engine:
+        raise ValueError("tensor_parallel_size > 1 is not supported with single_gpu_mode")
+    # In single_gpu_mode, use 0.5 GPU so we can schedule 2 instances on the same GPUs.
+    # Otherwise, request tensor_parallel_size GPUs so Ray sets CUDA_VISIBLE_DEVICES
+    # correctly for the "mp" distributed executor backend.
+    num_gpus = 0.5 if use_hybrid_engine and single_gpu_mode else tensor_parallel_size
 
     logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
-        # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        # Create a placement group to ensure that all engines are packed.
+        # Each bundle reserves tensor_parallel_size GPUs for one engine.
+        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
@@ -996,8 +1285,10 @@ def create_vllm_engines(
     bundle_indices_list = get_bundle_indices_list(pg)
 
     for i in range(num_engines):
-        bundle_indices = None
-        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        if use_hybrid_engine:
+            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        else:
+            bundle_indices = [bundle_indices_list[i]]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -1012,7 +1303,11 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                    env_vars={
+                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+                    }
                 ),
             )
             .remote(
@@ -1036,18 +1331,160 @@ def create_vllm_engines(
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
-                tools=tools,
-                max_tool_calls=max_tool_calls_dict,
+                tool_parser_type=tool_parser_type,
+                tool_definitions=tool_definitions,
+                tool_stop_sequences=tool_stop_sequences,
+                max_steps=max_steps,
+                per_turn_max_tokens=per_turn_max_tokens,
                 mask_tool_use=mask_tool_use,
+                pools=pools,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                trust_remote_code=trust_remote_code,
+                attention_backend=vllm_attention_backend,
+                language_model_only=True,
             )
         )
 
-    ray_get_with_progress(
+    utils.ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
     )
 
     return vllm_engines
+
+
+def _send_to_vllm(
+    params: list[tuple[str, torch.nn.Parameter, torch.Size]],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+) -> list[ray.ObjectRef]:
+    """Send parameters to vLLM engines via a single RPC + sequential NCCL broadcasts."""
+    param_metadata = [(name, str(param.dtype), tuple(shape)) for name, param, shape in params]
+    refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
+    for _, param, _ in params:
+        torch.distributed.broadcast(param.data, 0, group=model_update_group)
+    return refs
+
+
+def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]]:
+    """Get all FSDP2-wrapped submodules (excluding the root if it's FSDP2)."""
+    fsdp_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, FSDPModule) and module is not model:
+            fsdp_modules.append((name, module))
+    return fsdp_modules
+
+
+def _broadcast_fsdp2_block_params(
+    block_name: str,
+    block: FSDPModule,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+    is_rank_0: bool,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters from one FSDP2 block to vLLM engines.
+
+    All ranks must call this (unshard/reshard are collective ops).
+    Only rank 0 actually sends to vLLM.
+    """
+    block.unshard()
+    try:
+        refs: list[ray.ObjectRef] = []
+        if is_rank_0:
+            batch_params = []
+            for name, param in block.named_parameters():
+                full_name = f"{block_name}.{name}" if block_name else name
+                mapped_name = name_mapper(full_name) if name_mapper else full_name
+                batch_params.append((mapped_name, param, param.shape))
+            refs = _send_to_vllm(batch_params, vllm_engines, model_update_group)
+        return refs
+    finally:
+        block.reshard()
+
+
+def _broadcast_params_to_vllm(
+    params: list[tuple[str, torch.nn.Parameter]],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
+    batch_params = []
+    for name, param in params:
+        mapped_name = name_mapper(name) if name_mapper else name
+        shape = getattr(param, "ds_shape", param.shape)
+        batch_params.append((mapped_name, param, shape))
+    return _send_to_vllm(batch_params, vllm_engines, model_update_group)
+
+
+def broadcast_weights_to_vllm(
+    model: torch.nn.Module,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup | None,
+    name_mapper: Callable[[str], str] | None = None,
+    gather_whole_model: bool = True,
+) -> list[ray.ObjectRef]:
+    """Broadcast model weights to vLLM engines.
+
+    Supports both DeepSpeed and FSDP sharded models. Must be called on ALL ranks
+    when using DeepSpeed stage 3 or FSDP, since gathering is a collective operation.
+    Only rank 0 actually sends weights to vLLM.
+
+    Args:
+        model: The unwrapped model (model.module from DeepSpeed/FSDP engine)
+        vllm_engines: List of vLLM engine actor handles
+        model_update_group: Process group for distributed broadcast (only needed on rank 0)
+        name_mapper: Optional function to map parameter names (e.g., OLMo-core to HF format)
+        gather_whole_model: If True, gather all params at once (more memory, faster).
+            If False, gather each param individually (less memory, slower).
+
+    Returns:
+        List of Ray ObjectRefs for the weight update calls (empty on non-rank-0)
+    """
+    is_rank_0 = torch.distributed.get_rank() == 0
+
+    if isinstance(model, FSDP) and not gather_whole_model:
+        raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+
+    if isinstance(model, FSDPModule):
+        fsdp_submodules = _get_fsdp2_submodules(model)
+        if not fsdp_submodules:
+            raise ValueError("FSDP2 model has no FSDP submodules.")
+        all_refs: list[ray.ObjectRef] = []
+        for block_name, block in fsdp_submodules:
+            refs = _broadcast_fsdp2_block_params(
+                block_name, block, vllm_engines, model_update_group, name_mapper, is_rank_0
+            )
+            all_refs.extend(refs)
+        return all_refs
+
+    params = list(model.named_parameters())
+    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
+
+    if gather_whole_model:
+        if isinstance(model, FSDP):
+            ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+        else:
+            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+        with ctx:
+            if is_rank_0:
+                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+            return []
+    else:
+        if is_rank_0:
+            param_metadata = []
+            for name, param in params:
+                mapped_name = name_mapper(name) if name_mapper else name
+                shape = tuple(getattr(param, "ds_shape", param.shape))
+                param_metadata.append((mapped_name, str(param.dtype), shape))
+            all_refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
+        else:
+            all_refs = []
+        for _name, param in params:
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
+                if is_rank_0:
+                    torch.distributed.broadcast(param.data, 0, group=model_update_group)
+        return all_refs
