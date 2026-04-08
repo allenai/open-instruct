@@ -1,8 +1,6 @@
 import os
 import subprocess
 
-from transformers.utils import hub as transformers_hub
-
 WEKA_CLUSTERS = [
     "ai2/jupiter",
     "ai2/saturn",
@@ -16,6 +14,8 @@ WEKA_CLUSTERS = [
 
 
 def custom_cached_file(model_name_or_path: str, filename: str, revision: str | None = None, repo_type: str = "model"):
+    from transformers.utils import hub as transformers_hub
+
     if os.path.isdir(model_name_or_path):
         resolved_file = os.path.join(model_name_or_path, filename)
         if os.path.isfile(resolved_file):
@@ -34,6 +34,8 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
+    from transformers.utils import hub as transformers_hub
+
     file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = transformers_hub.extract_commit_hash(file, None)
     return commit_hash
