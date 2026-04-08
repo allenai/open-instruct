@@ -45,6 +45,11 @@ TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 class TestStreamingDataLoaderGPU(TestGrpoFastBase):
     """Integration tests for StreamingDataLoader with real vLLM engines."""
 
+    def setUp(self):
+        super().setUp()
+        with contextlib.suppress(ValueError):
+            ray.kill(ray.get_actor(data_loader.DATA_PREP_ACTOR_NAME))
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -123,8 +128,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=32, n=2)
 
-        with contextlib.suppress(ValueError):
-            ray.kill(ray.get_actor(data_loader.DATA_PREP_ACTOR_NAME))
         _actor = data_loader.DataPreparationActor.options(name=data_loader.DATA_PREP_ACTOR_NAME).remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
@@ -237,8 +240,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=128, n=2, stop=["</code>"])
 
-        with contextlib.suppress(ValueError):
-            ray.kill(ray.get_actor(data_loader.DATA_PREP_ACTOR_NAME))
         _actor = data_loader.DataPreparationActor.options(name=data_loader.DATA_PREP_ACTOR_NAME).remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
