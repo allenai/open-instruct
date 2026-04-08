@@ -135,6 +135,14 @@ WEIGHT_SYNC_TIMEOUT_S = 120.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
+def _build_vlm_name_mapper(model_name: str):
+    """Sometimes we have different weight names btw vLLM and HF, so we build
+    a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in vLLM but not HF."""
+    if "qwen3.5" in model_name.lower():
+        return lambda name: f"language_model.{name}"
+    return None
+
+
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
@@ -235,23 +243,22 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
-        # set sequence parallel
-        # note this returns None if sequence_parallel_size == 1
-        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-            model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            sequence_parallel_size=args.sequence_parallel_size,
-            micro_batch_size=args.per_device_train_batch_size,
-            seq_length_is_variable=True,
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=self.policy,
+            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            sequence_parallel_size=args.sequence_parallel_size,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
+        )
+        self._model_name_or_path = model_config.model_name_or_path
+        self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -440,6 +447,7 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
+            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
 
     def update_ref_policy(self):
@@ -2228,8 +2236,22 @@ def main(
     checkpoint_state = None
     data_prep_actor_state = None
     if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
+        # Find the latest checkpoint tag from the 'latest' file written by DeepSpeed/calibrate_checkpoint_state_dir
+        latest_file = os.path.join(args.checkpoint_state_dir, "latest")
+        checkpoint_path = None
+        if os.path.exists(latest_file):
+            with open(latest_file) as f:
+                tag = f.read().strip()
+            # DeepSpeed saves rank-0 model states (including client_state) in this file
+            candidate = os.path.join(args.checkpoint_state_dir, tag, "mp_rank_00_model_states.pt")
+            if os.path.exists(candidate):
+                checkpoint_path = candidate
+        if checkpoint_path is None:
+            # Fallback: search for any model states file in the checkpoint directory
+            matches = sorted(pathlib.Path(args.checkpoint_state_dir).rglob("mp_rank_00_model_states.pt"))
+            if matches:
+                checkpoint_path = str(matches[-1])
+        if checkpoint_path is not None and os.path.exists(checkpoint_path):
             checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             logger.info(f"Loaded checkpoint state from {checkpoint_path}")
             data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")

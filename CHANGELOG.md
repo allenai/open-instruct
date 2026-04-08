@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Now, to disable `max_grad_norm` clipping, set None, not -1 (https://github.com/allenai/open-instruct/pull/1591).
 - Inline GRPO utility functions and rename `ExperimentConfig` to `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/1578).
 - Extract shared OLMo-core config classes and helpers into `olmo_core_utils.py`; refactor DPO to use shared configs (https://github.com/allenai/open-instruct/pull/1576).
 - Decouple `mix_data.py` from `finetune.py` by replacing `FlatArguments` import with a lightweight `MixDataArguments` dataclass (https://github.com/allenai/open-instruct/pull/1573).
@@ -12,11 +13,14 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
+- Fix incorrect hardcoded checkpoint state path for multi-GPU DeepSpeed resumption (https://github.com/allenai/open-instruct/pull/1589).
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
 - Add OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1579).
+- Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, liger-kernel bump to 0.7.0, pre-download model on rank 0 to avoid HF cache race conditions, update vllm to 0.19.0, and fix Ulysses SP for VLM models by passing the model object to `register_with_transformers` (https://github.com/allenai/open-instruct/pull/1568).
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
 - Add a vLLM-based teacher logit sampling pipeline for offline distillation, including `sample_logits_vllm.py`, distillkit sampling writer utilities, and a launch script for generating compressed parquet shards (https://github.com/allenai/open-instruct/pull/1534).
 - Add user-focused documentation for tool use training, RL environments, parser selection, and rollout configuration (https://github.com/allenai/open-instruct/pull/1546).
@@ -77,6 +81,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fixed `dataset_mixer_list_splits` validation in `dataset_transformation` when multiple splits are provided, and prevent `combined_dataset` index-column conflicts by dropping an existing `index` column before adding a new one (https://github.com/allenai/open-instruct/pull/1494).
 - Fixed GSM8K reward verification for signed final answers by preserving explicit `+` and `-` signs when extracting the last numeric prediction, including boxed negative answers (https://github.com/allenai/open-instruct/pull/1530).
 - Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
 - Include tokenizer configuration in per-transform dataset cache fingerprints so rerunning transformations with a different tokenizer does not silently reuse stale cached outputs (https://github.com/allenai/open-instruct/pull/1518).
