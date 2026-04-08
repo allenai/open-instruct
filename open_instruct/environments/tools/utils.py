@@ -12,7 +12,7 @@ from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
-from open_instruct.environments.base import RLEnvironment, StepResult
+from open_instruct.environments.base import RLEnvironment, StepResult, ToolDefinition
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -312,7 +312,7 @@ async def make_api_request(
     raise RuntimeError(f"Failed to make API request to {url}")
 
 
-def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
+def get_openai_tool_definitions(tool: "Tool") -> ToolDefinition:
     """Helper function to export tool definition in OpenAI function calling format.
     Note that we rely on parameters being correctly set in the tool class.
 
@@ -401,7 +401,7 @@ class Tool(RLEnvironment):
 
     # -- RLEnvironment defaults for stateless tools --
 
-    async def reset(self, **kwargs) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs) -> tuple[StepResult, list[ToolDefinition]]:
         return StepResult(result=""), [get_openai_tool_definitions(self)]
 
     def state(self) -> State:
@@ -429,5 +429,5 @@ class Tool(RLEnvironment):
         """Get stop strings for this tool. Override in subclasses that define custom stop sequences."""
         return []
 
-    def get_tool_definitions(self) -> list[dict[str, Any]]:
+    def get_tool_definitions(self) -> list[ToolDefinition]:
         return [get_openai_tool_definitions(self)]

@@ -72,7 +72,7 @@ from open_instruct.data_types import (
     ToolCallStats,
 )
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
-from open_instruct.environments.base import EnvCall, RolloutState, StepResult
+from open_instruct.environments.base import EnvCall, RolloutState, StepResult, ToolDefinition
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
 
@@ -585,7 +585,7 @@ class LLMRayActor:
         self,
         *args,
         tool_parser_type: str = "legacy",
-        tool_definitions: list[dict] | None = None,
+        tool_definitions: list[ToolDefinition] | None = None,
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
         per_turn_max_tokens: int | None = None,
@@ -1242,7 +1242,7 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
     tool_parser_type: str = "legacy",
-    tool_definitions: list[dict] | None = None,
+    tool_definitions: list[ToolDefinition] | None = None,
     tool_stop_sequences: list[str] | None = None,
     max_steps: int = 5,
     per_turn_max_tokens: int | None = None,

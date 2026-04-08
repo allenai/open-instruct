@@ -13,7 +13,7 @@ from openenv.core.env_server.types import State
 from open_instruct import logger_utils
 
 from .backends import SandboxBackend, create_backend
-from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
+from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult, ToolDefinition
 from .tools.utils import coerce_args
 
 logger = logger_utils.setup_logger(__name__)
@@ -33,7 +33,7 @@ pwd > /tmp/.sandbox_cwd
 exit $_exit_code
 """
 
-_EXECUTE_BASH_TOOL = {
+_EXECUTE_BASH_TOOL: ToolDefinition = {
     "type": "function",
     "function": {
         "name": "execute_bash",
@@ -51,7 +51,7 @@ _EXECUTE_BASH_TOOL = {
     },
 }
 
-_STR_REPLACE_EDITOR_TOOL = {
+_STR_REPLACE_EDITOR_TOOL: ToolDefinition = {
     "type": "function",
     "function": {
         "name": "str_replace_editor",
@@ -131,10 +131,10 @@ class GenericSandboxEnv(RLEnvironment):
         self._task_prompt: str | None = None
 
     @classmethod
-    def get_tool_definitions(cls) -> list[dict]:
+    def get_tool_definitions(cls) -> list[ToolDefinition]:
         return list(cls._tool_definitions)
 
-    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    async def reset(self, **kwargs: Any) -> tuple[StepResult, list[ToolDefinition]]:
         last_error = None
         for attempt in range(3):
             try:
@@ -151,7 +151,7 @@ class GenericSandboxEnv(RLEnvironment):
         else:
             raise RuntimeError("Reset failed without capturing an error.")
 
-    def _do_reset(self, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+    def _do_reset(self, **kwargs: Any) -> tuple[StepResult, list[ToolDefinition]]:
         task_prompt = kwargs.get("task_prompt")
         if self._backend is not None:
             self._backend.close()
