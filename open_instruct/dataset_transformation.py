@@ -1690,6 +1690,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+    chat_template = getattr(tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()[:16]
+    tokenizer_files_hash = json.dumps(tc.tokenizer_files_hash, sort_keys=True)
 
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
@@ -1721,7 +1728,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}".encode()
+            (
+                f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}"
+                f"{tc.chat_template_name}:{tc.get_tokenizer_fn}:{tokenizer_files_hash}:{chat_template_hash}"
+            ).encode()
         ).hexdigest()[:16]
 
         # perform the transformation
@@ -1781,7 +1791,18 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    chat_template = getattr(tc.tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()
+    combined_dict = {
+        "cache_version": DATASET_CACHE_VERSION,
+        "dataset_configs": dc_dicts,
+        "tokenizer_config": tc_dict,
+        "chat_template_hash": chat_template_hash,
+    }
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
@@ -1828,6 +1849,8 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        if "index" in combined_dataset.column_names:
+            combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
             return combined_dataset
@@ -1975,6 +1998,8 @@ class LocalDatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        if "index" in combined_dataset.column_names:
+            combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
         # Prepare return statistics
@@ -2036,11 +2061,11 @@ def load_dataset_configs(
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
-        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * (len(dataset_mixer_list) // 2)
     else:
-        if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+        if len(dataset_mixer_list_splits) != len(dataset_mixer_list) // 2:
             raise ValueError(
-                f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
+                f"dataset_mixer_list_splits length must be half of dataset_mixer_list (since mixer list alternates [dataset, amount]): {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)//2=}"
             )
     assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
     for i in range(0, len(dataset_mixer_list), 2):
@@ -2049,16 +2074,13 @@ def load_dataset_configs(
         # Parse amount: strings with "." become floats (proportions), without become ints (counts).
         # IMPORTANT: "1" = 1 sample, "1.0" = 100% of dataset. This is a common mistake!
         frac_or_num_samples = float(frac_or_num_samples) if "." in frac_or_num_samples else int(frac_or_num_samples)
-        # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
-        # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
-        # If different splits per dataset are needed, use dataset_mixer_list_splits[i // 2] instead.
         assert i % 2 == 0, f"Index {i} must be even"
-        assert i < len(dataset_mixer_list_splits), (
-            f"Index {i} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
+        assert (i // 2) < len(dataset_mixer_list_splits), (
+            f"Index {i // 2} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
         )
         dataset_config = DatasetConfig(
             dataset_name=dataset_name,
-            dataset_split=dataset_mixer_list_splits[i],
+            dataset_split=dataset_mixer_list_splits[i // 2],
             dataset_revision="main",
             transform_fn=dataset_transform_fn,
             transform_fn_args=transform_fn_args,

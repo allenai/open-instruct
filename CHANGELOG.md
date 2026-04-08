@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
+- Now, to disable `max_grad_norm` clipping, set None, not -1 (https://github.com/allenai/open-instruct/pull/1591).
 - Inline GRPO utility functions and rename `ExperimentConfig` to `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/1578).
 - Extract shared OLMo-core config classes and helpers into `olmo_core_utils.py`; refactor DPO to use shared configs (https://github.com/allenai/open-instruct/pull/1576).
 - Decouple `mix_data.py` from `finetune.py` by replacing `FlatArguments` import with a lightweight `MixDataArguments` dataclass (https://github.com/allenai/open-instruct/pull/1573).
@@ -13,6 +14,8 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix `Batch.__getitem__` handling of `active_tools` for int and list indexing (https://github.com/allenai/open-instruct/pull/1592).
+- Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
 - Fix incorrect hardcoded checkpoint state path for multi-GPU DeepSpeed resumption (https://github.com/allenai/open-instruct/pull/1589).
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
@@ -56,6 +59,7 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Add support for loading DeepSpeed universal checkpoints when resuming GRPO runs so checkpoints can be reused across different parallelisms and cluster sizes (https://github.com/allenai/open-instruct/pull/1517).
 - Extract shared GRPO metric helpers into `grpo_utils.py` and align `grpo.py` metrics with `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1552).
 - Add a configurable vLLM attention backend option and switch remaining `flash_attention_2` defaults/references to `flash_attention_3` (https://github.com/allenai/open-instruct/pull/1559).
 - Switch back to CUDA 12.8.1, pin `flash-attn-3` to a direct x86_64 wheel URL to avoid flat-index drift to aarch64-only releases (https://github.com/allenai/open-instruct/pull/1560).
@@ -79,6 +83,8 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fixed dataset cache hashing to include chat template source/content and tokenizer template metadata so dataset caches invalidate when chat templates change (https://github.com/allenai/open-instruct/pull/1497).
+- Fixed `dataset_mixer_list_splits` validation in `dataset_transformation` when multiple splits are provided, and prevent `combined_dataset` index-column conflicts by dropping an existing `index` column before adding a new one (https://github.com/allenai/open-instruct/pull/1494).
 - Fixed GSM8K reward verification for signed final answers by preserving explicit `+` and `-` signs when extracting the last numeric prediction, including boxed negative answers (https://github.com/allenai/open-instruct/pull/1530).
 - Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
 - Include tokenizer configuration in per-transform dataset cache fingerprints so rerunning transformations with a different tokenizer does not silently reuse stale cached outputs (https://github.com/allenai/open-instruct/pull/1518).
