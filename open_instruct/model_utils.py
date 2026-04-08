@@ -15,13 +15,15 @@
 
 
 import asyncio
+import functools
+import importlib.util
 import itertools
 import pathlib
 import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Union
 
 import deepspeed
 import pandas as pd
@@ -31,6 +33,7 @@ from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
+from olmo_core.nn.attention import AttentionBackendName
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
@@ -42,6 +45,53 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+_OLMO_CORE_TO_HF_ATTN: dict[AttentionBackendName, str] = {
+    AttentionBackendName.flash_4: "flash_attention_4",
+    AttentionBackendName.flash_3: "flash_attention_3",
+    AttentionBackendName.flash_2: "flash_attention_2",
+    AttentionBackendName.torch: "sdpa",
+    AttentionBackendName.te: "sdpa",
+}
+
+
+def olmo_core_attn_to_hf(backend: AttentionBackendName) -> str:
+    return _OLMO_CORE_TO_HF_ATTN[backend]
+
+
+@functools.lru_cache(maxsize=1)
+def detect_hf_attn_implementation() -> str:
+    return olmo_core_attn_to_hf(detect_attn_implementation())
+
+
+def _is_flash_attn_4_available() -> bool:
+    return importlib.util.find_spec("flash_attn.cute") is not None
+
+
+@functools.lru_cache(maxsize=1)
+def _gpu_compute_major() -> int | None:
+    """Return the CUDA compute capability major version (e.g. 9=Hopper, 10=Blackwell)."""
+    if not torch.cuda.is_available():
+        return None
+    major, _ = torch.cuda.get_device_capability()
+    return major
+
+
+@functools.lru_cache(maxsize=1)
+def detect_attn_implementation() -> AttentionBackendName:
+    if not torch.cuda.is_available():
+        result = AttentionBackendName.torch
+    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:
+        result = AttentionBackendName.flash_4
+    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() >= 9:
+        result = AttentionBackendName.flash_3
+    elif transformers.utils.is_flash_attn_2_available():
+        result = AttentionBackendName.flash_2
+    else:
+        result = AttentionBackendName.torch
+    logger.info(f"Auto-detected attention implementation: {result}")
+    return result
 
 
 @dataclass
@@ -81,9 +131,11 @@ class Batch:
     decoded_responses: list[str] | None
     indices: list[int] | None
     scores: list[float] | None
+    active_tools: list[list[str] | None] | None = None
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
+        active_tools = self.active_tools[key] if self.active_tools is not None else None
         if isinstance(key, slice):
             # Handle slice object: batch[start:end]
             return Batch(
@@ -94,6 +146,7 @@ class Batch:
                 decoded_responses=self.decoded_responses[key] if self.decoded_responses is not None else None,
                 indices=self.indices[key] if self.indices is not None else None,
                 scores=self.scores[key] if self.scores is not None else None,
+                active_tools=active_tools,
             )
         elif isinstance(key, int):
             # Handle single index: batch[5]
@@ -105,6 +158,7 @@ class Batch:
                 decoded_responses=[self.decoded_responses[key]] if self.decoded_responses is not None else None,
                 indices=[self.indices[key]] if self.indices is not None else None,
                 scores=[self.scores[key]] if self.scores is not None else None,
+                active_tools=active_tools,
             )
         else:
             # Handle list of indices: batch[[1,3,5]]
@@ -118,6 +172,7 @@ class Batch:
                 else None,
                 indices=[self.indices[i] for i in key] if self.indices is not None else None,
                 scores=[self.scores[i] for i in key] if self.scores is not None else None,
+                active_tools=active_tools,
             )
 
 
@@ -129,10 +184,9 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    attn_implementation: AttentionBackendName | None = None
     """Which attention implementation to use.
-    flash_attention_2: Requires flash-attn package (default)
-    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
+    If None, auto-detects the best available implementation."""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -165,6 +219,9 @@ class ModelConfig:
     """use nested quantization"""
 
     def __post_init__(self):
+        if self.attn_implementation is None:
+            self.attn_implementation = detect_attn_implementation()
+
         # `use_cache=True` is incompatible with gradient checkpointing.
         # https://github.com/huggingface/transformers/blob/d6751d91c8f58cdeb35af6adae182d7dc90aa883/src/transformers/models/llama/modeling_llama.py#L945
         if self.gradient_checkpointing:
@@ -248,10 +305,10 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation=model_config.attn_implementation,
-        use_cache=False,
+        attn_implementation=olmo_core_attn_to_hf(model_config.attn_implementation),
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
+    ref_policy.config.use_cache = False
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
@@ -603,7 +660,7 @@ def add_hooks(model: "DeepSpeedEngine") -> None:
         optimizer_offload = model.optimizer.parameter_offload
     elif model.optimizer is not None:
         optimizer_offload = model.optimizer
-    optimizer_offload._register_hooks_recursively(optimizer_offload.module)
+    optimizer_offload.setup_zero_stage3_hooks()
 
 
 @contextmanager
@@ -640,7 +697,7 @@ def prepare_deepspeed(model: torch.nn.Module, per_device_train_batch_size: int, 
         `torch.nn.Module`:
             The model initialized and configured with DeepSpeed for training.
     """
-    import deepspeed
+    import deepspeed  # noqa: PLC0415
 
     deepspeed_plugin = AcceleratorState().deepspeed_plugin
     config_kwargs = deepspeed_plugin.deepspeed_config

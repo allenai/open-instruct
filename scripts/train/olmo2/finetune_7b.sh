@@ -1,3 +1,4 @@
+#!/bin/bash
 python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
@@ -21,7 +22,6 @@ python mason.py \
     --use_slow_tokenizer False \
     --add_bos \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \

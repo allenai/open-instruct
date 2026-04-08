@@ -1,3 +1,4 @@
+#!/bin/bash
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_list_splits train \

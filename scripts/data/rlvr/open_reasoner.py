@@ -6,11 +6,13 @@ python scripts/data/rlvr/open_reasoner.py --push_to_hub
 python scripts/data/rlvr/open_reasoner.py --push_to_hub --hf_entity ai2-adapt-dev
 """
 
+import json
 import os
 from collections import defaultdict
 from dataclasses import dataclass
 
 import datasets
+import requests
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from transformers import HfArgumentParser
@@ -23,11 +25,6 @@ class Args:
 
 
 def main(args: Args):
-    # download https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero/raw/refs/heads/main/data/orz_math_57k_collected.json
-    import json
-
-    import requests
-
     file_path = "orz_math_57k_collected.json"
     if not os.path.exists(file_path):
         url = "https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero/raw/refs/heads/main/data/orz_math_57k_collected.json"

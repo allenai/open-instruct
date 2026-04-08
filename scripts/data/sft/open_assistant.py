@@ -2,9 +2,9 @@ import argparse
 import os
 
 from datasets import Dataset, load_dataset
+from scripts.data.sft.utils import convert_sft_dataset
 
 import open_instruct.utils as open_instruct_utils
-from scripts.data.sft.utils import convert_sft_dataset
 
 
 def convert_oasst_dataset(ds: Dataset, top_k: int | None = None) -> Dataset:

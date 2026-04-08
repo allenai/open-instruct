@@ -1,3 +1,4 @@
+#!/bin/bash
 # Here we use 1 GPU for demonstration, but you can use multiple GPUs and larger eval_batch_size to speed up the evaluation.
 export CUDA_VISIBLE_DEVICES=0
 # you need to set the below to say you are okay with running llm-generated code on your machine...

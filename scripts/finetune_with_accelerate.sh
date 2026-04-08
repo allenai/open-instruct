@@ -1,3 +1,4 @@
+#!/bin/bash
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 MODEL_SIZE=7B
@@ -17,7 +18,6 @@ accelerate launch \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
     --model_name_or_path ../hf_llama2_models/${MODEL_SIZE} \
-    --use_flash_attn \
     --tokenizer_name ../hf_llama2_models/${MODEL_SIZE} \
     --use_slow_tokenizer \
     --train_file data/processed/tulu_v2/tulu_v2_data.jsonl \

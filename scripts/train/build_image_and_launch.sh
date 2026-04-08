@@ -32,15 +32,25 @@ if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"*
 else
   echo "Creating new beaker image for commit $git_hash..."
   CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
-  CACHE_ARGS="--cache-from type=registry,ref=$CACHE_REPO"
-  [ "${DOCKER_CACHE_PUSH:-}" = "1" ] && CACHE_ARGS="$CACHE_ARGS --cache-to type=registry,ref=$CACHE_REPO,mode=max"
 
-  docker buildx build --platform=linux/amd64 \
+  # Try to build with cache push first, fall back to cache-from only if push fails
+  if docker buildx build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
-    $CACHE_ARGS \
+    --cache-from "type=registry,ref=$CACHE_REPO" \
+    --cache-to "type=registry,ref=$CACHE_REPO,mode=max" \
     --load \
-    . -t "$image_name"
+    . -t "$image_name"; then
+    echo "Build succeeded with cache push."
+  else
+    echo "Warning: Build with cache push failed (likely due to permissions). Retrying without cache push..."
+    docker buildx build --platform=linux/amd64 \
+      --build-arg GIT_COMMIT="$git_hash" \
+      --build-arg GIT_BRANCH="$git_branch" \
+      --cache-from "type=registry,ref=$CACHE_REPO" \
+      --load \
+      . -t "$image_name"
+  fi
 
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
 

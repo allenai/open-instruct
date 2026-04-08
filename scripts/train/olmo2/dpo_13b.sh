@@ -1,3 +1,4 @@
+#!/bin/bash
 python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
@@ -32,7 +33,6 @@ python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --with_tracking \
     --seed 8

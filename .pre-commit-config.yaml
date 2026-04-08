@@ -11,6 +11,12 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
 
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [--severity=error]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.0
     hooks:
@@ -23,6 +29,12 @@ repos:
 
   - repo: local
     hooks:
+      - id: ban-type-checking
+        name: Ban TYPE_CHECKING blocks
+        entry: bash -c '! grep -rn "if TYPE_CHECKING" open_instruct/'
+        language: system
+        pass_filenames: false
+        types: [python]
       - id: export-requirements
         name: Export requirements.txt from uv.lock
         entry: uv export --format requirements-txt --no-hashes --all-extras --no-emit-project --output-file requirements.txt

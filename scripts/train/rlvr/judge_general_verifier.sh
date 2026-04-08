@@ -1,3 +1,4 @@
+#!/bin/bash
 ## Requires manual running
 # first, launch the judge server:
 beaker experiment create configs/judge_configs/general_verifier_judge.yaml \
