@@ -1715,7 +1715,7 @@ def maybe_evaluate(
         eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
             eval_result.finish_reasons
         )
-        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}        
+        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
         eval_pass_at_k_metrics: dict[str, float] = {}
         scores = np.array(eval_batch.scores)
         eval_k = eval_generation_config.n

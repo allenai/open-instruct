@@ -39,9 +39,7 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
         return {}
     num_samples = int(arr.shape[1])
     c_arr = arr.sum(axis=1).astype(np.int64).reshape(-1)
-    metrics: dict[str, float] = {
-        "eval/pass_at_1": float((c_arr.astype(np.float64) / num_samples).mean()),
-    }
+    metrics: dict[str, float] = {"eval/pass_at_1": float((c_arr.astype(np.float64) / num_samples).mean())}
     if num_samples > 1:
         metrics[f"eval/pass_at_{num_samples}"] = float((c_arr > 0).mean())
     k_pow = 1
