@@ -1,12 +1,15 @@
+import os
 import tempfile
 import unittest
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
+from olmo_core import data as oc_data
 
 from open_instruct import data_loader
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening, TensorDataCollatorWithFlatteningDPO
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
@@ -77,6 +80,106 @@ class TestWorldAwarePacking(unittest.TestCase):
             if not drop_last:
                 expected_indices = set(range(num_samples))
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
+
+
+def _make_sft_dataset(num_samples: int, max_seq_length: int, vocab_size: int = 1000) -> Dataset:
+    rng = torch.Generator().manual_seed(123)
+    data: dict[str, list] = {"input_ids": [], "labels": [], "attention_mask": [], "index": []}
+    for i in range(num_samples):
+        seq_len = torch.randint(4, max_seq_length + 1, (1,), generator=rng).item()
+        input_ids = torch.randint(1, vocab_size, (seq_len,), generator=rng)
+        labels = input_ids.clone()
+        num_masked = torch.randint(0, seq_len // 2 + 1, (1,), generator=rng).item()
+        labels[:num_masked] = -100
+        data["input_ids"].append(input_ids)
+        data["labels"].append(labels)
+        data["attention_mask"].append(torch.ones(seq_len, dtype=torch.long))
+        data["index"].append(i)
+    ds = Dataset.from_dict(data)
+    ds.set_format(type="pt")
+    return ds
+
+
+def _convert_hf_to_numpy(dataset: Dataset, output_dir: str) -> None:
+    all_token_ids = []
+    all_labels_mask = []
+    for sample in dataset:
+        all_token_ids.extend(sample["input_ids"].tolist())
+        all_labels_mask.extend([1 if label != -100 else 0 for label in sample["labels"].tolist()])
+    token_ids_arr = np.array(all_token_ids, dtype=np.uint16)
+    labels_mask_arr = np.array(all_labels_mask, dtype=np.bool_)
+    np.save(os.path.join(output_dir, "token_ids_part_000.npy"), token_ids_arr)
+    np.save(os.path.join(output_dir, "labels_mask_000.npy"), labels_mask_arr)
+
+
+class TestHFAndNumpyEquivalence(unittest.TestCase):
+    def test_same_tokens_and_labels(self):
+        num_samples = 20
+        max_seq_length = 64
+        batch_size_seqs = 4
+        dataset = _make_sft_dataset(num_samples, max_seq_length)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            collator = TensorDataCollatorWithFlattening(
+                return_position_ids=True,
+                return_flash_attn_kwargs=True,
+                max_seq_length=batch_size_seqs * max_seq_length,
+            )
+            hf_loader = data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=batch_size_seqs,
+                seed=42,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=tmpdir,
+                collator=collator,
+                drop_last=False,
+                max_seq_length=max_seq_length,
+            )
+
+            hf_tokens = []
+            hf_label_mask = []
+            for batch in hf_loader:
+                ids = batch["input_ids"].squeeze(0)
+                labs = batch["labels"].squeeze(0)
+                for token_id, label in zip(ids.tolist(), labs.tolist()):
+                    if token_id == 0 and label == -100:
+                        continue
+                    hf_tokens.append(token_id)
+                    hf_label_mask.append(label != -100)
+
+            numpy_dir = os.path.join(tmpdir, "numpy_data")
+            os.makedirs(numpy_dir)
+            _convert_hf_to_numpy(dataset, numpy_dir)
+
+            tokenizer_config = oc_data.TokenizerConfig.dolma2()
+            dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
+                tokenizer=tokenizer_config,
+                work_dir=os.path.join(numpy_dir, "_work"),
+                paths=[os.path.join(numpy_dir, "token_ids_part_*.npy")],
+                expand_glob=True,
+                label_mask_paths=[os.path.join(numpy_dir, "labels_mask_*.npy")],
+                generate_doc_lengths=True,
+                long_doc_strategy=oc_data.LongDocStrategy.truncate,
+                sequence_length=max_seq_length,
+            )
+            np_dataset = dataset_config.build()
+            np_dataset.prepare()
+
+            numpy_tokens = []
+            numpy_label_mask = []
+            for i in range(len(np_dataset)):
+                item = np_dataset[i]
+                ids = item["input_ids"]
+                mask = item["label_mask"]
+                for token_id, is_train in zip(ids.tolist(), mask.tolist()):
+                    if token_id == tokenizer_config.pad_token_id:
+                        continue
+                    numpy_tokens.append(token_id)
+                    numpy_label_mask.append(bool(is_train))
+
+            self.assertEqual(hf_tokens, numpy_tokens, "Token sequences differ between HF and numpy loaders")
+            self.assertEqual(hf_label_mask, numpy_label_mask, "Label masks differ between HF and numpy loaders")
 
 
 if __name__ == "__main__":

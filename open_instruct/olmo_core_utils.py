@@ -104,11 +104,6 @@ class TrainingConfig:
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW."""
-    global_batch_size_tokens: int | None = None
-    """Global batch size in tokens. When set, used directly for NumpyDataLoaderConfig instead of
-    computing from per_device_batch_size * grad_accum * world_size * seq_len."""
-    data_seed: int | None = None
-    """Separate seed for the data loader. If None, uses the experiment tracking seed."""
     cp_degree: int | None = None
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag"] = "llama3"
@@ -171,8 +166,6 @@ class DatasetConfig:
     """The hash of the dataset configuration."""
     hf_entity: str | None = None
     """The user or org name for dataset caching on the Hugging Face Hub."""
-    numpy_dataset_path: str | None = None
-    """Path to pre-tokenized numpy dataset directory."""
 
 
 @dataclass

@@ -26,9 +26,10 @@ from typing import Any, Literal
 import numpy as np
 import ray
 import torch
-import vllm
+import torch.distributed as dist
 from datasets import Dataset
 from olmo_core.data import data_loader
+from olmo_core.distributed import utils as distributed_utils
 from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
@@ -88,6 +89,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         drop_last: bool = True,
         fs_local_rank: int | None = None,
         max_seq_length: int = 1,
+        dp_process_group: dist.ProcessGroup | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -107,12 +109,17 @@ class HFDataLoader(data_loader.DataLoaderBase):
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
             max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
                 to the trainer for batch-size validation.
+            dp_process_group: Optional distributed process group. When provided, dp_rank and
+                dp_world_size are derived from it, overriding the explicit integer parameters.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
+        if dp_process_group is not None:
+            dp_rank = distributed_utils.get_rank(dp_process_group)
+            dp_world_size = distributed_utils.get_world_size(dp_process_group)
         # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
@@ -730,7 +737,7 @@ def add_prompt_to_generator(
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
-    generation_config: vllm.SamplingParams,
+    generation_config: Any,  # vllm.SamplingParams
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
