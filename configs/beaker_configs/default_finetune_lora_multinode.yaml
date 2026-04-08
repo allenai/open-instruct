@@ -29,7 +29,6 @@ tasks:
         --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B
         --use_slow_tokenizer
         --train_file /net/nfs.cirrascale/allennlp/yizhongw/open-instruct-public/data/processed/sharegpt/sharegpt_data.jsonl
-        --use_flash_attn
         --use_lora
         --lora_rank 64
         --lora_alpha 64
