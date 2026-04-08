@@ -202,9 +202,17 @@ async def process_request_harbor(actor: LLMRayActor, sub_request_id: str, sampli
         environment=harbor_config.get("environment", "docker"),
     )
 
+    logger.info(f"Harbor trial starting for {sub_request_id}: task={task_path}")
+
     start_time = time.perf_counter()
-    trial = await Trial.create(config=trial_config)
-    trial_result = await trial.run()
+    try:
+        trial = await Trial.create(config=trial_config)
+        logger.info(f"Harbor trial created for {sub_request_id}, running agent...")
+        trial_result = await trial.run()
+    except Exception:
+        elapsed = time.perf_counter() - start_time
+        logger.exception(f"Harbor trial failed for {sub_request_id} after {elapsed:.1f}s")
+        raise
     generation_time = time.perf_counter() - start_time
 
     completions, reward = harbor_output_to_completions(
@@ -212,7 +220,7 @@ async def process_request_harbor(actor: LLMRayActor, sub_request_id: str, sampli
     )
 
     logger.info(
-        f"Harbor trial for {sub_request_id}: {len(completions)} segment(s), "
+        f"Harbor trial completed for {sub_request_id}: {len(completions)} segment(s), "
         f"reward={reward:.3f}, time={generation_time:.1f}s"
     )
 
