@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Now, to disable `max_grad_norm` clipping, set None, not -1 (https://github.com/allenai/open-instruct/pull/1591).
 - Inline GRPO utility functions and rename `ExperimentConfig` to `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/1578).
 - Extract shared OLMo-core config classes and helpers into `olmo_core_utils.py`; refactor DPO to use shared configs (https://github.com/allenai/open-instruct/pull/1576).
 - Decouple `mix_data.py` from `finetune.py` by replacing `FlatArguments` import with a lightweight `MixDataArguments` dataclass (https://github.com/allenai/open-instruct/pull/1573).
