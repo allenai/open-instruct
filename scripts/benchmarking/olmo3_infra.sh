@@ -16,7 +16,7 @@ for split_var in mixin_it_up; do
 
     uv run mason.py \
         --description "Ablating infrastructure improvements." \
-        --cluster ai2/augusta --image "$IMAGE_NAME" \
+        --cluster ai2/jupiter --image "$IMAGE_NAME" \
         --pure_docker_mode \
         --workspace ai2/open-instruct-dev \
         --priority urgent \

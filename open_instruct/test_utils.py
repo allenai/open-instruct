@@ -15,6 +15,7 @@
 import json
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 import unittest
@@ -935,3 +936,33 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.query_responses[0].shape[-1], 4)
         # Original sequence was [0,1,2,3], which fits exactly in rank 0's chunk
         torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))
+
+
+class TestCleanLastNCheckpoints(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        for i in [10, 20, 30, 40, 50]:
+            os.makedirs(os.path.join(self.tmp_dir, f"step_{i}"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _checkpoint_dirs(self):
+        return sorted(d for d in os.listdir(self.tmp_dir) if d.startswith("step_"))
+
+    def test_keeps_last_n(self):
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=2)
+        self.assertEqual(self._checkpoint_dirs(), ["step_40", "step_50"])
+
+    def test_already_removed_directory(self):
+        shutil.rmtree(os.path.join(self.tmp_dir, "step_10"))
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=2)
+        self.assertEqual(self._checkpoint_dirs(), ["step_40", "step_50"])
+
+    def test_keep_all(self):
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=-1)
+        self.assertEqual(self._checkpoint_dirs(), ["step_10", "step_20", "step_30", "step_40", "step_50"])
+
+    def test_remove_all(self):
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=0)
+        self.assertEqual(self._checkpoint_dirs(), [])

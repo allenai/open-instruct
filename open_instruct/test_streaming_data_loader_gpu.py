@@ -26,10 +26,10 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
+from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import create_tools
+from open_instruct.grpo_fast import create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -49,7 +49,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
-            cwd="open_instruct/tools/servers/python_server",
+            cwd="open_instruct/environments/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -142,6 +142,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             tool_names=[],
             run_name="test_no_tools_run",
             model_name=tokenizer_name,
+            base_env_config=data_types.EnvConfig(),
         )
 
         loader = data_loader.StreamingDataLoader(
@@ -169,7 +170,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_with_tools(self):
-        tokenizer_name = "Qwen/Qwen3-1.7B"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         prompts = [
@@ -186,9 +187,14 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
-        tool_actors, _ = create_tools(
-            [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
+        pools, _ = create_tool_pools(
+            [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
+            pool_size=4,
         )
+        # Collect tool definitions from pool for the parser
+        actor = ray.get(list(pools.values())[0].acquire.remote())
+        tool_definitions = ray.get(actor.get_tool_definitions.remote())
+        list(pools.values())[0].release.remote(actor)
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
@@ -202,15 +208,16 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             revision="main",
             seed=42,
             enable_prefix_caching=False,
-            max_model_len=1024,
+            max_model_len=512,
             vllm_gpu_memory_utilization=0.5,
             single_gpu_mode=True,
             pg=pg,
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
-            tool_actors=tool_actors,
-            max_tool_calls=3,
+            pools=pools,
+            tool_definitions=tool_definitions,
+            max_steps=3,
             reward_config=RewardConfig(),
             train_dataset=train_dataset,
         )
@@ -248,6 +255,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             tool_names=["code"],
             run_name="test_with_tools_run",
             model_name=tokenizer_name,
+            base_env_config=data_types.EnvConfig(),
         )
 
         loader = data_loader.StreamingDataLoader(

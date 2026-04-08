@@ -10,7 +10,7 @@ LR=1e-4
 python src/scripts/train/sft/OLMo-sft.py train \
     olmo3-32b-SFT-${LR} \
         $CHECKPOINT \
-        ai2/augusta \
+        ai2/jupiter \
     --trainer.callbacks.wandb.enabled=True \
     --trainer.max_duration.value=2 \
     --train_module.optim.lr=$LR \

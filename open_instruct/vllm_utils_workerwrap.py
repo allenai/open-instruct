@@ -46,7 +46,7 @@ class WorkerWrap:
             f"rank={rank}, world_size={world_size}, group_name={group_name}",
         )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
+    def update_weight(self, name, dtype, shape):
         import torch
 
         assert str(dtype) == str(self.model_config.dtype), (
@@ -59,15 +59,14 @@ class WorkerWrap:
             collective.broadcast(weight, 0, group_name=self._model_update_group)
         else:
             torch.distributed.broadcast(weight, 0, group=self._model_update_group)
-
         self.model_runner.model.load_weights(weights=[(name, weight)])
-
         del weight
-        # TODO: should we empty cache if all weights have updated?
-        # if empty_cache:
-        #     torch.cuda.empty_cache()
 
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None, empty_cache=False):
+    def update_weights_batch(self, param_metadata):
+        for name, dtype, shape in param_metadata:
+            self.update_weight(name, dtype, shape)
+
+    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None):
         import torch
 
         from open_instruct.vllm_utils import get_physical_gpu_id

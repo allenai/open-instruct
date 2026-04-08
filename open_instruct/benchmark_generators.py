@@ -255,16 +255,16 @@ def setup_vllm_engines(
         vllm_gpu_memory_utilization=vllm_config.vllm_gpu_memory_utilization,
         single_gpu_mode=args.single_gpu_mode,
         pg=None,
-        tool_actors=[],
+        pools={},
         tool_parser_type="legacy",
-        max_tool_calls=5,  # default, no tools used in benchmarks
+        max_steps=5,  # default, no tools used in benchmarks
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=streaming_config.inflight_updates,
         reward_config=RewardConfig(
             apply_verifiable_reward=streaming_config.apply_verifiable_reward,
-            verification_reward=int(streaming_config.verification_reward),
+            verification_reward=streaming_config.verification_reward,
             verifier_functions=build_all_verifiers(args, streaming_config),
         ),
         train_dataset=dataset,
