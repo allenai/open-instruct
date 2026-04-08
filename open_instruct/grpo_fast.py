@@ -1203,7 +1203,7 @@ def create_model_and_optimizer(
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
-    pg = placement_group(bundles, strategy="SPREAD")
+    pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     queues_to_monitor = {
@@ -1272,7 +1272,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
-        get_vllm_max_model_len(streaming_config),
+        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
@@ -1360,31 +1360,6 @@ def create_generation_configs(
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-class WeightSyncTrigger:
-    """Event-like trigger that also carries the latest target model step."""
-
-    def __init__(self) -> None:
-        self._event = threading.Event()
-        self._lock = threading.Lock()
-        self._step: int | None = None
-
-    def notify(self, step: int | None = None) -> None:
-        with self._lock:
-            if step is not None:
-                self._step = step
-        self._event.set()
-
-    def wait(self, timeout: float | None = None) -> bool:
-        return self._event.wait(timeout=timeout)
-
-    def clear(self) -> None:
-        self._event.clear()
-
-    def get_step(self) -> int | None:
-        with self._lock:
-            return self._step
-
-
 def get_vllm_max_model_len(streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> int:
     """Size vLLM to support the longest generation path used by train or local eval."""
     eval_response_length = streaming_config.eval_response_length or streaming_config.response_length
@@ -1394,9 +1369,8 @@ def get_vllm_max_model_len(streaming_config: data_loader_lib.StreamingDataLoader
 def weight_sync_thread(
     args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger: WeightSyncTrigger,
+    weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
-    vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1405,16 +1379,15 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
+        weight_sync_trigger_event.set()
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger.wait(timeout=1.0):
+        if not weight_sync_trigger_event.wait(timeout=1.0):
             continue
 
         # Clear the event for next iteration
-        weight_sync_trigger.clear()
-        target_model_step = weight_sync_trigger.get_step()
+        weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1449,13 +1422,6 @@ def weight_sync_thread(
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1668,7 +1634,7 @@ def maybe_evaluate(
                     queued_results,
                     num_eval_prompts,
                 )
-                return
+                return False
 
         # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
         timeout = 100 if is_final_step else 0.01
@@ -1697,10 +1663,6 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        model_step_min = eval_reward_metrics.pop("eval/model_step_min", None)
-        model_step_max = eval_reward_metrics.pop("eval/model_step_max", None)
-        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean", None)
-        model_step_span = eval_reward_metrics.pop("eval/model_step_span", None)
         eval_k = eval_generation_config.n
         scores = np.array(eval_batch.scores)
         pass_at_1 = None
@@ -1729,13 +1691,6 @@ def maybe_evaluate(
             eval_metrics["eval/pass_at_1"] = pass_at_1
         if pass_at_k is not None:
             eval_metrics[f"eval/pass_at_{eval_k}"] = pass_at_k
-        if model_step_min is not None and model_step_max is not None and model_step_mean is not None:
-            assumed_step = float(training_step)
-            eval_metrics["eval/model_step_diff_min"] = model_step_min - assumed_step
-            eval_metrics["eval/model_step_diff_max"] = model_step_max - assumed_step
-            eval_metrics["eval/model_step_diff_avg"] = model_step_mean - assumed_step
-            if model_step_span is not None:
-                eval_metrics["eval/model_step_diff_span"] = model_step_span
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -1908,19 +1863,13 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger = WeightSyncTrigger()
-    initial_model_step = resume_training_step - 1
-    ray_get_with_progress(
-        [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
-        desc=f"Initializing vLLM model step to {initial_model_step}",
-    )
+    weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger,
+        weight_sync_trigger_event,
         policy_group,
-        vllm_engines,
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
@@ -2069,7 +2018,7 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger.notify(step=training_step)
+        weight_sync_trigger_event.set()
 
         last_eval_collected = maybe_evaluate(
             args,

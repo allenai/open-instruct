@@ -102,61 +102,6 @@ class TestMaybeEvaluate(unittest.TestCase):
 
         mock_accumulate.assert_called_once()
 
-    def test_records_eval_model_step_range_and_deltas(self):
-        args = SimpleNamespace(num_training_steps=200, with_tracking=False)
-        eval_dataset = self._build_eval_dataset(num_prompts=1)
-        eval_queue = _QueueWithSize(size=1)
-        eval_generation_config = SimpleNamespace(n=2)
-        tokenizer = Mock()
-        tokenizer.batch_decode.return_value = ["prompt", "prompt"]
-        tokenizer.pad_token = "<pad>"
-
-        eval_result = SimpleNamespace(
-            responses=[[1], [2]],
-            finish_reasons=["stop", "stop"],
-            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=4, generation_time=2.0),
-        )
-        eval_batch = SimpleNamespace(
-            scores=[1.0, 0.0],
-            queries=[[1, 2, 3], [1, 2, 3]],
-            decoded_responses=["resp_a", "resp_b"],
-            ground_truths=["42", "42"],
-            active_tools=None,
-        )
-        reward_metrics = {
-            "model_step_min": 100.0,
-            "model_step_max": 105.0,
-            "model_step_mean": 103.0,
-            "model_step_span": 5.0,
-        }
-
-        with (
-            patch(
-                "open_instruct.grpo_fast.accumulate_inference_batches",
-                return_value=(eval_result, eval_batch, reward_metrics, None),
-            ),
-            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
-            patch("open_instruct.grpo_fast.print_rich_table"),
-        ):
-            maybe_evaluate(
-                args=args,
-                training_step=100,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=tokenizer,
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                base_env_config=EnvConfig(),
-                max_possible_score=1.0,
-            )
-
-        logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/model_step_diff_min"], 0.0)
-        self.assertEqual(logged["eval/model_step_diff_max"], 5.0)
-        self.assertEqual(logged["eval/model_step_diff_avg"], 3.0)
-        self.assertEqual(logged["eval/model_step_diff_span"], 5.0)
-
     def test_records_pass_at_k_metrics(self):
         args = SimpleNamespace(num_training_steps=200, with_tracking=False)
         eval_dataset = self._build_eval_dataset(num_prompts=2)
