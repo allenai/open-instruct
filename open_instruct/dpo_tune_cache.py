@@ -113,7 +113,7 @@ def build_deepspeed_config(
     return config
 
 
-def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
+def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -168,9 +168,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if is_beaker_job():
         args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-    beaker_config = None
-    if is_beaker_job() and accelerator.is_main_process:
-        beaker_config = maybe_get_beaker_config()
+    beaker_config = maybe_get_beaker_config() if accelerator.is_main_process else None
 
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
@@ -309,7 +307,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     quantization_config=bnb_config,
                     device_map=device_map,
                     dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
                 )
             elif args.use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -324,7 +322,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
                     # liger-kernel specific args
                     fused_linear_cross_entropy=False,  # don't fuse the linear layer with CE loss, since we want logits
                 )
@@ -337,7 +335,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
                     dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
                 )
         else:
             logger.info("Training new model from scratch")
@@ -378,14 +376,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
+    # For VLM configs (e.g. Qwen3.5), model dim attributes live under text_config.
+    dims_config = getattr(config, "text_config", config)
     model_dims = ModelDims(
-        num_layers=config.num_hidden_layers,
-        hidden_size=config.hidden_size,
-        intermediate_size=config.intermediate_size,
-        vocab_size=config.vocab_size,
-        num_attn_heads=config.num_attention_heads,
-        head_dim=config.hidden_size // config.num_attention_heads,
-        num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+        num_layers=dims_config.num_hidden_layers,
+        hidden_size=dims_config.hidden_size,
+        intermediate_size=dims_config.intermediate_size,
+        vocab_size=dims_config.vocab_size,
+        num_attn_heads=dims_config.num_attention_heads,
+        head_dim=dims_config.hidden_size // dims_config.num_attention_heads,
+        num_kv_heads=getattr(dims_config, "num_key_value_heads", dims_config.num_attention_heads),
     )
 
     # Capture full dataset size by getting it from the dataset. Sharding happens inside the dataloaders, not the dataset, so we're fine to do this.
@@ -589,7 +589,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                if accelerator.sync_gradients and args.max_grad_norm:
                     accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -765,6 +765,6 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)

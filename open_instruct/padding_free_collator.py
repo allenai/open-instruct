@@ -242,8 +242,10 @@ def get_num_tokens(batch: dict[str, Any]) -> int:
     cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
     if cu_keys:
         return sum(batch[k][-1].item() for k in cu_keys)
-    if "attention_mask" in batch:
-        return batch["attention_mask"].sum().item()
+    # DPO batches have chosen_attention_mask and rejected_attention_mask; sum both branches.
+    attn_keys = [k for k in batch if k.endswith("attention_mask")]
+    if attn_keys:
+        return sum(batch[k].sum().item() for k in attn_keys)
     return sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
 
 

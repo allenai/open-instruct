@@ -38,7 +38,6 @@ python mason.py \
     --use_slow_tokenizer False \
     --add_bos \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --per_device_train_batch_size 2 \
     --gradient_accumulation_steps 8 \
@@ -69,7 +68,6 @@ accelerate launch \
     --use_slow_tokenizer False \
     --add_bos \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --per_device_train_batch_size 2 \
     --gradient_accumulation_steps 8 \
@@ -104,7 +102,6 @@ accelerate launch \
     --seed 111 \
     --model_name_or_path allenai/OLMo-2-0425-1B-SFT \
     --model_revision main \
-    --use_flash_attn \
     --tokenizer_name_or_path allenai/OLMo-2-1124-13B \
     --tokenizer_revision main \
     --max_seq_length 2048 \
@@ -152,7 +149,6 @@ python mason.py \
     --seed 111 \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision "olmo2_1b_v2_sft_lr3e-5_seed1__1__1744989064" \
-    --use_flash_attn \
     --tokenizer_name_or_path allenai/OLMo-2-1124-13B \
     --tokenizer_revision main \
     --max_seq_length 2048 \
@@ -198,7 +194,6 @@ python mason.py \
     --learning_rate $lr \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision "olmo2_1b_v2_sft_lr3e-5_seed1__1__1744989064" \
-    --use_flash_attn \
     --tokenizer_name_or_path allenai/OLMo-2-1124-13B \
     --tokenizer_revision main \
     --max_seq_length 2048 \
@@ -226,6 +221,8 @@ done
 ```
 
 ## RLVR
+
+> **Note**: These commands use the legacy [`grpo_vllm_thread_ray_gtrl.py`](https://github.com/allenai/open-instruct/blob/745bf58d321c/open_instruct/grpo_vllm_thread_ray_gtrl.py) script, which has since been removed. The experiments were run at commit [`745bf58d321c`](https://github.com/allenai/open-instruct/tree/745bf58d321c). They are preserved here for historical reference.
 
 ### 1B
 
