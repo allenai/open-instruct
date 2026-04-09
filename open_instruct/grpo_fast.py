@@ -42,7 +42,12 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
-from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_loader import (
+    DataPreparationActor,
+    accumulate_inference_batches,
+    add_prompt_to_generator,
+    summarize_test_solve_rate_metrics,
+)
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
@@ -133,6 +138,16 @@ logger = logger_utils.setup_logger(__name__)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 1200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+
+
+def estimate_pass_at_k_array(num_samples: int, num_correct: np.ndarray, k: int) -> np.ndarray:
+    return np.asarray(
+        [
+            grpo_utils.estimate_pass_at_k(num_samples=num_samples, num_correct=int(correct), k=k)
+            for correct in num_correct
+        ],
+        dtype=float,
+    )
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -1586,16 +1601,9 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        table_rows = metrics.pop("val/train_test_solve_rate_table_rows", None)
-        if table_rows:
-            metrics["val/train_test_solve_rate_table"] = wandb.Table(dataframe=pd.DataFrame(table_rows))
         # Convert array/list metrics to wandb histograms for logging
-        for key, value in list(metrics.items()):
-            if isinstance(value, wandb.Table):
-                continue
+        for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                if isinstance(value, list) and isinstance(value[0], tuple):
-                    continue
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=training_step)
 
@@ -1646,9 +1654,9 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
-    max_possible_score: float,
     base_env_config: EnvConfig | None = None,
     actor_manager=None,
+    max_possible_score: float = 1.0,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1659,28 +1667,17 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
     if base_env_config is None:
         base_env_config = EnvConfig()
-    expected_eval_results = len(eval_dataset)
-    if training_step < args.num_training_steps and evaluation_inference_results_Q.qsize() < expected_eval_results:
-        logger.info(
-            "[Main Thread] Skipping eval collection at step %s: only %s/%s results are ready.",
-            training_step,
-            evaluation_inference_results_Q.qsize(),
-            expected_eval_results,
-        )
-        return False
 
     try:
-        # Use a short timeout during training so eval collection never blocks rollout progress.
-        # At the final step, wait for the configured eval timeout budget to drain the queue.
-        timeout = 0.01
-        if training_step >= args.num_training_steps:
-            timeout = 60 * (args.eval_timeout_minutes or args.backend_timeout)
+        # timeout 0.01 if this is not the last training step
+        # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=expected_eval_results,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1690,6 +1687,7 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            max_possible_score=max_possible_score,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1716,14 +1714,7 @@ def maybe_evaluate(
             num_correct_per_prompt = (scores_per_prompt >= threshold).sum(axis=1)
             pass_at_ks = [2**i for i in range(eval_k.bit_length()) if 2**i <= eval_k]
             per_prompt_pass_at_by_k = np.asarray(
-                [
-                    [
-                        grpo_utils.estimate_pass_at_k(eval_k, int(num_correct), k)
-                        for num_correct in num_correct_per_prompt
-                    ]
-                    for k in pass_at_ks
-                ],
-                dtype=float,
+                [estimate_pass_at_k_array(eval_k, num_correct_per_prompt, k) for k in pass_at_ks], dtype=float
             ).T
             for col, k in enumerate(pass_at_ks):
                 pass_at_by_k[k] = float(per_prompt_pass_at_by_k[:, col].mean())
@@ -1868,35 +1859,11 @@ def maybe_evaluate(
                 dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
             for dataset_name, rates in dataset_to_solve_rates.items():
                 eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
-
-        if eval_batch_stats is not None and eval_batch_stats.per_prompt_test_records:
-            eval_test_triples: list[tuple[int, int, float]] = []
-            eval_test_table_rows: list[dict[str, Any]] = []
-            for prompt_index, rates, diff_list in eval_batch_stats.per_prompt_test_records:
-                for test_index, rate in enumerate(rates):
-                    eval_test_triples.append((prompt_index, test_index, float(rate)))
-                    erow: dict[str, Any] = {
-                        "prompt_index": prompt_index,
-                        "test_index": test_index,
-                        "solve_rate": float(rate),
-                    }
-                    if diff_list is not None:
-                        erow["difficulty"] = int(diff_list[test_index])
-                    eval_test_table_rows.append(erow)
-            eval_metrics["eval/test_solve_rate_by_prompt_and_test_index"] = eval_test_triples
-            eval_metrics["eval/test_solve_rate_by_prompt_and_test_index_count"] = len(eval_test_triples)
-            for q in (1, 2, 3, 4):
-                bucket_rates = [
-                    float(rates[i])
-                    for _pidx, rates, diff_list in eval_batch_stats.per_prompt_test_records
-                    if diff_list is not None
-                    for i, d in enumerate(diff_list)
-                    if d == q
-                ]
-                if bucket_rates:
-                    eval_metrics[f"eval/test_solve_rate_mean_difficulty_q{q}"] = float(np.mean(bucket_rates))
-            if args.with_tracking and eval_test_table_rows:
-                eval_metrics["eval/test_solve_rate_table"] = wandb.Table(dataframe=pd.DataFrame(eval_test_table_rows))
+            eval_metrics.update(
+                summarize_test_solve_rate_metrics(
+                    "eval", getattr(eval_batch_stats, "test_records", None), add_per_test_scalars=False
+                )
+            )
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -2236,9 +2203,9 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
-            streaming_config.max_possible_score,
             base_env_config,
             actor_manager,
+            streaming_config.max_possible_score,
         )
 
         maybe_update_beaker_description(
@@ -2595,6 +2562,8 @@ def main(
 
 
 if __name__ == "__main__":
+    utils.check_oe_eval_internal()
+
     parser = ArgumentParserPlus(
         (
             grpo_utils.GRPOExperimentConfig,

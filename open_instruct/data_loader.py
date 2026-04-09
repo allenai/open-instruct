@@ -37,7 +37,6 @@ from transformers import PreTrainedTokenizer
 from open_instruct import data_types, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
-    DIFFICULTY_KEY,
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -713,8 +712,72 @@ class BatchStatistics:
     filtered_prompt_datasets_nonzero: list[str]
     no_resampled_prompts: int
     total_prompts: int
-    per_prompt_test_records: list[tuple[int, list[float], list[int] | None]] = field(default_factory=list)
-    """(dataset_row_index, per_test_solve_rates, difficulty_per_test or None)."""
+    test_records: list[dict[str, Any]] | None = None
+
+
+def _normalize_test_metric_key(record: dict[str, Any]) -> str:
+    test_global_index = record.get("test_global_index")
+    if test_global_index is not None:
+        return str(test_global_index)
+
+    test_id = record.get("test_id")
+    if test_id not in {None, ""}:
+        return str(test_id)
+
+    prompt_index = record.get("prompt_index", "unknown")
+    test_index = record.get("test_index", "unknown")
+    return f"{prompt_index}:{test_index}"
+
+
+def summarize_test_solve_rate_metrics(
+    prefix: str, test_records: list[dict[str, Any]] | None, add_per_test_scalars: bool = True
+) -> dict[str, Any]:
+    if not test_records:
+        return {}
+
+    test_key_to_passes: dict[str, list[float]] = {}
+    test_key_to_group_names: dict[str, str] = {}
+    test_key_to_quartiles: dict[str, int] = {}
+    test_key_display: dict[str, Any] = {}
+
+    for record in test_records:
+        test_key = _normalize_test_metric_key(record)
+        test_key_to_passes.setdefault(test_key, []).append(float(bool(record.get("passed", False))))
+        if "test_group_name" in record and record["test_group_name"] not in {None, ""}:
+            test_key_to_group_names[test_key] = _sanitize_metric_name(str(record["test_group_name"]))
+        if record.get("test_quartile") is not None:
+            test_key_to_quartiles[test_key] = int(record["test_quartile"])
+        if record.get("test_global_index") is not None:
+            test_key_display[test_key] = int(record["test_global_index"])
+        else:
+            test_key_display[test_key] = test_key
+
+    test_solve_rate_by_index = [
+        (test_key_display[test_key], float(np.mean(passes)))
+        for test_key, passes in sorted(test_key_to_passes.items(), key=lambda item: str(item[0]))
+    ]
+    metrics: dict[str, Any] = {
+        f"{prefix}/test_solve_rate_by_index": test_solve_rate_by_index,
+        f"{prefix}/test_solve_rate_by_index_count": len(test_solve_rate_by_index),
+    }
+
+    if add_per_test_scalars:
+        for test_key, passes in test_key_to_passes.items():
+            metrics[f"{prefix}/test_solve_rate_by_index_{_sanitize_metric_name(test_key)}"] = float(np.mean(passes))
+
+    group_to_rates: dict[str, list[float]] = {}
+    for test_key, group_name in test_key_to_group_names.items():
+        group_to_rates.setdefault(group_name, []).append(float(np.mean(test_key_to_passes[test_key])))
+    for group_name, rates in group_to_rates.items():
+        metrics[f"{prefix}/test_solve_rate_mean_{group_name}"] = float(np.mean(rates))
+
+    quartile_to_rates: dict[int, list[float]] = {}
+    for test_key, quartile in test_key_to_quartiles.items():
+        quartile_to_rates.setdefault(quartile, []).append(float(np.mean(test_key_to_passes[test_key])))
+    for quartile, rates in quartile_to_rates.items():
+        metrics[f"{prefix}/test_solve_rate_mean_quartile{quartile}"] = float(np.mean(rates))
+
+    return metrics
 
 
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -862,7 +925,6 @@ def accumulate_inference_batches(
     all_prompt_indices = []
     all_prompt_datasets = []
     all_model_steps = []
-    all_per_prompt_test_records: list[tuple[int, list[float], list[int] | None]] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -1019,50 +1081,6 @@ def accumulate_inference_batches(
         all_percent_solved.append(percent_solved)
         all_prompt_indices.append(result.index)
         all_prompt_datasets.append(prompt_dataset_key)
-        rm = result.reward_metrics or {}
-        per_rates = rm.get("_per_prompt_per_test_pass_rate")
-        if isinstance(per_rates, list) and len(per_rates) > 0:
-            diff_parsed: list[int] | None = None
-            dr = example.get(DIFFICULTY_KEY)
-            if dr is not None:
-                if not isinstance(dr, (list, tuple)):
-                    logger.warning(
-                        "difficulty column must be a list for prompt index %s; skipping difficulty bucketing",
-                        result.index,
-                    )
-                elif len(dr) != len(per_rates):
-                    logger.warning(
-                        "difficulty length %s != per-test rates length %s for prompt index %s; skipping difficulty bucketing",
-                        len(dr),
-                        len(per_rates),
-                        result.index,
-                    )
-                else:
-                    diff_parsed = []
-                    bad = False
-                    for d in dr:
-                        try:
-                            di = int(d)
-                        except (TypeError, ValueError):
-                            logger.warning(
-                                "Invalid difficulty value %r for prompt index %s; skipping difficulty bucketing",
-                                d,
-                                result.index,
-                            )
-                            bad = True
-                            break
-                        if di not in (1, 2, 3, 4):
-                            logger.warning(
-                                "difficulty value %s not in 1..4 for prompt index %s; skipping difficulty bucketing",
-                                d,
-                                result.index,
-                            )
-                            bad = True
-                            break
-                        diff_parsed.append(di)
-                    if bad:
-                        diff_parsed = None
-            all_per_prompt_test_records.append((int(result.index), [float(x) for x in per_rates], diff_parsed))
         if result.model_step is not None:
             all_model_steps.append(result.model_step)
 
@@ -1166,6 +1184,7 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    manufactoria_test_records = combined_reward_metrics.pop("__manufactoria_test_records__", None)
     if len(all_model_steps) != len(results):
         raise ValueError(
             f"Expected model_step for every accumulated result, got {len(all_model_steps)} model steps for {len(results)} results."
@@ -1192,7 +1211,7 @@ def accumulate_inference_batches(
         filtered_prompt_datasets_nonzero=filtered_prompt_datasets_nonzero,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
-        per_prompt_test_records=all_per_prompt_test_records,
+        test_records=manufactoria_test_records,
     )
     progress_bar.close()
     return combined_result, batch, combined_reward_metrics, batch_stats
@@ -1654,37 +1673,11 @@ class DataPreparationActor:
                     for dataset_name, rates in dataset_to_solve_rates.items():
                         step_metrics[f"val/train_prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
 
-                    if batch_stats.per_prompt_test_records:
-                        test_solve_triples: list[tuple[int, int, float]] = []
-                        test_solve_table_rows: list[dict[str, Any]] = []
-                        for prompt_index, rates, diff_list in batch_stats.per_prompt_test_records:
-                            for test_index, rate in enumerate(rates):
-                                test_solve_triples.append((prompt_index, test_index, float(rate)))
-                                row: dict[str, Any] = {
-                                    "prompt_index": prompt_index,
-                                    "test_index": test_index,
-                                    "solve_rate": float(rate),
-                                }
-                                if diff_list is not None:
-                                    row["difficulty"] = int(diff_list[test_index])
-                                test_solve_table_rows.append(row)
-                        step_metrics["val/train_test_solve_rate_by_prompt_and_test_index"] = test_solve_triples
-                        step_metrics["val/train_test_solve_rate_by_prompt_and_test_index_count"] = len(
-                            test_solve_triples
+                    step_metrics.update(
+                        summarize_test_solve_rate_metrics(
+                            "val/train", batch_stats.test_records, add_per_test_scalars=True
                         )
-                        step_metrics["val/train_test_solve_rate_table_rows"] = test_solve_table_rows
-                        for q in (1, 2, 3, 4):
-                            bucket_rates = [
-                                float(rates[i])
-                                for _pidx, rates, diff_list in batch_stats.per_prompt_test_records
-                                if diff_list is not None
-                                for i, d in enumerate(diff_list)
-                                if d == q
-                            ]
-                            if bucket_rates:
-                                step_metrics[f"val/train_test_solve_rate_mean_difficulty_q{q}"] = float(
-                                    np.mean(bucket_rates)
-                                )
+                    )
 
                 tool_stats = EnvStatistics(tool_names=self.tool_names)
                 for rollout_stats in result.request_info.tool_call_stats:

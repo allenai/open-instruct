@@ -2516,9 +2516,6 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
 
     combined: dict[str, Any] = {}
     for key, records in buckets.items():
-        if key.startswith("_"):
-            combined[key] = records[-1]
-            continue
         sample_value = records[0]
         if isinstance(sample_value, np.ndarray):
             combined[key] = [x for value in records for x in value]

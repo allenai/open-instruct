@@ -974,18 +974,6 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))
 
 
-class TestCombineRewardMetrics(unittest.TestCase):
-    def test_preserves_underscore_keys_as_latest(self):
-        merged = utils.combine_reward_metrics(
-            [
-                {"_per_prompt_per_test_pass_rate": [0.5, 1.0], "objective/x": 1.0},
-                {"_per_prompt_per_test_pass_rate": [0.0, 0.25], "objective/x": 2.0},
-            ]
-        )
-        self.assertEqual(merged["_per_prompt_per_test_pass_rate"], [0.0, 0.25])
-        self.assertAlmostEqual(merged["objective/x"], 1.5)
-
-
 class TestCleanLastNCheckpoints(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp()

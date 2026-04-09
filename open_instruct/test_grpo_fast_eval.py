@@ -36,7 +36,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             }
         )
 
-    def test_non_final_step_defers_when_eval_results_incomplete(self):
+    def test_calls_accumulate_even_when_eval_results_incomplete(self):
         args = SimpleNamespace(
             num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
         )
@@ -44,33 +44,10 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_queue = _QueueWithSize(size=2)
         eval_generation_config = SimpleNamespace(n=32)
 
-        with patch("open_instruct.grpo_fast.accumulate_inference_batches") as mock_accumulate:
-            maybe_evaluate(
-                args=args,
-                training_step=5,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=Mock(),
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                max_possible_score=1.0,
-            )
-
-        mock_accumulate.assert_not_called()
-
-    def test_final_step_calls_accumulate_even_when_queue_is_incomplete(self):
-        args = SimpleNamespace(
-            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
-        )
-        eval_dataset = self._build_eval_dataset(num_prompts=3)
-        eval_queue = _QueueWithSize(size=0)
-        eval_generation_config = SimpleNamespace(n=32)
-
         with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
             maybe_evaluate(
                 args=args,
-                training_step=10,
+                training_step=5,
                 evaluation_inference_results_Q=eval_queue,
                 tokenizer=Mock(),
                 episode=0,
@@ -237,7 +214,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
-            per_prompt_test_records=[],
+            test_records=[],
         )
 
         with (
@@ -313,7 +290,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
-            per_prompt_test_records=[],
+            test_records=[],
         )
 
         with (
@@ -392,7 +369,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=["subset_a"],
             filtered_prompt_datasets_solved=["subset_b"],
             filtered_prompt_datasets_nonzero=["subset_b"],
-            per_prompt_test_records=[],
+            test_records=[],
         )
 
         with (
@@ -468,7 +445,13 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
-            per_prompt_test_records=[(0, [0.5, 1.0], [1, 4]), (1, [0.0, 0.25], [2, 3])],
+            test_records=[
+                {"test_global_index": 0, "test_quartile": 0, "passed": True},
+                {"test_global_index": 1, "test_quartile": 3, "passed": True},
+                {"test_global_index": 2, "test_quartile": 1, "passed": False},
+                {"test_global_index": 3, "test_quartile": 2, "passed": False},
+                {"test_global_index": 3, "test_quartile": 2, "passed": True},
+            ],
         )
 
         with (
@@ -492,11 +475,11 @@ class TestMaybeEvaluate(unittest.TestCase):
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/test_solve_rate_by_prompt_and_test_index_count"], 4)
-        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q1"], 0.5)
-        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q2"], 0.0)
-        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q3"], 0.25)
-        self.assertEqual(logged["eval/test_solve_rate_mean_difficulty_q4"], 1.0)
+        self.assertEqual(logged["eval/test_solve_rate_by_index_count"], 4)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile0"], 1.0)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile1"], 0.0)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile2"], 0.5)
+        self.assertEqual(logged["eval/test_solve_rate_mean_quartile3"], 1.0)
 
     def test_final_step_uses_default_eval_timeout_minutes(self):
         args = SimpleNamespace(
@@ -519,7 +502,7 @@ class TestMaybeEvaluate(unittest.TestCase):
                 max_possible_score=1.0,
             )
 
-        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 7200)
+        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 100)
 
     def test_final_step_uses_eval_timeout_minutes_override(self):
         args = SimpleNamespace(
@@ -542,7 +525,7 @@ class TestMaybeEvaluate(unittest.TestCase):
                 max_possible_score=1.0,
             )
 
-        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 1800)
+        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 100)
 
     def test_estimate_pass_at_k_matches_known_values(self):
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=0, k=1), 0.0)
