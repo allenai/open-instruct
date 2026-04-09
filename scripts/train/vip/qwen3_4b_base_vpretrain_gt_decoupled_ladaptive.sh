@@ -75,7 +75,7 @@ uv run python mason.py \
     --value_model_ground_truth_conditioning \
     --gt_conditioning_template expected_accuracy \
     --value_learning_rate 2e-6 \
-    --value_warmup_steps 1000 \
+    --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
     --value_loss_coef 0.5 \
     --gamma 1.0 \
