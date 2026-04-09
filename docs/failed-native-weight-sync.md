@@ -196,8 +196,10 @@ Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved 
 | 4 | No | Yes | 50.5e9 | All non-parametric | NaN |
 | 5 | No | No | — | All non-parametric | NaN |
 | 6 | No | No | — | ALL modules fail | NaN |
+| 7 | Yes | No | — | Only RotaryEmbedding | NaN |
+| 8 | Yes | No | — | Only RotaryEmbedding | NaN |
 
-**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`), not by RotaryEmbedding, inv_freq, bad training weights, parameter names, or scheduler state. Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync. Experiment 5 confirms parameter names are correct. Experiment 6 confirms pause/resume doesn't help.
+**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`). Every other hypothesis has been ruled out across 8 experiments: RotaryEmbedding, inv_freq, bad training weights, parameter names, scheduler state (pause/resume), sleep/wake_up, and cudagraphs (enforce_eager). Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync.
 
 ## Experiment 5: Parameter name logging
 
@@ -246,16 +248,32 @@ Added `pause_generation(mode="wait")` before weight sync and `resume_generation(
 
 **Result**: Same NaN failure. Pausing/resuming the scheduler around weight sync does not fix the issue. The bug is in the layerwise reload path itself, not a race condition with inflight inference.
 
+## Experiment 7: layerwise hotfix + pause/resume
+
+**Experiment**: [01KNT2GPX3E4C86MGX1Y59HP40](https://beaker.org/ex/01KNT2GPX3E4C86MGX1Y59HP40)
+
+Combined layerwise.py hotfix with `pause_generation(mode="wait")` / `resume_generation()`. Weight sync took 19.5s due to draining active requests. Only RotaryEmbedding warnings (hotfix working). Still NaN.
+
+## Experiment 8: layerwise hotfix + sleep/wake_up + enforce_eager
+
+**Experiment**: [01KNT3JK097J23WWCP9WYRM1R6](https://beaker.org/ex/01KNT3JK097J23WWCP9WYRM1R6)
+
+Combined layerwise.py hotfix + `sleep(level=0, mode="keep")` / `wake_up(tags=["scheduling"])` + `enforce_eager=True`. This matches the working vLLM RLHF example as closely as possible. Weight sync back to 0.78s. Only RotaryEmbedding warnings. **Still NaN.**
+
+This definitively rules out cudagraphs — `enforce_eager=True` disables all compilation/cudagraph capture, yet the layerwise reload still produces NaN.
+
 ## What We've Ruled Out (Updated)
 
 1. HF → vLLM name mapping (experiment 2)
 2. `packed=False` bypassing `load_weights()` (code analysis)
 3. NCCL transport (experiments 2-5)
-4. Cudagraph invalidation (code analysis)
+4. Cudagraph invalidation (experiment 8 — enforce_eager still NaN)
 5. Training producing bad weights (experiment 3)
 6. RotaryEmbedding / inv_freq (experiment 4)
 7. Parameter names (experiment 5)
-8. Scheduler state / pause-resume (experiment 6)
+8. Scheduler state / pause-resume (experiments 6-7)
+9. sleep/wake_up (experiment 8)
+10. Cudagraphs / compiled mode (experiment 8 — enforce_eager=True)
 
 ## Questions for vLLM Team
 
@@ -266,12 +284,14 @@ Added `pause_generation(mode="wait")` before weight sync and `resume_generation(
 
 ## Next Steps
 
-1. ~~Experiment 5~~ ✅ Parameter names match. Names ruled out.
-2. ~~Experiment 6~~ ✅ pause/resume doesn't help. Scheduler state ruled out.
-3. **Experiment 7**: Add layerwise.py hotfix + pause/resume. Test whether the combination helps.
-4. **Experiment 8**: If 7 still NaN's, try `enforce_eager=True` to rule out cudagraph corruption.
-5. **Revert to old `WorkerWrap` approach**: If native weight sync is fundamentally broken, fall back.
-6. **Report to vLLM**: File a bug with all experiment evidence.
+1. ~~Experiment 5~~ ✅ Parameter names ruled out.
+2. ~~Experiment 6~~ ✅ pause/resume ruled out.
+3. ~~Experiment 7~~ ✅ layerwise hotfix + pause/resume ruled out.
+4. ~~Experiment 8~~ ✅ enforce_eager + sleep/wake_up ruled out. Cudagraphs ruled out.
+5. **Dump all 339 parameter names**: vLLM team asked whether `name_mapper` is the issue. For Qwen2.5-7B, `name_mapper` is `None` (only Qwen3.5 uses it), so names pass through untransformed from `model.named_parameters()`. We logged first/last 5 and they match standard HF format, but should dump all 339 to share the complete list for verification.
+6. **Investigate what differs from working vLLM example**: Our setup uses `AsyncLLMEngine` (online serving), the working example uses `LLM` (offline). The weight update code path may differ. Also: working example is single-node single-GPU, we use 2 nodes × 8 GPUs with TP=2.
+7. **Revert to old `WorkerWrap` approach**: Native weight sync is broken in our setup. Fall back.
+8. **Report to vLLM**: File a bug with all 8 experiments as evidence.
 
 ## Files Changed
 

@@ -1322,10 +1322,7 @@ def _collect_weight_metadata(
             shape = getattr(param, "ds_shape", param.shape)
             shapes.append(list(shape))
 
-    logger.info(
-        "[Weight Metadata] %d params. First 5: %s", len(names), list(zip(names[:5], dtype_names[:5], shapes[:5]))
-    )
-    logger.info("[Weight Metadata] Last 5: %s", list(zip(names[-5:], dtype_names[-5:], shapes[-5:])))
+    logger.info("[Weight Metadata] %d params. All names:\n%s", len(names), "\n".join(names))
     return names, dtype_names, shapes
 
 
