@@ -72,12 +72,14 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
-# Hotfix for vllm-project/vllm#38574: layerwise.py warns "Failed to load weights"
-# for zero-parameter modules and calls _place_kernel_tensors, corrupting model state.
-# Remove once vllm>=0.19.1 is released.
-RUN LAYERWISE=$(find /stage/.venv -path '*/model_loader/reload/layerwise.py' 2>/dev/null | head -1) && \
-    if [ -n "$LAYERWISE" ]; then \
-    sed -i '/place kernel tensors back as a fallback/{n;s/            else:/            elif info.load_numel_total > 0:  # type: ignore[operator]/;}' "$LAYERWISE"; \
+# Hotfix: add inv_freq to SKIP_TENSORS so RotaryEmbedding's buffer is not counted
+# in load_numel_total during layerwise reload. Without this, _place_kernel_tensors
+# is called on RotaryEmbedding after weight sync, corrupting the model and producing NaN.
+# See docs/failed-native-weight-sync.md for full investigation.
+# Remove once vllm includes this fix upstream.
+RUN META=$(find /stage/.venv -path '*/model_loader/reload/meta.py' 2>/dev/null | head -1) && \
+    if [ -n "$META" ]; then \
+    sed -i 's/"expert_local_to_global",/"expert_local_to_global",\n    "inv_freq",/' "$META"; \
     fi
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
