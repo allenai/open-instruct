@@ -6,6 +6,7 @@ To run:
     ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 """
 
+import contextlib
 import logging
 import pathlib
 import subprocess
@@ -43,6 +44,11 @@ TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
 class TestStreamingDataLoaderGPU(TestGrpoFastBase):
     """Integration tests for StreamingDataLoader with real vLLM engines."""
+
+    def setUp(self):
+        super().setUp()
+        with contextlib.suppress(ValueError):
+            ray.kill(ray.get_actor(data_loader.DATA_PREP_ACTOR_NAME))
 
     @classmethod
     def setUpClass(cls):
@@ -122,7 +128,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=32, n=2)
 
-        _actor = data_loader.DataPreparationActor.options(name="test_no_tools").remote(
+        _actor = data_loader.DataPreparationActor.options(name=data_loader.DATA_PREP_ACTOR_NAME).remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -142,10 +148,10 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             tool_names=[],
             run_name="test_no_tools_run",
             model_name=tokenizer_name,
+            base_env_config=data_types.EnvConfig(),
         )
 
         loader = data_loader.StreamingDataLoader(
-            data_prep_actor_name="test_no_tools",
             tokenizer=tokenizer,
             work_dir="/tmp",
             global_batch_size=2,
@@ -169,7 +175,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_with_tools(self):
-        tokenizer_name = "Qwen/Qwen3-1.7B"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         prompts = [
@@ -207,7 +213,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             revision="main",
             seed=42,
             enable_prefix_caching=False,
-            max_model_len=1024,
+            max_model_len=512,
             vllm_gpu_memory_utilization=0.5,
             single_gpu_mode=True,
             pg=pg,
@@ -234,7 +240,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=128, n=2, stop=["</code>"])
 
-        _actor = data_loader.DataPreparationActor.options(name="test_with_tools").remote(
+        _actor = data_loader.DataPreparationActor.options(name=data_loader.DATA_PREP_ACTOR_NAME).remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -254,10 +260,10 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             tool_names=["code"],
             run_name="test_with_tools_run",
             model_name=tokenizer_name,
+            base_env_config=data_types.EnvConfig(),
         )
 
         loader = data_loader.StreamingDataLoader(
-            data_prep_actor_name="test_with_tools",
             tokenizer=tokenizer,
             work_dir="/tmp",
             global_batch_size=2,

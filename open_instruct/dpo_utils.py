@@ -45,7 +45,15 @@ from open_instruct.dataset_transformation import (
     compute_config_hash,
     load_dataset_configs,
 )
-from open_instruct.model_utils import log_softmax_and_gather
+from open_instruct.olmo_core_utils import (
+    CheckpointConfig,
+    DatasetConfig,
+    ExperimentConfig,
+    LoggingConfig,
+    ModelConfig,
+    TrainingConfig,
+)
+from open_instruct.padding_free_collator import calculate_per_token_logps
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
@@ -85,24 +93,12 @@ class DPOLossType(enum.StrEnum):
 
 
 @dataclass
-class TrackingConfig:
-    """Base configuration for experiment tracking."""
-
-    exp_name: str = "dpo_experiment"
-    """The name of this experiment"""
-    run_name: str | None = None
-    """A unique name of this run"""
-    seed: int = 42
-    """Random seed for initialization and dataset shuffling."""
-
-
-@dataclass
 class DPOConfig:
     """Configuration for DPO-specific hyperparameters."""
 
-    beta: float = 0.1
+    beta: float = 5.0
     """Beta parameter for DPO loss."""
-    loss_type: DPOLossType = DPOLossType.dpo
+    loss_type: DPOLossType = DPOLossType.dpo_norm
     """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
     gamma_beta_ratio: float = 0.3
     """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
@@ -119,81 +115,27 @@ class DPOConfig:
 
 
 @dataclass
-class TrainingConfig:
-    """Configuration for training hyperparameters."""
+class DPOTrainingConfig(TrainingConfig):
+    """DPO-specific training configuration extending TrainingConfig."""
 
-    num_epochs: int = 2
-    """Total number of training epochs to perform."""
-    per_device_train_batch_size: int = 8
-    """Batch size per GPU/TPU core/CPU for training."""
-    gradient_accumulation_steps: int = 1
-    """Number of updates steps to accumulate before performing a backward/update pass."""
-    learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    warmup_ratio: float = 0.03
-    """Linear warmup over warmup_ratio fraction of total steps."""
-    weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
-    max_grad_norm: float = -1
-    """Maximum gradient norm for clipping. -1 means no clipping."""
-    max_seq_length: int = 2048
-    """The maximum total input sequence length after tokenization."""
-    lr_scheduler_type: str = "linear"
-    """The scheduler type to use for learning rate adjustment."""
-    max_train_steps: int | None = None
-    """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
-    activation_memory_budget: float = 1.0
-    """Memory budget for activation checkpointing (0.0-1.0).
-
-    A practical "just turn it on" default is `0.5` (somewhat arbitrary, but works well in practice):
-    any value < 1.0 enables budget-mode checkpointing. Higher values use more memory and are
-    typically faster; lower values use less memory and are typically slower, so use the highest
-    value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
-    """
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
     """Use paged optimizer from bitsandbytes."""
-    fused_optimizer: bool = True
-    """Whether to use fused AdamW or not."""
+    optimizer_type: str = "adamw"
+    """Optimizer type: 'adamw' or 'muon'."""
+    optimizer_kwargs: dict | str = field(default_factory=dict)
+    """Extra kwargs passed to the optimizer config constructor (e.g. '{"mu": 0.95}' for Muon)."""
     tensor_parallel_degree: int = 1
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
     """Context parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
-    compile_model: bool = True
-    """Whether to apply torch.compile to model blocks."""
-    shard_degree: int | None = None
+    fsdp_shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
-    num_replicas: int | None = None
+    fsdp_num_replicas: int | None = None
     """Number of FSDP replicas. None means auto-detect."""
-
-
-@dataclass
-class DatasetConfig:
-    """Configuration for dataset loading and processing."""
-
-    mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"])
-    """A list of datasets (local or HF) to sample from."""
-    mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    transform_fn: list[str] = field(
-        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
-    )
-    """The list of transform functions to apply to the dataset."""
-    target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    """The columns to use for the dataset."""
-    cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    skip_cache: bool = False
-    """Whether to skip the cache."""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-    config_hash: str | None = None
-    """The hash of the dataset configuration."""
 
 
 @dataclass
@@ -211,49 +153,17 @@ class LoRAConfig:
 
 
 @dataclass
-class LoggingConfig:
-    """Configuration for logging and experiment tracking."""
-
-    logging_steps: int | None = None
-    """Log the training loss and learning rate every logging_steps steps."""
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project: str = "open_instruct_internal"
-    """The wandb project name"""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
-    report_to: str | list[str] = "all"
-    """The integration(s) to report results and logs to."""
-
-
-@dataclass
 class HubConfig:
     """Configuration for Hugging Face Hub integration."""
 
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: str | None = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub"""
     hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub"""
     hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub"""
-
-
-@dataclass
-class CheckpointConfig:
-    """Configuration for checkpointing."""
-
-    output_dir: str = "output/"
-    """The output directory where the model predictions and checkpoints will be written."""
-    checkpointing_steps: int | str = 500
-    """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
-    resume_from_checkpoint: str | None = None
-    """If the training should continue from a checkpoint folder."""
 
 
 @dataclass
@@ -278,22 +188,6 @@ class EvalConfig:
     """The priority of auto-launched evaluation jobs"""
 
 
-@dataclass
-class ModelConfig:
-    """Configuration for model loading."""
-
-    model_name_or_path: str | None = None
-    """The model checkpoint for weights initialization."""
-    use_flash_attn: bool = True
-    """Whether to use flash attention in the model training"""
-    attn_backend: str = "auto"
-    """Attention backend for OLMo-core models. Options: flash_2, flash_3, auto."""
-    model_revision: str | None = None
-    """The specific model version to use (can be a branch name, tag name or commit id)."""
-    low_cpu_mem_usage: bool = False
-    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
-
-
 REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
     "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 )
@@ -302,11 +196,11 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 @dataclass
-class ExperimentConfig(
-    TrackingConfig,
+class DPOExperimentConfig(
+    ExperimentConfig,
     ModelConfig,
     DPOConfig,
-    TrainingConfig,
+    DPOTrainingConfig,
     DatasetConfig,
     LoRAConfig,
     LoggingConfig,
@@ -318,14 +212,17 @@ class ExperimentConfig(
     Full arguments class for all fine-tuning jobs.
     """
 
-    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+    _VALID_DICT_FIELDS = ["additional_model_arguments", "optimizer_kwargs"]
 
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    exp_name: str = "dpo"
+    transform_fn: list[str] = field(
+        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
+    )
+    target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
-    config_name: str | None = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
     additional_model_arguments: dict | str | None = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
@@ -431,6 +328,11 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        ModelConfig.__post_init__(self)
+        if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
+            logger.warning(
+                "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
+            )
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
 
@@ -459,11 +361,8 @@ class ExperimentConfig(
                 raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-FlatArguments = ExperimentConfig
-
-
-def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) -> str:
-    """Compute deterministic hash for reference logprobs cache from ExperimentConfig."""
+def compute_reference_cache_hash(args: DPOExperimentConfig, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from DPOExperimentConfig."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
         args.mixer_list, args.mixer_list_splits, args.transform_fn, transform_fn_args, args.target_columns
@@ -551,8 +450,7 @@ def build_reference_logprobs_cache(
                 f"Cannot write to cache directory {cache_path.parent}: {e}. "
                 f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
             ) from e
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
@@ -562,8 +460,7 @@ def build_reference_logprobs_cache(
     total_examples = 0
 
     with torch.no_grad():
-        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
+        for batch in (pbar := tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -574,6 +471,9 @@ def build_reference_logprobs_cache(
                 chosen_logps, rejected_logps, _ = forward_fn(
                     model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
                 )
+
+            if batch.get("is_padding", False):
+                continue
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
@@ -590,9 +490,8 @@ def build_reference_logprobs_cache(
                 }
             )
 
-    if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
 
     missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
     missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
@@ -618,8 +517,7 @@ def build_reference_logprobs_cache(
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
 
     return cache
 
@@ -790,13 +688,15 @@ def compute_loss(
     raise ValueError(f"Unknown loss type: {loss_type}")
 
 
-def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_prob: bool = False) -> torch.Tensor:
-    """Compute the log probabilities of the given labels under the given logits.
+def _get_batch_logps(
+    per_token_logps: torch.Tensor, labels: torch.Tensor, average_log_prob: bool = False
+) -> torch.Tensor:
+    """Aggregate per-token log probabilities into per-sequence log probabilities.
 
     Args:
-        logits: Logits of the model (unnormalized).
-            Shape: (batch_size, sequence_length, vocab_size)
-        labels: Labels for which to compute the log probabilities.
+        per_token_logps: Per-token log probabilities where position i contains
+            log p(labels[i+1] | x_i). Shape: (batch_size, sequence_length)
+        labels: Labels used to build the loss mask.
             Label tokens with a value of -100 are ignored. Shape: (batch_size, sequence_length)
         average_log_prob: If True, return the average log probability per (non-masked) token.
             Otherwise, return the sum of the log probabilities of the (non-masked) tokens.
@@ -805,16 +705,8 @@ def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_pro
         A tensor of shape (batch_size,) containing the average/sum
             log probabilities of the given labels under the given logits.
     """
-    assert logits.shape[:-1] == labels.shape
-
-    labels = labels[:, 1:].clone()
-    logits = logits[:, :-1, :]
-    loss_mask = labels != -100
-
-    # dummy token; we'll ignore the losses on these tokens later
-    labels[labels == -100] = 0
-
-    per_token_logps = log_softmax_and_gather(logits, labels)
+    per_token_logps = per_token_logps[:, :-1]
+    loss_mask = labels[:, 1:] != -100
 
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
@@ -965,26 +857,23 @@ def concatenated_forward(
         for k, v in concatenated_batch.items()
         if k.startswith("concatenated_") and not k.endswith("labels")
     }
-
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
-        logits = outputs.logits.to(torch.float32)
+        logits = outputs.logits
         aux_loss = outputs.aux_loss
     else:
-        logits = model(**inputs).logits.to(torch.float32)
+        logits = model(**inputs).logits
         aux_loss = None
 
+    concatenated_labels = concatenated_batch["concatenated_labels"]
+    per_token_logps = calculate_per_token_logps(logits, concatenated_labels)
+
     if not packing:
-        all_logps = _get_batch_logps(
-            logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
-        )
+        all_logps = _get_batch_logps(per_token_logps, concatenated_labels, average_log_prob=average_log_prob)
         bs = batch["chosen_input_ids"].shape[0]
     else:
         all_logps = pf_get_batch_logps(
-            logits,
-            concatenated_batch["concatenated_labels"],
-            inputs["cu_seq_lens_k"],
-            average_log_prob=average_log_prob,
+            per_token_logps, concatenated_labels, inputs["cu_seq_lens_k"], average_log_prob=average_log_prob
         )
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
@@ -1026,7 +915,11 @@ def separate_forward(
         ).logits.to(torch.float32)
         chosen_aux_loss = None
 
-    chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
+    chosen_logps = _get_batch_logps(
+        calculate_per_token_logps(chosen_logits, chosen_batch["labels"]),
+        chosen_batch["labels"],
+        average_log_prob=average_log_prob,
+    )
     del chosen_batch, chosen_logits
     if output_router_logits:
         del chosen_outputs
@@ -1048,7 +941,11 @@ def separate_forward(
         ).logits.to(torch.float32)
         rejected_aux_loss = None
 
-    rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
+    rejected_logps = _get_batch_logps(
+        calculate_per_token_logps(rejected_logits, rejected_batch["labels"]),
+        rejected_batch["labels"],
+        average_log_prob=average_log_prob,
+    )
     del rejected_batch, rejected_logits
     if output_router_logits:
         del rejected_outputs
@@ -1071,7 +968,9 @@ def concatenated_forward_olmo(
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
-    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly.
+    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
+    correctly under TP+compile, then computes per-token log-probs on the local logits shard
+    to avoid materializing the full (S, vocab) tensor.
 
     Args:
         model: The model to run (OLMo-core style model).
@@ -1084,37 +983,22 @@ def concatenated_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
-    bs = batch["chosen_input_ids"].shape[0]
-
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
-        packed_input_ids, packed_labels, cu_doc_lens, max_doc_len = pack_padded_sequences(
-            concatenated_batch["concatenated_input_ids"],
-            concatenated_batch["concatenated_labels"],
-            concatenated_batch["concatenated_attention_mask"],
-        )
-
-        doc_lens = cu_doc_lens.diff()
-        packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
-
-        batch_size = concatenated_batch["concatenated_input_ids"].shape[0]
-        max_seq_len = concatenated_batch["concatenated_input_ids"].shape[1]
-        logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
-
-        all_logps = _get_batch_logps(
-            logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
-        )
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
-        cu_doc_lens_packing = concatenated_batch["concatenated_cu_seq_lens_k"]
-        doc_lens_packing = cu_doc_lens_packing.diff()
-        max_doc_len_packing = concatenated_batch["concatenated_max_length_k"]
-        logits = model(
-            concatenated_batch["concatenated_input_ids"], doc_lens=doc_lens_packing, max_doc_lens=[max_doc_len_packing]
-        ).to(torch.float32)
+
+    concatenated_labels = concatenated_batch["concatenated_labels"]
+    output = model(concatenated_batch["concatenated_input_ids"], labels=concatenated_labels)
+    per_token_logps = output.loss
+
+    if not packing:
+        all_logps = _get_batch_logps(per_token_logps, concatenated_labels, average_log_prob=average_log_prob)
+        bs = batch["chosen_input_ids"].shape[0]
+    else:
         all_logps = pf_get_batch_logps(
-            logits,
-            concatenated_batch["concatenated_labels"],
+            per_token_logps,
+            concatenated_labels,
             concatenated_batch["concatenated_cu_seq_lens_k"],
             average_log_prob=average_log_prob,
         )
@@ -1132,7 +1016,9 @@ def separate_forward_olmo(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
-    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly.
+    Uses OLMo-core Transformer interface. Passes labels so the LM head handles DTensor
+    correctly under TP+compile, then computes per-token log-probs on the local logits shard
+    to avoid materializing the full (S, vocab) tensor.
     Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
 
     Args:
@@ -1145,33 +1031,16 @@ def separate_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
-    chosen_batch = process_batch(batch, "chosen")
-    packed_input_ids, _, cu_doc_lens, max_doc_len = pack_padded_sequences(
-        chosen_batch["input_ids"], chosen_batch["labels"], chosen_batch["attention_mask"]
-    )
-    doc_lens = cu_doc_lens.diff()
-    packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
-    batch_size = chosen_batch["input_ids"].shape[0]
-    max_seq_len = chosen_batch["input_ids"].shape[1]
-    chosen_logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
-    chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch, chosen_logits, packed_input_ids, packed_logits
-    torch.cuda.empty_cache()
 
-    rejected_batch = process_batch(batch, "rejected")
-    packed_input_ids, _, cu_doc_lens, max_doc_len = pack_padded_sequences(
-        rejected_batch["input_ids"], rejected_batch["labels"], rejected_batch["attention_mask"]
-    )
-    doc_lens = cu_doc_lens.diff()
-    packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
-    batch_size = rejected_batch["input_ids"].shape[0]
-    max_seq_len = rejected_batch["input_ids"].shape[1]
-    rejected_logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
-    rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
-    del rejected_batch, rejected_logits, packed_input_ids, packed_logits
-    torch.cuda.empty_cache()
+    def _get_logps(branch: str) -> torch.Tensor:
+        branch_batch = process_batch(batch, branch)
+        output = model(branch_batch["input_ids"], labels=branch_batch["labels"])
+        logps = _get_batch_logps(output.loss, branch_batch["labels"], average_log_prob=average_log_prob)
+        del branch_batch
+        torch.cuda.empty_cache()
+        return logps
 
-    return chosen_logps, rejected_logps, None
+    return _get_logps("chosen"), _get_logps("rejected"), None
 
 
 @dataclass
@@ -1212,8 +1081,4 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
                 full_key = f"{prefix}{key}"
                 pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
                 result[full_key] = tensor_utils.pad_to_length(result[full_key], max_len, pad_value)
-        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
-        result["attention_mask"] = torch.cat(
-            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
-        )
         return result

@@ -62,7 +62,7 @@ echo "=============================================="
 
 uv run python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
-    --wandb_project_name rl-rag \
+    --wandb_project rl-rag \
     --beta 0.001 \
     --num_samples_per_prompt_rollout 4 \
     --num_unique_prompts_rollout 4 \
@@ -82,7 +82,6 @@ uv run python open_instruct/grpo_fast.py \
     --response_length 1024 \
     --pack_length 2048 \
     --model_name_or_path ${model_path} \
-    --attn_implementation sdpa \
     --non_stop_penalty False \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
@@ -111,4 +110,3 @@ uv run python open_instruct/grpo_fast.py \
 echo "=============================================="
 echo "Test completed! Log saved to /tmp/evolving_rubric_test.log"
 echo "=============================================="
-

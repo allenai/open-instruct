@@ -18,26 +18,33 @@ dependencies = [
     "multiprocess<0.70.18", # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy>=2",
-    "ai2-olmo-core==2.3.0",
+    "ai2-olmo-core",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
+    "pyarrow>=20.0.0",
+    "pyyaml>=6.0.2",
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.9.0,<2.10",
-    "transformers>=4.57.0",
-    "vllm==0.14.1; platform_system != 'Darwin'",
+    "torch>=2.10.0",
+    "transformers>=5.4.0",
+    "vllm>=0.19.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    # The flat FA3 wheel index can publish a newer aarch64-only build than the latest x86_64 build.
+    # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
+    "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
+    "flash-linear-attention>=0.4.2",
 ]
 
 [build-system]
@@ -49,20 +56,26 @@ py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
+flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-torch = [
-  { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "002958a8f15a" }
+flash-attn = [
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
 
+torch = [
+  { index = "pytorch-cu128", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
 [[tool.uv.index]]
-name = "pytorch-cu129"
-url = "https://download.pytorch.org/whl/cu129"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
@@ -90,6 +103,9 @@ dr-tulu = [
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
+override-dependencies = [
+    "transformers>=5.4.0",
+]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
@@ -98,7 +114,7 @@ environments = [
 
 [dependency-groups]
 dev = [
-    "beaker-py>=2.5.3",
+    "beaker-py>=2.5.7",
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
@@ -183,6 +199,9 @@ include = [
     "open_instruct/data_types.py",
     "open_instruct/dpo_config.py",
     "open_instruct/dpo_utils.py",
+    "open_instruct/grpo.py",
+    "open_instruct/grpo_callbacks.py",
+    "open_instruct/grpo_olmo_core_actor.py",
     "open_instruct/grpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
@@ -191,6 +210,11 @@ include = [
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
     "open_instruct/rl_utils.py",
+    "open_instruct/distillkit/compression/bitpack.py",
+    "open_instruct/distillkit/compression/compressor.py",
+    "open_instruct/distillkit/compression/config.py",
+    "open_instruct/distillkit/compression/monotonic_logprobs.py",
+    "open_instruct/distillkit/sample_common.py",
     "open_instruct/rubrics/metrics.py",
     "open_instruct/rubrics/prompts.py",
     "open_instruct/rubrics/rubric_utils.py",

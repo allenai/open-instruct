@@ -41,7 +41,6 @@ import subprocess
 import time
 import unittest
 
-os.environ["VLLM_BATCH_INVARIANT"] = "1"
 os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
 import inspect

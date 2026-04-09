@@ -1,6 +1,5 @@
 model_name_or_path: allenai/OLMo-1.7-7B-hf
 model_revision: main
-use_flash_attn: true
 tokenizer_name: allenai/OLMo-1.7-7B-hf
 use_slow_tokenizer: false # olmo models only use fast tokenizers
 dataset_name: /net/nfs.cirrascale/mosaic/liweij/auto_jailbreak/data/safety_training_data/v3/mixtures/tulu2mix-all-vani_b-50000-vani_h-50000-adv_b-50000-adv_h-50000.jsonl

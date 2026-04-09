@@ -34,6 +34,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, padding_free_collator, utils
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
@@ -49,6 +50,8 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 
+DATA_PREP_ACTOR_NAME = "data_prep_singleton"
+
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
@@ -62,7 +65,7 @@ def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, A
     """
     if device is None:
         return batch
-    return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -86,12 +89,13 @@ class HFDataLoader(data_loader.DataLoaderBase):
         device: torch.device | None = None,
         drop_last: bool = True,
         fs_local_rank: int | None = None,
+        max_seq_length: int = 1,
     ) -> None:
         """Initialize the HFDataLoader.
 
         Args:
             dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
-            batch_size: The global batch size.
+            batch_size: The global batch size (in sequences).
             seed: Random seed for shuffling.
             dp_rank: The rank of the current process in the distributed setup.
             dp_world_size: Total number of data-parallel processes in the distributed setup.
@@ -103,15 +107,18 @@ class HFDataLoader(data_loader.DataLoaderBase):
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
+            max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
+                to the trainer for batch-size validation.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
+        # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
-            global_batch_size=batch_size,
+            global_batch_size=batch_size * max_seq_length,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
@@ -141,6 +148,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
         self._overflow: list[dict[str, Any]] = []
+        self._precomputed_batch_sizes: list[int] | None = None
+        self._num_padding_batches: int = 0
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
@@ -166,6 +175,26 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
+        # World-aware packing: batch boundaries were precomputed by
+        # _reshard_with_packing so that every rank has the same number of
+        # batches. Each entry in _precomputed_batch_sizes is the number of
+        # examples in that batch (variable due to packing).
+        if self._precomputed_batch_sizes is not None:
+            num_real = len(self._precomputed_batch_sizes) - self._num_padding_batches
+            offset = 0
+            for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
+                if batch_idx < self.batches_processed:
+                    offset += batch_size
+                    continue
+                examples = []
+                for i in range(offset, offset + batch_size):
+                    example = self.dataset[i]
+                    examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
+                offset += batch_size
+                yield batch
+            return
+
         start_example = self.batches_processed * self._per_rank_batch_size
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
@@ -188,6 +217,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
+        if self._precomputed_batch_sizes is not None:
+            return len(self._precomputed_batch_sizes)
         return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
@@ -240,6 +271,15 @@ class HFDataLoader(data_loader.DataLoaderBase):
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
+        packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
+        if packing_enabled:
+            self._reshard_with_packing(all_indices)
+            return
+
+        self._precomputed_batch_sizes = None
+        self._num_padding_batches = 0
+        self._overflow = []
+
         global_size = len(all_indices)
         total_batches = global_size // self._batch_size
         usable_size = total_batches * self._batch_size
@@ -258,6 +298,68 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
+
+    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
+        """Reshard with world-aware packing so all ranks get the same batch count.
+
+        Instead of distributing examples to ranks and letting each rank pack
+        independently (which can produce different batch counts due to variable
+        overflow), this packs globally first and then distributes packed batches
+        round-robin to ranks.
+        """
+        max_seq_length = self._collator.max_seq_length
+        column_names = self._full_dataset.column_names
+        subset = self._full_dataset.select(all_indices.tolist())
+        if "chosen_input_ids" in column_names:
+            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
+        else:
+            lengths = [[len(x)] for x in subset["input_ids"]]
+
+        num_streams = len(lengths[0])
+        batches: list[list[int]] = []
+        current_batch: list[int] = []
+        running_totals = [0] * num_streams
+
+        for i in range(len(all_indices)):
+            new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
+            would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
+            at_max_samples = len(current_batch) >= self._per_rank_batch_size
+
+            if would_exceed or at_max_samples:
+                batches.append(current_batch)
+                current_batch = [i]
+                running_totals = list(lengths[i])
+            else:
+                current_batch.append(i)
+                running_totals = new_totals
+
+        if current_batch:
+            batches.append(current_batch)
+
+        num_batches = len(batches)
+        padding_start = num_batches
+        if self._drop_last:
+            num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
+            batches = batches[:num_batches]
+        else:
+            if (remainder := num_batches % self.dp_world_size) > 0:
+                for _ in range(self.dp_world_size - remainder):
+                    batches.append(batches[-1])
+
+        rank_global_indices = list(range(self.dp_rank, len(batches), self.dp_world_size))
+        self._num_padding_batches = sum(1 for gi in rank_global_indices if gi >= padding_start)
+
+        rank_batches = batches[self.dp_rank :: self.dp_world_size]
+
+        rank_indices: list[int] = []
+        self._precomputed_batch_sizes = []
+        for batch in rank_batches:
+            for pos in batch:
+                rank_indices.append(int(all_indices[pos]))
+            self._precomputed_batch_sizes.append(len(batch))
+
+        self.effective_size = len(rank_indices)
+        self.dataset = self._full_dataset.select(rank_indices)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
@@ -292,16 +394,11 @@ class VLLMConfig:
     vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
+    vllm_attention_backend: str | None = None
     vllm_sync_backend: str = "nccl"
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0
-
-    def __post_init__(self):
-        if os.environ.get("VLLM_USE_V1") == "0":
-            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
-            if self.vllm_enable_prefix_caching:
-                raise ValueError("Prefix caching is currently not supported for v0.")
 
 
 @dataclass
@@ -312,7 +409,7 @@ class StreamingDataLoaderConfig:
     pack_length: int = 512
 
     # Batching
-    async_steps: int = 1
+    async_steps: int = 8
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -320,7 +417,7 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
-    advantage_normalization_type: str = "standard"
+    advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
@@ -340,7 +437,9 @@ class StreamingDataLoaderConfig:
     # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
-    inflight_updates: bool = False
+    inflight_updates: bool = True
+    eval_response_length: int | None = None
+    """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -395,6 +494,9 @@ class StreamingDataLoaderConfig:
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if self.eval_response_length is None:
+            self.eval_response_length = self.response_length
+
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -441,7 +543,6 @@ class StreamingDataLoaderConfig:
 
     def build_dataloader(
         self,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         dp_rank: int,
         fs_local_rank: int,
@@ -451,7 +552,6 @@ class StreamingDataLoaderConfig:
     ) -> "StreamingDataLoader":
         """Build a thin wrapper dataloader that pulls from the DataPreparationActor singleton."""
         return StreamingDataLoader(
-            data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             work_dir=work_dir,
             global_batch_size=self.num_unique_prompts_rollout,
@@ -468,7 +568,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
     def __init__(
         self,
         *,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         work_dir: Path | str,
         global_batch_size: int,
@@ -485,7 +584,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             fs_local_rank=fs_local_rank,
         )
 
-        self.data_prep_actor = ray.get_actor(data_prep_actor_name)
+        self.data_prep_actor = ray.get_actor(DATA_PREP_ACTOR_NAME)
         self.tokenizer = tokenizer
         self.num_training_steps = num_training_steps
         self.training_step = 0
@@ -507,11 +606,11 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.current_epoch = epoch
 
     def get_mock_batch(self) -> dict[str, Any]:
-        dummy_qr = torch.tensor([self.tokenizer.pad_token_id, self.tokenizer.eos_token_id], dtype=torch.long)
-        dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-        dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-        dummy_response_mask = torch.zeros_like(dummy_qr)
-        dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+        dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
+        dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
+        dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
+        dummy_response_mask = torch.tensor([[0, 1]], dtype=torch.long)
+        dummy_advantage = torch.tensor([[0.0, 1.0]], dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
             query_responses=[dummy_qr],
@@ -525,13 +624,17 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
+            wait_start_time = time.perf_counter()
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
+            trainer_idle_wait_time = time.perf_counter() - wait_start_time
+            batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
             yield batch_data
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
+    padded_tensor = torch.atleast_2d(padded_tensor)
     if pin_memory and torch.cuda.is_available():
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor
@@ -557,27 +660,64 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
+def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, Any] | None) -> EnvConfig:
+    """Merge base and sample env config into canonical payload.
+    Sample env_config overrides any base env_configs with the same name.
+    """
+    if sample_env_config is None:
+        return base_env_config
+
+    max_steps = sample_env_config.get("max_steps", base_env_config.max_steps)
+
+    merged = dict(base_env_config.env_configs)
+    for sample_entry in sample_env_config.get("env_configs", []):
+        env_name = sample_entry["env_name"]
+        base = merged.get(env_name)
+        is_text_env = sample_entry.get("is_text_env", base.is_text_env if base else False)
+        extra = {k: v for k, v in sample_entry.items() if k not in ("env_name", "is_text_env")}
+        merged_kwargs = {**(base.kwargs if base else {}), **extra}
+        merged[env_name] = EnvConfigEntry(env_name=env_name, is_text_env=is_text_env, kwargs=merged_kwargs)
+
+    return EnvConfig(max_steps=max_steps, env_configs=merged)
+
+
+def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
+    env_metrics: dict[str, dict[str, list[float]]] = {}
+    for rs in rollout_states:
+        info = rs.get("info", {})
+        multi_env_metrics = info.get("env_metrics")
+        if multi_env_metrics is not None:
+            for ename, per_env in multi_env_metrics.items():
+                bucket = env_metrics.setdefault(ename, {})
+                for k, v in per_env.items():
+                    bucket.setdefault(k, []).append(float(v))
+            continue
+
+        ename = info.get("env_name", "unknown")
+        bucket = env_metrics.setdefault(ename, {})
+        for k, v in info.items():
+            if k != "env_name" and isinstance(v, (int, float)):
+                bucket.setdefault(k, []).append(float(v))
+
+    return {
+        f"env/{ename}/{k}": float(np.mean(vals))
+        for ename, metrics in env_metrics.items()
+        for k, vals in metrics.items()
+    }
+
+
 def add_prompt_to_generator(
     example: dict[str, Any],
     epoch_number: int,
     param_prompt_Q: ray_queue.Queue,
     generation_config,
     is_eval: bool,
-    base_env_config: dict | None = None,
+    base_env_config: EnvConfig,
 ) -> None:
     index = int(example["index"])
 
-    # Merge base env_config with per-sample env_config.
-    # 1. Sample has env_config -> merge with base (sample overrides base)
-    # 2. Sample has no env_config but base has env_name -> use base as-is
-    # 3. Neither -> None (non-env sample)
-    env_config = None
     sample_env_config = example.get(ENV_CONFIG_KEY)
-    if sample_env_config is not None:
-        env_config = dict(base_env_config) if base_env_config else {}
-        env_config.update(sample_env_config)
-    elif base_env_config and base_env_config.get("env_name"):
-        env_config = dict(base_env_config)
+    env_config = _merge_env_config(base_env_config, sample_env_config)
 
     param_prompt_Q.put(
         data_types.PromptRequest(
@@ -599,6 +739,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
+    base_env_config: EnvConfig,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -611,7 +752,6 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
-    base_env_config: dict | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -993,8 +1133,8 @@ class DataPreparationActor:
         tool_names: list[str],
         run_name: str,
         model_name: str | None,
+        base_env_config: EnvConfig,
         initial_state: dict | None = None,
-        base_env_config: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1035,14 +1175,20 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
+        self._executor: ThreadPoolExecutor | None = None
+        self._prep_future = None
 
         if initial_state is not None:
-            self.training_step = initial_state["training_step"]
-            self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
-            logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
+            logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
+            self.set_state(initial_state)
+            self.start()
 
+    def start(self):
+        if self._prep_future is not None:
+            return
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
         self._prep_future = self._executor.submit(self._data_preparation_loop)
+        logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
@@ -1067,6 +1213,7 @@ class DataPreparationActor:
             if self.shutdown_requested:
                 return
 
+            generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
                 if self.shutdown_requested:
                     return
@@ -1074,6 +1221,7 @@ class DataPreparationActor:
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
+            generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1118,7 +1266,7 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {}
+                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
                     self.current_prepared_step = step
                 continue
 
@@ -1194,7 +1342,7 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {}
+                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1216,6 +1364,7 @@ class DataPreparationActor:
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "scores": scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
@@ -1247,17 +1396,7 @@ class DataPreparationActor:
                     tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
 
-                env_metrics: dict[str, dict[str, list[float]]] = {}
-                for rs in result.request_info.rollout_states:
-                    info = rs.get("info", {})
-                    ename = info.get("env_name", "unknown")
-                    env_specific_metrics = env_metrics.setdefault(ename, {})
-                    for k, v in info.items():
-                        if k != "env_name" and isinstance(v, (int, float)):
-                            env_specific_metrics.setdefault(k, []).append(float(v))
-                for ename, metrics in env_metrics.items():
-                    for k, vals in metrics.items():
-                        step_metrics[f"env/{ename}/{k}"] = np.mean(vals)
+                step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
@@ -1271,6 +1410,8 @@ class DataPreparationActor:
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
+        if self._prep_future is None:
+            self.start()
         logger.info(
             f"[DataPreparationActor.get_data] rank={rank} requesting step={step}, current_prepared_step={self.current_prepared_step}"
         )
@@ -1305,10 +1446,19 @@ class DataPreparationActor:
 
     def get_state(self) -> dict:
         return {
-            "training_step": self.current_prepared_step + 1,
+            "training_step": self.training_step,
+            "last_consumed_step": self._last_consumed_step,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
 
     def set_state(self, state: dict):
-        self.training_step = state["training_step"]
+        if self._prep_future is not None:
+            raise RuntimeError("Cannot update DataPreparationActor state after preparation has started")
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
+
+        self._last_consumed_step = state.get("last_consumed_step", state["training_step"] - 1)
+        self.training_step = self._last_consumed_step + 1
+
+        logger.info(
+            f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}"
+        )
