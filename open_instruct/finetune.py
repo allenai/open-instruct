@@ -327,8 +327,9 @@ class FlatArguments:
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
         if (
-            self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None)
-        ) or (self.dataset_mixer is not None and self.dataset_mixer_list is not None):
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
+        ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
