@@ -16,11 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -sf $(which podman) /usr/local/bin/docker \
-    && mkdir -p /usr/local/lib/docker/cli-plugins \
     && curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
-       -o /usr/local/lib/docker/cli-plugins/docker-compose \
-    && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+       -o /usr/local/bin/docker-compose \
+    && chmod +x /usr/local/bin/docker-compose \
+    && printf '#!/bin/sh\nif [ "$1" = "compose" ]; then shift; exec docker-compose "$@"; fi\nexec podman "$@"\n' \
+       > /usr/local/bin/docker \
+    && chmod +x /usr/local/bin/docker
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
