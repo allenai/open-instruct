@@ -2,17 +2,20 @@
 
 **Date**: 2026-04-08
 **Branch**: `finbarr/vllm-weight-sync`
-**Experiment**: [01KNQB2A4APPPHK19CWNVGHK7F](https://beaker.org/ex/01KNQB2A4APPPHK19CWNVGHK7F) (failed)
-**W&B run**: [xqt73bw0](https://wandb.ai/ai2-llm/open_instruct_internal/runs/xqt73bw0)
 **vLLM version**: 0.19.0
 **Model**: Qwen/Qwen2.5-7B
 **Config**: 4 vLLM engines x TP=2, DeepSpeed stage 3, 2 nodes x 8 GPUs
 
 ## Summary
 
-We migrated from a custom `WorkerWrap`-based weight sync (using `torch.distributed.broadcast` + `model_runner.model.load_weights`) to vLLM's native `NCCLWeightTransferEngine` API. After the first training step's weight sync, all vLLM engines fail to apply the received weights, producing NaN outputs and crashing.
+We migrated from a custom `WorkerWrap`-based weight sync (using `torch.distributed.broadcast` + `model_runner.model.load_weights`) to vLLM's native `NCCLWeightTransferEngine` API. After the first training step's weight sync, all vLLM engines produce NaN outputs and crash.
 
-## Timeline
+## Experiments
+
+### Experiment 1: Unpatched vLLM 0.19.0
+
+**Experiment**: [01KNQB2A4APPPHK19CWNVGHK7F](https://beaker.org/ex/01KNQB2A4APPPHK19CWNVGHK7F)
+**W&B run**: [xqt73bw0](https://wandb.ai/ai2-llm/open_instruct_internal/runs/xqt73bw0)
 
 | Time | Event | Status |
 |------|-------|--------|
@@ -20,27 +23,61 @@ We migrated from a custom `WorkerWrap`-based weight sync (using `torch.distribut
 | 20:15:52 | Training step 1 starts | OK |
 | 20:16:15 | Training step 1 completes (grad_norm: 7.6e9) | OK |
 | 20:16:16 | Weight sync completes (0.71s, no NCCL errors) | OK |
-| 20:16:16 | `layerwise.py:230` "Failed to load weights" for all modules | FAIL |
+| 20:16:16 | `layerwise.py:230` "Failed to load weights" for ALL modules | FAIL |
 | 20:16:22 | vLLM inference returns NaN | FAIL |
 | 20:16:43 | Experiment crashes | FAIL |
 
-## Root Cause
+Every module type reports failure, including both parametric modules (QKVParallelLinear, etc.) and non-parametric wrappers (SiluAndMul, RotaryEmbedding, etc.).
 
-The NCCL transport succeeds (no errors, completes in 0.71s), but vLLM's internal layerwise weight loader fails to apply the received weights to the model. Every module type reports failure:
+### Experiment 2: Patched vLLM 0.19.0 (layerwise.py hotfix + DEBUG logging)
+
+**Experiment**: [01KNSM92NT1WEWVRQF7E24GNGB](https://beaker.org/ex/01KNSM92NT1WEWVRQF7E24GNGB)
+**W&B run**: [pv1j3lha](https://wandb.ai/ai2-llm/open_instruct_internal/runs/pv1j3lha)
+
+Applied Dockerfile patch from [vllm-project/vllm#38574](https://github.com/vllm-project/vllm/pull/38574): changed `else:` to `elif info.load_numel_total > 0:` in `layerwise.py:230` to suppress warnings for zero-parameter modules. Enabled `VLLM_LOGGING_LEVEL=DEBUG`.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 17:27:33 | Step 0: initial inference with original weights | OK |
+| 17:30:10 | Training step 1 starts | OK |
+| 17:30:33 | Training step 1 completes (grad_norm: 3.4e10) | OK |
+| 17:30:34 | Weight sync completes (0.661s, no NCCL errors) | OK |
+| 17:30:34 | All parametric layers: "Processed" (weights fully received) | OK |
+| 17:30:34 | `RotaryEmbedding: Failed to load weights` (on all engines) | FAIL |
+| 17:30:42 | vLLM inference returns NaN | FAIL |
+| 17:31:08 | Experiment crashes | FAIL |
+
+**Key finding**: With DEBUG logging, all parametric layers successfully receive and apply weights:
 
 ```
-WARNING [layerwise.py:230] Qwen2ForCausalLM: Failed to load weights
-WARNING [layerwise.py:230] Qwen2Model: Failed to load weights
-WARNING [layerwise.py:230] ModuleList: Failed to load weights
-WARNING [layerwise.py:230] Qwen2DecoderLayer: Failed to load weights
-WARNING [layerwise.py:230] Qwen2Attention: Failed to load weights
-WARNING [layerwise.py:230] RotaryEmbedding: Failed to load weights
-WARNING [layerwise.py:230] ApplyRotaryEmb: Failed to load weights
-WARNING [layerwise.py:230] SiluAndMul: Failed to load weights
-WARNING [layerwise.py:230] LogitsProcessor: Failed to load weights
+VocabParallelEmbedding: 272498688 / 272498688 → Processed
+QKVParallelLinear: 8259840 / 8259840 → Processed      (q_proj + k_proj + v_proj + biases, fused)
+RowParallelLinear: 6422528 / 6422528 → Processed       (o_proj)
+MergedColumnParallelLinear: 67895296 / 67895296 → Processed  (gate_proj + up_proj, fused)
+RowParallelLinear: 33947648 / 33947648 → Processed     (down_proj)
+RMSNorm: 3584 / 3584 → Processed
+ParallelLMHead: 272498688 / 272498688 → Processed
 ```
 
-Both TP0 and TP1 workers on all 4 engines fail. The model then runs inference with stale/uninitialized weights, producing NaN.
+The ONLY module that fails is **RotaryEmbedding**. The patch suppressed warnings for truly zero-parameter modules (SiluAndMul, ApplyRotaryEmb, etc.), but RotaryEmbedding has `load_numel_total > 0` because vLLM counts its `inv_freq` buffer as a weight.
+
+## Root Cause Analysis
+
+### Why RotaryEmbedding fails
+
+RotaryEmbedding has an `inv_freq` buffer (not a trainable parameter). We only send `model.named_parameters()` over NCCL, so `inv_freq` is never sent. vLLM's layerwise loader sees `load_numel_total > 0` (from `inv_freq`) but `load_numel == 0` (nothing received), triggering:
+
+```python
+# layerwise.py:228-230
+logger.warning("%s: Failed to load weights", layer.__class__.__name__)
+_place_kernel_tensors(layer, info)
+```
+
+`_place_kernel_tensors` replaces the RotaryEmbedding's `inv_freq` with compiled kernel tensors, corrupting position embeddings and causing NaN output.
+
+### Why the old approach didn't have this problem
+
+The old `WorkerWrap` approach called `model_runner.model.load_weights(weights=[(name, weight)])` for each parameter individually. This never triggered the layerwise reload path — it directly set weights via the model's `load_weights` method, which only touches the parameters you send and leaves everything else intact.
 
 ## How The Old Approach Worked
 
@@ -94,23 +131,19 @@ NCCLWeightTransferEngine.trainer_send_weights(
 )
 ```
 
-The NCCL send completes without error, but `layerwise.py:230` reports "Failed to load weights" for every module on every TP worker.
+The NCCL send completes without error. All parametric layers receive their weights correctly. But `_place_kernel_tensors` is called on RotaryEmbedding (which has an unreceived `inv_freq` buffer), corrupting the model.
 
-## Hypothesis
+## Possible Fixes
 
-The `NCCLWeightTransferEngine` receives the weight data over NCCL correctly, but the layerwise application step inside vLLM fails. Possible causes:
-
-1. **Name mismatch**: HF parameter names (e.g., `model.layers.0.self_attn.q_proj.weight`) may not match what vLLM's layerwise loader expects. The old `load_weights` method handled this mapping; the new engine may not.
-2. **Weight fusion**: vLLM fuses weights internally (e.g., `q_proj`+`k_proj`+`v_proj` → `qkv_proj`, `gate_proj`+`up_proj` → `gate_up_proj`). The old approach sent individual HF weights and `load_weights` handled fusion. The new NCCL engine may expect pre-fused weights.
-3. **TP sharding**: With TP=2, each worker needs a different shard. The old approach broadcast full weights and `load_weights` handled sharding. The new engine's handling of TP sharding during weight application may be broken.
-4. **`packed=False` code path**: We use `packed=False`. There may be a bug in vLLM's unpacked weight application for the NCCL backend.
+1. **Send `inv_freq` as part of the weight update**: Include model buffers (not just parameters) in the NCCL transfer. This would satisfy RotaryEmbedding's expected weight count.
+2. **Suppress `_place_kernel_tensors` for RotaryEmbedding**: Extend the Dockerfile patch to also gate on module type or skip non-parameter buffers.
+3. **Report to vLLM team**: The `NCCLWeightTransferEngine` reload path shouldn't call `_place_kernel_tensors` for modules whose only "weights" are non-trainable buffers like `inv_freq`. This is a vLLM bug separate from #38574.
 
 ## Questions for vLLM Team
 
-1. Does `NCCLWeightTransferEngine` handle the HF → vLLM weight name mapping and fusion internally, or does the caller need to send pre-mapped/pre-fused weights?
-2. Is there a known issue with `packed=False` and TP>1?
-3. What does the "Failed to load weights" warning from `layerwise.py:230` specifically indicate? Is it always a failure, or can it be benign for non-parametric modules?
-4. Is there a recommended example of using `NCCLWeightTransferEngine` for online weight updates (not just checkpoint loading)?
+1. Should `_place_kernel_tensors` be gated on whether the unreceived weights are trainable parameters vs. non-trainable buffers?
+2. Is RotaryEmbedding's `inv_freq` expected to be sent during weight transfer, or should the reload path preserve it from the existing model state?
+3. Is there a recommended example of using `NCCLWeightTransferEngine` for online weight updates (not just checkpoint loading)?
 
 ## Files Changed
 
@@ -118,3 +151,4 @@ The `NCCLWeightTransferEngine` receives the weight data over NCCL correctly, but
 - `open_instruct/vllm_utils.py`: `broadcast_weights_to_vllm()` now uses `NCCLWeightTransferEngine.trainer_send_weights()` instead of `torch.distributed.broadcast()` + `_send_to_vllm()`. Removed custom `init_process_group()`. `LLMRayActor` now uses `init_weight_transfer_engine()` and `update_weights()` instead of `init_process_group()` and `update_weights_batch()`.
 - `open_instruct/vllm_utils_workerwrap.py`: Deleted (was the custom worker extension).
 - Engine creation now uses `weight_transfer_config=WeightTransferConfig(backend="nccl")` instead of `worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap"`.
+- `Dockerfile`: Added hotfix patch for layerwise.py (experiment 2 only).
