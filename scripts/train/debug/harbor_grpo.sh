@@ -69,6 +69,7 @@ uv run python mason.py \
     --save_freq 100 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_enable_prefix_caching \
+    --filter_zero_std_samples false \
     --use_harbor \
     --harbor_agent_name terminus-2 \
     --harbor_environment docker
