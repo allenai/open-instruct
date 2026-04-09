@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     sudo \
     nginx \
-    docker.io \
-    docker-compose-v2 \
+    podman \
     && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf $(which podman) /usr/local/bin/docker
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
