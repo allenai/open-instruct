@@ -1470,6 +1470,14 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
+def _can_log_metric_as_wandb_histogram(value: np.ndarray | list[Any]) -> bool:
+    """Return True if values are numeric and suitable for wandb.Histogram (not strings / object arrays)."""
+    if len(value) == 0:
+        return False
+    arr = np.asanyarray(value)
+    return arr.dtype.kind in ("b", "i", "u", "f")
+
+
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1586,10 +1594,10 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging
-        for key, value in metrics.items():
-            if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics[key] = wandb.Histogram(value)
+        # Convert numeric array/list metrics to wandb histograms (skip strings, tuples, etc.)
+        for key, value in list(metrics.items()):
+            if isinstance(value, np.ndarray | list) and _can_log_metric_as_wandb_histogram(value):
+                metrics[key] = wandb.Histogram(np.asanyarray(value, dtype=np.float64).ravel())
         wandb.log(metrics, step=training_step)
 
     return num_step_tokens

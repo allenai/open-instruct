@@ -1018,6 +1018,18 @@ def accumulate_inference_batches(
         if result.model_step is not None:
             all_model_steps.append(result.model_step)
 
+    if num_prompts_sampled < num_prompts:
+        cap = max_prompts_to_sample if max_prompts_to_sample is not None else "no cap"
+        logger.warning(
+            "[accumulate_inference_batches] Incomplete batch: accepted %s/%s prompts after consuming %s "
+            "generation(s) (max consumable before stop: %s). With active sampling, each filtered prompt still "
+            "counts toward that cap — increase `active_sampling_max_samples_multiplier` if you need a full batch.",
+            num_prompts_sampled,
+            num_prompts,
+            prompts_consumed,
+            cap,
+        )
+
     if len(results) == 0:
         progress_bar.close()
         logging.warning(
