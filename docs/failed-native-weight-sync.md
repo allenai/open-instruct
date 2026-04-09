@@ -194,17 +194,49 @@ Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved 
 | 2 | Yes | No | — | Only RotaryEmbedding | NaN |
 | 3 | Yes (+ sent buffers) | No | 1.41 | Only RotaryEmbedding | NaN |
 | 4 | No | Yes | 50.5e9 | All non-parametric | NaN |
+| 5 | No | No | — | All non-parametric | NaN |
 
-**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`), not by RotaryEmbedding, inv_freq, or bad training weights. Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync.
+**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`), not by RotaryEmbedding, inv_freq, bad training weights, or parameter names. Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync. Experiment 5 confirms parameter names are correct.
 
-## Experiment 5: Parameter name logging (in progress)
+## Experiment 5: Parameter name logging
 
-Adding logging to `_collect_weight_metadata` and `broadcast_weights_to_vllm` to compare parameter names sent by our system vs the working vLLM RLHF example. The working example (`examples/rl/rlhf_nccl.py`) sends names directly from `model.named_parameters()` on a plain `AutoModelForCausalLM`. Our code does the same (no name mapper for Qwen2.5-7B), but through DeepSpeed stage 3 gathering.
+**Experiment**: [01KNSXXVFBJ5T9TKTNF2KB55ZA](https://beaker.org/ex/01KNSXXVFBJ5T9TKTNF2KB55ZA)
+**W&B run**: [0u6i2s20](https://wandb.ai/ai2-llm/open_instruct_internal/runs/0u6i2s20)
 
-Key differences from the working vLLM example:
+Added logging to `_collect_weight_metadata` and `broadcast_weights_to_vllm` to compare parameter names sent by our system vs the working vLLM RLHF example. Did NOT include the layerwise.py hotfix.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 20:14:07 | Job starts | OK |
+| 20:18:22 | Weight sync thread starts | OK |
+| 20:18:45 | First weight sync: 339 params sent, 0.723s | OK |
+| 20:18:45 | Non-parametric modules: "Failed to load weights" | WARN |
+| 20:19:09 | Second weight sync: 339 params sent, 0.673s | OK |
+| 20:19:10 | Non-parametric modules: "Failed to load weights" | WARN |
+| 20:19:11 | vLLM inference returns NaN | FAIL |
+
+Parameter names sent (339 total, all standard HF format):
+```
+First: model.embed_tokens.weight, model.layers.0.self_attn.q_proj.weight, ...
+Last: model.layers.27.mlp.down_proj.weight, model.layers.27.input_layernorm.weight, model.norm.weight, lm_head.weight
+```
+
+These match exactly what `AutoModelForCausalLM.named_parameters()` produces. **Parameter names are ruled out as a cause.**
+
+Key differences from the working vLLM RLHF example remain:
 - Example uses `enforce_eager=True`, we use compiled mode with cudagraphs
 - Example calls `llm.sleep(level=0)` / `llm.wake_up(tags=["scheduling"])` around weight sync
 - Example uses `packed=True`, we use `packed=False`
+
+## What We've Ruled Out (Updated)
+
+1. HF → vLLM name mapping (experiment 2)
+2. `packed=False` bypassing `load_weights()` (code analysis)
+3. NCCL transport (experiments 2-5)
+4. Cudagraph invalidation (code analysis)
+5. Training producing bad weights (experiment 3)
+6. RotaryEmbedding / inv_freq (experiment 4)
+7. Parameter names (experiment 5)
 
 ## Questions for vLLM Team
 
@@ -212,6 +244,14 @@ Key differences from the working vLLM example:
 2. Could `_place_kernel_tensors` on RotaryEmbedding (which restores pre-reload tensors) corrupt the compiled model state, even though RotaryEmbedding's data hasn't changed?
 3. Is there a synchronization gap between `finalize_layerwise_reload()` and the next cudagraph replay?
 4. Has `NCCLWeightTransferEngine` been tested for online RLHF-style repeated weight updates (not just one-shot checkpoint loading)?
+
+## Next Steps
+
+1. **~~Experiment 5~~** ✅ Parameter names match the working vLLM example. Names ruled out.
+2. **Add `enforce_eager=True` + `sleep`/`wake_up`**: The working vLLM RLHF example uses both. Try matching the working example exactly to isolate whether cudagraphs or scheduler state is the issue.
+3. **If eager works, bisect**: Try `enforce_eager=True` without `sleep`/`wake_up`, and vice versa, to identify which one matters.
+4. **Revert to old `WorkerWrap` approach**: If native weight sync is fundamentally broken with compiled mode, fall back to the approach that worked (direct `load_weights()` without layerwise reload).
+5. **Report to vLLM**: File a bug with experiment 3 as the smoking gun (healthy weights, all layers "Processed", still NaN).
 
 ## Files Changed
 

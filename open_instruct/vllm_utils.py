@@ -766,6 +766,12 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
+    def pause_generation(self) -> None:
+        return self._run_async(self.llm_engine.pause_generation(mode="wait"))
+
+    def resume_generation(self) -> None:
+        return self._run_async(self.llm_engine.resume_generation())
+
     def update_weights(self, request_or_names, dtype_names=None, shapes=None, packed=True) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
@@ -1366,10 +1372,13 @@ def broadcast_weights_to_vllm(
     if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
 
+    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+    if is_rank_0:
+        ray.get([engine.pause_generation.remote() for engine in vllm_engines])
+
     if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model)
 
-    is_rank_0 = torch.distributed.get_rank() == 0
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
     use_packed = False
 
