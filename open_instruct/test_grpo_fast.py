@@ -519,6 +519,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
             dataset=mock_dataset,
+            base_env_config=EnvConfig(),
         )
 
         self.assertEqual(reward_metrics["model_step_min"], 10.0)
