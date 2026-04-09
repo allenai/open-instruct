@@ -108,6 +108,7 @@ class VLLMWeightSyncCallback(Callback):
         )
         if refs:
             ray.get(refs)
+        ray.get([engine.wake_up.remote() for engine in self.vllm_engines])
 
 
 @dataclass
