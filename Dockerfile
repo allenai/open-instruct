@@ -13,15 +13,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     nginx \
     podman \
+    ca-certificates \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
     && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
-       -o /usr/local/bin/docker-compose \
-    && chmod +x /usr/local/bin/docker-compose \
-    && printf '#!/bin/sh\nif [ "$1" = "compose" ]; then shift; exec docker-compose "$@"; fi\nexec podman "$@"\n' \
-       > /usr/local/bin/docker \
-    && chmod +x /usr/local/bin/docker
+    && rm -rf /var/lib/apt/lists/*
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
