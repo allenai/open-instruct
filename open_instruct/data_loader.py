@@ -50,6 +50,8 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 
+DATA_PREP_ACTOR_NAME = "data_prep_singleton"
+
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
@@ -436,6 +438,8 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
+    eval_response_length: int | None = None
+    """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -490,6 +494,9 @@ class StreamingDataLoaderConfig:
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if self.eval_response_length is None:
+            self.eval_response_length = self.response_length
+
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -536,7 +543,6 @@ class StreamingDataLoaderConfig:
 
     def build_dataloader(
         self,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         dp_rank: int,
         fs_local_rank: int,
@@ -546,7 +552,6 @@ class StreamingDataLoaderConfig:
     ) -> "StreamingDataLoader":
         """Build a thin wrapper dataloader that pulls from the DataPreparationActor singleton."""
         return StreamingDataLoader(
-            data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             work_dir=work_dir,
             global_batch_size=self.num_unique_prompts_rollout,
@@ -563,7 +568,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
     def __init__(
         self,
         *,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         work_dir: Path | str,
         global_batch_size: int,
@@ -580,7 +584,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             fs_local_rank=fs_local_rank,
         )
 
-        self.data_prep_actor = ray.get_actor(data_prep_actor_name)
+        self.data_prep_actor = ray.get_actor(DATA_PREP_ACTOR_NAME)
         self.tokenizer = tokenizer
         self.num_training_steps = num_training_steps
         self.training_step = 0
@@ -770,6 +774,7 @@ def accumulate_inference_batches(
     all_active_tools = []
     all_scores = []
     all_percent_solved = []
+    all_model_steps = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -887,6 +892,8 @@ def accumulate_inference_batches(
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
+        if result.model_step is not None:
+            all_model_steps.append(result.model_step)
 
     if len(results) == 0:
         logging.warning(
@@ -987,6 +994,11 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    if all_model_steps:
+        model_steps_array = np.array(all_model_steps, dtype=float)
+        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
