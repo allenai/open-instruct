@@ -7,6 +7,7 @@
 
 
 # Workflow
+- Do not create tests unless specifically asked to do this for a feature. Only use tests to verify the effectiveness of created code.
 - When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
