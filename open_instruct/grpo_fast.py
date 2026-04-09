@@ -965,6 +965,8 @@ def setup_runtime_variables(
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
+    if args.eval_pass_at_k < 1:
+        raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1279,6 +1281,11 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
+    # vLLM context must cover prompt + max(train rollout length, local eval length).
+    vllm_max_model_len = streaming_config.max_prompt_token_length + max(
+        streaming_config.response_length, streaming_config.eval_response_length
+    )
+
     # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
@@ -1289,7 +1296,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
-        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
+        vllm_max_model_len,
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
@@ -1391,7 +1398,9 @@ def create_generation_configs(
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, n=1)
+    eval_generation_config = dataclasses.replace(
+        generation_config, n=args.eval_pass_at_k, max_tokens=streaming_config.eval_response_length
+    )
     return {"train": generation_config, "eval": eval_generation_config}
 
 
@@ -1639,6 +1648,7 @@ def maybe_evaluate(
     eval_generation_config,
     model_dims: utils.ModelDims,
     base_env_config: EnvConfig,
+    max_possible_score: float,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1650,15 +1660,28 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
-        # timeout 0.01 if this is not the last training step
-        # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if training_step < args.num_training_steps else 100
+        is_final_step = training_step >= args.num_training_steps
+        num_eval_prompts = len(eval_dataset)
+        # On non-final steps, only evaluate when we have a full batch ready.
+        # This avoids partially draining the queue and losing results.
+        if not is_final_step:
+            queued_results = evaluation_inference_results_Q.qsize()
+            if queued_results < num_eval_prompts:
+                logger.info(
+                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
+                    queued_results,
+                    num_eval_prompts,
+                )
+                return False
+
+        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
+        timeout = 100 if is_final_step else 0.01
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=len(eval_dataset),
+            num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1668,6 +1691,7 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            max_possible_score=max_possible_score,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1677,13 +1701,26 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_pass_at_k_metrics: dict[str, float] = {}
+        scores = np.array(eval_batch.scores)
+        eval_k = eval_generation_config.n
+
+        if scores.size and scores.size % eval_k == 0:
+            scores_per_prompt = scores.reshape(-1, eval_k)
+            correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8
+            eval_pass_at_k_metrics.update(grpo_utils.compute_pass_at_k_metrics(correct_per_prompt))
+        else:
+            logger.warning(
+                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
+            )
         eval_metrics = {
-            "eval/scores": np.array(eval_batch.scores).mean(),
+            "eval/scores": scores.mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
+            **eval_pass_at_k_metrics,
         }
 
         total_tokens = (
@@ -2024,6 +2061,7 @@ def run_training(
             generation_configs["eval"],
             model_dims,
             base_env_config,
+            streaming_config.max_possible_score,
             actor_manager,
         )
 

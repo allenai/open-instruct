@@ -438,6 +438,8 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
+    eval_response_length: int | None = None
+    """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -492,6 +494,9 @@ class StreamingDataLoaderConfig:
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if self.eval_response_length is None:
+            self.eval_response_length = self.response_length
+
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )

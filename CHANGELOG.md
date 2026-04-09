@@ -64,6 +64,7 @@ All notable changes to this project will be documented in this file.
 - Extract shared GRPO metric helpers into `grpo_utils.py` and align `grpo.py` metrics with `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1552).
 - Add a configurable vLLM attention backend option and switch remaining `flash_attention_2` defaults/references to `flash_attention_3` (https://github.com/allenai/open-instruct/pull/1559).
 - Switch back to CUDA 12.8.1, pin `flash-attn-3` to a direct x86_64 wheel URL to avoid flat-index drift to aarch64-only releases (https://github.com/allenai/open-instruct/pull/1560).
+- Added GRPO local eval `pass@k` metrics, plus optional `eval_response_length` handling so eval generations can exceed rollout response length without undersizing vLLM `max_model_len` (https://github.com/allenai/open-instruct/pull/1464).
 - Added other configs to wandb logging so all hyperparams are visible, set beaker name with RUN_NAME for grpo_fast.py (https://github.com/allenai/open-instruct/pull/1554).
 - Updated vLLM to 0.17.1 and torch to 2.10+.
 - Log `optim/grad_norm` in `grpo_fast`, including non-finite DeepSpeed values (`nan`/`inf`) when they occur (https://github.com/allenai/open-instruct/pull/1540).
