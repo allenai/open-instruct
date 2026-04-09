@@ -50,6 +50,8 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 
+DATA_PREP_ACTOR_NAME = "data_prep_singleton"
+
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
@@ -536,7 +538,6 @@ class StreamingDataLoaderConfig:
 
     def build_dataloader(
         self,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         dp_rank: int,
         fs_local_rank: int,
@@ -546,7 +547,6 @@ class StreamingDataLoaderConfig:
     ) -> "StreamingDataLoader":
         """Build a thin wrapper dataloader that pulls from the DataPreparationActor singleton."""
         return StreamingDataLoader(
-            data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             work_dir=work_dir,
             global_batch_size=self.num_unique_prompts_rollout,
@@ -563,7 +563,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
     def __init__(
         self,
         *,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         work_dir: Path | str,
         global_batch_size: int,
@@ -580,7 +579,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             fs_local_rank=fs_local_rank,
         )
 
-        self.data_prep_actor = ray.get_actor(data_prep_actor_name)
+        self.data_prep_actor = ray.get_actor(DATA_PREP_ACTOR_NAME)
         self.tokenizer = tokenizer
         self.num_training_steps = num_training_steps
         self.training_step = 0
