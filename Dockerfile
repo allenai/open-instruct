@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     sudo \
     nginx \
+    docker.io \
+    docker-compose-v2 \
     && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
