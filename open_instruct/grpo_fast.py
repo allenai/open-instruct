@@ -2015,6 +2015,8 @@ class PolicyTrainerRayProcess(RayProcess):
                                 sae_threshold=self.args.sae_threshold,
                                 lam_policy=self.args.gae_lambda,
                                 lam_critic=1.0,
+                                length_adaptive=self.args.length_adaptive_gae,
+                                length_adaptive_alpha=self.args.length_adaptive_gae_alpha,
                             )
                             policy_lambda_used = sae_boundary_frac
                         else:

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Qwen3-4B-Base value pretrain only (1000 steps) with GT conditioning + decoupled + adaptive lambda
-# No SAE (incompatible with length_adaptive_gae)
+# Qwen3-4B-Base value pretrain only (1000 steps) with SAE + GT conditioning + decoupled + adaptive lambda
+# SAE determines where lambda is applied; adaptive lambda determines the value at boundaries
 # 1 node (8 GPUs): 4 learner + 4 vLLM engines, 32 prompts
 DDMM=$(date +"%d%m")
 exp_name=vip_vpretrain_gt_decoupled_ladaptive_${DDMM}_qwen3_4b_math
@@ -82,4 +82,6 @@ uv run python mason.py \
     --gae_lambda 0.95 \
     --vf_clip_range 0.2 \
     --decoupled_gae \
-    --length_adaptive_gae
+    --length_adaptive_gae \
+    --use_sae \
+    --sae_threshold 0.2

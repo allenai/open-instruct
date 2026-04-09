@@ -370,10 +370,6 @@ class ExperimentConfig:
                 raise ValueError("SAE requires --use_value_model to be enabled.")
             if self.sae_threshold <= 0 or self.sae_threshold >= 1:
                 raise ValueError(f"sae_threshold must be in (0, 1), got {self.sae_threshold}")
-            if self.length_adaptive_gae:
-                raise ValueError(
-                    "SAE is incompatible with length_adaptive_gae; SAE replaces per-token lambda control."
-                )
 
 
 def compute_grpo_loss(

@@ -618,11 +618,15 @@ def calculate_advantages_packed_sae_vapo(
     sae_threshold: float = 0.2,
     lam_policy: float = 0.95,
     lam_critic: float = 1.0,
+    length_adaptive: bool = False,
+    length_adaptive_alpha: float = 0.05,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """SAE with decoupled lambda for VAPO-style training.
 
     Critic uses lam_critic=1.0 (standard MC returns, no SAE segmentation).
     Policy uses SAE-style position-dependent lambda at segment boundaries.
+    When length_adaptive=True, the boundary lambda varies per sub-sequence
+    based on response length.
 
     Args:
         values: Value predictions, shape (batch, seq_len)
@@ -634,6 +638,8 @@ def calculate_advantages_packed_sae_vapo(
         sae_threshold: Probability threshold for boundary detection
         lam_policy: Lambda applied at SAE segment boundaries for policy
         lam_critic: Lambda for critic GAE (typically 1.0)
+        length_adaptive: If True, compute per-sub-sequence lambda at boundaries
+        length_adaptive_alpha: Alpha for length-adaptive lambda formula
 
     Returns:
         Tuple of (policy_advantages, critic_returns, avg_boundary_fraction)
@@ -660,10 +666,28 @@ def calculate_advantages_packed_sae_vapo(
     is_boundary = logprobs < log_threshold
     is_boundary = is_boundary & (response_masks > 0)
 
+    # Compute per-position boundary lambda (may vary per sub-sequence if length_adaptive)
+    if length_adaptive:
+        batch_size = values.shape[0]
+        boundary_lam = np.full_like(values, lam_policy, dtype=np.float64)
+        for b in range(batch_size):
+            eos_positions = np.where(dones[b] > 0)[0]
+            start = 0
+            for eos_pos in eos_positions:
+                end = int(eos_pos) + 1
+                seq_resp_len = int(response_masks[b, start:end].sum())
+                seq_lambda = calculate_length_adaptive_lambda(seq_resp_len, length_adaptive_alpha)
+                boundary_lam[b, start:end] = seq_lambda
+                start = end
+    else:
+        boundary_lam = lam_policy
+
     lambda_arr = np.ones_like(values)
     if gen_length > 1:
-        lambda_arr[:, :-1] = np.where(is_boundary[:, 1:], lam_policy, 1.0)
-    lambda_arr[:, -1] = lam_policy
+        lambda_arr[:, :-1] = np.where(
+            is_boundary[:, 1:], boundary_lam if np.isscalar(boundary_lam) else boundary_lam[:, :-1], 1.0
+        )
+    lambda_arr[:, -1] = boundary_lam if np.isscalar(boundary_lam) else boundary_lam[:, -1]
 
     resp_tokens = (response_masks > 0).sum()
     boundary_count = is_boundary.sum()
