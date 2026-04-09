@@ -161,6 +161,18 @@ NCCLWeightTransferEngine.trainer_send_weights(
 6. For RotaryEmbedding (`load_numel == 0`, `load_numel_total > 0`): skips `_layerwise_process`, directly calls `_place_kernel_tensors` (restores original pre-reload tensors)
 7. `finalize_layerwise_reload()` runs, `torch.accelerator.synchronize()`
 
+## Experiment 4: SKIP_TENSORS fix (in progress)
+
+**Experiment**: [01KNSVC32H28S05D61R7GZ30ZA](https://beaker.org/ex/01KNSVC32H28S05D61R7GZ30ZA)
+
+The vLLM team suggested adding `inv_freq` to `SKIP_TENSORS` in `vllm/model_executor/model_loader/reload/meta.py` ([source](https://github.com/vllm-project/vllm/blob/0d310ffbebe588972fb57b84b3ce564c0222ef4e/vllm/model_executor/model_loader/reload/meta.py#L24)). This set controls which tensors are excluded from the layerwise reload's meta device transition and `load_numel_total` tracking. Adding `inv_freq` means:
+
+- RotaryEmbedding's `inv_freq` won't be counted in `load_numel_total`
+- `load_numel_total` will be 0 for RotaryEmbedding → no `_place_kernel_tensors` call
+- `inv_freq` stays in its original CUDA memory untouched throughout the reload
+
+Applied via Dockerfile `sed` patch on `meta.py`. Awaiting results.
+
 ## Questions for vLLM Team
 
 1. All parametric layers show "Processed" with correct element counts, yet inference produces NaN after the first weight sync. Is there a known issue with `_layerwise_process`'s `param.data.copy_()` not correctly updating cudagraph-captured tensor storage?
