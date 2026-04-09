@@ -74,7 +74,7 @@ uv run python mason.py \
     --use_value_model \
     --value_model_ground_truth_conditioning \
     --gt_conditioning_template rollout_context \
-    --rollout_context_num_siblings 4 \
+    --rollout_context_num_siblings 15 \
     --value_learning_rate 2e-6 \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
