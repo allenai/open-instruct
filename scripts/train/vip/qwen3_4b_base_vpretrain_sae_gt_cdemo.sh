@@ -1,9 +1,9 @@
 #!/bin/bash
-# Qwen3-4B-Base value pretrain only (1000 steps) with SAE + rollout_context GT conditioning
-# Uses sibling rollouts (not just GT answer) for conditioning
+# Qwen3-4B-Base value pretrain only with SAE + correct_demo GT conditioning
+# Conditions on one correct sibling rollout (inserted between prompt and response)
 # 1 node (8 GPUs): 4 learner + 4 vLLM engines, 32 prompts
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain_sae_gt_rollout_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain_sae_gt_cdemo_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -73,7 +73,7 @@ uv run python mason.py \
     --push_to_hub False \
     --use_value_model \
     --value_model_ground_truth_conditioning \
-    --gt_conditioning_template rollout_context \
+    --gt_conditioning_template correct_demo \
     --rollout_context_num_siblings 15 \
     --value_learning_rate 2e-6 \
     --value_warmup_steps 100 \
