@@ -110,13 +110,12 @@ Experiment 3 had grad_norm 1.41 (healthy). Steps 1-2 (which use pre-sync weights
 
 ## Remaining Hypothesis
 
-Despite all parametric layers showing "Processed" with correct counts, inference after weight sync produces NaN. The only visible anomaly is `_place_kernel_tensors` being called on RotaryEmbedding. However, this should theoretically be safe — it restores the original pre-reload `inv_freq` tensors which are computed from config and don't change.
+After 4 experiments, we can rule out RotaryEmbedding/inv_freq as the cause (experiment 4 with SKIP_TENSORS didn't help) and rule out bad training weights (experiment 3 with healthy grad_norm 1.41 still NaN'd). The bug is in vLLM's layerwise reload path itself.
 
-Possible causes inside vLLM's layerwise reload:
-1. **`_layerwise_process` copy bug**: The `param.data.copy_()` step may not correctly update cudagraph-captured memory for all layers, despite counts showing complete.
-2. **`_place_kernel_tensors` on RotaryEmbedding**: Although it should just restore original tensors, it may interact badly with the compiled model state (e.g., invalidating a fused kernel that spans attention + rotary).
-3. **Race condition**: The reload may not be fully synchronized before the next inference request replays a cudagraph.
-4. **Materialization side effects**: The layerwise reload moves layers to meta device then back. For RotaryEmbedding, `_place_kernel_tensors` restores original tensors, but any intermediate state corruption during the meta→device transition could persist.
+Most likely causes:
+1. **`_layerwise_process` copy bug**: The `param.data.copy_()` step may not correctly update cudagraph-captured memory for all layers, despite counts showing complete. The copy writes to materialized tensors, but the cudagraph may have captured pointers to the *original* tensor storage that was invalidated during the meta device transition.
+2. **Race condition**: The reload may not be fully synchronized before the next inference request replays a cudagraph. `finalize_layerwise_reload()` calls `torch.accelerator.synchronize()`, but this may not be sufficient if the engine core is in a different process.
+3. **Meta device transition corruption**: The layerwise reload moves all layers to meta device, then materializes them one-by-one. Even though `param.data.copy_()` writes back into the original storage, the meta→device round-trip may lose tensor metadata (strides, storage offsets) that compiled code depends on.
 
 ## How The Old Approach Worked (And Why It Didn't Have This Bug)
 
@@ -161,9 +160,10 @@ NCCLWeightTransferEngine.trainer_send_weights(
 6. For RotaryEmbedding (`load_numel == 0`, `load_numel_total > 0`): skips `_layerwise_process`, directly calls `_place_kernel_tensors` (restores original pre-reload tensors)
 7. `finalize_layerwise_reload()` runs, `torch.accelerator.synchronize()`
 
-## Experiment 4: SKIP_TENSORS fix (in progress)
+## Experiment 4: SKIP_TENSORS fix
 
 **Experiment**: [01KNSVC32H28S05D61R7GZ30ZA](https://beaker.org/ex/01KNSVC32H28S05D61R7GZ30ZA)
+**W&B run**: [32v8cw1k](https://wandb.ai/ai2-llm/open_instruct_internal/runs/32v8cw1k)
 
 The vLLM team suggested adding `inv_freq` to `SKIP_TENSORS` in `vllm/model_executor/model_loader/reload/meta.py` ([source](https://github.com/vllm-project/vllm/blob/0d310ffbebe588972fb57b84b3ce564c0222ef4e/vllm/model_executor/model_loader/reload/meta.py#L24)). This set controls which tensors are excluded from the layerwise reload's meta device transition and `load_numel_total` tracking. Adding `inv_freq` means:
 
@@ -171,7 +171,40 @@ The vLLM team suggested adding `inv_freq` to `SKIP_TENSORS` in `vllm/model_execu
 - `load_numel_total` will be 0 for RotaryEmbedding → no `_place_kernel_tensors` call
 - `inv_freq` stays in its original CUDA memory untouched throughout the reload
 
-Applied via Dockerfile `sed` patch on `meta.py`. Awaiting results.
+Applied via Dockerfile `sed` patch on `meta.py`. **Did NOT include the layerwise.py hotfix from experiment 2.**
+
+| Time | Event | Status |
+|------|-------|--------|
+| 19:30:07 | W&B run starts, Ray cluster connects | OK |
+| 19:33:36 | Weight sync thread starts, training step 1 begins | OK |
+| 19:33:58 | Training step 1 completes (grad_norm: 50,544,750,592) | BAD |
+| 19:33:58 | All parametric layers: "Processed" (weights fully received) | OK |
+| 19:34:23 | Non-parametric modules: "Failed to load weights" (SiluAndMul, Qwen2MLP, ModuleList, RotaryEmbedding, ApplyRotaryEmb, LogitsProcessor) | WARN |
+| 19:34:24 | vLLM inference returns NaN | FAIL |
+
+**Result**: Same NaN failure. The SKIP_TENSORS fix did not help. Non-parametric module warnings reappeared because the layerwise.py hotfix was not included.
+
+Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved that even with healthy grad_norm (1.41), NaN still occurs. The root cause is in the layerwise reload path, not weight quality.
+
+## Summary Across All Experiments
+
+| Exp | layerwise.py hotfix | SKIP_TENSORS inv_freq | grad_norm | Non-param warnings | Result |
+|-----|---------------------|-----------------------|-----------|--------------------|--------|
+| 1 | No | No | 7.6e9 | ALL modules fail | NaN |
+| 2 | Yes | No | — | Only RotaryEmbedding | NaN |
+| 3 | Yes (+ sent buffers) | No | 1.41 | Only RotaryEmbedding | NaN |
+| 4 | No | Yes | 50.5e9 | All non-parametric | NaN |
+
+**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`), not by RotaryEmbedding, inv_freq, or bad training weights. Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync.
+
+## Experiment 5: Parameter name logging (in progress)
+
+Adding logging to `_collect_weight_metadata` and `broadcast_weights_to_vllm` to compare parameter names sent by our system vs the working vLLM RLHF example. The working example (`examples/rl/rlhf_nccl.py`) sends names directly from `model.named_parameters()` on a plain `AutoModelForCausalLM`. Our code does the same (no name mapper for Qwen2.5-7B), but through DeepSpeed stage 3 gathering.
+
+Key differences from the working vLLM example:
+- Example uses `enforce_eager=True`, we use compiled mode with cudagraphs
+- Example calls `llm.sleep(level=0)` / `llm.wake_up(tags=["scheduling"])` around weight sync
+- Example uses `packed=True`, we use `packed=False`
 
 ## Questions for vLLM Team
 

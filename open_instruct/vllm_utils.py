@@ -1316,6 +1316,10 @@ def _collect_weight_metadata(
             shape = getattr(param, "ds_shape", param.shape)
             shapes.append(list(shape))
 
+    logger.info(
+        "[Weight Metadata] %d params. First 5: %s", len(names), list(zip(names[:5], dtype_names[:5], shapes[:5]))
+    )
+    logger.info("[Weight Metadata] Last 5: %s", list(zip(names[-5:], dtype_names[-5:], shapes[-5:])))
     return names, dtype_names, shapes
 
 
@@ -1406,6 +1410,14 @@ def broadcast_weights_to_vllm(
         with ctx:
             if is_rank_0:
                 mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
+                logger.info(
+                    "[Weight Sync] Sending %d params. First 5: %s",
+                    len(mapped_params),
+                    [(n, list(p.shape), str(p.dtype)) for n, p in mapped_params[:5]],
+                )
+                logger.info(
+                    "[Weight Sync] Last 5: %s", [(n, list(p.shape), str(p.dtype)) for n, p in mapped_params[-5:]]
+                )
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return refs
     else:

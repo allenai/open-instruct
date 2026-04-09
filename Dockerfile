@@ -72,16 +72,6 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
-# Hotfix: add inv_freq to SKIP_TENSORS so RotaryEmbedding's buffer is not counted
-# in load_numel_total during layerwise reload. Without this, _place_kernel_tensors
-# is called on RotaryEmbedding after weight sync, corrupting the model and producing NaN.
-# See docs/failed-native-weight-sync.md for full investigation.
-# Remove once vllm includes this fix upstream.
-RUN META=$(find /stage/.venv -path '*/model_loader/reload/meta.py' 2>/dev/null | head -1) && \
-    if [ -n "$META" ]; then \
-    sed -i 's/"expert_local_to_global",/"expert_local_to_global",\n    "inv_freq",/' "$META"; \
-    fi
-
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
