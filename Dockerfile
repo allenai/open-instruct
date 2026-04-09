@@ -72,6 +72,14 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
+# Hotfix for vllm-project/vllm#38574: layerwise.py warns "Failed to load weights"
+# for zero-parameter modules and calls _place_kernel_tensors, corrupting model state.
+# Remove once vllm>=0.19.1 is released.
+RUN LAYERWISE=$(find /stage/.venv -path '*/model_loader/reload/layerwise.py' 2>/dev/null | head -1) && \
+    if [ -n "$LAYERWISE" ]; then \
+    sed -i '/place kernel tensors back as a fallback/{n;s/            else:/            elif info.load_numel_total > 0:  # type: ignore[operator]/;}' "$LAYERWISE"; \
+    fi
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts

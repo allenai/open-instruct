@@ -195,8 +195,9 @@ Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved 
 | 3 | Yes (+ sent buffers) | No | 1.41 | Only RotaryEmbedding | NaN |
 | 4 | No | Yes | 50.5e9 | All non-parametric | NaN |
 | 5 | No | No | — | All non-parametric | NaN |
+| 6 | No | No | — | ALL modules fail | NaN |
 
-**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`), not by RotaryEmbedding, inv_freq, bad training weights, or parameter names. Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync. Experiment 5 confirms parameter names are correct.
+**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`), not by RotaryEmbedding, inv_freq, bad training weights, parameter names, or scheduler state. Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync. Experiment 5 confirms parameter names are correct. Experiment 6 confirms pause/resume doesn't help.
 
 ## Experiment 5: Parameter name logging
 
@@ -228,6 +229,23 @@ Key differences from the working vLLM RLHF example remain:
 - Example calls `llm.sleep(level=0)` / `llm.wake_up(tags=["scheduling"])` around weight sync
 - Example uses `packed=True`, we use `packed=False`
 
+## Experiment 6: pause_generation / resume_generation
+
+**Experiment**: [01KNT1V5B10QNHJQ49FF26CPGG](https://beaker.org/ex/01KNT1V5B10QNHJQ49FF26CPGG)
+**W&B run**: [4rfetzwl](https://wandb.ai/ai2-llm/open_instruct_internal/runs/4rfetzwl)
+
+Added `pause_generation(mode="wait")` before weight sync and `resume_generation()` after, to prevent inference during the layerwise reload. Did NOT include the layerwise.py hotfix.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 21:22:19 | Job starts | OK |
+| 21:25:59 | Weight sync thread starts | OK |
+| 21:26:44 | Weight sync: 339 params sent | OK |
+| 21:26:44 | ALL modules: "Failed to load weights" | FAIL |
+| 21:27:23 | vLLM inference returns NaN | FAIL |
+
+**Result**: Same NaN failure. Pausing/resuming the scheduler around weight sync does not fix the issue. The bug is in the layerwise reload path itself, not a race condition with inflight inference.
+
 ## What We've Ruled Out (Updated)
 
 1. HF → vLLM name mapping (experiment 2)
@@ -237,6 +255,7 @@ Key differences from the working vLLM RLHF example remain:
 5. Training producing bad weights (experiment 3)
 6. RotaryEmbedding / inv_freq (experiment 4)
 7. Parameter names (experiment 5)
+8. Scheduler state / pause-resume (experiment 6)
 
 ## Questions for vLLM Team
 
@@ -247,11 +266,12 @@ Key differences from the working vLLM RLHF example remain:
 
 ## Next Steps
 
-1. **~~Experiment 5~~** ✅ Parameter names match the working vLLM example. Names ruled out.
-2. **Add `enforce_eager=True` + `sleep`/`wake_up`**: The working vLLM RLHF example uses both. Try matching the working example exactly to isolate whether cudagraphs or scheduler state is the issue.
-3. **If eager works, bisect**: Try `enforce_eager=True` without `sleep`/`wake_up`, and vice versa, to identify which one matters.
-4. **Revert to old `WorkerWrap` approach**: If native weight sync is fundamentally broken with compiled mode, fall back to the approach that worked (direct `load_weights()` without layerwise reload).
-5. **Report to vLLM**: File a bug with experiment 3 as the smoking gun (healthy weights, all layers "Processed", still NaN).
+1. ~~Experiment 5~~ ✅ Parameter names match. Names ruled out.
+2. ~~Experiment 6~~ ✅ pause/resume doesn't help. Scheduler state ruled out.
+3. **Experiment 7**: Add layerwise.py hotfix + pause/resume. Test whether the combination helps.
+4. **Experiment 8**: If 7 still NaN's, try `enforce_eager=True` to rule out cudagraph corruption.
+5. **Revert to old `WorkerWrap` approach**: If native weight sync is fundamentally broken, fall back.
+6. **Report to vLLM**: File a bug with all experiment evidence.
 
 ## Files Changed
 
