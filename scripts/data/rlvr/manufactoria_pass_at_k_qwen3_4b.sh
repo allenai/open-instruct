@@ -36,8 +36,8 @@ SPLIT="${SPLIT:-train}"
 
 HF_DATASETS_OWNER="${HF_DATASETS_OWNER:-mnoukhov}"
 # Use ${var-word} (not :-) so PUSH_*="" explicitly skips push for that split.
-PUSH_TRAIN_REPO="${PUSH_TRAIN_REPO-${HF_DATASETS_OWNER}/manufactoria-has-train-qwen3-4b-instruct-pass32}"
-PUSH_TEST_REPO="${PUSH_TEST_REPO-${HF_DATASETS_OWNER}/manufactoria-has-test-qwen3-4b-instruct-pass32}"
+PUSH_TRAIN_REPO="${PUSH_TRAIN_REPO-${HF_DATASETS_OWNER}/manufactoria-has-train-qwen3-4b-instruct-pass32-codex}"
+PUSH_TEST_REPO="${PUSH_TEST_REPO-${HF_DATASETS_OWNER}/manufactoria-has-test-qwen3-4b-instruct-pass32-codex}"
 PRIVATE_FLAG="${PRIVATE_FLAG:-}"
 
 _extra_limit=()
