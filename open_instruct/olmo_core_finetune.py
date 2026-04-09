@@ -130,10 +130,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     global_batch_size_seqs = rank_batch_size_seqs * world_size
 
-    collator = padding_free_collator.TensorDataCollatorWithFlattening(
-        return_position_ids=True,
-        return_flash_attn_kwargs=True,
-        max_seq_length=rank_batch_size_seqs * args.training.max_seq_length,
+    collator = padding_free_collator.PackedSFTCollator(
+        sequence_length=args.training.max_seq_length, pad_token_id=tokenizer.pad_token_id
     )
 
     num_training_steps = len(dataset) // global_batch_size_seqs * args.training.num_epochs

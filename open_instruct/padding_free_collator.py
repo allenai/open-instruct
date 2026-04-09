@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 from transformers import DefaultDataCollator
 
 from open_instruct import tensor_utils
@@ -118,6 +119,69 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             if "seq_idx" in ret:
                 ret["seq_idx"] = tensor_utils.pad_to_length(ret["seq_idx"], self.max_seq_length, pad_value=-1)
         return ret
+
+
+@dataclass
+class PackedSFTCollator:
+    """Collator that bin-packs variable-length SFT examples into fixed-length rows.
+
+    Produces ``[num_rows, sequence_length]`` tensors matching the format expected by
+    olmo-core's ``TransformerTrainModule`` (``input_ids`` + ``label_mask``).
+    """
+
+    sequence_length: int
+    pad_token_id: int
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        sorted_indices = sorted(range(len(features)), key=lambda i: len(features[i]["input_ids"]), reverse=True)
+
+        rows_input_ids: list[list[torch.Tensor]] = []
+        rows_label_mask: list[list[torch.Tensor]] = []
+        rows_remaining: list[int] = []
+
+        for idx in sorted_indices:
+            item = features[idx]
+            input_ids = item["input_ids"]
+            seq_len = len(input_ids)
+            if seq_len > self.sequence_length:
+                input_ids = input_ids[: self.sequence_length]
+                seq_len = self.sequence_length
+
+            if "labels" in item:
+                labels = item["labels"]
+                if len(labels) > self.sequence_length:
+                    labels = labels[: self.sequence_length]
+                label_mask = labels != -100
+            else:
+                label_mask = torch.ones(seq_len, dtype=torch.bool)
+
+            placed = False
+            for row_idx, remaining in enumerate(rows_remaining):
+                if seq_len <= remaining:
+                    rows_input_ids[row_idx].append(input_ids)
+                    rows_label_mask[row_idx].append(label_mask)
+                    rows_remaining[row_idx] -= seq_len
+                    placed = True
+                    break
+
+            if not placed:
+                rows_input_ids.append([input_ids])
+                rows_label_mask.append([label_mask])
+                rows_remaining.append(self.sequence_length - seq_len)
+
+        packed_input_ids = []
+        packed_label_mask = []
+        for row_ids, row_mask in zip(rows_input_ids, rows_label_mask):
+            cat_ids = torch.cat(row_ids)
+            cat_mask = torch.cat(row_mask)
+            pad_len = self.sequence_length - len(cat_ids)
+            if pad_len > 0:
+                cat_ids = F.pad(cat_ids, (0, pad_len), value=self.pad_token_id)
+                cat_mask = F.pad(cat_mask, (0, pad_len), value=False)
+            packed_input_ids.append(cat_ids)
+            packed_label_mask.append(cat_mask)
+
+        return {"input_ids": torch.stack(packed_input_ids), "label_mask": torch.stack(packed_label_mask)}
 
 
 def count_features_within_token_budget(features: list[dict[str, Any]], max_seq_length: int | None) -> int:

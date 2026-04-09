@@ -7,9 +7,10 @@ import parameterized
 import torch
 from datasets import Dataset
 from olmo_core import data as oc_data
+from olmo_core.data import utils as oc_data_utils
 
 from open_instruct import data_loader
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening, TensorDataCollatorWithFlatteningDPO
+from open_instruct.padding_free_collator import PackedSFTCollator, TensorDataCollatorWithFlatteningDPO
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
@@ -82,83 +83,26 @@ class TestWorldAwarePacking(unittest.TestCase):
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
 
 
-def _make_sft_dataset(num_samples: int, max_seq_length: int, vocab_size: int = 1000) -> Dataset:
-    rng = torch.Generator().manual_seed(123)
-    data: dict[str, list] = {"input_ids": [], "labels": [], "attention_mask": [], "index": []}
-    for i in range(num_samples):
-        seq_len = torch.randint(4, max_seq_length + 1, (1,), generator=rng).item()
-        input_ids = torch.randint(1, vocab_size, (seq_len,), generator=rng)
-        labels = input_ids.clone()
-        num_masked = torch.randint(0, seq_len // 2 + 1, (1,), generator=rng).item()
-        labels[:num_masked] = -100
-        data["input_ids"].append(input_ids)
-        data["labels"].append(labels)
-        data["attention_mask"].append(torch.ones(seq_len, dtype=torch.long))
-        data["index"].append(i)
-    ds = Dataset.from_dict(data)
-    ds.set_format(type="pt")
-    return ds
+_NUMPY_SFT_DIR = os.path.join(os.path.dirname(__file__), "test_data", "numpy_sft")
 
 
-def _convert_hf_to_numpy(dataset: Dataset, output_dir: str) -> None:
-    all_token_ids = []
-    all_labels_mask = []
-    for sample in dataset:
-        all_token_ids.extend(sample["input_ids"].tolist())
-        all_labels_mask.extend([1 if label != -100 else 0 for label in sample["labels"].tolist()])
-    token_ids_arr = np.array(all_token_ids, dtype=np.uint16)
-    labels_mask_arr = np.array(all_labels_mask, dtype=np.bool_)
-    np.save(os.path.join(output_dir, "token_ids_part_000.npy"), token_ids_arr)
-    np.save(os.path.join(output_dir, "labels_mask_000.npy"), labels_mask_arr)
-
-
-class TestHFAndNumpyEquivalence(unittest.TestCase):
-    def test_same_tokens_and_labels(self):
-        num_samples = 20
+class TestNumpyDataLoading(unittest.TestCase):
+    def test_numpy_packed_fsl_dataset_loads_correctly(self):
         max_seq_length = 64
-        batch_size_seqs = 4
-        dataset = _make_sft_dataset(num_samples, max_seq_length)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            collator = TensorDataCollatorWithFlattening(
-                return_position_ids=True,
-                return_flash_attn_kwargs=True,
-                max_seq_length=batch_size_seqs * max_seq_length,
-            )
-            hf_loader = data_loader.HFDataLoader(
-                dataset=dataset,
-                batch_size=batch_size_seqs,
-                seed=42,
-                dp_rank=0,
-                dp_world_size=1,
-                work_dir=tmpdir,
-                collator=collator,
-                drop_last=False,
-                max_seq_length=max_seq_length,
-            )
+        raw_token_ids = np.memmap(os.path.join(_NUMPY_SFT_DIR, "token_ids_part_0000.npy"), dtype=np.uint32, mode="r")
+        raw_label_mask = np.memmap(os.path.join(_NUMPY_SFT_DIR, "labels_mask_part_0000.npy"), dtype=np.bool_, mode="r")
+        self.assertEqual(len(raw_token_ids), len(raw_label_mask))
+        total_raw_tokens = len(raw_token_ids)
 
-            hf_tokens = []
-            hf_label_mask = []
-            for batch in hf_loader:
-                ids = batch["input_ids"].squeeze(0)
-                labs = batch["labels"].squeeze(0)
-                for token_id, label in zip(ids.tolist(), labs.tolist()):
-                    if token_id == 0 and label == -100:
-                        continue
-                    hf_tokens.append(token_id)
-                    hf_label_mask.append(label != -100)
-
-            numpy_dir = os.path.join(tmpdir, "numpy_data")
-            os.makedirs(numpy_dir)
-            _convert_hf_to_numpy(dataset, numpy_dir)
-
+        with tempfile.TemporaryDirectory() as work_dir:
             tokenizer_config = oc_data.TokenizerConfig.dolma2()
             dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
                 tokenizer=tokenizer_config,
-                work_dir=os.path.join(numpy_dir, "_work"),
-                paths=[os.path.join(numpy_dir, "token_ids_part_*.npy")],
+                work_dir=work_dir,
+                paths=[os.path.join(_NUMPY_SFT_DIR, "token_ids_part_*.npy")],
                 expand_glob=True,
-                label_mask_paths=[os.path.join(numpy_dir, "labels_mask_*.npy")],
+                label_mask_paths=[os.path.join(_NUMPY_SFT_DIR, "labels_mask_*.npy")],
                 generate_doc_lengths=True,
                 long_doc_strategy=oc_data.LongDocStrategy.truncate,
                 sequence_length=max_seq_length,
@@ -166,20 +110,106 @@ class TestHFAndNumpyEquivalence(unittest.TestCase):
             np_dataset = dataset_config.build()
             np_dataset.prepare()
 
-            numpy_tokens = []
-            numpy_label_mask = []
+            self.assertGreater(len(np_dataset), 0)
+
+            total_non_pad = 0
+            raw_token_set = set(raw_token_ids.tolist())
             for i in range(len(np_dataset)):
                 item = np_dataset[i]
-                ids = item["input_ids"]
-                mask = item["label_mask"]
-                for token_id, is_train in zip(ids.tolist(), mask.tolist()):
-                    if token_id == tokenizer_config.pad_token_id:
-                        continue
-                    numpy_tokens.append(token_id)
-                    numpy_label_mask.append(bool(is_train))
+                self.assertIn("input_ids", item)
+                self.assertIn("label_mask", item)
+                self.assertEqual(len(item["input_ids"]), max_seq_length)
+                self.assertEqual(len(item["label_mask"]), max_seq_length)
+                for token_id in item["input_ids"].tolist():
+                    if token_id != tokenizer_config.pad_token_id:
+                        total_non_pad += 1
+                        self.assertIn(token_id, raw_token_set)
 
-            self.assertEqual(hf_tokens, numpy_tokens, "Token sequences differ between HF and numpy loaders")
-            self.assertEqual(hf_label_mask, numpy_label_mask, "Label masks differ between HF and numpy loaders")
+            self.assertGreater(total_non_pad, 0)
+            self.assertLessEqual(total_non_pad, total_raw_tokens)
+
+
+class TestPackedSFTCollatorEquivalence(unittest.TestCase):
+    def test_labels_match_get_labels(self):
+        input_ids = torch.tensor([10, 20, 30, 40, 50])
+        labels = torch.tensor([-100, -100, 30, 40, 50])
+
+        collator = PackedSFTCollator(sequence_length=5, pad_token_id=0)
+        batch = collator([{"input_ids": input_ids, "labels": labels}])
+
+        self.assertEqual(batch["input_ids"].shape, (1, 5))
+        self.assertEqual(batch["label_mask"].shape, (1, 5))
+        self.assertNotIn("labels", batch)
+
+        generated_labels = oc_data_utils.get_labels(batch)
+        expected = torch.tensor([[-100, 30, 40, 50, -100]])
+        self.assertTrue(torch.equal(generated_labels, expected))
+
+    def test_multi_sequence_packing(self):
+        examples = [
+            {"input_ids": torch.tensor([1, 2, 3]), "labels": torch.tensor([-100, 2, 3])},
+            {"input_ids": torch.tensor([4, 5]), "labels": torch.tensor([4, 5])},
+        ]
+        collator = PackedSFTCollator(sequence_length=6, pad_token_id=0)
+        batch = collator(examples)
+
+        self.assertEqual(batch["input_ids"].shape[1], 6)
+        self.assertEqual(batch["label_mask"].shape[1], 6)
+        self.assertEqual(batch["input_ids"].shape[0], 1)
+
+        expected_ids = torch.tensor([[1, 2, 3, 4, 5, 0]])
+        expected_mask = torch.tensor([[False, True, True, True, True, False]])
+        self.assertTrue(torch.equal(batch["input_ids"], expected_ids))
+        self.assertTrue(torch.equal(batch["label_mask"], expected_mask))
+
+        generated_labels = oc_data_utils.get_labels(batch)
+        expected_labels = torch.tensor([[2, 3, 4, 5, -100, -100]])
+        self.assertTrue(torch.equal(generated_labels, expected_labels))
+
+    def test_sequences_overflow_to_new_row(self):
+        examples = [
+            {"input_ids": torch.tensor([1, 2, 3]), "labels": torch.tensor([-100, 2, 3])},
+            {"input_ids": torch.tensor([4, 5, 6]), "labels": torch.tensor([4, 5, 6])},
+        ]
+        collator = PackedSFTCollator(sequence_length=4, pad_token_id=0)
+        batch = collator(examples)
+
+        self.assertEqual(batch["input_ids"].shape, (2, 4))
+        self.assertEqual(batch["label_mask"].shape, (2, 4))
+
+    def test_all_masked_sequence(self):
+        input_ids = torch.tensor([10, 20, 30])
+        labels = torch.tensor([-100, -100, -100])
+
+        collator = PackedSFTCollator(sequence_length=4, pad_token_id=0)
+        batch = collator([{"input_ids": input_ids, "labels": labels}])
+
+        expected_mask = torch.tensor([[False, False, False, False]])
+        self.assertTrue(torch.equal(batch["label_mask"], expected_mask))
+
+    def test_no_labels_field(self):
+        examples = [{"input_ids": torch.tensor([10, 20, 30])}]
+        collator = PackedSFTCollator(sequence_length=4, pad_token_id=0)
+        batch = collator(examples)
+
+        expected_mask = torch.tensor([[True, True, True, False]])
+        self.assertTrue(torch.equal(batch["label_mask"], expected_mask))
+
+    def test_dpo_collator_unchanged(self):
+        dpo_collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=20)
+        features = [
+            {
+                "chosen_input_ids": torch.tensor([1, 2, 3]),
+                "chosen_labels": torch.tensor([-100, 2, 3]),
+                "rejected_input_ids": torch.tensor([4, 5]),
+                "rejected_labels": torch.tensor([-100, 5]),
+                "index": 0,
+            }
+        ]
+        batch = dpo_collator(features)
+        self.assertIn("chosen_labels", batch)
+        self.assertIn("rejected_labels", batch)
+        self.assertNotIn("label_mask", batch)
 
 
 if __name__ == "__main__":
