@@ -1293,9 +1293,6 @@ def _collect_weight_metadata(
 ) -> tuple[list[str], list[str], list[list[int]]]:
     """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
 
-    Includes both parameters and buffers so that vLLM's layerwise reload can
-    account for non-trainable tensors like RotaryEmbedding.inv_freq.
-
     For DeepSpeed stage 3, uses ds_shape. For FSDP2 DTensors, .shape returns global shape.
     For FSDP1, param.shape returns full shape when parameters are registered (not flat).
     """
@@ -1311,12 +1308,6 @@ def _collect_weight_metadata(
                 names.append(mapped_name)
                 dtype_names.append(str(param.dtype).split(".")[-1])
                 shapes.append(list(param.shape))
-            for name, buf in block.named_buffers():
-                full_name = f"{block_name}.{name}" if block_name else name
-                mapped_name = name_mapper(full_name) if name_mapper else full_name
-                names.append(mapped_name)
-                dtype_names.append(str(buf.dtype).split(".")[-1])
-                shapes.append(list(buf.shape))
     else:
         for name, param in model.named_parameters():
             mapped_name = name_mapper(name) if name_mapper else name
@@ -1324,11 +1315,6 @@ def _collect_weight_metadata(
             dtype_names.append(str(param.dtype).split(".")[-1])
             shape = getattr(param, "ds_shape", param.shape)
             shapes.append(list(shape))
-        for name, buf in model.named_buffers():
-            mapped_name = name_mapper(name) if name_mapper else name
-            names.append(mapped_name)
-            dtype_names.append(str(buf.dtype).split(".")[-1])
-            shapes.append(list(buf.shape))
 
     return names, dtype_names, shapes
 
@@ -1352,10 +1338,9 @@ def _broadcast_weights_ipc(
     with ctx:
         if is_rank_0:
             for engine in vllm_engines:
-                mapped_tensors = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
-                mapped_tensors += [(name_mapper(n) if name_mapper else n, b.data) for n, b in model.named_buffers()]
+                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
-                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_tensors), trainer_args=trainer_args)
+                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
     return []
 
 
@@ -1399,23 +1384,18 @@ def broadcast_weights_to_vllm(
             block.unshard()
             try:
                 if is_rank_0:
-                    block_tensors = [
+                    block_params = [
                         (name_mapper(f"{block_name}.{n}") if name_mapper else f"{block_name}.{n}", p.data)
                         for n, p in block.named_parameters()
                     ]
-                    block_tensors += [
-                        (name_mapper(f"{block_name}.{n}") if name_mapper else f"{block_name}.{n}", b.data)
-                        for n, b in block.named_buffers()
-                    ]
                     NCCLWeightTransferEngine.trainer_send_weights(
-                        iterator=iter(block_tensors), trainer_args=trainer_args
+                        iterator=iter(block_params), trainer_args=trainer_args
                     )
             finally:
                 block.reshard()
         return refs
 
     params = list(model.named_parameters())
-    buffers = list(model.named_buffers())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
     if gather_whole_model:
@@ -1425,9 +1405,8 @@ def broadcast_weights_to_vllm(
             ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
         with ctx:
             if is_rank_0:
-                mapped_tensors = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
-                mapped_tensors += [(name_mapper(n) if name_mapper else n, b.data) for n, b in buffers]
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_tensors), trainer_args=trainer_args)
+                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
+                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return refs
     else:
         for name, param in params:
@@ -1437,10 +1416,4 @@ def broadcast_weights_to_vllm(
                     NCCLWeightTransferEngine.trainer_send_weights(
                         iterator=iter([(mapped_name, param.data)]), trainer_args=trainer_args
                     )
-        for name, buf in buffers:
-            if is_rank_0:
-                mapped_name = name_mapper(name) if name_mapper else name
-                NCCLWeightTransferEngine.trainer_send_weights(
-                    iterator=iter([(mapped_name, buf.data)]), trainer_args=trainer_args
-                )
         return refs
