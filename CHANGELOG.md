@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
+- Use local fixture for AceCode test instead of downloading from HuggingFace (https://github.com/allenai/open-instruct/pull/1593).
 - Now, to disable `max_grad_norm` clipping, set None, not -1 (https://github.com/allenai/open-instruct/pull/1591).
 - Inline GRPO utility functions and rename `ExperimentConfig` to `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/1578).
 - Extract shared OLMo-core config classes and helpers into `olmo_core_utils.py`; refactor DPO to use shared configs (https://github.com/allenai/open-instruct/pull/1576).
@@ -83,6 +84,7 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fix GRPO data prep actor checkpoint resume so resumed runs restore data prep client state and continue from the next unseen learner step (https://github.com/allenai/open-instruct/pull/1523).
 - Fixed dataset cache hashing to include chat template source/content and tokenizer template metadata so dataset caches invalidate when chat templates change (https://github.com/allenai/open-instruct/pull/1497).
 - Fixed `dataset_mixer_list_splits` validation in `dataset_transformation` when multiple splits are provided, and prevent `combined_dataset` index-column conflicts by dropping an existing `index` column before adding a new one (https://github.com/allenai/open-instruct/pull/1494).
 - Fixed GSM8K reward verification for signed final answers by preserving explicit `+` and `-` signs when extracting the last numeric prediction, including boxed negative answers (https://github.com/allenai/open-instruct/pull/1530).
