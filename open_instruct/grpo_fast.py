@@ -1353,7 +1353,6 @@ def weight_sync_thread(
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    vllm_engines: list[ray.actor.ActorHandle],
     resume_training_step: int = 1,
     inflight_updates: bool = False,
 ):
@@ -1399,12 +1398,6 @@ def weight_sync_thread(
                         desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
                         enable=False,
                     )
-
-            ray_get_with_progress(
-                [engine.resume_generation.remote() for engine in vllm_engines],
-                desc="[Weight Sync Thread] Resuming vLLM generation",
-                enable=False,
-            )
 
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
@@ -1824,7 +1817,6 @@ def run_training(
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
-        vllm_engines,
         resume_training_step,
         streaming_config.inflight_updates,
     )
