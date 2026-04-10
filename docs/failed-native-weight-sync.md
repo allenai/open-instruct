@@ -353,11 +353,32 @@ NaN params are predominantly `k_proj`, `v_proj`, `up_proj`, and `gate_proj` weig
 
 This definitively rules out vLLM's layerwise reload as the cause. The bug is in DeepSpeed stage 3's `GatheredParameters`.
 
+## Experiment 16: DS3 shard-level NaN validation
+
+**Experiment**: [01KNW35XSQ0J86D3HBGJ4WD6RB](https://beaker.org/ex/01KNW35XSQ0J86D3HBGJ4WD6RB)
+
+Added `ds_tensor` shard validation before `GatheredParameters` to determine whether NaN is in the shards or introduced by the gather.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 16:22:43 | Job starts | OK |
+| 16:24:44 | Weight sync thread starts | OK |
+| 16:25:16 | Training step 1 completes (grad_norm: 581,990,848) | BAD |
+| 16:25:16 | **NaN in DS3 shards BEFORE gather**: 82 params | **KEY FINDING** |
+| 16:25:17 | BAD WEIGHTS before send (after gather): same 82 params | FAIL |
+
+**Key finding**: The NaN is in the `ds_tensor` shards themselves, not introduced by `GatheredParameters`. The training step produced a catastrophic `grad_norm` of 582M, which caused NaN in the optimizer states and weights.
+
 ## Updated Root Cause
 
-The NaN is **not** in vLLM — it's in the weights that DS3 `GatheredParameters` produces. Training produces valid gradients and optimizer states, but the all-gather that reconstructs full parameters from shards introduces NaN.
+**The NaN is a DS3 training instability, not a weight sync or vLLM bug.** DS3 training with this config produces gradient explosions (grad_norm 582M) that cause NaN in the optimizer states and weight shards. DS2 with identical hyperparameters (experiment 14) is stable.
 
-Next step: check whether the DS3 shards themselves contain NaN (pre-gather), or whether the gather operation introduces it.
+However, experiment 3 (earlier code) had healthy grad_norm (1.41) and still NaN'd. This suggests either:
+1. The grad_norm explosion is intermittent — some runs are unlucky
+2. The earlier experiments had a different bug that was masked by the DS3 training instability
+3. The grad_norm is reported after clipping, but the pre-clip overflow already poisoned optimizer states
+
+The root cause is now clearly **training-side**, not weight-sync-side. vLLM's layerwise reload works correctly when given valid weights (experiments 10-14). The investigation should shift to understanding why DS3 training is unstable with GRPO.
 
 ## Next Steps
 
@@ -366,8 +387,10 @@ Next step: check whether the DS3 shards themselves contain NaN (pre-gather), or 
 3. ~~Add weight validation~~ ✅ Experiment 15 confirmed NaN exists before send, not introduced by vLLM.
 4. ~~Try `.contiguous().clone()` before sending~~ ✅ Tensor layout is fine (no non-contiguous, no views). Problem is NaN values.
 5. **Check DS3 shards pre-gather**: Are `ds_tensor` shards NaN before `GatheredParameters`, or does the gather introduce it?
-6. **Report to DeepSpeed**: File a bug with evidence that `GatheredParameters` produces NaN from valid shards (if confirmed).
-7. **Workaround**: If shards are clean but gather corrupts, try per-parameter gathering instead of whole-model gathering.
+6. ~~Check DS3 shards pre-gather~~ ✅ Experiment 16 confirmed shards are NaN before gather. Training itself produces NaN weights under DS3.
+7. **Investigate DS3 training instability**: Why does DS3 produce grad_norm 582M while DS2 is stable with same hyperparameters? Check loss function, gradient accumulation, mixed precision handling differences between DS2 and DS3.
+8. **Re-run DS3 with `--fused_optimizer False`**: The fused optimizer might handle NaN differently under DS3.
+9. **Add gradient NaN detection**: Check gradients for NaN before the optimizer step to determine if NaN originates in the backward pass or optimizer.
 
 ## Files Changed
 
