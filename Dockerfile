@@ -16,17 +16,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Docker CLI (static binary) + buildx plugin for Harbor.
+# Install Docker CLI + buildx plugin for Harbor.
 RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz -o docker.tgz \
     && tar xzvf docker.tgz --strip 1 -C /usr/local/bin docker/docker \
     && rm docker.tgz \
     && mkdir -p /usr/local/lib/docker/cli-plugins \
     && curl -fsSL https://github.com/docker/buildx/releases/download/v0.26.1/buildx-v0.26.1.linux-amd64 \
        -o /usr/local/lib/docker/cli-plugins/docker-buildx \
-    && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx \
-    && curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
-       -o /usr/local/lib/docker/cli-plugins/docker-compose \
-    && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+
+# Install podman-compose and symlink docker → podman for Beaker nodes.
+RUN uv pip install --no-cache-dir --system podman-compose \
+    && ln -sf $(which podman) /usr/local/bin/docker
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
