@@ -1,3 +1,4 @@
+import gzip
 import os
 import tempfile
 import unittest
@@ -5,11 +6,13 @@ import unittest
 import numpy as np
 import parameterized
 import torch
+import torch.nn.functional as F
 from datasets import Dataset
 from olmo_core import data as oc_data
 from olmo_core.data import utils as oc_data_utils
+from olmo_core.data.utils import InstancePacker
 
-from open_instruct import data_loader
+from open_instruct import data_loader, dataset_transformation
 from open_instruct.padding_free_collator import PackedSFTCollator, TensorDataCollatorWithFlatteningDPO
 
 
@@ -210,6 +213,182 @@ class TestPackedSFTCollatorEquivalence(unittest.TestCase):
         self.assertIn("chosen_labels", batch)
         self.assertIn("rejected_labels", batch)
         self.assertNotIn("label_mask", batch)
+
+
+def _convert_to_numpy(dataset: Dataset, output_dir: str) -> None:
+    token_ids: list[int] = []
+    labels_mask: list[int] = []
+    document_boundaries: list[tuple[int, int]] = []
+    current_position = 0
+
+    for i in range(len(dataset)):
+        sample = dataset[i]
+        sample_ids = sample["input_ids"].tolist()
+        sample_labels = sample["labels"].tolist()
+        sample_length = len(sample_ids)
+
+        token_ids.extend(sample_ids)
+        labels_mask.extend([1 if label != -100 else 0 for label in sample_labels])
+        document_boundaries.append((current_position, current_position + sample_length))
+        current_position += sample_length
+
+    mmap_ids = np.memmap(
+        os.path.join(output_dir, "token_ids_part_0000.npy"), mode="w+", dtype=np.uint32, shape=(len(token_ids),)
+    )
+    mmap_ids[:] = token_ids
+    mmap_ids.flush()
+
+    mmap_mask = np.memmap(
+        os.path.join(output_dir, "labels_mask_part_0000.npy"), mode="w+", dtype=np.bool_, shape=(len(labels_mask),)
+    )
+    mmap_mask[:] = labels_mask
+    mmap_mask.flush()
+
+    with gzip.open(os.path.join(output_dir, "token_ids_part_0000.csv.gz"), "wt") as f:
+        for start, end in document_boundaries:
+            f.write(f"{start},{end}\n")
+
+
+class OBFDCollator:
+    """Collator that uses olmo-core's OBFD packing algorithm.
+
+    This replicates the packing logic of NumpyPackedFSLDataset so that
+    HFDataLoader produces batches identical to the numpy path.
+    """
+
+    def __init__(self, sequence_length: int, pad_token_id: int):
+        self.sequence_length = sequence_length
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, features: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        lengths = np.array([len(f["input_ids"]) for f in features])
+        doc_indices = np.zeros((len(features), 2), dtype=np.uint64)
+        pos = 0
+        for i, length in enumerate(lengths):
+            doc_indices[i] = [pos, pos + length]
+            pos += length
+
+        packer = InstancePacker(self.sequence_length)
+        instances, sorted_doc_indices, _ = packer.pack_documents(doc_indices)
+
+        sorted_lengths = sorted_doc_indices[:, 1] - sorted_doc_indices[:, 0]
+        original_sort_order = np.argsort(-1 * lengths.astype(np.int64))
+
+        packed_input_ids = []
+        packed_label_mask = []
+        for instance in instances:
+            row_ids = []
+            row_mask = []
+            for sorted_doc_id in instance:
+                original_idx = original_sort_order[sorted_doc_id]
+                f = features[original_idx]
+                ids = f["input_ids"]
+                doc_len = int(sorted_lengths[sorted_doc_id])
+                ids = ids[:doc_len]
+                if "labels" in f:
+                    labels = f["labels"][:doc_len]
+                    mask = labels != -100
+                else:
+                    mask = torch.ones(doc_len, dtype=torch.bool)
+                row_ids.append(ids)
+                row_mask.append(mask)
+
+            cat_ids = torch.cat(row_ids)
+            cat_mask = torch.cat(row_mask)
+            cat_ids = F.pad(cat_ids, (0, self.sequence_length - len(cat_ids)), value=self.pad_token_id)
+            cat_mask = F.pad(cat_mask, (0, self.sequence_length - len(cat_mask)), value=False)
+            packed_input_ids.append(cat_ids)
+            packed_label_mask.append(cat_mask)
+
+        return {
+            "input_ids": torch.stack(packed_input_ids),
+            "label_mask": torch.stack(packed_label_mask),
+            "index": torch.tensor([f["index"] for f in features]),
+        }
+
+
+class TestHFNumpyEquivalence(unittest.TestCase):
+    def test_batches_match(self):
+        sequence_length = 4096
+        num_examples = 100
+
+        tc = dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="allenai/OLMo-2-1124-7B", chat_template_name="olmo"
+        )
+        oc_tokenizer_config = oc_data.TokenizerConfig.dolma2()
+        pad_token_id = tc.tokenizer.pad_token_id
+
+        dataset = dataset_transformation.get_cached_dataset_tulu(
+            dataset_mixer_list=["allenai/tulu-3-sft-olmo-2-mixture-0225", str(num_examples)],
+            dataset_mixer_list_splits=["train"],
+            tc=tc,
+            dataset_transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            transform_fn_args=[{"max_seq_length": sequence_length}, {}],
+            target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
+            dataset_cache_mode="local",
+            dataset_skip_cache=True,
+        )
+        if "index" not in dataset.column_names:
+            dataset = dataset.add_column("index", list(range(len(dataset))))
+        dataset.set_format(type="pt")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hf_work_dir = os.path.join(tmpdir, "hf_work")
+            os.makedirs(hf_work_dir)
+            numpy_dir = os.path.join(tmpdir, "numpy")
+            os.makedirs(numpy_dir)
+            np_work_dir = os.path.join(tmpdir, "np_work")
+            os.makedirs(np_work_dir)
+
+            collator = OBFDCollator(sequence_length=sequence_length, pad_token_id=pad_token_id)
+            hf_loader = data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=len(dataset),
+                seed=42,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=hf_work_dir,
+                collator=collator,
+                drop_last=False,
+                max_seq_length=sequence_length,
+            )
+
+            generator = torch.Generator().manual_seed(42)
+            shuffled_indices = torch.randperm(len(dataset), generator=generator).tolist()
+            shuffled_dataset = dataset.select(shuffled_indices)
+            shuffled_dataset.set_format(type="pt")
+            _convert_to_numpy(shuffled_dataset, numpy_dir)
+
+            np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
+                tokenizer=oc_tokenizer_config,
+                work_dir=np_work_dir,
+                paths=[os.path.join(numpy_dir, "token_ids_part_*.npy")],
+                expand_glob=True,
+                label_mask_paths=[os.path.join(numpy_dir, "labels_mask_*.npy")],
+                generate_doc_lengths=True,
+                long_doc_strategy=oc_data.LongDocStrategy.truncate,
+                sequence_length=sequence_length,
+            )
+            np_dataset = np_dataset_config.build()
+            np_dataset.prepare()
+
+            hf_batch = next(iter(hf_loader))
+            hf_ids = hf_batch["input_ids"]
+            hf_mask = hf_batch["label_mask"]
+
+            np_ids_list = []
+            np_mask_list = []
+            for i in range(len(np_dataset)):
+                item = np_dataset[i]
+                np_ids_list.append(item["input_ids"])
+                np_mask_list.append(item["label_mask"])
+            np_ids = torch.stack(np_ids_list)
+            np_mask = torch.stack(np_mask_list)
+
+            self.assertEqual(hf_ids.shape, np_ids.shape, f"Shape mismatch: HF {hf_ids.shape} vs numpy {np_ids.shape}")
+            self.assertEqual(hf_mask.shape, np_mask.shape)
+            self.assertTrue(torch.equal(hf_ids, np_ids), "input_ids mismatch between HF and numpy paths")
+            self.assertTrue(torch.equal(hf_mask, np_mask), "label_mask mismatch between HF and numpy paths")
 
 
 if __name__ == "__main__":
