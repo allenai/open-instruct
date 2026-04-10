@@ -9,7 +9,7 @@ uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
-       --description "Minimal weight sync NaN repro (AsyncLLMEngine + TP=1 + packed=False)" \
+       --description "Minimal weight sync NaN repro (LLM + TP=2 + packed=False)" \
        --pure_docker_mode \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
@@ -18,6 +18,6 @@ uv run python mason.py \
        --max_retries 0 \
        --timeout 15m \
        --budget ai2/oe-adapt \
-       --gpus 2 \
+       --gpus 8 \
        --no_auto_dataset_cache \
-       -- TP_SIZE=1 python scripts/debug/minimal_weight_sync_repro.py
+       -- python scripts/debug/minimal_weight_sync_repro.py

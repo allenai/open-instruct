@@ -29,13 +29,15 @@ from vllm.distributed.weight_transfer.nccl_engine import (
 from vllm.utils.network_utils import get_ip, get_open_port
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-1.5B")
+TP_SIZE = int(os.environ.get("TP_SIZE", "2"))
 USE_PACKED = os.environ.get("USE_PACKED", "false").lower() == "true"
 LOAD_FORMAT = os.environ.get("LOAD_FORMAT", "auto")
 
 
 class MyLLM(LLM):
-    def __init__(self, *args, **kwargs):
-        os.environ["VLLM_RAY_BUNDLE_INDICES"] = "0"
+    def __init__(self, *args, bundle_indices=None, **kwargs):
+        if bundle_indices is not None:
+            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
         super().__init__(*args, **kwargs)
 
 
@@ -83,11 +85,11 @@ class TrainModel:
 
 ray.init()
 
-print(f"Model: {MODEL_NAME}, packed={USE_PACKED}, load_format={LOAD_FORMAT}")
+print(f"Model: {MODEL_NAME}, TP={TP_SIZE}, packed={USE_PACKED}, load_format={LOAD_FORMAT}")
 
 train_model = TrainModel.remote(MODEL_NAME)
 
-pg_inference = placement_group([{"GPU": 1, "CPU": 0}])
+pg_inference = placement_group([{"GPU": 1, "CPU": 0}] * TP_SIZE)
 ray.get(pg_inference.ready())
 scheduling_inference = PlacementGroupSchedulingStrategy(
     placement_group=pg_inference,
@@ -102,10 +104,11 @@ llm = ray.remote(
 )(MyLLM).remote(
     model=MODEL_NAME,
     enforce_eager=True,
-    tensor_parallel_size=1,
+    tensor_parallel_size=TP_SIZE,
     distributed_executor_backend="ray",
     weight_transfer_config=WeightTransferConfig(backend="nccl"),
     load_format=LOAD_FORMAT,
+    bundle_indices=list(range(TP_SIZE)),
 )
 
 prompts = [
