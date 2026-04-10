@@ -529,17 +529,11 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     for idx in range(len(command)):
         if "{" in command[idx]:
             command[idx] = "'" + command[idx] + "'"
-    full_command = command
-    setup_commands = ""
-    if not args.pure_docker_mode:
-        setup_commands = f"cd {os.getcwd()} && "
-
-    join_full_command = " ".join(full_command)
-    # override accelerate call
+    joined_command = " ".join(command)
     if args.num_nodes > 1:
-        if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
+        if "--num_processes" not in joined_command and "accelerate" in joined_command:
             raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
-        join_full_command = re.sub(
+        joined_command = re.sub(
             r"--num_processes (\d+)",
             lambda m: (
                 f"--num_processes {int(m.group(1)) * args.num_nodes} "
@@ -548,9 +542,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 "--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME "
                 "--main_process_port 29400 "
             ),
-            join_full_command,
+            joined_command,
         )
-    full_command = setup_commands + join_full_command
+
+    setup_commands = ""
+    if not args.pure_docker_mode:
+        setup_commands = f"cd {os.getcwd()} && "
+    full_command = setup_commands + joined_command
     console.log("🔍🔍🔍 Full command")
     print(full_command)
     return full_command
