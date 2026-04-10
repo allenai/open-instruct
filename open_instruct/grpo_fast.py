@@ -42,7 +42,7 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
-from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
@@ -70,7 +70,7 @@ import torch.utils
 import torch.utils.data
 import wandb
 from datasets import Dataset
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, snapshot_download
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -79,7 +79,7 @@ from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils, model_utils, vllm_utils
+from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
@@ -100,6 +100,7 @@ from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, 
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
+    estimate_kl,
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
@@ -108,6 +109,7 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
+    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
@@ -130,43 +132,13 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
-
-def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
-    if checkpoint_state is None:
-        return None
-
-    data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
-    if data_prep_actor_state is None:
-        return None
-
-    resume_state = dict(data_prep_actor_state)
-    last_consumed_step = resume_state.get("last_consumed_step")
-    if last_consumed_step is None:
-        trainer_training_step = checkpoint_state.get("training_step")
-        if trainer_training_step is None:
-            raise ValueError("Checkpoint is missing both data prep actor progress and training_step")
-        last_consumed_step = trainer_training_step - 1
-        logger.warning(
-            "Checkpoint is missing data_prep_actor_state.last_consumed_step; "
-            "falling back to training_step-derived resume state"
-        )
-
-    resume_state["last_consumed_step"] = last_consumed_step
-    resume_state["training_step"] = last_consumed_step + 1
-    return resume_state
-
-
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
-EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
-def _build_vlm_name_mapper(model_name: str):
-    """Sometimes we have different weight names btw vLLM and HF, so we build
-    a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in vLLM but not HF."""
-    if "qwen3.5" in model_name.lower():
-        return lambda name: f"language_model.{name}"
-    return None
+def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
+    for i in range(len(tensors_list)):
+        tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
 @ray.remote(num_gpus=1)
@@ -178,9 +150,10 @@ class PolicyTrainerRayProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
-        args: grpo_utils.GRPOExperimentConfig,
+        args: grpo_utils.ExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
+        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
@@ -193,6 +166,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.world_size = world_size
         self.local_rank = local_rank
         self.dp_world_size = world_size // args.sequence_parallel_size
+        self._data_prep_actor_name = data_prep_actor_name
 
     def get_dataloader_state(self) -> dict[str, Any]:
         return self._streaming_dataloader.state_dict()
@@ -202,12 +176,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def from_pretrained(
         self,
-        args: grpo_utils.GRPOExperimentConfig,
+        args: grpo_utils.ExperimentConfig,
         model_config: ModelConfig,
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-    ) -> dict[str, Any]:
+    ) -> int:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -257,7 +231,6 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
-        ds_config["checkpoint"] = {"load_universal": args.deepspeed_checkpoint_load_universal}
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
@@ -268,22 +241,23 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
-        self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            dtype=torch.bfloat16,
-            attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
-        )
+        # set sequence parallel
+        # note this returns None if sequence_parallel_size == 1
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-            model_name_or_path=self.policy,
-            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            model_name_or_path=model_config.model_name_or_path,
+            core_attn_implementation=model_config.attn_implementation,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-        self._model_name_or_path = model_config.model_name_or_path
-        self.policy.config.use_cache = False
+        self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+            model_config.model_name_or_path,
+            revision=model_config.model_revision,
+            dtype=torch.bfloat16,
+            attn_implementation=model_config.attn_implementation,
+            use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+        )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -292,11 +266,13 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = self.policy.parameters()
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
-        warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
+        warm_up_steps = args.warm_up_steps
+        if args.warmup_ratio > 0.0:
+            warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=warmup_steps,
+            num_warmup_steps=warm_up_steps,
             num_training_steps=num_scheduler_steps,
         )
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -308,7 +284,6 @@ class PolicyTrainerRayProcess(RayProcess):
             mpu=self.mpu,
         )
         optimization_steps_done = 0
-        checkpoint_state = None
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
@@ -329,7 +304,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
-                checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
                 rng_states = states["rng_states"]
@@ -413,6 +387,7 @@ class PolicyTrainerRayProcess(RayProcess):
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
         self._streaming_dataloader = streaming_config.build_dataloader(
+            data_prep_actor_name=self._data_prep_actor_name,
             tokenizer=tokenizer,
             dp_rank=dp_rank,
             fs_local_rank=self.local_rank,
@@ -422,7 +397,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.dataloader = iter(self._streaming_dataloader)
 
-        return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
+        return optimization_steps_done
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -472,8 +447,8 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            deepspeed_stage=self.args.deepspeed_stage,
             gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
 
     def update_ref_policy(self):
@@ -505,12 +480,30 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
-    def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor) -> None:
-        metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
-        for k, v in metrics.items():
-            self.local_metrics[k] = v
-        self.local_metrics["_token_count"] = token_counts.sum().item()
+    def _compute_loss_metrics(
+        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
+    ) -> dict[str, float]:
+        """Compute weighted average metrics from per-batch loss statistics."""
+        token_counts = loss_stats_B["token_count"]
+        total_tokens = token_counts.sum()
+        # Zero weights when no tokens - all weighted sums become 0
+        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
+
+        if self.args.load_ref_policy:
+            for j in range(4):
+                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
+            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
+        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
+        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
+        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
+        weighted_mean_ratio = self.local_metrics["val/ratio"]
+        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
+        if self.args.record_entropy:
+            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+        self.local_metrics["_token_count"] = total_valid_tokens
 
     def step(self):
         """Execute one training step: fetch data from the dataloader and train on it.
@@ -529,7 +522,8 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
-        data_BT = data_BT.to(self.device)
+        for f in dataclasses.fields(data_BT):
+            to_device_inplace(getattr(data_BT, f.name), self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
@@ -561,10 +555,14 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
+                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                        vllm_old_logprob_BT = torch.masked_fill(
+                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
+                        )
+                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
+
                         if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
-                            )
+                            old_logprobs_BT[i] = vllm_old_logprob_BT
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
@@ -575,11 +573,20 @@ class PolicyTrainerRayProcess(RayProcess):
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
         # This only needs to be done once since response_masks don't change across epochs
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
+        total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
-        grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
+            loss_stats_B: dict[str, torch.Tensor] = {
+                "kl": torch.zeros(4, num_samples, device=device),
+                "kl_loss": torch.zeros(num_samples, device=device),
+                "pg_clipfrac": torch.zeros(num_samples, device=device),
+                "pg_loss": torch.zeros(num_samples, device=device),
+                "loss": torch.zeros(num_samples, device=device),
+                "ratio": torch.zeros(num_samples, device=device),
+                "entropy": torch.zeros(num_samples, device=device),
+                "token_count": token_counts_per_sample,
+            }
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -605,8 +612,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
-                    local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
-                    vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
+                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
+                    vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
+                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
+                    vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
@@ -630,25 +639,66 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     new_logprobs_BT = local_logprobs_BT
 
-                    old_logprob_BT = grpo_utils.resolve_old_logprob(
-                        old_logprobs_BT,
-                        i,
-                        epoch_idx,
-                        num_mini_batches,
-                        self.args.use_vllm_logprobs,
-                        vllm_logprobs_BT,
-                        local_logprobs_BT,
+                    # Cache the old logprobs
+                    if num_mini_batches > 1:
+                        old_logprob_BT = old_logprobs_BT[i]
+                    else:
+                        with torch.no_grad():
+                            if epoch_idx == 0:
+                                if self.args.use_vllm_logprobs:
+                                    old_logprobs_BT[i] = vllm_logprobs_BT
+                                else:
+                                    old_logprobs_BT[i] = local_logprobs_BT.detach()
+                            old_logprob_BT = old_logprobs_BT[i]
+
+                    old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                    assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
+                        f"Old logprobs mask should match response mask. "
+                        f"old_mask sum={old_logprobs_mask_BT.sum()}, "
+                        f"response_mask sum={response_mask_BT.sum()}"
                     )
 
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
-                        old_logprob_BT,
-                        vllm_logprobs_BT,
-                        response_mask_BT,
-                        self.args.truncated_importance_sampling_ratio_cap,
-                    )
+                    # Apply truncated importance sampling if enabled
+                    tis_imp_ratio_BT = None
+                    if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
+                        old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                        vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
+
+                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
+                            f"Old logprobs mask should match response mask. "
+                            f"old_mask sum={old_logprobs_mask_BT.sum()}, "
+                            f"response_mask sum={response_mask_BT.sum()}"
+                        )
+                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
+                            f"vLLM logprobs mask should match response mask. "
+                            f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
+                            f"response_mask sum={response_mask_BT.sum()}"
+                        )
+
+                        valid_mask_BT = response_mask_BT
+                        # Initialize importance ratio to 1.0 (no effect) for all positions
+                        tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
+
+                        if valid_mask_BT.any():
+                            # Calculate logprob difference only for valid positions
+                            logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
+                            # Clamp to prevent numerical overflow in exp
+                            logprob_diff_is_BT = torch.where(
+                                valid_mask_BT,
+                                logprob_diff_is_BT.clamp(-10.0, 10.0),
+                                torch.zeros_like(logprob_diff_is_BT),
+                            )
+                            # Compute importance ratio only for valid positions
+                            tis_imp_ratio_BT = torch.where(
+                                valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
+                            )
+                            # Apply cap
+                            tis_imp_ratio_BT = torch.clamp(
+                                tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
+                            )
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -656,7 +706,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_clamped_BT,
+                        tis_weights=tis_imp_ratio_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -675,29 +725,26 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
-                        grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
-                    grpo_utils.populate_sample_loss_stats(
-                        loss_stats_B,
-                        i,
-                        pg_losses_BT,
-                        pg_losses2_BT,
-                        pg_loss_max_BT,
-                        ratio_BT,
-                        loss,
-                        response_mask_BT,
-                        new_logprobs_BT,
-                        ref_logprobs_BT[i] if self.args.load_ref_policy else None,
-                        entropy_BT,
-                        self.args,
-                        tis_clamped=tis_clamped_BT,
-                        tis_unclamped=tis_unclamped_BT,
-                    )
+                    with torch.no_grad():
+                        if self.args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprobs_BT[i]).clamp(-40.0, 40.0)
+                            kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
+                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
+                            loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
+                        loss_stats_B["pg_clipfrac"][i] = masked_mean(
+                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
+                        )
+                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
+                        loss_stats_B["loss"][i] = loss
+                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
+                        if self.args.record_entropy:
+                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
-                self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
-                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
+                self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -849,6 +896,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
                 stop_strings=streaming_config.stop_strings,
+                gs_bucket_path=args.gs_bucket_path,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,
@@ -863,9 +911,10 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
-        args: grpo_utils.GRPOExperimentConfig,
+        args: grpo_utils.ExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
+        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
         self.pg = pg
@@ -881,7 +930,7 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, tokenizer)
+        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, data_prep_actor_name, tokenizer)
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -914,7 +963,18 @@ class ModelGroup:
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(world_size, rank, 0, master_addr, master_port, args, streaming_config, vllm_config, tokenizer)
+            ).remote(
+                world_size,
+                rank,
+                0,
+                master_addr,
+                master_port,
+                args,
+                streaming_config,
+                vllm_config,
+                data_prep_actor_name,
+                tokenizer,
+            )
             self.models.append(worker_policy)
 
 
@@ -956,17 +1016,15 @@ def validate_configs(
 
 
 def setup_runtime_variables(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     tools_config: EnvsConfig,
-) -> grpo_utils.GRPOExperimentConfig:
+) -> grpo_utils.ExperimentConfig:
     """Set up runtime variables for the experiment."""
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
-    if args.eval_pass_at_k < 1:
-        raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -995,27 +1053,21 @@ def setup_runtime_variables(
     return args
 
 
-def setup_experiment_tracking(
-    args: grpo_utils.GRPOExperimentConfig,
-    tc: TokenizerConfig,
-    model_config: ModelConfig,
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    vllm_config: data_loader_lib.VLLMConfig,
-):
+def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     """Setup experiment tracking and seeds."""
     all_configs = {}
-    if (beaker_config := maybe_get_beaker_config()) is not None:
+    beaker_config = None
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
-    all_configs.update(**asdict(vllm_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
 
     wandb_url = None
     if args.with_tracking:
         wandb.init(
-            project=args.wandb_project,
+            project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
-            group=args.wandb_group_name,
             name=args.run_name,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
@@ -1040,7 +1092,7 @@ def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | 
 
 
 def setup_datasets(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1189,7 +1241,7 @@ def build_base_env_config(tools_config: EnvsConfig, pools: dict[str, ray.actor.A
 
 
 def create_model_and_optimizer(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     beaker_config: BeakerRuntimeConfig,
@@ -1205,19 +1257,13 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     base_env_config: EnvConfig,
+    data_prep_actor_state: dict | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
-    ModelGroup,
-    list[vllm_utils.LLMRayActor],
-    int,
-    int,
-    ray.actor.ActorHandle,
-    utils.ModelDims,
-    ray.actor.ActorHandle,
-    dict[str, Any] | None,
+    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -1236,9 +1282,8 @@ def create_model_and_optimizer(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     # Create DataPreparationActor FIRST so StreamingDataLoader can find it
-    _data_prep_actor = data_loader_lib.DataPreparationActor.options(
-        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
-    ).remote(  # type: ignore[unresolved-attribute]
+    data_prep_actor_name = "data_prep_singleton"
+    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
         param_prompt_Q=prompt_Q,
@@ -1258,7 +1303,7 @@ def create_model_and_optimizer(
         tool_names=tools_config.tool_call_names if tools_config else [],
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
-        initial_state=None,
+        initial_state=data_prep_actor_state,
         base_env_config=base_env_config,
     )
 
@@ -1274,6 +1319,7 @@ def create_model_and_optimizer(
         args=args,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
+        data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
     )
     inits = [
@@ -1281,12 +1327,7 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # vLLM context must cover prompt + max(train rollout length, local eval length).
-    vllm_max_model_len = streaming_config.max_prompt_token_length + max(
-        streaming_config.response_length, streaming_config.eval_response_length
-    )
-
-    # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
+    # Create vLLM engines with queues
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
@@ -1296,7 +1337,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
-        vllm_max_model_len,
+        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
@@ -1315,7 +1356,6 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        vllm_attention_backend=vllm_config.vllm_attention_backend,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -1344,8 +1384,7 @@ def create_model_and_optimizer(
 
     # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0]["optimization_steps_done"] + 1
-    checkpoint_state = results[0]["checkpoint_state"]
+    resume_training_step = results[0] + 1
     episode = (
         (resume_training_step - 1)
         * streaming_config.num_unique_prompts_rollout
@@ -1353,40 +1392,17 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
-    data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
-    if data_prep_actor_state is not None:
-        ray_get_with_progress(
-            [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
-        )
-        logger.info(
-            "Restored data prep actor state from checkpoint "
-            f"with training_step={data_prep_actor_state['training_step']}"
-        )
-
-    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
-
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
         desc="Setting up model update group",
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return (
-        policy_group,
-        vllm_engines,
-        resume_training_step,
-        episode,
-        actor_manager,
-        model_dims,
-        _data_prep_actor,
-        checkpoint_state,
-    )
+    return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
 
 def create_generation_configs(
-    args: grpo_utils.GRPOExperimentConfig,
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    vllm_config: data_loader_lib.VLLMConfig,
+    args: grpo_utils.ExperimentConfig, streaming_config: data_loader_lib.StreamingDataLoaderConfig
 ):
     """Create generation configs for training and evaluation."""
     generation_config = vllm_utils.SamplingConfig(
@@ -1398,43 +1414,15 @@ def create_generation_configs(
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(
-        generation_config, n=args.eval_pass_at_k, max_tokens=streaming_config.eval_response_length
-    )
+    eval_generation_config = dataclasses.replace(generation_config, n=1)
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-class WeightSyncTrigger:
-    """Event-like trigger that also carries the latest target model step."""
-
-    def __init__(self) -> None:
-        self._event = threading.Event()
-        self._lock = threading.Lock()
-        self._step: int | None = None
-
-    def notify(self, step: int | None = None) -> None:
-        with self._lock:
-            if step is not None:
-                self._step = step
-        self._event.set()
-
-    def wait(self, timeout: float | None = None) -> bool:
-        return self._event.wait(timeout=timeout)
-
-    def get_step_and_clear(self) -> int | None:
-        """Atomically gets the step and clears the event."""
-        with self._lock:
-            step = self._step
-            self._event.clear()
-            return step
-
-
 def weight_sync_thread(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger: WeightSyncTrigger,
+    weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
-    vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1443,15 +1431,15 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
+        weight_sync_trigger_event.set()
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger.wait(timeout=1.0):
+        if not weight_sync_trigger_event.wait(timeout=1.0):
             continue
 
         # Clear the event for next iteration
-        target_model_step = weight_sync_trigger.get_step_and_clear()
+        weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1487,13 +1475,6 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
-
         # Calculate distribution statistics
         sync_time_stats = {
             "time/weight_sync": timer.duration,
@@ -1512,7 +1493,7 @@ def weight_sync_thread(
 
 
 def one_training_step(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
@@ -1627,21 +1608,18 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging.
-        metrics_to_log = {}
+        # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics_to_log[key] = wandb.Histogram(value)
-            else:
-                metrics_to_log[key] = value
-        wandb.log(metrics_to_log, step=training_step)
+                metrics[key] = wandb.Histogram(value)
+        wandb.log(metrics, step=training_step)
 
     return num_step_tokens
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def maybe_save_checkpoint(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     training_step: int,
     policy_group: ModelGroup,
     chat_template_name: str,
@@ -1675,7 +1653,7 @@ def maybe_save_checkpoint(
 
 
 def maybe_evaluate(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
@@ -1684,7 +1662,6 @@ def maybe_evaluate(
     eval_generation_config,
     model_dims: utils.ModelDims,
     base_env_config: EnvConfig,
-    max_possible_score: float,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1696,28 +1673,15 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
-        is_final_step = training_step >= args.num_training_steps
-        num_eval_prompts = len(eval_dataset)
-        # On non-final steps, only evaluate when we have a full batch ready.
-        # This avoids partially draining the queue and losing results.
-        if not is_final_step:
-            queued_results = evaluation_inference_results_Q.qsize()
-            if queued_results < num_eval_prompts:
-                logger.info(
-                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
-                    queued_results,
-                    num_eval_prompts,
-                )
-                return False
-
-        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        timeout = 100 if is_final_step else 0.01
+        # timeout 0.01 if this is not the last training step
+        # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1727,7 +1691,6 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
-            max_possible_score=max_possible_score,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1737,26 +1700,13 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        eval_pass_at_k_metrics: dict[str, float] = {}
-        scores = np.array(eval_batch.scores)
-        eval_k = eval_generation_config.n
-
-        if scores.size and scores.size % eval_k == 0:
-            scores_per_prompt = scores.reshape(-1, eval_k)
-            correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8
-            eval_pass_at_k_metrics.update(grpo_utils.compute_pass_at_k_metrics(correct_per_prompt))
-        else:
-            logger.warning(
-                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
-            )
         eval_metrics = {
-            "eval/scores": scores.mean(),
+            "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
-            **eval_pass_at_k_metrics,
         }
 
         total_tokens = (
@@ -1789,7 +1739,7 @@ def maybe_evaluate(
 
 
 def save_final_model(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     training_step: int,
@@ -1930,19 +1880,13 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger = WeightSyncTrigger()
-    initial_model_step = resume_training_step - 1
-    ray_get_with_progress(
-        [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
-        desc=f"Initializing vLLM model step to {initial_model_step}",
-    )
+    weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger,
+        weight_sync_trigger_event,
         policy_group,
-        vllm_engines,
         actor_manager,
         weight_sync_metrics_Q,
         resume_training_step,
@@ -2021,13 +1965,12 @@ def run_training(
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
                     eval_example,
-                    training_step,
+                    0,
                     prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
                     base_env_config=base_env_config,
                 )
-            eval_data_loader.reset()
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2078,7 +2021,7 @@ def run_training(
                 client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
 
                 # Save DataPreparationActor state
-                data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+                data_prep_actor = ray.get_actor("data_prep_singleton")
                 client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
 
                 ray_get_with_progress(
@@ -2091,7 +2034,7 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger.notify(step=training_step)
+        weight_sync_trigger_event.set()
 
         last_eval_collected = maybe_evaluate(
             args,
@@ -2103,7 +2046,6 @@ def run_training(
             generation_configs["eval"],
             model_dims,
             base_env_config,
-            streaming_config.max_possible_score,
             actor_manager,
         )
 
@@ -2260,13 +2202,26 @@ def initialize_tools_and_envs(
 
 
 def main(
-    args: grpo_utils.GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
+    # Pre-download model on rank 0 to avoid HF cache race conditions
+    # when multiple ranks on a shared filesystem try to access concurrently.
+    rank = int(os.environ.get("RANK", "0"))
+    barrier_file = f"/tmp/.model_download_done_{os.environ.get('BEAKER_JOB_ID', 'local')}"
+    if rank == 0:
+        logger.info(f"Pre-downloading model {model_config.model_name_or_path}...")
+        snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+        open(barrier_file, "w").close()
+        logger.info("Model pre-download complete.")
+    else:
+        while not os.path.exists(barrier_file):
+            time.sleep(1)
+
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
@@ -2276,15 +2231,10 @@ def main(
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, streaming_config, vllm_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
-    ray.init(
-        runtime_env={
-            "excludes": [".git/"],
-            "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
-        }
-    )
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     pool_size = tools_config.pool_size
     if pool_size is None:
@@ -2322,10 +2272,6 @@ def main(
     if args.cache_dataset_only:
         return
 
-    utils.ensure_hf_repo_cached(model_config.model_name_or_path, revision=model_config.model_revision)
-    if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
-        utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
-
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Create Ray queues.
@@ -2353,39 +2299,46 @@ def main(
     )
 
     # AFTER potentially adding tool stop sequences, create generation configs
-    generation_configs = create_generation_configs(args, streaming_config, vllm_config)
+    generation_configs = create_generation_configs(args, streaming_config)
+
+    checkpoint_state = None
+    data_prep_actor_state = None
+    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
+        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
+        if os.path.exists(checkpoint_path):
+            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+            data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
+            if data_prep_actor_state:
+                # Use trainer's authoritative training_step for DataPreparationActor.
+                # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
+                data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
     base_env_config = build_base_env_config(tools_config, pools)
-    (
-        policy_group,
-        vllm_engines,
-        resume_training_step,
-        episode,
-        actor_manager,
-        model_dims,
-        _data_prep_actor,
-        checkpoint_state,
-    ) = create_model_and_optimizer(
-        args,
-        tc,
-        model_config,
-        beaker_config,
-        wandb_url,
-        tokenizer,
-        inference_results_Q,
-        prompt_Q,
-        evaluation_inference_results_Q,
-        streaming_config,
-        vllm_config,
-        train_dataset,
-        eval_dataset,
-        reward_config,
-        generation_configs["train"],
-        base_env_config,
-        tool_definitions,
-        tools_config,
-        pools,
-        tool_stop_sequences,
+    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            prompt_Q,
+            evaluation_inference_results_Q,
+            streaming_config,
+            vllm_config,
+            train_dataset,
+            eval_dataset,
+            reward_config,
+            generation_configs["train"],
+            base_env_config,
+            data_prep_actor_state,
+            tool_definitions,
+            tools_config,
+            pools,
+            tool_stop_sequences,
+        )
     )
 
     if checkpoint_state:
@@ -2458,7 +2411,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParserPlus(
         (
-            grpo_utils.GRPOExperimentConfig,
+            grpo_utils.ExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
@@ -2466,11 +2419,10 @@ if __name__ == "__main__":
             EnvsConfig,
         )
     )
-    parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
         parser.parse_args_into_dataclasses()
     )
-    assert isinstance(args, grpo_utils.GRPOExperimentConfig)
+    assert isinstance(args, grpo_utils.ExperimentConfig)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
