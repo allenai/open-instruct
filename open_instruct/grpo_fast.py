@@ -1484,6 +1484,32 @@ def _can_log_metric_as_wandb_histogram(value: np.ndarray | list[Any]) -> bool:
     return arr.dtype.kind in ("b", "i", "u", "f")
 
 
+def _move_dataset_index_solve_rate_to_wandb_table(
+    metrics: dict[str, Any], table_metrics: dict[str, Any], source_key: str, table_key: str
+) -> None:
+    rows = metrics.pop(source_key, None)
+    if rows is None:
+        return
+    if not isinstance(rows, list):
+        logger.warning(
+            "Expected list for %s, got %s; skipping wandb table conversion.", source_key, type(rows).__name__
+        )
+        return
+    if len(rows) == 0:
+        return
+
+    table_rows = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            logger.warning("Expected 2-item rows for %s, got %r; skipping malformed row.", source_key, row)
+            continue
+        dataset_index, solve_rate = row
+        table_rows.append([int(dataset_index), float(solve_rate)])
+
+    if table_rows:
+        table_metrics[table_key] = wandb.Table(columns=["dataset_index", "solve_rate"], data=table_rows)
+
+
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1603,11 +1629,19 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
+        metrics_to_log = dict(metrics)
+        table_metrics: dict[str, Any] = {}
+        _move_dataset_index_solve_rate_to_wandb_table(
+            metrics_to_log,
+            table_metrics,
+            source_key="val/train_prompt_solve_rate_by_dataset_index",
+            table_key="val/train_prompt_solve_rate_by_dataset_index_table",
+        )
         # Convert numeric array/list metrics to wandb histograms (skip strings, tuples, etc.)
-        for key, value in list(metrics.items()):
+        for key, value in list(metrics_to_log.items()):
             if isinstance(value, np.ndarray | list) and _can_log_metric_as_wandb_histogram(value):
-                metrics[key] = wandb.Histogram(np.asanyarray(value, dtype=np.float64).ravel())
-        wandb.log(metrics, step=training_step)
+                metrics_to_log[key] = wandb.Histogram(np.asanyarray(value, dtype=np.float64).ravel())
+        wandb.log({**metrics_to_log, **table_metrics}, step=training_step)
 
     return num_step_tokens
 
@@ -1855,8 +1889,15 @@ def maybe_evaluate(
         df = pd.DataFrame(table)
 
         if args.with_tracking:
-            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
-            wandb.log(eval_metrics, step=training_step)
+            metrics_to_log = dict(eval_metrics)
+            table_metrics = {"sample_completions": wandb.Table(dataframe=df)}
+            _move_dataset_index_solve_rate_to_wandb_table(
+                metrics_to_log,
+                table_metrics,
+                source_key="eval/prompt_solve_rate_by_dataset_index",
+                table_key="eval/prompt_solve_rate_by_dataset_index_table",
+            )
+            wandb.log({**metrics_to_log, **table_metrics}, step=training_step)
         else:
             print_rich_table(df.iloc[:1])
         del table
