@@ -25,9 +25,8 @@ RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.
        -o /usr/local/lib/docker/cli-plugins/docker-buildx \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
-# Install podman-compose and symlink docker → podman for Beaker nodes.
-RUN uv pip install --no-cache-dir --system podman-compose \
-    && ln -sf $(which podman) /usr/local/bin/docker
+# Symlink docker → podman for Beaker nodes.
+RUN ln -sf $(which podman) /usr/local/bin/docker
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
@@ -72,6 +71,8 @@ RUN curl --silent \
     && rm beaker.tar.gz
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
+
+RUN uv pip install --no-cache-dir --system podman-compose
 
 WORKDIR /stage/
 
