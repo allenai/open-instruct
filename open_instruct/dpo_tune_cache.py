@@ -39,6 +39,7 @@ import torch.utils.data
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
+from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
@@ -69,7 +70,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
-logger = logger_utils.setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 def build_deepspeed_config(
