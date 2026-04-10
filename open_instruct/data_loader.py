@@ -1770,8 +1770,6 @@ class DataPreparationActor:
                         )
                     ]
                     step_metrics["val/train_prompt_solve_rate_by_dataset_index"] = prompt_solve_rate_by_dataset_index
-                    for prompt_index, rates in prompt_index_to_solve_rates.items():
-                        step_metrics[f"val/train_prompt_solve_rate_by_index_{prompt_index}"] = float(np.mean(rates))
                     step_metrics["val/train_prompt_solve_rate_by_dataset_index_count"] = len(
                         prompt_solve_rate_by_dataset_index
                     )
