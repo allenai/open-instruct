@@ -376,14 +376,16 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
+    # For VLM configs (e.g. Qwen3.5), model dim attributes live under text_config.
+    dims_config = getattr(config, "text_config", config)
     model_dims = ModelDims(
-        num_layers=config.num_hidden_layers,
-        hidden_size=config.hidden_size,
-        intermediate_size=config.intermediate_size,
-        vocab_size=config.vocab_size,
-        num_attn_heads=config.num_attention_heads,
-        head_dim=config.hidden_size // config.num_attention_heads,
-        num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+        num_layers=dims_config.num_hidden_layers,
+        hidden_size=dims_config.hidden_size,
+        intermediate_size=dims_config.intermediate_size,
+        vocab_size=dims_config.vocab_size,
+        num_attn_heads=dims_config.num_attention_heads,
+        head_dim=dims_config.hidden_size // dims_config.num_attention_heads,
+        num_kv_heads=getattr(dims_config, "num_key_value_heads", dims_config.num_attention_heads),
     )
 
     # Capture full dataset size by getting it from the dataset. Sharding happens inside the dataloaders, not the dataset, so we're fine to do this.
@@ -587,7 +589,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                if accelerator.sync_gradients and args.max_grad_norm:
                     accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
