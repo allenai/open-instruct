@@ -47,13 +47,13 @@ uv run python mason.py \
     --pack_length 32768 \
     --inflight_updates True \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 8 \
+    --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --temperature 0.7 \
     --exp_name harbor_grpo_tblite \
     --learning_rate 3e-7 \
-    --total_episodes $((5 * 8 * 4)) \
+    --total_episodes $((5 * 4 * 4)) \
     --deepspeed_stage 3 \
     --with_tracking \
     --num_epochs 1 \
