@@ -219,10 +219,6 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
-        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
-            logger.warning(
-                "No checkpointing enabled, `checkpoint_state_freq` is greater than 0 but `checkpoint_state_dir` is not set"
-            )
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
