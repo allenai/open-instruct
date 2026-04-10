@@ -42,7 +42,13 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
-from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_loader import (
+    DataPreparationActor,
+    accumulate_inference_batches,
+    add_prompt_to_generator,
+    compute_filtered_batch_metrics,
+    compute_prompt_solve_rate_metrics,
+)
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 
 # isort: on
@@ -1744,40 +1750,17 @@ def maybe_evaluate(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
             )
         dataset_sequence_length_metrics: dict[str, Any] = {}
-        dataset_filtered_prompt_metrics: dict[str, int] = {}
+        dataset_filtered_prompt_metrics: dict[str, Any] = {}
         if eval_batch_stats is not None:
-            dataset_filtered_prompts = {
-                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
-            }
-            dataset_filtered_prompts_zero = {
-                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
-            }
-            dataset_filtered_prompts_solved = {
-                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
-            }
-            dataset_filtered_prompts_nonzero = {
-                dataset_name: 0 for dataset_name in dict.fromkeys(eval_batch_stats.prompt_datasets)
-            }
-            for dataset_name in eval_batch_stats.filtered_prompt_datasets:
-                dataset_filtered_prompts.setdefault(dataset_name, 0)
-                dataset_filtered_prompts[dataset_name] += 1
-            for dataset_name in eval_batch_stats.filtered_prompt_datasets_zero:
-                dataset_filtered_prompts_zero.setdefault(dataset_name, 0)
-                dataset_filtered_prompts_zero[dataset_name] += 1
-            for dataset_name in eval_batch_stats.filtered_prompt_datasets_solved:
-                dataset_filtered_prompts_solved.setdefault(dataset_name, 0)
-                dataset_filtered_prompts_solved[dataset_name] += 1
-            for dataset_name in eval_batch_stats.filtered_prompt_datasets_nonzero:
-                dataset_filtered_prompts_nonzero.setdefault(dataset_name, 0)
-                dataset_filtered_prompts_nonzero[dataset_name] += 1
-            for dataset_name, count in dataset_filtered_prompts.items():
-                dataset_filtered_prompt_metrics[f"eval/filtered_prompts/{dataset_name}"] = count
-            for dataset_name, count in dataset_filtered_prompts_zero.items():
-                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_zero/{dataset_name}"] = count
-            for dataset_name, count in dataset_filtered_prompts_solved.items():
-                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_solved/{dataset_name}"] = count
-            for dataset_name, count in dataset_filtered_prompts_nonzero.items():
-                dataset_filtered_prompt_metrics[f"eval/filtered_prompts_nonzero/{dataset_name}"] = count
+            dataset_filtered_prompt_metrics = compute_filtered_batch_metrics(
+                batch_stats=eval_batch_stats,
+                dataset_metric_names=None,
+                batch_metrics=None,
+                batch_metric_prefix=None,
+                filtered_metric_prefix="eval",
+                completions_per_prompt_prefix=None,
+                include_prompt_datasets=False,
+            )
         if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) > 0:
             num_eval_prompts = len(eval_batch_stats.prompt_datasets)
             if eval_sequence_lengths.size % num_eval_prompts == 0:
@@ -1843,28 +1826,16 @@ def maybe_evaluate(
         eval_metrics.update(dataset_sequence_length_metrics)
         eval_metrics["eval/model_step_mean"] = float(model_step_mean)
         eval_metrics["eval/model_step_diff"] = float(training_step - model_step_mean)
-        if eval_batch_stats is not None and eval_batch_stats.percent_solved_hist.size > 0:
-            prompt_index_to_solve_rates: dict[int, list[float]] = {}
-            for prompt_index, prompt_solve_rate in zip(
-                eval_batch_stats.prompt_indices, eval_batch_stats.percent_solved_hist
-            ):
-                prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
-            eval_prompt_solve_rate_by_dataset_index = [
-                (int(prompt_index), float(np.mean(rates)))
-                for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
-            ]
-            eval_metrics["eval/prompt_solve_rate_by_dataset_index"] = eval_prompt_solve_rate_by_dataset_index
-            eval_metrics["eval/prompt_solve_rate_by_dataset_index_count"] = len(
-                eval_prompt_solve_rate_by_dataset_index
+        if eval_batch_stats is not None:
+            eval_metrics.update(
+                compute_prompt_solve_rate_metrics(
+                    batch_stats=eval_batch_stats,
+                    count_key=None,
+                    by_index_key="eval/prompt_solve_rate_by_dataset_index",
+                    by_index_count_key="eval/prompt_solve_rate_by_dataset_index_count",
+                    dataset_mean_prefix="eval/prompt_solve_rate_mean",
+                )
             )
-
-            dataset_to_solve_rates: dict[str, list[float]] = {}
-            for dataset_name, prompt_solve_rate in zip(
-                eval_batch_stats.prompt_datasets, eval_batch_stats.percent_solved_hist
-            ):
-                dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
-            for dataset_name, rates in dataset_to_solve_rates.items():
-                eval_metrics[f"eval/prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens

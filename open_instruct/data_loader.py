@@ -715,6 +715,123 @@ class BatchStatistics:
     total_prompts: int
 
 
+def compute_filtered_batch_metrics(
+    batch_stats: BatchStatistics,
+    dataset_metric_names: list[str] | None = None,
+    batch_metrics: dict[str, Any] | None = None,
+    batch_metric_prefix: str | None = "batch",
+    filtered_metric_prefix: str = "batch",
+    completions_per_prompt_prefix: str | None = "val/completions_per_prompt",
+    include_prompt_datasets: bool = True,
+) -> dict[str, Any]:
+    if dataset_metric_names is None:
+        dataset_metric_names = list(
+            dict.fromkeys(
+                [
+                    *batch_stats.prompt_datasets,
+                    *batch_stats.filtered_prompt_datasets,
+                    *batch_stats.filtered_prompt_datasets_zero,
+                    *batch_stats.filtered_prompt_datasets_solved,
+                    *batch_stats.filtered_prompt_datasets_nonzero,
+                ]
+            )
+        )
+
+    metrics: dict[str, Any] = {}
+    if batch_metrics is not None and batch_metric_prefix is not None:
+        metrics.update({f"{batch_metric_prefix}/{k}": v for k, v in batch_metrics.items()})
+
+    if include_prompt_datasets:
+        metrics[f"{filtered_metric_prefix}/prompt_datasets"] = batch_stats.prompt_datasets
+
+    nonzero_prompts_by_dataset: dict[str, int] = {dataset_name: 0 for dataset_name in dataset_metric_names}
+    for dataset_name in batch_stats.prompt_datasets:
+        nonzero_prompts_by_dataset.setdefault(dataset_name, 0)
+        nonzero_prompts_by_dataset[dataset_name] += 1
+
+    filtered_prompts_by_dataset: dict[str, int] = {dataset_name: 0 for dataset_name in dataset_metric_names}
+    filtered_prompts_zero_by_dataset: dict[str, int] = {dataset_name: 0 for dataset_name in dataset_metric_names}
+    filtered_prompts_solved_by_dataset: dict[str, int] = {dataset_name: 0 for dataset_name in dataset_metric_names}
+    filtered_prompts_nonzero_by_dataset: dict[str, int] = {dataset_name: 0 for dataset_name in dataset_metric_names}
+    for dataset_name in batch_stats.filtered_prompt_datasets:
+        filtered_prompts_by_dataset.setdefault(dataset_name, 0)
+        filtered_prompts_by_dataset[dataset_name] += 1
+    for dataset_name in batch_stats.filtered_prompt_datasets_zero:
+        filtered_prompts_zero_by_dataset.setdefault(dataset_name, 0)
+        filtered_prompts_zero_by_dataset[dataset_name] += 1
+    for dataset_name in batch_stats.filtered_prompt_datasets_solved:
+        filtered_prompts_solved_by_dataset.setdefault(dataset_name, 0)
+        filtered_prompts_solved_by_dataset[dataset_name] += 1
+    for dataset_name in batch_stats.filtered_prompt_datasets_nonzero:
+        filtered_prompts_nonzero_by_dataset.setdefault(dataset_name, 0)
+        filtered_prompts_nonzero_by_dataset[dataset_name] += 1
+
+    for dataset_name, count in nonzero_prompts_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/nonzero_prompts/{dataset_name}"] = count
+    for dataset_name, count in filtered_prompts_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/filtered_prompts/{dataset_name}"] = count
+    for dataset_name, count in filtered_prompts_zero_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/filtered_prompts_zero/{dataset_name}"] = count
+    for dataset_name, count in filtered_prompts_solved_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/filtered_prompts_solved/{dataset_name}"] = count
+    for dataset_name, count in filtered_prompts_nonzero_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/filtered_prompts_nonzero/{dataset_name}"] = count
+
+    if completions_per_prompt_prefix is None:
+        return metrics
+
+    if len(batch_stats.prompt_datasets) != len(batch_stats.prompt_sample_counts):
+        return metrics
+
+    prompt_sample_counts_by_dataset: dict[str, list[int]] = {dataset_name: [] for dataset_name in dataset_metric_names}
+    for dataset_name, sample_count in zip(batch_stats.prompt_datasets, batch_stats.prompt_sample_counts):
+        prompt_sample_counts_by_dataset.setdefault(dataset_name, [])
+        prompt_sample_counts_by_dataset[dataset_name].append(int(sample_count))
+    for dataset_name, sample_counts in prompt_sample_counts_by_dataset.items():
+        if sample_counts:
+            metrics[f"{completions_per_prompt_prefix}/{dataset_name}"] = float(np.mean(sample_counts))
+
+    return metrics
+
+
+def compute_prompt_solve_rate_metrics(
+    batch_stats: BatchStatistics,
+    count_key: str | None,
+    by_index_key: str,
+    by_index_count_key: str,
+    dataset_mean_prefix: str,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    solve_rates = batch_stats.percent_solved_hist
+    metrics: dict[str, Any] = {}
+    if solve_rates.size == 0:
+        return metrics
+
+    if count_key is not None:
+        metrics[count_key] = int(solve_rates.size)
+
+    if not enabled:
+        return metrics
+
+    prompt_index_to_solve_rates: dict[int, list[float]] = {}
+    for prompt_index, prompt_solve_rate in zip(batch_stats.prompt_indices, solve_rates):
+        prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
+    prompt_solve_rate_by_dataset_index = [
+        (int(prompt_index), float(np.mean(rates)))
+        for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
+    ]
+    metrics[by_index_key] = prompt_solve_rate_by_dataset_index
+    metrics[by_index_count_key] = len(prompt_solve_rate_by_dataset_index)
+
+    dataset_to_solve_rates: dict[str, list[float]] = {}
+    for dataset_name, prompt_solve_rate in zip(batch_stats.prompt_datasets, solve_rates):
+        dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
+    for dataset_name, rates in dataset_to_solve_rates.items():
+        metrics[f"{dataset_mean_prefix}_{dataset_name}"] = float(np.mean(rates))
+
+    return metrics
+
+
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     assert len(examples) == 1, f"Expected 1 example, got {len(examples)}"
     example = examples[0]
@@ -1671,13 +1788,23 @@ class DataPreparationActor:
                 prompt_sample_counts = np.array(batch_stats.prompt_sample_counts, dtype=np.int32)
 
                 batch_metrics_dict = asdict(batch_stats)
-                # Keep dataset names as internal metadata for downstream metric aggregation.
-                prompt_datasets = batch_metrics_dict.pop("prompt_datasets", None)
-                filtered_prompt_datasets = batch_metrics_dict.pop("filtered_prompt_datasets", [])
-                filtered_prompt_datasets_zero = batch_metrics_dict.pop("filtered_prompt_datasets_zero", [])
-                filtered_prompt_datasets_solved = batch_metrics_dict.pop("filtered_prompt_datasets_solved", [])
-                filtered_prompt_datasets_nonzero = batch_metrics_dict.pop("filtered_prompt_datasets_nonzero", [])
-                batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
+                for key in (
+                    "prompt_datasets",
+                    "filtered_prompt_datasets",
+                    "filtered_prompt_datasets_zero",
+                    "filtered_prompt_datasets_solved",
+                    "filtered_prompt_datasets_nonzero",
+                ):
+                    batch_metrics_dict.pop(key, None)
+                batch_metrics = compute_filtered_batch_metrics(
+                    batch_stats=batch_stats,
+                    dataset_metric_names=self.dataset_metric_names,
+                    batch_metrics=batch_metrics_dict,
+                    batch_metric_prefix="batch",
+                    filtered_metric_prefix="batch",
+                    completions_per_prompt_prefix="val/completions_per_prompt",
+                    include_prompt_datasets=True,
+                )
 
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
@@ -1706,81 +1833,18 @@ class DataPreparationActor:
                     "val/advantages_max": advantages.max(),
                     "val/advantages_hist": advantages,
                     **reward_metrics,
-                    **batch_metrics_prefixed,
+                    **batch_metrics,
                 }
-                step_metrics["batch/prompt_datasets"] = prompt_datasets
-                nonzero_prompts_by_dataset: dict[str, int] = {
-                    dataset_name: 0 for dataset_name in self.dataset_metric_names
-                }
-                for dataset_name in prompt_datasets:
-                    nonzero_prompts_by_dataset[dataset_name] += 1
-                filtered_prompts_by_dataset: dict[str, int] = {
-                    dataset_name: 0 for dataset_name in self.dataset_metric_names
-                }
-                filtered_prompts_zero_by_dataset: dict[str, int] = {
-                    dataset_name: 0 for dataset_name in self.dataset_metric_names
-                }
-                filtered_prompts_solved_by_dataset: dict[str, int] = {
-                    dataset_name: 0 for dataset_name in self.dataset_metric_names
-                }
-                filtered_prompts_nonzero_by_dataset: dict[str, int] = {
-                    dataset_name: 0 for dataset_name in self.dataset_metric_names
-                }
-                for dataset_name in filtered_prompt_datasets:
-                    filtered_prompts_by_dataset[dataset_name] += 1
-                for dataset_name in filtered_prompt_datasets_zero:
-                    filtered_prompts_zero_by_dataset[dataset_name] += 1
-                for dataset_name in filtered_prompt_datasets_solved:
-                    filtered_prompts_solved_by_dataset[dataset_name] += 1
-                for dataset_name in filtered_prompt_datasets_nonzero:
-                    filtered_prompts_nonzero_by_dataset[dataset_name] += 1
-                for dataset_name, count in nonzero_prompts_by_dataset.items():
-                    step_metrics[f"batch/nonzero_prompts/{dataset_name}"] = count
-                for dataset_name, count in filtered_prompts_by_dataset.items():
-                    step_metrics[f"batch/filtered_prompts/{dataset_name}"] = count
-                for dataset_name, count in filtered_prompts_zero_by_dataset.items():
-                    step_metrics[f"batch/filtered_prompts_zero/{dataset_name}"] = count
-                for dataset_name, count in filtered_prompts_solved_by_dataset.items():
-                    step_metrics[f"batch/filtered_prompts_solved/{dataset_name}"] = count
-                for dataset_name, count in filtered_prompts_nonzero_by_dataset.items():
-                    step_metrics[f"batch/filtered_prompts_nonzero/{dataset_name}"] = count
-                if prompt_datasets is not None and len(prompt_datasets) == len(prompt_sample_counts):
-                    prompt_sample_counts_by_dataset: dict[str, list[int]] = {
-                        dataset_name: [] for dataset_name in self.dataset_metric_names
-                    }
-                    for dataset_name, sample_count in zip(prompt_datasets, prompt_sample_counts):
-                        prompt_sample_counts_by_dataset[dataset_name].append(int(sample_count))
-                    for dataset_name, sample_counts in prompt_sample_counts_by_dataset.items():
-                        if sample_counts:
-                            step_metrics[f"val/completions_per_prompt/{dataset_name}"] = float(np.mean(sample_counts))
-                solve_rates = batch_stats.percent_solved_hist
-                if solve_rates.size > 0:
-                    step_metrics["val/train_prompt_solve_rate_count"] = int(solve_rates.size)
-
-                if self.config.log_train_solve_rate_metrics:
-                    prompt_index_to_solve_rates: dict[int, list[float]] = {}
-                    for prompt_index, prompt_solve_rate in zip(
-                        batch_stats.prompt_indices, batch_stats.percent_solved_hist
-                    ):
-                        prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
-                    prompt_solve_rate_by_dataset_index = [
-                        (int(prompt_index), float(np.mean(rates)))
-                        for prompt_index, rates in sorted(
-                            prompt_index_to_solve_rates.items(), key=lambda item: item[0]
-                        )
-                    ]
-                    step_metrics["val/train_prompt_solve_rate_by_dataset_index"] = prompt_solve_rate_by_dataset_index
-                    step_metrics["val/train_prompt_solve_rate_by_dataset_index_count"] = len(
-                        prompt_solve_rate_by_dataset_index
+                step_metrics.update(
+                    compute_prompt_solve_rate_metrics(
+                        batch_stats=batch_stats,
+                        count_key="val/train_prompt_solve_rate_count",
+                        by_index_key="val/train_prompt_solve_rate_by_dataset_index",
+                        by_index_count_key="val/train_prompt_solve_rate_by_dataset_index_count",
+                        dataset_mean_prefix="val/train_prompt_solve_rate_mean",
+                        enabled=self.config.log_train_solve_rate_metrics,
                     )
-
-                    dataset_to_solve_rates: dict[str, list[float]] = {}
-                    for dataset_name, prompt_solve_rate in zip(
-                        batch_stats.prompt_datasets, batch_stats.percent_solved_hist
-                    ):
-                        dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
-                    for dataset_name, rates in dataset_to_solve_rates.items():
-                        step_metrics[f"val/train_prompt_solve_rate_mean_{dataset_name}"] = float(np.mean(rates))
+                )
 
                 tool_stats = EnvStatistics(tool_names=self.tool_names)
                 for rollout_stats in result.request_info.tool_call_stats:
