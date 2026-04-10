@@ -14,7 +14,8 @@ Example (local):
     --model Qwen/Qwen3-4B-Instruct-2507 \\
     --chat-template from_model \\
     --num-samples 32 \\
-    --max-tokens 8192 \\
+    --max_prompt_token_length 2048 \\
+    --response_length 8192 \\
     --tensor-parallel-size 1 \\
     --num-engines 8
 """
@@ -61,7 +62,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=32, help="Completions per prompt (k)")
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
     parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling")
-    parser.add_argument("--max-tokens", type=int, default=8192, help="Max new tokens per completion")
+    parser.add_argument("--response_length", type=int, default=8192, help="Max new tokens per completion")
+    parser.add_argument(
+        "--max_prompt_token_length", type=int, default=2048, help="Prompt token budget used to set vLLM max_model_len"
+    )
     parser.add_argument("--tensor-parallel-size", type=int, default=1, help="vLLM tensor parallel size")
     parser.add_argument(
         "--num-engines",
@@ -158,6 +162,7 @@ def _generate_completions_single_engine(
     tensor_parallel_size: int,
     gpu_memory_utilization: float,
     sampling_params: SamplingParams,
+    max_model_len: int,
 ) -> list[list[str]]:
     llm = LLM(
         model=model,
@@ -165,6 +170,7 @@ def _generate_completions_single_engine(
         dtype="bfloat16",
         gpu_memory_utilization=gpu_memory_utilization,
         enable_prefix_caching=True,
+        max_model_len=max_model_len,
     )
     outputs = llm.generate(prompts, sampling_params)
     return [[completion.text for completion in request_output.outputs] for request_output in outputs]
@@ -190,6 +196,7 @@ def _generate_completions_chunk(
     tensor_parallel_size: int,
     gpu_memory_utilization: float,
     sampling_params_kwargs: dict,
+    max_model_len: int,
 ) -> tuple[int, list[list[str]]]:
     os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     llm = LLM(
@@ -199,6 +206,7 @@ def _generate_completions_chunk(
         dtype="bfloat16",
         gpu_memory_utilization=gpu_memory_utilization,
         enable_prefix_caching=True,
+        max_model_len=max_model_len,
     )
     outputs = llm.generate(prompts, SamplingParams(**sampling_params_kwargs))
     completions = [[completion.text for completion in request_output.outputs] for request_output in outputs]
@@ -212,6 +220,7 @@ def _generate_completions_multi_engine(
     tensor_parallel_size: int,
     gpu_memory_utilization: float,
     sampling_params: SamplingParams,
+    max_model_len: int,
 ) -> list[list[str]]:
     started_ray = not ray.is_initialized()
     if started_ray:
@@ -249,6 +258,7 @@ def _generate_completions_multi_engine(
                     tensor_parallel_size=tensor_parallel_size,
                     gpu_memory_utilization=gpu_memory_utilization,
                     sampling_params_kwargs=sampling_params_kwargs,
+                    max_model_len=max_model_len,
                 )
             )
 
@@ -357,7 +367,18 @@ def main() -> None:
         args.num_samples,
     )
     sampling_params = SamplingParams(
-        n=args.num_samples, temperature=args.temperature, top_p=args.top_p, max_tokens=args.max_tokens, seed=args.seed
+        n=args.num_samples,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=args.response_length,
+        seed=args.seed,
+    )
+    max_model_len = args.max_prompt_token_length + args.response_length
+    logger.info(
+        "Using max_model_len=%d (max_prompt_token_length=%d + response_length=%d)",
+        max_model_len,
+        args.max_prompt_token_length,
+        args.response_length,
     )
 
     logger.info("Generating completions")
@@ -368,6 +389,7 @@ def main() -> None:
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
             sampling_params=sampling_params,
+            max_model_len=max_model_len,
         )
     else:
         completions_by_prompt = _generate_completions_multi_engine(
@@ -377,6 +399,7 @@ def main() -> None:
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
             sampling_params=sampling_params,
+            max_model_len=max_model_len,
         )
 
     verifier = ManufactoriaVerifier(
@@ -413,7 +436,7 @@ def main() -> None:
             "generator_chat_template": args.chat_template,
             "generator_temperature": args.temperature,
             "generator_top_p": args.top_p,
-            "generator_max_tokens": args.max_tokens,
+            "generator_max_tokens": args.response_length,
             "generator_manufactoria_scoring_mode": args.manufactoria_scoring_mode,
             "generator_pass_score_threshold": args.pass_score_threshold,
         }

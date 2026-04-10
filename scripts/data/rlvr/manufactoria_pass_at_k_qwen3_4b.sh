@@ -18,7 +18,8 @@ set -euo pipefail
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-Instruct-2507}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-from_model}"
 NUM_SAMPLES="${NUM_SAMPLES:-32}"
-MAX_TOKENS="${MAX_TOKENS:-8192}"
+MAX_PROMPT_TOKEN_LENGTH="${MAX_PROMPT_TOKEN_LENGTH:-2048}"
+RESPONSE_LENGTH="${RESPONSE_LENGTH:-8192}"
 TEMPERATURE="${TEMPERATURE:-1.0}"
 TOP_P="${TOP_P:-1.0}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
@@ -64,7 +65,8 @@ _run_one() {
     --model "${MODEL_NAME}" \
     --chat-template "${CHAT_TEMPLATE}" \
     --num-samples "${NUM_SAMPLES}" \
-    --max-tokens "${MAX_TOKENS}" \
+    --max_prompt_token_length "${MAX_PROMPT_TOKEN_LENGTH}" \
+    --response_length "${RESPONSE_LENGTH}" \
     --temperature "${TEMPERATURE}" \
     --top-p "${TOP_P}" \
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}" \
