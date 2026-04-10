@@ -1294,6 +1294,47 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
+def _prepare_params_for_sync(
+    params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
+) -> list[tuple[str, torch.Tensor]]:
+    """Clone params into contiguous tensors and log diagnostics.
+
+    DS3 gathered tensors may be non-contiguous or views into temporary buffers.
+    Cloning ensures we send independent, contiguous tensors over NCCL.
+    """
+    mapped_params = []
+    non_contiguous = []
+    views = []
+    bad_params = []
+    for n, p in params:
+        mapped_name = name_mapper(n) if name_mapper else n
+        t = p.data
+        if not t.is_contiguous():
+            non_contiguous.append((mapped_name, t.stride(), t.shape))
+        if t._base is not None:
+            views.append((mapped_name, t.storage_offset()))
+        ds_shape = getattr(p, "ds_shape", None)
+        if ds_shape is not None and list(ds_shape) != list(t.shape):
+            logger.warning(
+                "[Weight Sync] Shape mismatch: %s ds_shape=%s actual=%s", mapped_name, list(ds_shape), list(t.shape)
+            )
+        cloned = t.contiguous().clone()
+        if torch.isnan(cloned).any():
+            bad_params.append((mapped_name, "NaN", cloned.shape))
+        elif torch.isinf(cloned).any():
+            bad_params.append((mapped_name, "Inf", cloned.shape))
+        mapped_params.append((mapped_name, cloned))
+    if non_contiguous:
+        logger.warning("[Weight Sync] %d non-contiguous params: %s", len(non_contiguous), non_contiguous[:5])
+    if views:
+        logger.warning("[Weight Sync] %d view params: %s", len(views), views[:5])
+    if bad_params:
+        logger.error("[Weight Sync] BAD WEIGHTS before send: %s", bad_params)
+    else:
+        logger.info("[Weight Sync] All %d params validated: no NaN/Inf", len(mapped_params))
+    return mapped_params
+
+
 def _collect_weight_metadata(
     model: torch.nn.Module, name_mapper: Callable[[str], str] | None
 ) -> tuple[list[str], list[str], list[list[int]]]:
@@ -1415,23 +1456,15 @@ def broadcast_weights_to_vllm(
             ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
         with ctx:
             if is_rank_0:
-                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
-                logger.info(
-                    "[Weight Sync] Sending %d params. First 5: %s",
-                    len(mapped_params),
-                    [(n, list(p.shape), str(p.dtype)) for n, p in mapped_params[:5]],
-                )
-                logger.info(
-                    "[Weight Sync] Last 5: %s", [(n, list(p.shape), str(p.dtype)) for n, p in mapped_params[-5:]]
-                )
+                mapped_params = _prepare_params_for_sync(params, name_mapper)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return refs
     else:
         for name, param in params:
             with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
                 if is_rank_0:
-                    mapped_name = name_mapper(name) if name_mapper else name
+                    mapped_params = _prepare_params_for_sync([(name, param)], name_mapper)
                     NCCLWeightTransferEngine.trainer_send_weights(
-                        iterator=iter([(mapped_name, param.data)]), trainer_args=trainer_args
+                        iterator=iter(mapped_params), trainer_args=trainer_args
                     )
         return refs

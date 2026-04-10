@@ -200,7 +200,7 @@ Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved 
 | 8 | Yes | No | — | Only RotaryEmbedding | NaN |
 | 9 | Yes | No | — | Only RotaryEmbedding | NaN |
 
-**Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`). Every other hypothesis has been ruled out across 8 experiments: RotaryEmbedding, inv_freq, bad training weights, parameter names, scheduler state (pause/resume), sleep/wake_up, and cudagraphs (enforce_eager). Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync.
+**Conclusion**: The NaN is caused by the interaction between **DeepSpeed stage 3 weight gathering** and vLLM's layerwise reload path. Minimal repro experiments (10-13) confirmed that the weight sync works correctly with TP=1, TP=2, `packed=False`, `p.data`, `LLM`, and `AsyncLLMEngine` — all on single-node without DeepSpeed. Experiment 14 (full GRPO with DeepSpeed stage 2) runs without NaN, confirming that DS3 gathering is the trigger.
 
 ## Experiment 5: Parameter name logging
 
@@ -263,6 +263,49 @@ Combined layerwise.py hotfix + `sleep(level=0, mode="keep")` / `wake_up(tags=["s
 
 This definitively rules out cudagraphs — `enforce_eager=True` disables all compilation/cudagraph capture, yet the layerwise reload still produces NaN.
 
+## Experiment 10: Minimal repro — AsyncLLMEngine + TP=1 + packed=False
+
+**Experiment**: [01KNTJS4P5QASX7WMZNEQX6N96](https://beaker.org/ex/01KNTJS4P5QASX7WMZNEQX6N96)
+
+Minimal script based on vLLM's `rlhf_nccl.py` example. Uses `AsyncLLMEngine`, TP=1, `packed=False`, real weights (Qwen2.5-1.5B), single-node, 2 GPUs. No DeepSpeed.
+
+**Result**: ✅ No NaN. Weight sync works correctly. Generation identical before and after sync.
+
+## Experiment 11: Minimal repro — LLM + TP=1 + packed=False
+
+**Experiment**: [01KNTJVYDNH9EGJT9VE33P1NJZ](https://beaker.org/ex/01KNTJVYDNH9EGJT9VE33P1NJZ)
+
+Same as experiment 10 but using `LLM` (offline) instead of `AsyncLLMEngine`.
+
+**Result**: ✅ No NaN. Weight sync works correctly.
+
+## Experiment 12: Minimal repro — LLM + TP=2 + packed=False
+
+**Experiment**: [01KNTPC15NJ2QGA1DWSY9ZMKSR](https://beaker.org/ex/01KNTPC15NJ2QGA1DWSY9ZMKSR)
+
+Same as experiment 11 but with TP=2 (3 GPUs: 1 trainer + 2 for TP). Tests whether tensor parallelism triggers the NaN.
+
+**Result**: ✅ No NaN. TP=2 weight sync works correctly.
+
+## Experiment 13: Minimal repro — LLM + TP=2 + packed=False + send p.data
+
+**Experiment**: [01KNVYHDDA0KJCCWCA22F2Z7DF](https://beaker.org/ex/01KNVYHDDA0KJCCWCA22F2Z7DF)
+
+Same as experiment 12 but sends `p.data` (Tensor) instead of `p` (Parameter), matching how our GRPO code sends weights after DeepSpeed gathering.
+
+**Result**: ✅ No NaN. Sending `.data` vs full Parameter makes no difference.
+
+## Experiment 14: Full GRPO with DeepSpeed stage 2
+
+**Experiment**: [01KNVZA9H7EEPSDAS692DZ06F2](https://beaker.org/ex/01KNVZA9H7EEPSDAS692DZ06F2)
+**W&B run**: [3ugl5q5w](https://wandb.ai/ai2-llm/open_instruct_internal/runs/3ugl5q5w)
+
+Full GRPO training run identical to experiments 1-9 but with `--deepspeed_stage 2` instead of 3 (and `--sequence_parallel_size 1` since SP requires DS3). 2 nodes × 8 GPUs, Qwen2.5-7B, 4 vLLM engines × TP=2.
+
+**Result**: ✅ No NaN. Multiple weight syncs complete successfully. Training continues normally.
+
+This definitively isolates the bug: **DeepSpeed stage 3 weight gathering produces weights that cause NaN when passed through vLLM's layerwise reload path.**
+
 ## What We've Ruled Out (Updated)
 
 1. HF → vLLM name mapping (experiment 2)
@@ -271,28 +314,32 @@ This definitively rules out cudagraphs — `enforce_eager=True` disables all com
 4. Cudagraph invalidation (experiment 8 — enforce_eager still NaN)
 5. Training producing bad weights (experiment 3)
 6. RotaryEmbedding / inv_freq (experiment 4)
-7. Parameter names (experiment 5)
+7. Parameter names (experiments 5, 9)
 8. Scheduler state / pause-resume (experiments 6-7)
 9. sleep/wake_up (experiment 8)
 10. Cudagraphs / compiled mode (experiment 8 — enforce_eager=True)
+11. AsyncLLMEngine vs LLM (experiments 10-11 — both work)
+12. TP=2 (experiment 12 — works without DeepSpeed)
+13. `packed=False` (experiments 10-13 — all work)
+14. Sending `p.data` vs `p` (experiment 13 — no difference)
 
-## Questions for vLLM Team
+## Root Cause: DeepSpeed Stage 3
 
-1. All parametric layers show "Processed" with correct element counts, yet inference produces NaN after the first weight sync. Is there a known issue with `_layerwise_process`'s `param.data.copy_()` not correctly updating cudagraph-captured tensor storage?
-2. Could `_place_kernel_tensors` on RotaryEmbedding (which restores pre-reload tensors) corrupt the compiled model state, even though RotaryEmbedding's data hasn't changed?
-3. Is there a synchronization gap between `finalize_layerwise_reload()` and the next cudagraph replay?
-4. Has `NCCLWeightTransferEngine` been tested for online RLHF-style repeated weight updates (not just one-shot checkpoint loading)?
+DeepSpeed stage 3 is the trigger. All minimal repros without DeepSpeed work. Full GRPO with DS2 works. Only full GRPO with DS3 produces NaN.
+
+Possible mechanisms:
+1. **Tensor properties**: DS3 gathered tensors may have different strides, storage offsets, or contiguity that confuse `load_weights()` or the layerwise reload's `param.data.copy_()`.
+2. **Multi-rank gathering**: DS3 uses collective ops to materialize full parameters from shards. The gathered tensor on rank 0 may have unexpected memory layout.
+3. **Metadata mismatch**: `_collect_weight_metadata` uses `ds_shape` for shapes, but the actual gathered tensor's properties may differ in subtle ways (e.g., transposed storage).
 
 ## Next Steps
 
-1. ~~Experiment 5~~ ✅ Parameter names ruled out.
-2. ~~Experiment 6~~ ✅ pause/resume ruled out.
-3. ~~Experiment 7~~ ✅ layerwise hotfix + pause/resume ruled out.
-4. ~~Experiment 8~~ ✅ enforce_eager + sleep/wake_up ruled out. Cudagraphs ruled out.
-5. ~~Dump all 339 parameter names~~ ✅ Dumped in experiment 9 ([01KNT4CBAYT7NV5AJDKBKXZGFN](https://beaker.org/ex/01KNT4CBAYT7NV5AJDKBKXZGFN), W&B [i9zrmxbz](https://wandb.ai/ai2-llm/open_instruct_internal/runs/i9zrmxbz)). All 339 names are standard HF format: 12 params/layer × 28 layers + embed_tokens + norm + lm_head. `name_mapper` is `None` for Qwen2.5-7B.
-6. **Investigate what differs from working vLLM example**: Our setup uses `AsyncLLMEngine` (online serving), the working example uses `LLM` (offline). The weight update code path may differ. Also: working example is single-node single-GPU, we use 2 nodes × 8 GPUs with TP=2.
-7. **Revert to old `WorkerWrap` approach**: Native weight sync is broken in our setup. Fall back.
-8. **Report to vLLM**: File a bug with all 8 experiments as evidence.
+1. ~~Experiments 10-13~~ ✅ Minimal repros all pass. Bug is not in vLLM's core weight sync.
+2. ~~Experiment 14~~ ✅ DS2 works. DS3 is the trigger.
+3. **Add weight validation**: Log NaN/Inf checks on trainer side (before send) and vLLM side (after receive) to pinpoint where corruption occurs.
+4. **Investigate DS3 gathered tensor properties**: Compare tensor strides, contiguity, storage offsets between DS2 and DS3 gathered parameters.
+5. **Try `.contiguous().clone()` before sending**: If DS3 gathered tensors have non-standard memory layout, making them contiguous before sending may fix the issue.
+6. **Report to vLLM**: File a bug with all 14 experiments as evidence, specifically that DS3 gathering triggers the NaN.
 
 ## Files Changed
 
