@@ -1814,7 +1814,7 @@ class DatasetTransformationCache:
 
     def load_or_transform_dataset(
         self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Dataset:
+    ) -> tuple[Dataset, dict[str, Any]]:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
@@ -1837,7 +1837,7 @@ class DatasetTransformationCache:
                 assert isinstance(loaded_dataset, Dataset)
                 if "index" not in loaded_dataset.column_names:
                     loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
-                return loaded_dataset
+                return loaded_dataset, {"per_dataset_stats": [], "dataset_order": []}
 
         print("Cache not found, transforming datasets...")
 
@@ -1853,7 +1853,7 @@ class DatasetTransformationCache:
             combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
-            return combined_dataset
+            return combined_dataset, {"per_dataset_stats": [], "dataset_order": []}
 
         # Push to hub with config hash as revision
         combined_dataset.push_to_hub(
@@ -1897,7 +1897,7 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
             repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
         )
         assert isinstance(final_dataset, Dataset)
-        return final_dataset
+        return final_dataset, {"per_dataset_stats": [], "dataset_order": []}
 
 
 class LocalDatasetTransformationCache:
