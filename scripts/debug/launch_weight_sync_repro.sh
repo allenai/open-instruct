@@ -13,7 +13,8 @@ uv run python mason.py \
        --pure_docker_mode \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
-       --priority preemptible \
+       --priority normal \
+       --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
        --timeout 15m \
