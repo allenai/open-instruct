@@ -705,6 +705,7 @@ class BatchStatistics:
     percent_solved_mean: float
     percent_solved_hist: np.ndarray
     prompt_indices: list[int]
+    prompt_sample_counts: list[int]
     prompt_datasets: list[str]
     filtered_prompt_datasets: list[str]
     filtered_prompt_datasets_zero: list[str]
@@ -793,14 +794,126 @@ def add_prompt_to_generator(
     )
 
 
-def get_never_give_up_retry_suffix(prompt_id: str | None, epoch_number: int, index: int) -> str:
+def get_never_give_up_retry_suffix(prompt_id: str, epoch_number: int, index: int) -> str:
     """Return a numeric retry suffix for a never_give_up requeue."""
     base_prompt_id = f"{epoch_number}_{index}"
-    if prompt_id is None or prompt_id == base_prompt_id:
+    if prompt_id == base_prompt_id:
         return "_1"
 
     retry_count = int(prompt_id.removeprefix(f"{base_prompt_id}_"))
     return f"_{retry_count + 1}"
+
+
+def get_never_give_up_chain_id(prompt_id: str) -> str:
+    """Return the base epoch/index prompt id shared by a never_give_up retry chain."""
+    prompt_id_parts = prompt_id.split("_")
+    if len(prompt_id_parts) == 2:
+        return prompt_id
+    if len(prompt_id_parts) == 3:
+        return "_".join(prompt_id_parts[:2])
+    raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
+
+
+def merge_generation_results(
+    results: list[data_types.GenerationResult], reward_metrics: list[dict[str, Any]]
+) -> tuple[data_types.GenerationResult, dict[str, Any]]:
+    """Merge buffered never_give_up attempts into a single logical prompt group."""
+    if len(results) == 0:
+        raise ValueError("Cannot merge an empty list of GenerationResults.")
+
+    combined_num_calls = []
+    combined_timeouts = []
+    combined_tool_errors = []
+    combined_tool_outputs = []
+    combined_tool_runtimes = []
+    combined_tool_calleds = []
+    combined_tool_call_stats = []
+    combined_rollout_states = []
+    combined_responses = []
+    combined_finish_reasons = []
+    combined_masks = []
+    combined_logprobs = []
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+    max_generation_time = 0.0
+    earliest_start_time = float("inf")
+
+    for result in results:
+        combined_num_calls.extend(result.request_info.num_calls)
+        combined_timeouts.extend(result.request_info.timeouts)
+        combined_tool_errors.extend(result.request_info.tool_errors)
+        combined_tool_outputs.extend(result.request_info.tool_outputs)
+        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
+        combined_tool_calleds.extend(result.request_info.tool_calleds)
+        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_rollout_states.extend(result.request_info.rollout_states)
+        combined_responses.extend(result.responses)
+        combined_finish_reasons.extend(result.finish_reasons)
+        combined_masks.extend(result.masks)
+        if result.logprobs is not None:
+            combined_logprobs.extend(result.logprobs)
+        if result.token_statistics is not None:
+            total_prompt_tokens += result.token_statistics.num_prompt_tokens
+            total_response_tokens += result.token_statistics.num_response_tokens
+            max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+            if result.start_time is not None:
+                earliest_start_time = min(earliest_start_time, result.start_time)
+
+    combined_request_info = data_types.RequestInfo(
+        num_calls=combined_num_calls,
+        timeouts=combined_timeouts,
+        tool_errors=combined_tool_errors,
+        tool_outputs=combined_tool_outputs,
+        tool_runtimes=combined_tool_runtimes,
+        tool_calleds=combined_tool_calleds,
+        tool_call_stats=combined_tool_call_stats,
+        rollout_states=combined_rollout_states,
+    )
+    token_statistics = None
+    if any(result.token_statistics is not None for result in results):
+        token_statistics = data_types.TokenStatistics(
+            num_prompt_tokens=total_prompt_tokens,
+            num_response_tokens=total_response_tokens,
+            generation_time=max_generation_time,
+            earliest_start_time=None if earliest_start_time == float("inf") else earliest_start_time,
+        )
+
+    combined_reward_metrics = combine_reward_metrics(reward_metrics)
+    merged_result = data_types.GenerationResult(
+        responses=combined_responses,
+        finish_reasons=combined_finish_reasons,
+        masks=combined_masks,
+        request_info=combined_request_info,
+        index=results[-1].index,
+        prompt_id=results[-1].prompt_id,
+        token_statistics=token_statistics,
+        start_time=None if earliest_start_time == float("inf") else earliest_start_time,
+        logprobs=combined_logprobs if combined_logprobs else None,
+        reward_scores=[score for result in results for score in (result.reward_scores or [])],
+        reward_metrics=combined_reward_metrics,
+        model_step=results[-1].model_step,
+    )
+    return merged_result, combined_reward_metrics
+
+
+def expand_grouped_scores(scores: np.ndarray, prompt_sample_counts: list[int]) -> tuple[np.ndarray, np.ndarray]:
+    """Expand per-group means/stds back to per-sample arrays for advantage normalization."""
+    if sum(prompt_sample_counts) != len(scores):
+        raise ValueError(
+            "Mismatch between prompt_sample_counts and scores: "
+            f"{sum(prompt_sample_counts)} grouped samples vs {len(scores)} scores."
+        )
+
+    mean_grouped_rewards = []
+    std_grouped_rewards = []
+    start = 0
+    for sample_count in prompt_sample_counts:
+        group_scores = scores[start : start + sample_count]
+        mean_grouped_rewards.append(np.full(sample_count, group_scores.mean(), dtype=scores.dtype))
+        std_grouped_rewards.append(np.full(sample_count, group_scores.std(), dtype=scores.dtype))
+        start += sample_count
+
+    return np.concatenate(mean_grouped_rewards), np.concatenate(std_grouped_rewards)
 
 
 def accumulate_inference_batches(
@@ -857,8 +970,10 @@ def accumulate_inference_batches(
     all_scores = []
     all_percent_solved = []
     all_prompt_indices = []
+    all_prompt_sample_counts = []
     all_prompt_datasets = []
     all_model_steps = []
+    accepted_prompt_lengths = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -880,6 +995,24 @@ def accumulate_inference_batches(
     num_prompts_sampled = 0
     prompts_consumed = 0
     collected_results = []  # Track results for potential requeue on timeout
+    pending_never_give_up_results: dict[str, list[data_types.GenerationResult]] = {}
+    pending_never_give_up_metrics: dict[str, list[dict[str, Any]]] = {}
+
+    def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
+        nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
+        assert filtered_result.reward_scores is not None
+        total_filtered_prompts += 1
+        filtered_prompt_datasets.append(dataset_key)
+        if filtered_result.reward_scores[0] == 0:
+            filtered_prompt_zero += 1
+            filtered_prompt_datasets_zero.append(dataset_key)
+        elif filtered_result.reward_scores[0] == max_possible_score:
+            filtered_prompt_solved += 1
+            filtered_prompt_datasets_solved.append(dataset_key)
+        else:
+            filtered_prompt_nonzero += 1
+            filtered_prompt_datasets_nonzero.append(dataset_key)
+
     while num_prompts_sampled < num_prompts and (
         max_prompts_to_sample is None or prompts_consumed < max_prompts_to_sample
     ):
@@ -905,6 +1038,8 @@ def accumulate_inference_batches(
             f"but expected {generation_config.n} samples per prompt. "
             f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
+        assert result.index is not None
+        assert result.prompt_id is not None
         prompts_consumed += 1
 
         dataset_position = dataset_index_map[result.index]
@@ -914,6 +1049,7 @@ def accumulate_inference_batches(
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
+        assert result.reward_scores is not None
 
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
@@ -929,17 +1065,12 @@ def accumulate_inference_batches(
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
+        chain_id = get_never_give_up_chain_id(result.prompt_id)
+        pending_results = pending_never_give_up_results.pop(chain_id, [])
+        pending_metrics = pending_never_give_up_metrics.pop(chain_id, [])
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
-        percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
-        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-            assert iter_dataloader is not None
-            iter_dataloader.exclude_index(result.index)
-            total_no_resampled += 1
-            logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
-            )
-
+        requeue_same_prompt = False
         if filter_zero_std_samples and np.std(result.reward_scores) == 0:
             if replenish_prompts:
                 assert param_prompt_Q is not None
@@ -964,23 +1095,22 @@ def accumulate_inference_batches(
                     base_env_config=base_env_config,
                     prompt_id_suffix=prompt_id_suffix,
                 )
+            if requeue_same_prompt and chain_id is not None:
+                pending_results.append(result)
+                pending_metrics.append(result.reward_metrics)
+                pending_never_give_up_results[chain_id] = pending_results
+                pending_never_give_up_metrics[chain_id] = pending_metrics
+                logging.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
+                continue
+
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
                 if progress_callback is not None:
                     progress_callback(num_prompts_sampled, num_prompts)
-
-            total_filtered_prompts += 1
-            filtered_prompt_datasets.append(prompt_dataset_key)
-            if result.reward_scores[0] == 0:
-                filtered_prompt_zero += 1
-                filtered_prompt_datasets_zero.append(prompt_dataset_key)
-            elif result.reward_scores[0] == max_possible_score:
-                filtered_prompt_solved += 1
-                filtered_prompt_datasets_solved.append(prompt_dataset_key)
-            else:
-                filtered_prompt_nonzero += 1
-                filtered_prompt_datasets_nonzero.append(prompt_dataset_key)
+            for pending_result in pending_results:
+                record_filtered_prompt(pending_result, prompt_dataset_key)
+            record_filtered_prompt(result, prompt_dataset_key)
             logging.debug(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
@@ -1003,6 +1133,32 @@ def accumulate_inference_batches(
             if progress_callback is not None:
                 progress_callback(num_prompts_sampled, num_prompts)
 
+        if pending_results:
+            pending_results.append(result)
+            pending_metrics.append(result.reward_metrics)
+            result, merged_reward_metrics = merge_generation_results(pending_results, pending_metrics)
+            reward_scores = np.asarray(result.reward_scores, dtype=float)
+            sample_count = len(result.responses)
+            k_queries = repeat_each([query], sample_count)
+            k_ground_truths = repeat_each([ground_truth], sample_count)
+            k_datasets = repeat_each([dataset_name], sample_count)
+            k_raw_queries = repeat_each([raw_query], sample_count)
+            k_active_tools = repeat_each([sample_active_tools], sample_count)
+            decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
+        else:
+            merged_reward_metrics = result.reward_metrics
+            sample_count = generation_config.n
+
+        percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
+        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+            assert iter_dataloader is not None
+            assert result.index is not None
+            iter_dataloader.exclude_index(result.index)
+            total_no_resampled += 1
+            logging.debug(
+                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
+
         results.append(result)
         all_queries.extend(k_queries)
         all_ground_truths.extend(k_ground_truths)
@@ -1010,11 +1166,13 @@ def accumulate_inference_batches(
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
         all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(result.reward_scores)
-        all_reward_metrics.append(result.reward_metrics)
+        all_scores.extend(reward_scores.tolist())
+        all_reward_metrics.append(merged_reward_metrics)
         all_percent_solved.append(percent_solved)
         all_prompt_indices.append(result.index)
+        all_prompt_sample_counts.append(sample_count)
         all_prompt_datasets.append(prompt_dataset_key)
+        accepted_prompt_lengths.append(len(query))
         if result.model_step is not None:
             all_model_steps.append(result.model_step)
 
@@ -1077,7 +1235,7 @@ def accumulate_inference_batches(
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
-        prompt_lengths.append(len(all_queries[i * generation_config.n]))
+        prompt_lengths.append(accepted_prompt_lengths[i])
 
         for response in result.responses:
             response_lengths.append(len(response))
@@ -1149,6 +1307,7 @@ def accumulate_inference_batches(
         percent_solved_mean=percent_solved_mean,
         percent_solved_hist=np.array(all_percent_solved),
         prompt_indices=all_prompt_indices,
+        prompt_sample_counts=all_prompt_sample_counts,
         prompt_datasets=all_prompt_datasets,
         filtered_prompt_datasets=filtered_prompt_datasets,
         filtered_prompt_datasets_zero=filtered_prompt_datasets_zero,
@@ -1427,11 +1586,7 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
             scores = np.array(batch.scores)
-            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+            mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(scores, batch_stats.prompt_sample_counts)
 
             if self.config.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
@@ -1448,7 +1603,7 @@ class DataPreparationActor:
                     batch,
                     result,
                     advantages,
-                    self.config.num_samples_per_prompt_rollout,
+                    batch_stats.prompt_sample_counts,
                     self.total_samples_written,
                 )
                 self.total_samples_written += len(batch.queries)
@@ -1530,7 +1685,7 @@ class DataPreparationActor:
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                     "val/solve_rate_hist": batch_stats.percent_solved_hist,
-                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
+                    "val/total_reward_groups": batch_stats.total_prompts,
                     "val/sequence_lengths": sequence_lengths.mean(),
                     "val/sequence_lengths_min": sequence_lengths.min(),
                     "val/sequence_lengths_max": sequence_lengths.max(),

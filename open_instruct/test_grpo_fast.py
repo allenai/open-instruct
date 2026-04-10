@@ -3,7 +3,7 @@ import os
 import threading
 import time
 import unittest
-from queue import Empty, Queue
+from queue import Queue
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -787,11 +787,16 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(data_loader_lib.get_never_give_up_retry_suffix("7_0", epoch_number=7, index=0), "_1")
         self.assertEqual(data_loader_lib.get_never_give_up_retry_suffix("7_0_1", epoch_number=7, index=0), "_2")
 
-    def test_active_sampling_never_give_up_one_requeues_same_zero_reward_prompt(self):
+    def test_get_never_give_up_chain_id_strips_retry_suffix(self):
+        self.assertEqual(data_loader_lib.get_never_give_up_chain_id("7_0"), "7_0")
+        self.assertEqual(data_loader_lib.get_never_give_up_chain_id("7_0_1"), "7_0")
+        self.assertEqual(data_loader_lib.get_never_give_up_chain_id("7_0_3"), "7_0")
+
+    def test_active_sampling_never_give_up_buffers_until_nonzero_std(self):
         num_samples_per_prompt = 4
         queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
 
-        inference_results_Q = Queue(maxsize=2)
+        inference_results_Q = Queue(maxsize=3)
         param_prompt_Q = Queue(maxsize=4)
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
@@ -803,7 +808,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         )
         inference_results_Q.put(
             self.create_mock_result(
-                1, "0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 1.0, 0.0, 1.0]
+                0, "0_0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 1.0, 0.0, 1.0]
             )
         )
 
@@ -844,7 +849,9 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             )
 
         self.assertEqual(iter_dataloader.next_calls, 1)
-        self.assertEqual(batch_stats.filtered_prompts_zero, 1)
+        self.assertEqual(batch_stats.filtered_prompts_zero, 0)
+        self.assertEqual(batch_stats.prompt_sample_counts, [8])
+        self.assertEqual(batch.scores, [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0])
 
         requeued_prompt = param_prompt_Q.get(timeout=1)
         replacement_prompt = param_prompt_Q.get(timeout=1)
@@ -853,18 +860,28 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(replacement_prompt.index, 1)
         self.assertEqual(replacement_prompt.prompt_id, "7_1")
 
-    def test_active_sampling_never_give_up_zero_uses_next_prompt(self):
+    def test_active_sampling_never_give_up_discards_buffer_when_retry_stops(self):
         num_samples_per_prompt = 4
         queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
 
-        inference_results_Q = Queue(maxsize=2)
-        param_prompt_Q = Queue(maxsize=2)
+        inference_results_Q = Queue(maxsize=3)
+        param_prompt_Q = Queue(maxsize=4)
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
 
         inference_results_Q.put(
             self.create_mock_result(
                 0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0] * num_samples_per_prompt
+            )
+        )
+        inference_results_Q.put(
+            self.create_mock_result(
+                0, "0_0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0] * num_samples_per_prompt
+            )
+        )
+        inference_results_Q.put(
+            self.create_mock_result(
+                1, "0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 1.0, 0.0, 1.0]
             )
         )
 
@@ -883,10 +900,10 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
                 self.next_calls += 1
                 return self._examples[self.next_calls - 1]
 
-        iter_dataloader = FakeIterDataLoader([mock_dataset[1]])
+        iter_dataloader = FakeIterDataLoader([mock_dataset[1], mock_dataset[1]])
 
-        with self.assertRaises(Empty):
-            data_loader_lib.accumulate_inference_batches(
+        with unittest.mock.patch("open_instruct.data_loader.np.random.random", side_effect=[0.0, 1.0]):
+            _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(
                 inference_results_Q,
                 mock_generation_config,
                 num_prompts=1,
@@ -896,20 +913,27 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
                 base_env_config=EnvConfig(),
                 active_sampling=True,
                 filter_zero_std_samples=True,
-                never_give_up=0.0,
+                never_give_up=0.5,
                 replenish_prompts=True,
                 iter_dataloader=iter_dataloader,
                 param_prompt_Q=param_prompt_Q,
                 max_possible_score=1.0,
-                timeout=0.01,
                 show_progress_bar=False,
-                requeue_on_timeout=False,
             )
 
-        self.assertEqual(iter_dataloader.next_calls, 1)
+        self.assertEqual(iter_dataloader.next_calls, 2)
+        self.assertEqual(batch_stats.filtered_prompts_zero, 2)
+        self.assertEqual(batch_stats.prompt_sample_counts, [4])
+        self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
+        requeued_prompt = param_prompt_Q.get(timeout=1)
         replacement_prompt = param_prompt_Q.get(timeout=1)
+        post_accept_replacement_prompt = param_prompt_Q.get(timeout=1)
+        self.assertEqual(requeued_prompt.index, 0)
+        self.assertEqual(requeued_prompt.prompt_id, "7_0_1")
         self.assertEqual(replacement_prompt.index, 1)
         self.assertEqual(replacement_prompt.prompt_id, "7_1")
+        self.assertEqual(post_accept_replacement_prompt.index, 1)
+        self.assertEqual(post_accept_replacement_prompt.prompt_id, "7_1")
 
     def test_all_prompts_filtered_returns_none(self):
         """Test that accumulate_inference_batches returns None when all prompts are filtered."""
@@ -1002,6 +1026,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertIsNotNone(batch)
         self.assertIsNotNone(reward_metrics)
         self.assertIsNotNone(batch_stats)
+        self.assertEqual(batch_stats.prompt_sample_counts, [4, 4])
         self.assertEqual(batch_stats.prompt_datasets, ["dataset_a", "dataset_b"])
         self.assertEqual(batch_stats.filtered_prompt_datasets, ["dataset_a", "dataset_b"])
         self.assertEqual(batch_stats.filtered_prompt_datasets_zero, [])
