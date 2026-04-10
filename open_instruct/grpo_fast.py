@@ -1559,6 +1559,9 @@ def one_training_step(
     total_generation_time = average_metrics["time/getting_response"]
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
+    prompt_sample_counts = array_metrics[0].get(
+        "batch/prompt_sample_counts", streaming_config.num_samples_per_prompt_rollout
+    )
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
@@ -1566,7 +1569,7 @@ def one_training_step(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
-        samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
+        samples_per_prompt=prompt_sample_counts,
         num_engines=vllm_config.vllm_num_engines,
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
         training_time=train_timer.duration,

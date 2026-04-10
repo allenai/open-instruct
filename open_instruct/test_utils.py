@@ -642,6 +642,28 @@ class TestModelDims(unittest.TestCase):
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
+    def test_variable_prompt_sample_counts_utilization(self):
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256, 256]
+        response_lengths = [128, 128, 64, 64, 64]
+        prompt_sample_counts = [2, 3]
+
+        metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=8.0,
+            samples_per_prompt=prompt_sample_counts,
+            num_engines=1,
+            num_gpus_per_engine=8,
+            training_time=4.0,
+            num_training_gpus=4,
+        )
+
+        self.assertLessEqual(metrics["actor_mfu"], 100)
+        self.assertLessEqual(metrics["actor_mbu"], 100)
+        self.assertLessEqual(metrics["learner_mfu"], 100)
+
 
 class TestModelDimsFromHFConfig(unittest.TestCase):
     def test_from_hf_config_with_sliding_window(self):

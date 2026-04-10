@@ -184,6 +184,26 @@ def repeat_each(seq, k):
     return [item for item in seq for _ in range(k)]
 
 
+def normalize_prompt_sample_counts(
+    prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int | list[int]
+) -> list[int]:
+    """Return per-prompt completion counts, validating they match the flattened responses."""
+    if isinstance(samples_per_prompt, int):
+        expected_num_responses = len(prompt_lengths) * samples_per_prompt
+        assert len(response_lengths) == expected_num_responses, (
+            f"Expected {expected_num_responses} response lengths, got {len(response_lengths)}"
+        )
+        return [samples_per_prompt] * len(prompt_lengths)
+
+    assert len(samples_per_prompt) == len(prompt_lengths), (
+        f"Expected {len(prompt_lengths)} prompt sample counts, got {len(samples_per_prompt)}"
+    )
+    assert sum(samples_per_prompt) == len(response_lengths), (
+        f"Expected {sum(samples_per_prompt)} response lengths from prompt sample counts, got {len(response_lengths)}"
+    )
+    return samples_per_prompt
+
+
 def ray_get_with_progress(
     ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
@@ -1940,7 +1960,9 @@ class ModelDims:
 
         return total
 
-    def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
+    def decode_flops(
+        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int | list[int] = 1
+    ) -> int:
         """Decode/generation FLOPs.
 
         Args:
@@ -1950,18 +1972,16 @@ class ModelDims:
 
         Embedding lookups are ignored by design.
         """
-        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-        )
+        prompt_sample_counts = normalize_prompt_sample_counts(prompt_lengths, response_lengths, samples_per_prompt)
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         total = 0
         response_idx = 0
-        for P in prompt_lengths:
+        for P, sample_count in zip(prompt_lengths, prompt_sample_counts):
             # Process all samples for this prompt
-            for _ in range(samples_per_prompt):
+            for _ in range(sample_count):
                 R = response_lengths[response_idx]
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
                 for t in range(R):
@@ -1982,7 +2002,7 @@ class ModelDims:
         self,
         prompt_lengths: list[int],
         response_lengths: list[int] | None = None,
-        samples_per_prompt: int = 1,
+        samples_per_prompt: int | list[int] = 1,
         is_training: bool = False,
     ) -> int:
         """Total FLOPs for prefill and (optionally) decode.
@@ -2040,7 +2060,11 @@ class ModelDims:
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
-        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        samples_per_prompt: int | list[int] = 1,
+        dtype_bytes: int = 2,
     ) -> int:
         """Memory bytes for reading KV cache during decode.
 
@@ -2056,9 +2080,7 @@ class ModelDims:
         Returns:
             Total bytes for KV cache reads during decode
         """
-        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-        )
+        prompt_sample_counts = normalize_prompt_sample_counts(prompt_lengths, response_lengths, samples_per_prompt)
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
@@ -2069,10 +2091,10 @@ class ModelDims:
         kv_read_terms = 0
         response_idx = 0
 
-        for P in prompt_lengths:
+        for P, sample_count in zip(prompt_lengths, prompt_sample_counts):
             # For this prompt, collect all response lengths
             prompt_responses = []
-            for _ in range(samples_per_prompt):
+            for _ in range(sample_count):
                 prompt_responses.append(response_lengths[response_idx])
                 response_idx += 1
 
@@ -2081,8 +2103,8 @@ class ModelDims:
             # At each decoding position, each sample reads the prompt KV cache.
             # Number of positions = max response length (all generate synchronously).
             max_response_length = max(prompt_responses) if prompt_responses else 0
-            # Each of the samples_per_prompt samples reads prompt KV at each position
-            kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
+            # Each sample for the prompt reads prompt KV at each position.
+            kv_read_terms += max_response_length * sample_count * P * num_full_attn_layers
 
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
@@ -2117,7 +2139,11 @@ class ModelDims:
         return weight_bytes + kv_write_bytes
 
     def decode_memory_bytes(
-        self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        samples_per_prompt: int | list[int] = 1,
+        dtype_bytes: int = 2,
     ) -> int:
         """Memory bytes for decode/generation phase.
 
@@ -2135,15 +2161,16 @@ class ModelDims:
         Returns:
             Total memory bytes for decode
         """
+        prompt_sample_counts = normalize_prompt_sample_counts(prompt_lengths, response_lengths, samples_per_prompt)
         # In synchronized batch generation, weights are read once per position,
         # not once per token. With multiple samples per prompt generating in parallel,
         # we only need to read weights for the number of unique positions.
         unique_positions = 0
         response_idx = 0
-        for _ in prompt_lengths:
+        for sample_count in prompt_sample_counts:
             # Get response lengths for this prompt's samples
-            prompt_responses = response_lengths[response_idx : response_idx + samples_per_prompt]
-            response_idx += samples_per_prompt
+            prompt_responses = response_lengths[response_idx : response_idx + sample_count]
+            response_idx += sample_count
             # In synchronized generation, all samples generate the same number of positions
             # (up to the max length among them)
             unique_positions += max(prompt_responses) if prompt_responses else 0
@@ -2163,7 +2190,7 @@ class ModelDims:
         num_engines: int,
         num_gpus_per_engine: int,
         response_lengths: list[int] | None = None,
-        samples_per_prompt: int = 1,
+        samples_per_prompt: int | list[int] = 1,
         dtype_bytes: int = 2,
     ) -> int:
         """Approximate total HBM bytes moved per engine for prefill + decode.
@@ -2211,28 +2238,36 @@ class ModelDims:
         prompt_chunks = _split_evenly(prompt_lengths, num_engines)
 
         response_chunks: list[list[int] | None]
+        sample_count_chunks: list[list[int] | None]
         if response_lengths is not None:
-            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-            )
+            prompt_sample_counts = normalize_prompt_sample_counts(prompt_lengths, response_lengths, samples_per_prompt)
             response_chunks = []
+            sample_count_chunks = []
             response_idx = 0
+            sample_count_idx = 0
             for chunk in prompt_chunks:
-                num_responses = len(chunk) * samples_per_prompt
+                chunk_sample_counts = prompt_sample_counts[sample_count_idx : sample_count_idx + len(chunk)]
+                num_responses = sum(chunk_sample_counts)
                 response_chunks.append(response_lengths[response_idx : response_idx + num_responses])
+                sample_count_chunks.append(chunk_sample_counts)
                 response_idx += num_responses
+                sample_count_idx += len(chunk)
         else:
             response_chunks = [None] * num_engines
+            sample_count_chunks = [None] * num_engines
 
         per_engine_totals: list[int] = []
-        for chunk_prompts, chunk_responses in zip(prompt_chunks, response_chunks):
+        for chunk_prompts, chunk_responses, chunk_sample_counts in zip(
+            prompt_chunks, response_chunks, sample_count_chunks
+        ):
             if not chunk_prompts:
                 per_engine_totals.append(0)
                 continue
 
             total = self.prefill_memory_bytes(chunk_prompts, dtype_bytes)
             if chunk_responses is not None:
-                total += self.decode_memory_bytes(chunk_prompts, chunk_responses, samples_per_prompt, dtype_bytes)
+                assert chunk_sample_counts is not None
+                total += self.decode_memory_bytes(chunk_prompts, chunk_responses, chunk_sample_counts, dtype_bytes)
             per_engine_totals.append(total)
 
         if len(per_engine_totals) < num_engines:
@@ -2246,7 +2281,7 @@ class ModelDims:
         prompt_lengths: list[int],
         generation_time: float,
         response_lengths: list[int] | None = None,
-        samples_per_prompt: int = 1,
+        samples_per_prompt: int | list[int] = 1,
         num_gpus: int = 1,
     ) -> float:
         total_flops = self.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
@@ -2259,7 +2294,7 @@ class ModelDims:
         prompt_lengths: list[int],
         generation_time: float,
         response_lengths: list[int] | None = None,
-        samples_per_prompt: int = 1,
+        samples_per_prompt: int | list[int] = 1,
         num_engines: int = 1,
         num_gpus_per_engine: int = 1,
     ) -> float:
@@ -2281,7 +2316,7 @@ class ModelDims:
         prompt_lengths: list[int],
         response_lengths: list[int],
         total_generation_time: float,
-        samples_per_prompt: int,
+        samples_per_prompt: int | list[int],
         num_engines: int,
         num_gpus_per_engine: int,
     ) -> dict[str, float]:
@@ -2332,12 +2367,16 @@ class ModelDims:
         prompt_lengths: list[int],
         response_lengths: list[int],
         training_time: float,
-        samples_per_prompt: int,
+        samples_per_prompt: int | list[int],
         num_training_gpus: int,
     ) -> dict[str, float]:
-        total_sequence_lengths = [
-            prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
-        ]
+        prompt_sample_counts = normalize_prompt_sample_counts(prompt_lengths, response_lengths, samples_per_prompt)
+        response_idx = 0
+        total_sequence_lengths = []
+        for prompt_length, sample_count in zip(prompt_lengths, prompt_sample_counts):
+            for response_len in response_lengths[response_idx : response_idx + sample_count]:
+                total_sequence_lengths.append(prompt_length + response_len)
+            response_idx += sample_count
 
         training_flops = self.flops(
             prompt_lengths=total_sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
@@ -2408,15 +2447,13 @@ def calculate_utilization_metrics(
     prompt_lengths: list[int],
     response_lengths: list[int],
     total_generation_time: float,
-    samples_per_prompt: int,
+    samples_per_prompt: int | list[int],
     num_engines: int,
     num_gpus_per_engine: int,
     training_time: float,
     num_training_gpus: int,
 ) -> dict:
-    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-    )
+    normalize_prompt_sample_counts(prompt_lengths, response_lengths, samples_per_prompt)
 
     actor_metrics = model_dims.calculate_actor_utilization(
         prompt_lengths=prompt_lengths,
@@ -2448,7 +2485,7 @@ def check_calculation(
     timing: float,
     prompt_lengths: list[int],
     response_lengths: list[int] | None,
-    samples_per_prompt: int,
+    samples_per_prompt: int | list[int],
     num_engines: int,
     num_gpus_per_engine: int,
 ) -> None:
@@ -2463,7 +2500,9 @@ def check_calculation(
     test_case_json = {
         "model_name": "REPLACE_WITH_MODEL_NAME",
         "total_generation_time": timing,
-        "samples_per_prompt": samples_per_prompt,
+        "samples_per_prompt": (
+            samples_per_prompt if isinstance(samples_per_prompt, int) else list(samples_per_prompt)
+        ),
         "num_engines": num_engines,
         "num_gpus_per_engine": num_gpus_per_engine,
         "training_time": "REPLACE_WITH_TRAINING_TIME",
