@@ -675,6 +675,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         },
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
+
+    # Filter empty groups to avoid issues with torch 2.10 and deepspeed
+    optimizer_grouped_parameters = [group for group in optimizer_grouped_parameters if group["params"]]
+
     if args.use_qlora:
         from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
