@@ -1668,6 +1668,7 @@ class DataPreparationActor:
                     else np.array(sequence_lengths[scores == 0])
                 )
                 stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
+                prompt_sample_counts = np.array(batch_stats.prompt_sample_counts, dtype=np.int32)
 
                 batch_metrics_dict = asdict(batch_stats)
                 # Keep dataset names as internal metadata for downstream metric aggregation.
@@ -1686,6 +1687,8 @@ class DataPreparationActor:
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                     "val/solve_rate_hist": batch_stats.percent_solved_hist,
                     "val/total_reward_groups": batch_stats.total_prompts,
+                    "val/completions_per_prompt": prompt_sample_counts.mean(),
+                    "val/completions_per_prompt_hist": prompt_sample_counts,
                     "val/sequence_lengths": sequence_lengths.mean(),
                     "val/sequence_lengths_min": sequence_lengths.min(),
                     "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1741,6 +1744,15 @@ class DataPreparationActor:
                     step_metrics[f"batch/filtered_prompts_solved/{dataset_name}"] = count
                 for dataset_name, count in filtered_prompts_nonzero_by_dataset.items():
                     step_metrics[f"batch/filtered_prompts_nonzero/{dataset_name}"] = count
+                if prompt_datasets is not None and len(prompt_datasets) == len(prompt_sample_counts):
+                    prompt_sample_counts_by_dataset: dict[str, list[int]] = {
+                        dataset_name: [] for dataset_name in self.dataset_metric_names
+                    }
+                    for dataset_name, sample_count in zip(prompt_datasets, prompt_sample_counts):
+                        prompt_sample_counts_by_dataset[dataset_name].append(int(sample_count))
+                    for dataset_name, sample_counts in prompt_sample_counts_by_dataset.items():
+                        if sample_counts:
+                            step_metrics[f"val/completions_per_prompt/{dataset_name}"] = float(np.mean(sample_counts))
                 solve_rates = batch_stats.percent_solved_hist
                 if solve_rates.size > 0:
                     step_metrics["val/train_prompt_solve_rate_count"] = int(solve_rates.size)
