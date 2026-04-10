@@ -198,6 +198,7 @@ Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved 
 | 6 | No | No | — | ALL modules fail | NaN |
 | 7 | Yes | No | — | Only RotaryEmbedding | NaN |
 | 8 | Yes | No | — | Only RotaryEmbedding | NaN |
+| 9 | Yes | No | — | Only RotaryEmbedding | NaN |
 
 **Conclusion**: The NaN is caused by a bug in vLLM's layerwise reload path (`_layerwise_process` / `param.data.copy_()`). Every other hypothesis has been ruled out across 8 experiments: RotaryEmbedding, inv_freq, bad training weights, parameter names, scheduler state (pause/resume), sleep/wake_up, and cudagraphs (enforce_eager). Experiment 3 is definitive: healthy weights, all parametric layers correctly loaded, still NaN after sync.
 
@@ -288,7 +289,7 @@ This definitively rules out cudagraphs — `enforce_eager=True` disables all com
 2. ~~Experiment 6~~ ✅ pause/resume ruled out.
 3. ~~Experiment 7~~ ✅ layerwise hotfix + pause/resume ruled out.
 4. ~~Experiment 8~~ ✅ enforce_eager + sleep/wake_up ruled out. Cudagraphs ruled out.
-5. **Dump all 339 parameter names**: vLLM team asked whether `name_mapper` is the issue. For Qwen2.5-7B, `name_mapper` is `None` (only Qwen3.5 uses it), so names pass through untransformed from `model.named_parameters()`. We logged first/last 5 and they match standard HF format, but should dump all 339 to share the complete list for verification.
+5. ~~Dump all 339 parameter names~~ ✅ Dumped in experiment 9 ([01KNT4CBAYT7NV5AJDKBKXZGFN](https://beaker.org/ex/01KNT4CBAYT7NV5AJDKBKXZGFN), W&B [i9zrmxbz](https://wandb.ai/ai2-llm/open_instruct_internal/runs/i9zrmxbz)). All 339 names are standard HF format: 12 params/layer × 28 layers + embed_tokens + norm + lm_head. `name_mapper` is `None` for Qwen2.5-7B.
 6. **Investigate what differs from working vLLM example**: Our setup uses `AsyncLLMEngine` (online serving), the working example uses `LLM` (offline). The weight update code path may differ. Also: working example is single-node single-GPU, we use 2 nodes × 8 GPUs with TP=2.
 7. **Revert to old `WorkerWrap` approach**: Native weight sync is broken in our setup. Fall back.
 8. **Report to vLLM**: File a bug with all 8 experiments as evidence.
