@@ -51,13 +51,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         master_port: int | None,
         local_world_size: int,
         model_name_or_path: str,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: str = "flash_attention_3",
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.local_world_size = local_world_size
@@ -67,7 +66,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.max_sequence_length = max_sequence_length
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self.data_prep_actor_name = data_prep_actor_name
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
@@ -99,7 +97,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         backend = "cpu:gloo,cuda:nccl"
         logger.info(f"[Rank {self.rank}] Calling train.prepare_training_environment...")
-        train.prepare_training_environment(seed=self.grpo_config.seed, backend=backend)
+        train.prepare_training_environment(
+            seed=self.grpo_config.seed, backend=backend, timeout=timedelta(minutes=self.grpo_config.backend_timeout)
+        )
         logger.info(f"[Rank {self.rank}] train.prepare_training_environment completed")
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -111,9 +111,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
         self.model_config = olmo_core_utils.get_transformer_config(
-            self.model_name_or_path,
-            vocab_size,
-            attn_backend=model_utils.hf_attn_to_olmo_core_backend(self.attn_implementation),
+            self.model_name_or_path, vocab_size, attn_backend=self.attn_implementation
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model = self.model_config.build(init_device="cpu")
@@ -126,7 +124,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
-            data_prep_actor_name=self.data_prep_actor_name,
             tokenizer=self.tokenizer,
             dp_rank=self.rank,
             fs_local_rank=self.rank,
@@ -138,9 +135,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         num_scheduler_steps = (
             self.grpo_config.num_training_steps * self.grpo_config.num_epochs * self.grpo_config.num_mini_batches
         )
-        warmup_steps = self.grpo_config.warm_up_steps
-        if self.grpo_config.warmup_ratio > 0.0:
-            warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
+        warmup_steps = int(num_scheduler_steps * self.grpo_config.warmup_ratio)
 
         if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
@@ -153,10 +148,16 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if not self.grpo_config.single_gpu_mode and self.world_size > 1:
             dp_config = TransformerDataParallelConfig(
                 name=DataParallelType.hsdp,
+                num_replicas=self.grpo_config.fsdp_num_replicas,
+                shard_degree=self.grpo_config.fsdp_shard_degree,
                 param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
+
+        ac_config = olmo_core_utils.build_ac_config(
+            self.grpo_config.activation_memory_budget, self.grpo_config.compile_model
+        )
 
         self.train_module = GRPOTrainModule(
             model=self.model,
@@ -168,6 +169,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             tokenizer=self.tokenizer,
             ref_policy=self.ref_policy,
             dp_config=dp_config,
+            ac_config=ac_config,
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
@@ -322,13 +324,12 @@ class OLMoCoreModelGroup:
         pg,
         num_gpus_per_node: list[int],
         model_name_or_path: str,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
-        attn_implementation: str = "flash_attention_3",
+        attn_implementation: model_utils.AttentionBackendName,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
@@ -353,7 +354,6 @@ class OLMoCoreModelGroup:
             "max_sequence_length": max_sequence_length,
             "streaming_config": streaming_config,
             "vllm_config": vllm_config,
-            "data_prep_actor_name": data_prep_actor_name,
             "tokenizer": tokenizer,
             "attn_implementation": attn_implementation,
         }

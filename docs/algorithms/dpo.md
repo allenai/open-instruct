@@ -54,7 +54,7 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | | `--max_seq_length` | Maximum sequence length after tokenization | `2048` |
 | | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
 | | `--weight_decay` | Weight decay for AdamW | `0.0` |
-| | `--max_grad_norm` | Maximum gradient norm for clipping (-1 = no clipping) | `-1` |
+| | `--max_grad_norm` | Maximum gradient norm for clipping (None = no clipping) | `None` |
 | | `--lr_scheduler_type` | LR scheduler: `linear`, `cosine`, `constant` | `linear` |
 | | `--compile_model` | Apply `torch.compile` to model blocks | `True` |
 | | `--activation_memory_budget` | Activation checkpointing budget (0.0–1.0) | `1.0` |
@@ -92,6 +92,8 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | | `--hf_repo_id` | ID of the saved model in HF Hub | `None` |
 | **Eval** | `--try_launch_beaker_eval_jobs` | Launch Beaker evaluation jobs after training | `True` |
 | | `--oe_eval_tasks` | Beaker evaluation tasks to launch | `None` |
+
+For details on how the parallelism flags interact, see [OLMo-core Sharding and Parallelism](olmo_core_sharding.md).
 
 ---
 

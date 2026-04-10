@@ -188,7 +188,7 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
 
 
 def setup_dataset(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     tokenizer_config: dataset_transformation.TokenizerConfig,
 ) -> datasets.Dataset:
@@ -221,7 +221,7 @@ def setup_dataset(
 
 
 def setup_vllm_engines(
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     vllm_config: data_loader.VLLMConfig,
     tokenizer_config: dataset_transformation.TokenizerConfig,
@@ -278,7 +278,9 @@ def setup_vllm_engines(
 
 
 def simulate_weight_sync(
-    actor_manager: ray.actor.ActorHandle, vllm_engines: list[ray.actor.ActorHandle], args: grpo_utils.ExperimentConfig
+    actor_manager: ray.actor.ActorHandle,
+    vllm_engines: list[ray.actor.ActorHandle],
+    args: grpo_utils.GRPOExperimentConfig,
 ) -> float:
     """Simulate weight sync by pausing all actors.
 
@@ -354,7 +356,7 @@ def run_benchmark(
     param_prompt_Q: ray_queue.Queue,
     inference_results_Q: ray_queue.Queue,
     actor_manager: ray.actor.ActorHandle,
-    args: grpo_utils.ExperimentConfig,
+    args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     vllm_config: data_loader.VLLMConfig,
     model_config: model_utils.ModelConfig,
@@ -681,7 +683,7 @@ def main() -> None:
     # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
         (
-            grpo_utils.ExperimentConfig,
+            grpo_utils.GRPOExperimentConfig,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
@@ -691,7 +693,7 @@ def main() -> None:
 
     args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
         tuple[
-            grpo_utils.ExperimentConfig,
+            grpo_utils.GRPOExperimentConfig,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
