@@ -181,7 +181,10 @@ class PackedSFTCollator:
             packed_input_ids.append(cat_ids)
             packed_label_mask.append(cat_mask)
 
-        return {"input_ids": torch.stack(packed_input_ids), "label_mask": torch.stack(packed_label_mask)}
+        result = {"input_ids": torch.stack(packed_input_ids), "label_mask": torch.stack(packed_label_mask)}
+        if features and "index" in features[0]:
+            result["index"] = torch.tensor([f["index"] for f in features])
+        return result
 
 
 def count_features_within_token_budget(features: list[dict[str, Any]], max_seq_length: int | None) -> int:
