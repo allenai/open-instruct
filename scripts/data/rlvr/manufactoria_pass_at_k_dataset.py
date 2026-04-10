@@ -1,8 +1,9 @@
-"""Generate pass@k completions for Manufactoria RLVR datasets (e.g. has_train / has_test) and optionally push to HF Hub.
+"""Generate or recompute Manufactoria pass@k metrics and difficulty for RLVR datasets.
 
 Adds a `difficulty` column: length-N list (one entry per ground-truth test), integers 1–4, quartiles within
 that prompt from per-test solve rates across the k completions (1 = hardest tests for this model, 4 = easiest).
-Use one dataset repo instead of separate pass-rate bucket subsets.
+Also stores explicit full-pass and per-test pass metrics so difficulty can be recomputed from an existing
+dataset that already contains a `completions` column.
 
 Requires a running Manufactoria API (same as training). Set MANUFACTORIA_API_URL or pass --manufactoria-api-url.
 
@@ -48,7 +49,7 @@ _DEFAULT_MANUFACTORIA_URL = os.environ.get("MANUFACTORIA_API_URL", "http://local
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate pass@k Manufactoria completions and build a Hub dataset.")
+    parser = argparse.ArgumentParser(description="Generate or recompute Manufactoria pass@k metrics and difficulty.")
     parser.add_argument(
         "--dataset", default="manufactoria/has_train", help="Input HF dataset (e.g. manufactoria/has_test)"
     )
@@ -78,6 +79,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="vLLM GPU memory utilization")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--limit", type=int, default=None, help="Optional max rows to process")
+    parser.add_argument(
+        "--use-existing-completions",
+        action="store_true",
+        help="Reuse the dataset's existing `completions` column and recompute pass metrics/difficulty without generation",
+    )
     parser.add_argument(
         "--manufactoria-api-url",
         default=_DEFAULT_MANUFACTORIA_URL,
@@ -296,6 +302,25 @@ def _align_per_test_pass(vec: list[float] | None, n_tests: int) -> list[float]:
     return out
 
 
+def _format_pass_rate(pass_count: int, num_samples: int) -> str:
+    return f"{pass_count}/{num_samples}"
+
+
+def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int) -> list[float]:
+    test_results = result_metadata.get("manufactoria_test_results", []) or []
+    if n_tests <= 0:
+        return []
+
+    per_test_pass = [0.0] * n_tests
+    for test_result in test_results:
+        if not isinstance(test_result, dict):
+            continue
+        test_index = test_result.get("test_index")
+        if isinstance(test_index, int) and 0 <= test_index < n_tests:
+            per_test_pass[test_index] = float(bool(test_result.get("passed")))
+    return per_test_pass
+
+
 def per_test_solve_rates_to_difficulty_quartiles(rates: list[float]) -> list[int]:
     """Map per-test solve rates (length N) to quartiles 1–4 within this prompt (low rate → 1, high → 4)."""
     n = len(rates)
@@ -319,7 +344,7 @@ def _score_completions(
     threshold: float,
     max_workers: int,
     with_difficulty: bool,
-) -> tuple[int, list[int]]:
+) -> tuple[int, list[int], list[int]]:
     n_tests = _num_tests_in_label(label)
 
     def score_one(text: str) -> tuple[int, list[float] | None]:
@@ -328,8 +353,7 @@ def _score_completions(
         if not with_difficulty or n_tests <= 0:
             return passed, None
         meta = getattr(result, "metadata", {}) or {}
-        pt = meta.get("manufactoria_per_test_passed")
-        vec = _align_per_test_pass(pt, n_tests)
+        vec = _extract_per_test_pass_vector(meta, n_tests)
         return passed, vec
 
     workers = min(max_workers, max(1, len(completions)))
@@ -338,12 +362,60 @@ def _score_completions(
 
     pass_count = sum(r[0] for r in results)
     if not with_difficulty or n_tests <= 0:
-        return pass_count, []
+        return pass_count, [], []
 
     matrix = np.array([r[1] for r in results], dtype=float)
+    per_test_pass_count = matrix.sum(axis=0).astype(int).tolist()
     rates = matrix.mean(axis=0).tolist()
     difficulty = per_test_solve_rates_to_difficulty_quartiles(rates)
-    return pass_count, difficulty
+    return pass_count, per_test_pass_count, difficulty
+
+
+def _row_num_samples(completions: list[str], fallback_num_samples: int) -> int:
+    return len(completions) if completions else fallback_num_samples
+
+
+def build_output_row(
+    sample: dict[str, Any],
+    completions: list[str],
+    verifier: ManufactoriaVerifier,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if "ground_truth" not in sample:
+        raise KeyError('Expected column "ground_truth" in dataset rows')
+
+    label = normalize_manufactoria_ground_truth(sample["ground_truth"])
+    with_difficulty = not args.no_difficulty
+    full_pass_count, per_test_pass_count, difficulty = _score_completions(
+        verifier,
+        label,
+        completions,
+        args.pass_score_threshold,
+        args.score_threads,
+        with_difficulty=with_difficulty,
+    )
+
+    num_samples = _row_num_samples(completions, args.num_samples)
+    row = {
+        **sample,
+        "completions": completions,
+        "Full pass count": full_pass_count,
+        "Full pass rate": _format_pass_rate(full_pass_count, num_samples),
+        "num_samples": num_samples,
+        "generator_manufactoria_scoring_mode": args.manufactoria_scoring_mode,
+        "generator_pass_score_threshold": args.pass_score_threshold,
+    }
+    if not args.use_existing_completions:
+        row["generator_model"] = args.model
+        row["generator_chat_template"] = args.chat_template
+        row["generator_temperature"] = args.temperature
+        row["generator_top_p"] = args.top_p
+        row["generator_max_tokens"] = args.response_length
+    if with_difficulty:
+        row["Per-test pass count"] = per_test_pass_count
+        row["Per-test pass rate"] = [_format_pass_rate(count, num_samples) for count in per_test_pass_count]
+        row[DIFFICULTY_KEY] = difficulty
+    return row
 
 
 def main() -> None:
@@ -356,51 +428,57 @@ def main() -> None:
     if args.limit is not None:
         ds = ds.select(range(min(args.limit, len(ds))))
 
-    prompts = build_prompts(ds, args.model, args.chat_template)
-
-    logger.info(
-        "Initializing vLLM model=%s engines=%d tp=%d rows=%d samples=%d",
-        args.model,
-        args.num_engines,
-        args.tensor_parallel_size,
-        len(ds),
-        args.num_samples,
-    )
-    sampling_params = SamplingParams(
-        n=args.num_samples,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        max_tokens=args.response_length,
-        seed=args.seed,
-    )
-    max_model_len = args.max_prompt_token_length + args.response_length
-    logger.info(
-        "Using max_model_len=%d (max_prompt_token_length=%d + response_length=%d)",
-        max_model_len,
-        args.max_prompt_token_length,
-        args.response_length,
-    )
-
-    logger.info("Generating completions")
-    if args.num_engines == 1:
-        completions_by_prompt = _generate_completions_single_engine(
-            prompts=prompts,
-            model=args.model,
-            tensor_parallel_size=args.tensor_parallel_size,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-            sampling_params=sampling_params,
-            max_model_len=max_model_len,
-        )
+    if args.use_existing_completions:
+        if "completions" not in ds.column_names:
+            raise KeyError('Expected column "completions" when using --use-existing-completions')
+        completions_by_prompt = [list(sample["completions"]) for sample in ds]
+        logger.info("Reusing existing completions from dataset rows=%d", len(ds))
     else:
-        completions_by_prompt = _generate_completions_multi_engine(
-            prompts=prompts,
-            model=args.model,
-            num_engines=args.num_engines,
-            tensor_parallel_size=args.tensor_parallel_size,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-            sampling_params=sampling_params,
-            max_model_len=max_model_len,
+        prompts = build_prompts(ds, args.model, args.chat_template)
+
+        logger.info(
+            "Initializing vLLM model=%s engines=%d tp=%d rows=%d samples=%d",
+            args.model,
+            args.num_engines,
+            args.tensor_parallel_size,
+            len(ds),
+            args.num_samples,
         )
+        sampling_params = SamplingParams(
+            n=args.num_samples,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            max_tokens=args.response_length,
+            seed=args.seed,
+        )
+        max_model_len = args.max_prompt_token_length + args.response_length
+        logger.info(
+            "Using max_model_len=%d (max_prompt_token_length=%d + response_length=%d)",
+            max_model_len,
+            args.max_prompt_token_length,
+            args.response_length,
+        )
+
+        logger.info("Generating completions")
+        if args.num_engines == 1:
+            completions_by_prompt = _generate_completions_single_engine(
+                prompts=prompts,
+                model=args.model,
+                tensor_parallel_size=args.tensor_parallel_size,
+                gpu_memory_utilization=args.gpu_memory_utilization,
+                sampling_params=sampling_params,
+                max_model_len=max_model_len,
+            )
+        else:
+            completions_by_prompt = _generate_completions_multi_engine(
+                prompts=prompts,
+                model=args.model,
+                num_engines=args.num_engines,
+                tensor_parallel_size=args.tensor_parallel_size,
+                gpu_memory_utilization=args.gpu_memory_utilization,
+                sampling_params=sampling_params,
+                max_model_len=max_model_len,
+            )
 
     verifier = ManufactoriaVerifier(
         ManufactoriaVerifierConfig(
@@ -413,35 +491,7 @@ def main() -> None:
     rows: list[dict] = []
     logger.info("Scoring completions via Manufactoria API (%s)", args.manufactoria_api_url)
     for sample, completions in zip(ds, completions_by_prompt):
-        if "ground_truth" not in sample:
-            raise KeyError('Expected column "ground_truth" in dataset rows')
-        label = normalize_manufactoria_ground_truth(sample["ground_truth"])
-        with_difficulty = not args.no_difficulty
-        pass_count, difficulty = _score_completions(
-            verifier,
-            label,
-            completions,
-            args.pass_score_threshold,
-            args.score_threads,
-            with_difficulty=with_difficulty,
-        )
-
-        row = {
-            **sample,
-            "completions": completions,
-            "pass_count": pass_count,
-            "pass_rate": f"{pass_count}/{args.num_samples}",
-            "num_samples": args.num_samples,
-            "generator_model": args.model,
-            "generator_chat_template": args.chat_template,
-            "generator_temperature": args.temperature,
-            "generator_top_p": args.top_p,
-            "generator_max_tokens": args.response_length,
-            "generator_manufactoria_scoring_mode": args.manufactoria_scoring_mode,
-            "generator_pass_score_threshold": args.pass_score_threshold,
-        }
-        row[DIFFICULTY_KEY] = difficulty
-        rows.append(row)
+        rows.append(build_output_row(sample, completions, verifier, args))
 
     out_ds = Dataset.from_list(rows)
     logger.info("Built output dataset with %d rows and columns: %s", len(out_ds), out_ds.column_names)
