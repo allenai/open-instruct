@@ -34,7 +34,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        --env DOCKER_HOST=unix:///run/podman/podman.sock \
-       -- podman system service --time=0 unix:///run/podman/podman.sock \& git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- podman system service --time=0 unix:///run/podman/podman.sock \& sleep 1 \&\& git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/openthoughts-tblite-harbor 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/openthoughts-tblite-harbor 8 \
