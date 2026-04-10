@@ -121,6 +121,7 @@ class _PriorityPromptQueueActor:
     def __init__(self, maxsize: int = 0):
         self.maxsize = maxsize
         self.queue = asyncio.PriorityQueue(self.maxsize)
+        self._next_seq = 0
 
     def qsize(self):
         return self.queue.qsize()
@@ -131,9 +132,14 @@ class _PriorityPromptQueueActor:
     def full(self):
         return self.queue.full()
 
-    async def put(self, item, timeout=None):
+    def _pack(self, item: Any, priority: PromptQueuePriority) -> tuple[int, int, Any]:
+        packed = (int(priority), self._next_seq, item)
+        self._next_seq += 1
+        return packed
+
+    async def put(self, item: Any, priority: PromptQueuePriority, timeout=None):
         try:
-            await asyncio.wait_for(self.queue.put(item), timeout)
+            await asyncio.wait_for(self.queue.put(self._pack(item, priority)), timeout)
         except asyncio.TimeoutError as err:
             raise queue.Full from err
 
@@ -143,8 +149,8 @@ class _PriorityPromptQueueActor:
         except asyncio.TimeoutError as err:
             raise queue.Empty from err
 
-    def put_nowait(self, item):
-        self.queue.put_nowait(item)
+    def put_nowait(self, item: Any, priority: PromptQueuePriority):
+        self.queue.put_nowait(self._pack(item, priority))
 
     def get_nowait(self):
         return self.queue.get_nowait()
@@ -156,12 +162,6 @@ class PriorityPromptQueue:
     def __init__(self, maxsize: int = 0):
         self.maxsize = maxsize
         self.actor = _PriorityPromptQueueActor.remote(maxsize=maxsize)
-        self._next_seq = 0
-
-    def _pack(self, item: Any, priority: PromptQueuePriority) -> tuple[int, int, Any]:
-        packed = (int(priority), self._next_seq, item)
-        self._next_seq += 1
-        return packed
 
     def put(
         self,
@@ -170,16 +170,15 @@ class PriorityPromptQueue:
         timeout: float | None = None,
         priority: PromptQueuePriority = PromptQueuePriority.TRAIN,
     ) -> None:
-        packed = self._pack(item, priority)
         if not block:
             try:
-                ray.get(self.actor.put_nowait.remote(packed))
+                ray.get(self.actor.put_nowait.remote(item, priority))
             except asyncio.QueueFull as err:
                 raise queue.Full from err
         else:
             if timeout is not None and timeout < 0:
                 raise ValueError("'timeout' must be a non-negative number")
-            ray.get(self.actor.put.remote(packed, timeout))
+            ray.get(self.actor.put.remote(item, priority, timeout))
 
     def get(self, block: bool = True, timeout: float | None = None) -> Any:
         if not block:

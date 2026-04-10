@@ -217,9 +217,16 @@ class TestVllmUtils3(unittest.TestCase):
 
     def test_priority_prompt_queue_dequeues_eval_before_train(self):
         queued_items = []
+        next_seq = 0
+
+        def put_item(item, priority, timeout=None):
+            nonlocal next_seq
+            queued_items.append((int(priority), next_seq, item))
+            next_seq += 1
+            queued_items.sort()
 
         actor = mock.Mock()
-        actor.put.remote.side_effect = lambda item, timeout=None: queued_items.append(item) or queued_items.sort()
+        actor.put.remote.side_effect = put_item
         actor.get.remote.side_effect = lambda timeout=None: queued_items.pop(0)
         actor.qsize.remote.side_effect = lambda: len(queued_items)
         actor.empty.remote.side_effect = lambda: len(queued_items) == 0
@@ -243,9 +250,16 @@ class TestVllmUtils3(unittest.TestCase):
 
     def test_priority_prompt_queue_defaults_to_train_priority(self):
         queued_items = []
+        next_seq = 0
+
+        def put_item(item, priority, timeout=None):
+            nonlocal next_seq
+            queued_items.append((int(priority), next_seq, item))
+            next_seq += 1
+            queued_items.sort()
 
         actor = mock.Mock()
-        actor.put.remote.side_effect = lambda item, timeout=None: queued_items.append(item) or queued_items.sort()
+        actor.put.remote.side_effect = put_item
         actor.get.remote.side_effect = lambda timeout=None: queued_items.pop(0)
         actor.qsize.remote.side_effect = lambda: len(queued_items)
         actor.empty.remote.side_effect = lambda: len(queued_items) == 0
