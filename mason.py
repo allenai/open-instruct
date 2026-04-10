@@ -613,7 +613,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
     return spec
 
 
-def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_dir_path: str, whoami: str):
+def maybe_download_tokenizer_from_gs_bucket(
+    filtered_command: list[str], auto_output_dir_path: str, whoami: str
+) -> list[str]:
     """if model is only on gs, download tokenizer from gs to local cache folder for dataset preprocessing"""
 
     if "--model_name_or_path" not in filtered_command:

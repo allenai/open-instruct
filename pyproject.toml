@@ -189,6 +189,7 @@ possibly-missing-attribute = "ignore"
 
 [tool.ty.src]
 include = [
+    "mason.py",
     "open_instruct/actor_manager.py",
     "open_instruct/benchmark_generators.py",
     "open_instruct/code_utils/api.py",
