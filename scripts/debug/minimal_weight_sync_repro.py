@@ -1,86 +1,49 @@
 """
 Minimal reproduction of NaN after NCCLWeightTransferEngine weight sync.
 
-Replicates our GRPO setup:
-- AsyncLLMEngine (not offline LLM)
-- TP=2
-- packed=False
-- Real base weights (not dummy)
-- Qwen2.5-7B (or smaller Qwen for faster testing)
+Based directly on vllm/examples/rl/rlhf_nccl.py but with:
+- packed=False (matching our GRPO setup)
+- Real base weights (not load_format="dummy")
+- Qwen2.5-1.5B (same family as our Qwen2.5-7B)
 
-Usage (3 GPUs: 1 trainer + 2 for TP=2):
-  ray start --head --num-gpus=3
+Usage (2 GPUs):
   python scripts/debug/minimal_weight_sync_repro.py
 
-Or on a single machine with 3+ GPUs:
-  python scripts/debug/minimal_weight_sync_repro.py
+Set USE_PACKED=true to test with packed=True (should match working example).
+Set LOAD_FORMAT=dummy to test with dummy weights (should match working example).
 """
 
-import asyncio
 import os
-import uuid
-from dataclasses import asdict
 
 import ray
-import torch
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM
 
-import vllm
-from vllm import SamplingParams
+from vllm import LLM, SamplingParams
 from vllm.config import WeightTransferConfig
-from vllm.distributed.weight_transfer.base import (
-    WeightTransferInitRequest,
-    WeightTransferUpdateRequest,
-)
 from vllm.distributed.weight_transfer.nccl_engine import (
     NCCLTrainerSendWeightsArgs,
     NCCLWeightTransferEngine,
-    NCCLWeightTransferInitInfo,
-    NCCLWeightTransferUpdateInfo,
 )
 from vllm.utils.network_utils import get_ip, get_open_port
-from vllm.v1.executor import Executor
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-1.5B")
-TP_SIZE = int(os.environ.get("TP_SIZE", "2"))
 USE_PACKED = os.environ.get("USE_PACKED", "false").lower() == "true"
+LOAD_FORMAT = os.environ.get("LOAD_FORMAT", "auto")
 
 
-class MyAsyncLLM(vllm.AsyncLLMEngine):
-    def __init__(self, **kwargs):
-        bundle_indices = kwargs.pop("bundle_indices", None)
-        if bundle_indices is not None:
-            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(
-                map(str, bundle_indices)
-            )
-        engine_args = vllm.AsyncEngineArgs(**kwargs)
-        vllm_config = engine_args.create_engine_config()
-        executor_class = Executor.get_class(vllm_config)
-        super().__init__(
-            vllm_config=vllm_config,
-            executor_class=executor_class,
-            log_requests=False,
-            log_stats=False,
-        )
-
-    async def do_generate(self, prompt_token_ids, sampling_params):
-        output = None
-        async for request_output in self.generate(
-            {"prompt_token_ids": prompt_token_ids},
-            sampling_params,
-            request_id=str(uuid.uuid4()),
-        ):
-            output = request_output
-        return output
+class MyLLM(LLM):
+    def __init__(self, *args, **kwargs):
+        os.environ["VLLM_RAY_BUNDLE_INDICES"] = "0"
+        super().__init__(*args, **kwargs)
 
 
 @ray.remote(num_gpus=1)
 class TrainModel:
     def __init__(self, model_name):
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch.bfloat16
+            model_name,
         ).to("cuda:0")
         self.port = get_open_port()
         self.master_address = get_ip()
@@ -118,136 +81,106 @@ class TrainModel:
         )
 
 
-def main():
-    ray.init(
-        runtime_env={
-            "env_vars": {"RAY_EXPERIMENTAL_NOSET_CUDA_ENV_VAR": "1"}
-        }
-    )
+ray.init()
 
-    print(f"Model: {MODEL_NAME}, TP={TP_SIZE}, packed={USE_PACKED}")
+print(f"Model: {MODEL_NAME}, packed={USE_PACKED}, load_format={LOAD_FORMAT}")
 
-    train_model = TrainModel.remote(MODEL_NAME)
+train_model = TrainModel.remote(MODEL_NAME)
 
-    pg_inference = placement_group([{"GPU": 1, "CPU": 0}] * TP_SIZE)
-    ray.get(pg_inference.ready())
-    scheduling_inference = PlacementGroupSchedulingStrategy(
-        placement_group=pg_inference,
-        placement_group_capture_child_tasks=True,
-        placement_group_bundle_index=0,
-    )
+pg_inference = placement_group([{"GPU": 1, "CPU": 0}])
+ray.get(pg_inference.ready())
+scheduling_inference = PlacementGroupSchedulingStrategy(
+    placement_group=pg_inference,
+    placement_group_capture_child_tasks=True,
+    placement_group_bundle_index=0,
+)
 
-    bundle_indices = list(range(TP_SIZE))
+llm = ray.remote(
+    num_cpus=0,
+    num_gpus=0,
+    scheduling_strategy=scheduling_inference,
+)(MyLLM).remote(
+    model=MODEL_NAME,
+    enforce_eager=True,
+    tensor_parallel_size=1,
+    distributed_executor_backend="ray",
+    weight_transfer_config=WeightTransferConfig(backend="nccl"),
+    load_format=LOAD_FORMAT,
+)
 
-    llm = ray.remote(
-        num_cpus=0,
-        num_gpus=0,
-        scheduling_strategy=scheduling_inference,
-    )(MyAsyncLLM).remote(
-        model=MODEL_NAME,
-        enforce_eager=True,
-        tensor_parallel_size=TP_SIZE,
-        distributed_executor_backend="ray",
-        weight_transfer_config=WeightTransferConfig(backend="nccl"),
-        dtype="bfloat16",
-        bundle_indices=bundle_indices,
-    )
+prompts = [
+    "Hello, my name is",
+    "The president of the United States is",
+    "The capital of France is",
+    "The future of AI is",
+]
+sampling_params = SamplingParams(temperature=0, max_tokens=50)
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    prompts = [
-        "Hello, my name is",
-        "The president of the United States is",
-        "The capital of France is",
-        "The future of AI is",
-    ]
-    prompt_token_ids = [
-        tokenizer.encode(p, add_special_tokens=False) for p in prompts
-    ]
-    sampling_params = SamplingParams(temperature=0, max_tokens=50)
+print("\n" + "=" * 60)
+print("PHASE 1: Generate BEFORE weight sync")
+print("=" * 60)
+outputs_before = ray.get(llm.generate.remote(prompts, sampling_params))
+for output in outputs_before:
+    print(f"  {output.prompt!r} -> {output.outputs[0].text!r}")
 
-    print("\n" + "=" * 60)
-    print("PHASE 1: Generate BEFORE weight sync (should be normal)")
-    print("=" * 60)
-    outputs_before = ray.get(
-        [llm.do_generate.remote(ptids, sampling_params) for ptids in prompt_token_ids]
-    )
-    for output in outputs_before:
-        text = tokenizer.decode(output.outputs[0].token_ids)
-        print(f"  {output.prompt!r} -> {text!r}")
+print("\n" + "=" * 60)
+print("PHASE 2: Weight sync")
+print("=" * 60)
 
-    print("\n" + "=" * 60)
-    print("PHASE 2: Weight sync")
-    print("=" * 60)
+ray.get(llm.sleep.remote(level=0))
 
-    ray.get(llm.sleep.remote(level=0, mode="keep"))
+master_address, master_port = ray.get(
+    train_model.get_master_address_and_port.remote()
+)
+world_size = ray.get(llm.get_world_size.remote()) + 1
 
-    master_address, master_port = ray.get(
-        train_model.get_master_address_and_port.remote()
-    )
-    world_size = TP_SIZE + 1
-
-    inference_handle = llm.init_weight_transfer_engine.remote(
-        WeightTransferInitRequest(
-            init_info=asdict(
-                NCCLWeightTransferInitInfo(
-                    master_address=master_address,
-                    master_port=master_port,
-                    rank_offset=1,
-                    world_size=world_size,
-                )
-            )
+inference_handle = llm.init_weight_transfer_engine.remote(
+    dict(
+        init_info=dict(
+            master_address=master_address,
+            master_port=master_port,
+            rank_offset=1,
+            world_size=world_size,
         )
     )
-    train_handle = train_model.init_weight_transfer_group.remote(world_size)
-    ray.get([train_handle, inference_handle])
+)
+train_handle = train_model.init_weight_transfer_group.remote(world_size)
+ray.get([train_handle, inference_handle])
 
-    names, dtype_names, shapes = ray.get(
-        train_model.get_weight_metadata.remote()
-    )
-    print(f"  Sending {len(names)} parameters, packed={USE_PACKED}")
+names, dtype_names, shapes = ray.get(train_model.get_weight_metadata.remote())
+print(f"  Sending {len(names)} parameters, packed={USE_PACKED}")
 
-    inference_handle = llm.update_weights.remote(
-        WeightTransferUpdateRequest(
-            update_info=asdict(
-                NCCLWeightTransferUpdateInfo(
-                    names=names,
-                    dtype_names=dtype_names,
-                    shapes=shapes,
-                    packed=USE_PACKED,
-                )
-            )
+inference_handle = llm.update_weights.remote(
+    dict(
+        update_info=dict(
+            names=names,
+            dtype_names=dtype_names,
+            shapes=shapes,
+            packed=USE_PACKED,
         )
     )
-    train_handle = train_model.broadcast_weights.remote(packed=USE_PACKED)
-    ray.get([train_handle, inference_handle])
-    print("  Weight sync complete!")
+)
+train_handle = train_model.broadcast_weights.remote(packed=USE_PACKED)
+ray.get([train_handle, inference_handle])
+print("  Weight sync complete!")
 
-    ray.get(llm.wake_up.remote(tags=["scheduling"]))
+ray.get(llm.wake_up.remote(tags=["scheduling"]))
 
-    print("\n" + "=" * 60)
-    print("PHASE 3: Generate AFTER weight sync (NaN bug would show here)")
-    print("=" * 60)
-    outputs_after = ray.get(
-        [llm.do_generate.remote(ptids, sampling_params) for ptids in prompt_token_ids]
-    )
+print("\n" + "=" * 60)
+print("PHASE 3: Generate AFTER weight sync")
+print("=" * 60)
+outputs_after = ray.get(llm.generate.remote(prompts, sampling_params))
 
-    has_nan = False
-    for output in outputs_after:
-        text = tokenizer.decode(output.outputs[0].token_ids)
-        print(f"  {output.prompt!r} -> {text!r}")
-        if "nan" in text.lower() or not output.outputs[0].token_ids:
-            has_nan = True
+has_nan = False
+for output in outputs_after:
+    text = output.outputs[0].text
+    print(f"  {output.prompt!r} -> {text!r}")
+    if not text or "nan" in text.lower():
+        has_nan = True
 
-    print("\n" + "=" * 60)
-    if has_nan:
-        print("RESULT: NaN detected after weight sync - BUG REPRODUCED")
-    else:
-        print("RESULT: Generation looks normal after weight sync")
-    print("=" * 60)
-
-    ray.get(llm.shutdown.remote())
-    ray.shutdown()
-
-
-if __name__ == "__main__":
-    main()
+print("\n" + "=" * 60)
+if has_nan:
+    print("RESULT: NaN detected after weight sync - BUG REPRODUCED")
+else:
+    print("RESULT: Generation looks normal after weight sync")
+print("=" * 60)
