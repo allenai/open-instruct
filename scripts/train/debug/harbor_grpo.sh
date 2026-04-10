@@ -30,6 +30,8 @@ uv run python mason.py \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+       --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+       --env BEAKER_SKIP_DOCKER_SOCKET=1 \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
