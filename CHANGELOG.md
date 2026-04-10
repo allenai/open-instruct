@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`.
+- Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking.
+- Fix DeepSpeed gradient clipping in `grpo_fast.py` by passing `max_norm` to the DS config.
+- Fix `dpo_tune_cache.py` logging on every rank by switching to `accelerate.logging.get_logger`.
 - Fix `Batch.__getitem__` handling of `active_tools` for int and list indexing (https://github.com/allenai/open-instruct/pull/1592).
 - Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
 - Fix incorrect hardcoded checkpoint state path for multi-GPU DeepSpeed resumption (https://github.com/allenai/open-instruct/pull/1589).
