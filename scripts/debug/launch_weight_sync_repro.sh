@@ -9,7 +9,7 @@ uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
-       --description "Minimal weight sync NaN repro (LLM + TP=2 + packed=False)" \
+       --description "Weight sync repro: TP=2 + send_data_only (like GRPO DeepSpeed path)" \
        --pure_docker_mode \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
@@ -21,4 +21,4 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- python scripts/debug/minimal_weight_sync_repro.py
+       -- SEND_DATA_ONLY=true python scripts/debug/minimal_weight_sync_repro.py

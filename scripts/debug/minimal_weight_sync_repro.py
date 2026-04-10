@@ -32,6 +32,7 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-1.5B")
 TP_SIZE = int(os.environ.get("TP_SIZE", "2"))
 USE_PACKED = os.environ.get("USE_PACKED", "false").lower() == "true"
 LOAD_FORMAT = os.environ.get("LOAD_FORMAT", "auto")
+SEND_DATA_ONLY = os.environ.get("SEND_DATA_ONLY", "false").lower() == "true"
 
 
 class MyLLM(LLM):
@@ -72,20 +73,25 @@ class TrainModel:
             ),
         )
 
-    def broadcast_weights(self, packed):
+    def broadcast_weights(self, packed, send_data_only=False):
         trainer_args = NCCLTrainerSendWeightsArgs(
             group=self.model_update_group,
             packed=packed,
         )
+        if send_data_only:
+            mapped_params = [(n, p.data) for n, p in self.model.named_parameters()]
+            iterator = iter(mapped_params)
+        else:
+            iterator = self.model.named_parameters()
         NCCLWeightTransferEngine.trainer_send_weights(
-            iterator=self.model.named_parameters(),
+            iterator=iterator,
             trainer_args=trainer_args,
         )
 
 
 ray.init()
 
-print(f"Model: {MODEL_NAME}, TP={TP_SIZE}, packed={USE_PACKED}, load_format={LOAD_FORMAT}")
+print(f"Model: {MODEL_NAME}, TP={TP_SIZE}, packed={USE_PACKED}, load_format={LOAD_FORMAT}, send_data_only={SEND_DATA_ONLY}")
 
 train_model = TrainModel.remote(MODEL_NAME)
 
@@ -163,7 +169,7 @@ inference_handle = llm.update_weights.remote(
         )
     )
 )
-train_handle = train_model.broadcast_weights.remote(packed=USE_PACKED)
+train_handle = train_model.broadcast_weights.remote(packed=USE_PACKED, send_data_only=SEND_DATA_ONLY)
 ray.get([train_handle, inference_handle])
 print("  Weight sync complete!")
 
