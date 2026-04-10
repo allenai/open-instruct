@@ -25,7 +25,7 @@ MASON_PUSH_ENV=()
 [[ -n "${HF_DATASETS_OWNER+x}" ]] && MASON_PUSH_ENV+=(--env "HF_DATASETS_OWNER=${HF_DATASETS_OWNER}")
 
 uv run python mason.py \
-  --cluster ai2/neptune \
+  --cluster ai2/neptune ai2/saturn ai2/rhea \
   --workspace ai2/oe-adapt-code \
   --priority high \
   --preemptible \
