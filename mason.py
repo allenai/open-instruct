@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import hashlib
 import os
 import random
@@ -641,29 +642,24 @@ def maybe_override_checkpoint_dir(
     if not auto_checkpoint_state_dir or is_external_user:
         return command
 
-    need_to_override_checkpoint_state_dir = True
-    default_checkpoint_state_freq = 200
-    for i, cmd in enumerate(command):
-        if cmd == "--checkpoint_state_dir" and i + 1 < len(command) and "/weka/" in command[i + 1]:
-            need_to_override_checkpoint_state_dir = False
-        if cmd == "--checkpoint_state_freq" and i + 1 < len(command):
-            default_checkpoint_state_freq = command[i + 1]
+    # get the last .index, not the first
+    checkpoint_arg_last_index = None
+    with contextlib.suppress(ValueError):
+        checkpoint_arg_last_index = len(command) - 1 - command[::-1].index("--checkpoint_state_dir")
 
-    if need_to_override_checkpoint_state_dir:
-        new_checkpoint_state_dir = (
-            f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-        )
-        console.log(
-            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-        )
-        command.extend(
-            [
-                "--checkpoint_state_dir",
-                new_checkpoint_state_dir,
-                "--checkpoint_state_freq",
-                str(default_checkpoint_state_freq),
-            ]
-        )
+    # don't override if the checkpoint dir is on /weka/
+    if (
+        checkpoint_arg_last_index is not None
+        and checkpoint_arg_last_index + 1 < len(command)
+        and "/weka/" in command[checkpoint_arg_last_index + 1]
+    ):
+        return command
+
+    new_checkpoint_state_dir = f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+    console.log(
+        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+    )
+    command.extend(["--checkpoint_state_dir", new_checkpoint_state_dir])
 
     return command
 
