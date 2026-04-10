@@ -16,17 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Docker CLI + buildx plugin for Harbor.
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz -o docker.tgz \
-    && tar xzvf docker.tgz --strip 1 -C /usr/local/bin docker/docker \
-    && rm docker.tgz \
-    && mkdir -p /usr/local/lib/docker/cli-plugins \
-    && curl -fsSL https://github.com/docker/buildx/releases/download/v0.26.1/buildx-v0.26.1.linux-amd64 \
-       -o /usr/local/lib/docker/cli-plugins/docker-buildx \
-    && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+# Install Docker CLI + compose + buildx for Harbor.
+RUN apt-get update && apt-get install -y ca-certificates curl gnupg && \
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli docker-buildx-plugin docker-compose-plugin && \
+    rm -rf /var/lib/apt/lists/*
 
-# Symlink docker → podman for Beaker nodes.
-RUN ln -sf $(which podman) /usr/local/bin/docker
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
@@ -71,8 +69,6 @@ RUN curl --silent \
     && rm beaker.tar.gz
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
-
-RUN uv pip install --no-cache-dir --system podman-compose
 
 WORKDIR /stage/
 
