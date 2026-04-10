@@ -170,7 +170,7 @@ class GRPOExperimentConfig(
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    checkpoint_state_freq: int = 100
+    checkpoint_state_freq: int = 200
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
