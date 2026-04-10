@@ -116,6 +116,8 @@ class PromptQueuePriority(enum.IntEnum):
 
 @ray.remote
 class _PriorityPromptQueueActor:
+    """Exactly like Ray's regular prompt queue actor but backed with a Priority Queue."""
+
     def __init__(self, maxsize: int = 0):
         self.maxsize = maxsize
         self.queue = asyncio.PriorityQueue(self.maxsize)

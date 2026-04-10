@@ -1600,17 +1600,16 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
-        num_eval_prompts = len(eval_dataset)
         is_final_step = training_step >= args.num_training_steps
         # On non-final steps, only evaluate when we have a full batch ready.
         # This avoids partially draining the queue and losing results.
         if not is_final_step:
             queued_results = evaluation_inference_results_Q.qsize()
-            if queued_results < num_eval_prompts:
+            if queued_results < len(eval_dataset):
                 logger.info(
                     "[Main Thread] Eval responses pending (%s/%s); deferring evaluation.",
                     queued_results,
-                    num_eval_prompts,
+                    len(eval_dataset),
                 )
                 return False
 
@@ -1622,7 +1621,7 @@ def maybe_evaluate(
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -2322,8 +2321,9 @@ def main(
             utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
         raise
     finally:
-        shutdown_queues: list[ray_queue.Queue] = [inference_results_Q, prompt_Q, evaluation_inference_results_Q]
-        cleanup_training_resources(stop_event, executor, shutdown_queues, actor_manager)
+        cleanup_training_resources(
+            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
+        )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
