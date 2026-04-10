@@ -627,35 +627,43 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     return filtered_command
 
 
-def maybe_override_checkpoint_dir(command, auto_checkpoint_state_dir, whoami, is_external_user):
-    for file in OPEN_INSTRUCT_RESUMABLES:
-        if file not in command:
-            continue
+def maybe_override_checkpoint_dir(
+    command: list[str], auto_checkpoint_state_dir: str, whoami: str, is_external_user: bool
+):
+    """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
 
-        if len(auto_checkpoint_state_dir) > 0:
-            need_to_override_checkpoint_state_dir = True
-            default_checkpoint_state_freq = 200
-            for i, cmd in enumerate(command):
-                if cmd == "--checkpoint_state_dir" and i + 1 < len(command) and "/weka/" in command[i + 1]:
-                    need_to_override_checkpoint_state_dir = False
-                if cmd == "--checkpoint_state_freq" and i + 1 < len(command):
-                    default_checkpoint_state_freq = command[i + 1]
+    --checkpoint_state_dir is not overriden if it is already set and is on /weka (useful for restarting from a checkpoint)
+    """
 
-            if need_to_override_checkpoint_state_dir and not is_external_user:
-                new_checkpoint_state_dir = (
-                    f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-                )
-                console.log(
-                    f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-                )
-                command.extend(
-                    [
-                        "--checkpoint_state_dir",
-                        new_checkpoint_state_dir,
-                        "--checkpoint_state_freq",
-                        str(default_checkpoint_state_freq),
-                    ]
-                )
+    if not any(file in command for file in OPEN_INSTRUCT_RESUMABLES):
+        return command
+
+    if not auto_checkpoint_state_dir or is_external_user:
+        return command
+
+    need_to_override_checkpoint_state_dir = True
+    default_checkpoint_state_freq = 200
+    for i, cmd in enumerate(command):
+        if cmd == "--checkpoint_state_dir" and i + 1 < len(command) and "/weka/" in command[i + 1]:
+            need_to_override_checkpoint_state_dir = False
+        if cmd == "--checkpoint_state_freq" and i + 1 < len(command):
+            default_checkpoint_state_freq = command[i + 1]
+
+    if need_to_override_checkpoint_state_dir:
+        new_checkpoint_state_dir = (
+            f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+        )
+        console.log(
+            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+        )
+        command.extend(
+            [
+                "--checkpoint_state_dir",
+                new_checkpoint_state_dir,
+                "--checkpoint_state_freq",
+                str(default_checkpoint_state_freq),
+            ]
+        )
 
     return command
 
