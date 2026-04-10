@@ -49,7 +49,7 @@ uv run python mason.py \
         --total_episodes 10_000 \
         --deepspeed_stage 2 \
         --num_learners_per_node 8 \
-        --sequence_parallel_size 2 \
+        --sequence_parallel_size 1 \
         --vllm_num_engines 4 \
         --vllm_tensor_parallel_size 2 \
         --lr_scheduler_type constant \
