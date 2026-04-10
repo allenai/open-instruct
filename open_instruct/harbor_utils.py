@@ -9,6 +9,7 @@ that the rest of the pipeline consumes.
 
 from __future__ import annotations
 
+import socket
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -58,7 +59,7 @@ def make_harbor_trial_config(
     env_type = EnvironmentType.DAYTONA if environment == "daytona" else EnvironmentType.DOCKER
     max_model_len = getattr(actor.llm_engine.model_config, "max_model_len", 32768)
     merged_kwargs: dict[str, Any] = {
-        "base_url": f"http://172.17.0.1:{actor.server_port}/v1",
+        "base_url": f"http://{socket.gethostname()}:{actor.server_port}/v1",
         "collect_rollout_details": True,
         "linear_history": True,
         "temperature": sampling_params.temperature,
