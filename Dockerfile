@@ -81,35 +81,9 @@ RUN LAYERWISE=$(find /stage/.venv -path '*/model_loader/reload/layerwise.py' 2>/
     fi
 
 # Weight validation: log NaN/Inf stats after finalize_layerwise_reload in gpu_worker.py
+COPY scripts/patch_gpu_worker.py /tmp/patch_gpu_worker.py
 RUN GPU_WORKER=$(find /stage/.venv -path '*/v1/worker/gpu_worker.py' 2>/dev/null | head -1) && \
-    if [ -n "$GPU_WORKER" ]; then \
-    python3 -c "
-import pathlib, sys
-p = pathlib.Path(sys.argv[1])
-src = p.read_text()
-target = 'finalize_layerwise_reload(model, self.model_config)'
-idx = src.find(target)
-if idx == -1:
-    print('WARNING: target not found in gpu_worker.py', file=sys.stderr)
-    sys.exit(0)
-end = src.index('\n', idx) + 1
-patch = '''            import logging as _logging
-            _wv_logger = _logging.getLogger('weight_validation')
-            _bad = []
-            for _n, _p in model.named_parameters():
-                if _p.isnan().any():
-                    _bad.append((_n, 'NaN', list(_p.shape)))
-                elif _p.isinf().any():
-                    _bad.append((_n, 'Inf', list(_p.shape)))
-            if _bad:
-                _wv_logger.error('WEIGHT VALIDATION FAILED after layerwise reload: %s', _bad[:10])
-            else:
-                _wv_logger.warning('WEIGHT VALIDATION OK: all %d params clean after layerwise reload', sum(1 for _ in model.named_parameters()))
-'''
-p.write_text(src[:end] + patch + src[end:])
-print('Patched gpu_worker.py with weight validation')
-" "$GPU_WORKER"; \
-    fi
+    if [ -n "$GPU_WORKER" ]; then python3 /tmp/patch_gpu_worker.py "$GPU_WORKER"; fi
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
