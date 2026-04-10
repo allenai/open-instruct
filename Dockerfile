@@ -12,24 +12,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     sudo \
     nginx \
-    podman \
     && apt-get autoremove -y \
     && mkdir -p /etc/nginx/conf.d \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Docker Compose v2 + buildx as standalone binaries, with a
-# wrapper that routes `docker compose` to docker-compose and everything
-# else to podman (the container runtime available on Beaker nodes).
-RUN mkdir -p /usr/local/lib/docker/cli-plugins \
-    && curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
-       -o /usr/local/bin/docker-compose \
-    && chmod +x /usr/local/bin/docker-compose \
+# Install Docker CLI (static binary) + buildx plugin for Harbor.
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz -o docker.tgz \
+    && tar xzvf docker.tgz --strip 1 -C /usr/local/bin docker/docker \
+    && rm docker.tgz \
+    && mkdir -p /usr/local/lib/docker/cli-plugins \
     && curl -fsSL https://github.com/docker/buildx/releases/download/v0.26.1/buildx-v0.26.1.linux-amd64 \
        -o /usr/local/lib/docker/cli-plugins/docker-buildx \
-    && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx \
-    && printf '#!/bin/sh\nif [ "$1" = "compose" ]; then shift; exec docker-compose "$@"; fi\nexec podman "$@"\n' \
-       > /usr/local/bin/docker \
-    && chmod +x /usr/local/bin/docker
+    && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
