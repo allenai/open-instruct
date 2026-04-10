@@ -1329,9 +1329,8 @@ def _prepare_params_for_sync(
     if views:
         logger.warning("[Weight Sync] %d view params: %s", len(views), views[:5])
     if bad_params:
-        logger.error("[Weight Sync] BAD WEIGHTS before send: %s", bad_params)
-    else:
-        logger.info("[Weight Sync] All %d params validated: no NaN/Inf", len(mapped_params))
+        raise ValueError(f"[Weight Sync] BAD WEIGHTS before send: {bad_params}")
+    logger.info("[Weight Sync] All %d params validated: no NaN/Inf", len(mapped_params))
     return mapped_params
 
 
@@ -1455,11 +1454,10 @@ def broadcast_weights_to_vllm(
             if hasattr(p, "ds_tensor") and p.ds_tensor.data.isnan().any():
                 nan_shards.append((n, list(p.ds_tensor.shape)))
         if nan_shards:
-            logger.error(
-                "[Weight Sync] NaN in DS3 shards BEFORE gather: %d params: %s", len(nan_shards), nan_shards[:10]
+            raise ValueError(
+                f"[Weight Sync] NaN in DS3 shards BEFORE gather: {len(nan_shards)} params: {nan_shards[:10]}"
             )
-        else:
-            logger.info("[Weight Sync] All %d DS3 shards clean before gather", len(params))
+        logger.info("[Weight Sync] All %d DS3 shards clean before gather", len(params))
 
     if gather_whole_model:
         if isinstance(model, FSDP):

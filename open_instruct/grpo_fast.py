@@ -641,6 +641,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
                     if is_accumulation_boundary:
+                        nan_grads = []
+                        for name, param in self.model.module.named_parameters():
+                            if param.grad is not None and torch.isnan(param.grad).any():
+                                nan_grads.append(name)
+                        if nan_grads:
+                            raise ValueError(
+                                f"NaN gradients before optimizer step: {len(nan_grads)} params: {nan_grads[:10]}"
+                            )
                         self.model.step()
                         grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
