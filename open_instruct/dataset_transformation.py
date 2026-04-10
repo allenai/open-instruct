@@ -645,6 +645,26 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "qwen_thinker": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant. "
+        "Think carefully inside <think> and </think> tags, "
+        "then provide your answer inside <answer> and </answer> tags.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 
 
