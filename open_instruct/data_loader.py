@@ -816,12 +816,12 @@ def compute_prompt_solve_rate_metrics(
     prompt_index_to_solve_rates: dict[int, list[float]] = {}
     for prompt_index, prompt_solve_rate in zip(batch_stats.prompt_indices, solve_rates):
         prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
-    prompt_solve_rate_by_dataset_index = [
+    prompt_solve_rate_by_index = [
         (int(prompt_index), float(np.mean(rates)))
         for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
     ]
-    metrics[by_index_key] = prompt_solve_rate_by_dataset_index
-    metrics[by_index_count_key] = len(prompt_solve_rate_by_dataset_index)
+    metrics[by_index_key] = prompt_solve_rate_by_index
+    metrics[by_index_count_key] = len(prompt_solve_rate_by_index)
 
     dataset_to_solve_rates: dict[str, list[float]] = {}
     for dataset_name, prompt_solve_rate in zip(batch_stats.prompt_datasets, solve_rates):
@@ -1839,8 +1839,8 @@ class DataPreparationActor:
                     compute_prompt_solve_rate_metrics(
                         batch_stats=batch_stats,
                         count_key="val/train_prompt_solve_rate_count",
-                        by_index_key="val/train_prompt_solve_rate_by_dataset_index",
-                        by_index_count_key="val/train_prompt_solve_rate_by_dataset_index_count",
+                        by_index_key="val/train_prompt_solve_rate_by_index",
+                        by_index_count_key="val/train_prompt_solve_rate_by_index_count",
                         dataset_mean_prefix="val/train_prompt_solve_rate_mean",
                         enabled=self.config.log_train_solve_rate_metrics,
                     )

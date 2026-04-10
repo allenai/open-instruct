@@ -1669,8 +1669,8 @@ def one_training_step(
         _move_dataset_index_solve_rate_to_wandb_table(
             metrics_to_log,
             table_metrics,
-            source_key="val/train_prompt_solve_rate_by_dataset_index",
-            table_key="val/train_prompt_solve_rate_by_dataset_index_table",
+            source_key="val/train_prompt_solve_rate_by_index",
+            table_key="val/train_prompt_solve_rate_by_index_table",
         )
         # Convert numeric array/list metrics to wandb histograms (skip strings, tuples, etc.)
         for key, value in list(metrics_to_log.items()):
@@ -1900,8 +1900,8 @@ def maybe_evaluate(
                 compute_prompt_solve_rate_metrics(
                     batch_stats=eval_batch_stats,
                     count_key=None,
-                    by_index_key="eval/prompt_solve_rate_by_dataset_index",
-                    by_index_count_key="eval/prompt_solve_rate_by_dataset_index_count",
+                    by_index_key="eval/prompt_solve_rate_by_index",
+                    by_index_count_key="eval/prompt_solve_rate_by_index_count",
                     dataset_mean_prefix="eval/prompt_solve_rate_mean",
                 )
             )
@@ -1929,8 +1929,8 @@ def maybe_evaluate(
             _move_dataset_index_solve_rate_to_wandb_table(
                 metrics_to_log,
                 table_metrics,
-                source_key="eval/prompt_solve_rate_by_dataset_index",
-                table_key="eval/prompt_solve_rate_by_dataset_index_table",
+                source_key="eval/prompt_solve_rate_by_index",
+                table_key="eval/prompt_solve_rate_by_index_table",
             )
             wandb.log({**metrics_to_log, **table_metrics}, step=training_step)
         else:
