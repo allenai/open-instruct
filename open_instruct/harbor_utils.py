@@ -213,7 +213,7 @@ async def process_request_harbor(actor: LLMRayActor, sub_request_id: str, sampli
 
     logger.info(
         f"Harbor trial starting for {sub_request_id}: task={task_path}, "
-        f"base_url={merged_kwargs['base_url']}, model={trial_config.agent.model_name}"
+        f"base_url={trial_config.agent.kwargs.get('base_url')}, model={trial_config.agent.model_name}"
     )
 
     start_time = time.perf_counter()
