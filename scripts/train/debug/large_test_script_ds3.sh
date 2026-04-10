@@ -47,7 +47,7 @@ uv run python mason.py \
         --total_episodes 10_000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --sequence_parallel_size 1 \
+        --sequence_parallel_size 2 \
         --vllm_num_engines 4 \
         --vllm_tensor_parallel_size 2 \
         --lr_scheduler_type constant \
@@ -59,7 +59,6 @@ uv run python mason.py \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
         --vllm_enable_prefix_caching \
-        --vllm_enforce_eager \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
 		--checkpoint_state_freq 2 \
