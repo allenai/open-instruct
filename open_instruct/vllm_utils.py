@@ -1449,6 +1449,18 @@ def broadcast_weights_to_vllm(
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
+    if deepspeed_stage_3:
+        nan_shards = []
+        for n, p in params:
+            if hasattr(p, "ds_tensor") and p.ds_tensor.data.isnan().any():
+                nan_shards.append((n, list(p.ds_tensor.shape)))
+        if nan_shards:
+            logger.error(
+                "[Weight Sync] NaN in DS3 shards BEFORE gather: %d params: %s", len(nan_shards), nan_shards[:10]
+            )
+        else:
+            logger.info("[Weight Sync] All %d DS3 shards clean before gather", len(params))
+
     if gather_whole_model:
         if isinstance(model, FSDP):
             ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)

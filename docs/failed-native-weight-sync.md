@@ -332,14 +332,42 @@ Possible mechanisms:
 2. **Multi-rank gathering**: DS3 uses collective ops to materialize full parameters from shards. The gathered tensor on rank 0 may have unexpected memory layout.
 3. **Metadata mismatch**: `_collect_weight_metadata` uses `ds_shape` for shapes, but the actual gathered tensor's properties may differ in subtle ways (e.g., transposed storage).
 
+## Experiment 15: contiguous().clone() + diagnostics
+
+**Experiment**: [01KNW2RSWMANJA315D2WMQYDH5](https://beaker.org/ex/01KNW2RSWMANJA315D2WMQYDH5)
+
+Added `_prepare_params_for_sync()` helper that clones params via `.contiguous().clone()` and logs tensor diagnostics (contiguity, views, shape mismatches, NaN/Inf). Also added vLLM-side weight validation via `scripts/patch_gpu_worker.py`.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 16:15:42 | Job starts | OK |
+| 16:17:47 | Weight sync thread starts | OK |
+| 16:18:19 | Training steps complete (grad_norm: 1.00, 1.41) | OK |
+| 16:18:20 | **BAD WEIGHTS before send**: ~80+ params have NaN | **KEY FINDING** |
+| 16:18:20 | vLLM-side validation also confirms NaN after reload | FAIL |
+| 16:18:30 | vLLM inference returns NaN | FAIL |
+
+**Key finding**: The weights are NaN **before being sent to vLLM**. The NaN is in the DS3 gathered tensors, not introduced by vLLM's layerwise reload. No non-contiguous or view warnings — tensor layout is fine.
+
+NaN params are predominantly `k_proj`, `v_proj`, `up_proj`, and `gate_proj` weights across all layers. Training grad_norm is healthy (1.0-1.41, clipped), so the optimizer step itself is fine. The corruption happens during `GatheredParameters` reconstruction from shards.
+
+This definitively rules out vLLM's layerwise reload as the cause. The bug is in DeepSpeed stage 3's `GatheredParameters`.
+
+## Updated Root Cause
+
+The NaN is **not** in vLLM — it's in the weights that DS3 `GatheredParameters` produces. Training produces valid gradients and optimizer states, but the all-gather that reconstructs full parameters from shards introduces NaN.
+
+Next step: check whether the DS3 shards themselves contain NaN (pre-gather), or whether the gather operation introduces it.
+
 ## Next Steps
 
 1. ~~Experiments 10-13~~ ✅ Minimal repros all pass. Bug is not in vLLM's core weight sync.
 2. ~~Experiment 14~~ ✅ DS2 works. DS3 is the trigger.
-3. **Add weight validation**: Log NaN/Inf checks on trainer side (before send) and vLLM side (after receive) to pinpoint where corruption occurs.
-4. **Investigate DS3 gathered tensor properties**: Compare tensor strides, contiguity, storage offsets between DS2 and DS3 gathered parameters.
-5. **Try `.contiguous().clone()` before sending**: If DS3 gathered tensors have non-standard memory layout, making them contiguous before sending may fix the issue.
-6. **Report to vLLM**: File a bug with all 14 experiments as evidence, specifically that DS3 gathering triggers the NaN.
+3. ~~Add weight validation~~ ✅ Experiment 15 confirmed NaN exists before send, not introduced by vLLM.
+4. ~~Try `.contiguous().clone()` before sending~~ ✅ Tensor layout is fine (no non-contiguous, no views). Problem is NaN values.
+5. **Check DS3 shards pre-gather**: Are `ds_tensor` shards NaN before `GatheredParameters`, or does the gather introduce it?
+6. **Report to DeepSpeed**: File a bug with evidence that `GatheredParameters` produces NaN from valid shards (if confirmed).
+7. **Workaround**: If shards are clean but gather corrupts, try per-parameter gathering instead of whole-model gathering.
 
 ## Files Changed
 
