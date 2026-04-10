@@ -157,9 +157,9 @@ class TestGeneration(TestGrpoFastBase):
         )
 
         ray.get(engines[0].ready.remote())
-        param_prompt_Q.put(request, priority=vllm_utils_module.TRAIN_PROMPT_PRIORITY)
+        param_prompt_Q.put(request, priority=vllm_utils_module.PromptQueuePriority.TRAIN)
         result = inference_results_Q.get(timeout=120)
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils_module.PromptQueuePriority.SHUTDOWN)
 
         return result
 
@@ -267,7 +267,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
 
-        param_prompt_Q.put(request, priority=vllm_utils_module.TRAIN_PROMPT_PRIORITY)
+        param_prompt_Q.put(request, priority=vllm_utils_module.PromptQueuePriority.TRAIN)
         result = inference_results_Q.get()
 
         self.assertIsInstance(result, GenerationResult)
@@ -280,7 +280,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self.assertIsInstance(generated_text, str)
         self.assertGreater(len(generated_text), 0)
 
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils_module.PromptQueuePriority.SHUTDOWN)
 
 
 if __name__ == "__main__":

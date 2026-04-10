@@ -166,7 +166,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         self.assertEqual(batches_received, 2)
 
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils.PromptQueuePriority.SHUTDOWN)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_with_tools(self):
@@ -279,7 +279,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         self.assertEqual(batches_received, 2)
 
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils.PromptQueuePriority.SHUTDOWN)
 
 
 if __name__ == "__main__":

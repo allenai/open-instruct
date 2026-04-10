@@ -1910,7 +1910,6 @@ def run_training(
                     prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
-                    priority=vllm_utils.EVAL_PROMPT_PRIORITY,
                     base_env_config=base_env_config,
                 )
             eval_data_loader.reset()

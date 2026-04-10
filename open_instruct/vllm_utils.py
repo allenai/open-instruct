@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import contextlib
 import dataclasses
+import enum
 import os
 import queue
 import socket
@@ -105,9 +106,12 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
-EVAL_PROMPT_PRIORITY = 0
-TRAIN_PROMPT_PRIORITY = 1
-SHUTDOWN_PROMPT_PRIORITY = 2
+
+
+class PromptQueuePriority(enum.IntEnum):
+    EVAL = 0
+    TRAIN = 1
+    SHUTDOWN = 2
 
 
 @ray.remote
@@ -152,17 +156,18 @@ class PriorityPromptQueue:
         self.actor = _PriorityPromptQueueActor.remote(maxsize=maxsize)
         self._next_seq = 0
 
-    def _pack(self, item: Any, priority: int | None) -> tuple[int, int, Any]:
-        if priority is None:
-            if item is None:
-                priority = SHUTDOWN_PROMPT_PRIORITY
-            else:
-                raise ValueError("priority must be provided when enqueueing prompt requests")
-        packed = (priority, self._next_seq, item)
+    def _pack(self, item: Any, priority: PromptQueuePriority) -> tuple[int, int, Any]:
+        packed = (int(priority), self._next_seq, item)
         self._next_seq += 1
         return packed
 
-    def put(self, item: Any, block: bool = True, timeout: float | None = None, priority: int | None = None) -> None:
+    def put(
+        self,
+        item: Any,
+        block: bool = True,
+        timeout: float | None = None,
+        priority: PromptQueuePriority = PromptQueuePriority.TRAIN,
+    ) -> None:
         packed = self._pack(item, priority)
         if not block:
             try:

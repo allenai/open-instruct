@@ -242,9 +242,7 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(
-                example, 0, prompt_Q, mock_generation_config, False, vllm_utils.TRAIN_PROMPT_PRIORITY, EnvConfig()
-            )
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         return prompt_Q, inference_results_Q, mock_dataset
 
@@ -576,9 +574,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(
-                example, 0, prompt_Q, mock_generation_config, False, vllm_utils.TRAIN_PROMPT_PRIORITY, EnvConfig()
-            )
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
 
@@ -615,9 +611,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            data_loader_lib.add_prompt_to_generator(
-                example, 0, prompt_Q, mock_generation_config, False, vllm_utils.TRAIN_PROMPT_PRIORITY, EnvConfig()
-            )
+            data_loader_lib.add_prompt_to_generator(example, 0, prompt_Q, mock_generation_config, False, EnvConfig())
 
         request_count = 0
         while not prompt_Q.empty():

@@ -708,7 +708,6 @@ def add_prompt_to_generator(
     param_prompt_Q: vllm_utils.PriorityPromptQueue,
     generation_config,
     is_eval: bool,
-    priority: int,
     base_env_config: EnvConfig,
 ) -> None:
     index = int(example["index"])
@@ -725,6 +724,7 @@ def add_prompt_to_generator(
         active_tools=example.get(TOOLS_COLUMN_KEY),
         env_config=env_config,
     )
+    priority = vllm_utils.PromptQueuePriority.EVAL if is_eval else vllm_utils.PromptQueuePriority.TRAIN
     param_prompt_Q.put(request, priority=priority)
 
 
@@ -831,7 +831,6 @@ def accumulate_inference_batches(
                 param_prompt_Q,
                 generation_config,
                 is_eval=False,
-                priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
                 base_env_config=base_env_config,
             )
 
@@ -1189,7 +1188,6 @@ class DataPreparationActor:
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
-                priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
                 base_env_config=self.base_env_config,
             )
 

@@ -346,7 +346,7 @@ def submission_thread(
                     prompt_id=f"batch_{batch_idx}_prompt_{i}",
                     generation_config=generation_config,
                 ),
-                priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
+                priority=vllm_utils.PromptQueuePriority.TRAIN,
             )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
@@ -403,7 +403,7 @@ def run_benchmark(
                 prompt_id=f"warmup_prompt_{i}",
                 generation_config=generation_config,
             ),
-            priority=vllm_utils.TRAIN_PROMPT_PRIORITY,
+            priority=vllm_utils.PromptQueuePriority.TRAIN,
         )
 
     utils.ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking if engines are ready.")
