@@ -44,6 +44,7 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
+from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
 
 # isort: on
 import asyncio
@@ -1538,6 +1539,10 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
+        # Convert evolving rubric table data to wandb.Table
+        if RUBRIC_TABLE_KEY in metrics and isinstance(metrics[RUBRIC_TABLE_KEY], list):
+            metrics[RUBRIC_TABLE_KEY] = wandb.Table(columns=RUBRIC_TABLE_COLUMNS, data=metrics[RUBRIC_TABLE_KEY])
+
         # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:

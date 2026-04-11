@@ -20,6 +20,8 @@ from open_instruct.rubrics.rubric_utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
+RUBRIC_TABLE_KEY = "evolving_rubrics/example_rubrics_table"
+
 
 class RubricManager:
     """Manages evolving rubric state across training steps.
@@ -115,10 +117,21 @@ def _run_evolving_rubric_step(
 
     overrides = _build_ground_truth_overrides(updated_ground_truths, indices)
 
+    # --- Scalar metrics ---
     metrics.update(compute_rubric_count_metrics(avg_evolving_rubrics, avg_active_buffer))
     metrics["evolving_rubrics/valid_rate"] = valid_rate
     metrics["evolving_rubrics/avg_gt_rubrics"] = avg_gt_rubrics
     metrics["evolving_rubrics/skipped"] = skipped
+    metrics["evolving_rubrics/num_overrides"] = len(overrides)
+
+    if rubric_buffer is not None:
+        buffer_stats = _compute_buffer_aggregate_metrics(rubric_buffer)
+        metrics.update(buffer_stats)
+
+    # --- wandb table data (example rubrics) ---
+    table_rows = _build_example_rubrics_table(all_evolving_rubrics, ground_truths, num_samples, step)
+    if table_rows:
+        metrics[RUBRIC_TABLE_KEY] = table_rows
 
     if cache_dir:
         save_evolving_rubric_cache_safe(
@@ -136,7 +149,8 @@ def _run_evolving_rubric_step(
     logger.info(
         f"Step {step}: evolving rubrics generated. "
         f"valid_rate={valid_rate:.2f}, avg_new={avg_evolving_rubrics:.1f}, "
-        f"avg_active_buffer={avg_active_buffer:.1f}, skipped={skipped}"
+        f"avg_active_buffer={avg_active_buffer:.1f}, skipped={skipped}, "
+        f"overrides={len(overrides)}"
     )
     if rubric_buffer is not None:
         _log_buffer_summary(rubric_buffer, step)
@@ -161,10 +175,15 @@ def _cap_active_rubrics(rubric_buffer: dict[str, Any], max_active: int) -> None:
             logger.debug(f"Capped {len(evicted)} rubrics for query '{query[:60]}...'")
 
 
+# ---------------------------------------------------------------------------
+# Logging helpers
+# ---------------------------------------------------------------------------
+
+
 def _log_new_rubrics(
     all_evolving_rubrics: list[dict[str, Any] | None], ground_truths: list, num_samples: int, step: int
 ) -> None:
-    """Log details of newly generated rubrics for each query."""
+    """Log details of newly generated rubrics for each query, including example descriptions."""
     parsed_gts = [json.loads(gt[0] if isinstance(gt, list) else gt) for gt in ground_truths]
     query_key = "query" if "query" in parsed_gts[0] else "Question"
 
@@ -176,24 +195,81 @@ def _log_new_rubrics(
             continue
         pos = rubrics.get("positive_rubrics", [])
         neg = rubrics.get("negative_rubrics", [])
-        titles = [r.get("title", "?") for r in pos + neg]
-        logger.info(
-            f"  Step {step} | query={short_query!r} | +{len(pos)} positive, -{len(neg)} negative | titles={titles}"
-        )
+
+        logger.info(f"  Step {step} | query={short_query!r} | +{len(pos)} positive, -{len(neg)} negative")
+        for r in pos:
+            logger.info(f"    [+] {r.get('title', '?')}: {r.get('description', '?')[:120]}")
+        for r in neg:
+            logger.info(f"    [-] {r.get('title', '?')}: {r.get('description', '?')[:120]}")
 
 
 def _log_buffer_summary(rubric_buffer: dict[str, Any], step: int) -> None:
     """Log per-query rubric buffer state after an evolving rubric step."""
+    total_active = 0
+    total_inactive = 0
+    total_persistent = 0
     for query, buf in rubric_buffer.items():
         active = buf.get("active_rubrics", [])
         inactive = buf.get("inactive_rubrics", [])
         persistent = buf.get("persistent_rubrics", [])
+        total_active += len(active)
+        total_inactive += len(inactive)
+        total_persistent += len(persistent)
         active_titles = [r.get("title", r.get("description", "?")[:30]) for r in active]
         logger.info(
             f"  Step {step} buffer | query={query[:80]!r} | "
             f"persistent={len(persistent)}, active={len(active)}, inactive={len(inactive)} | "
             f"active_titles={active_titles}"
         )
+    logger.info(
+        f"  Step {step} buffer totals | "
+        f"queries={len(rubric_buffer)}, persistent={total_persistent}, "
+        f"active={total_active}, inactive={total_inactive}"
+    )
+
+
+def _compute_buffer_aggregate_metrics(rubric_buffer: dict[str, Any]) -> dict[str, float]:
+    """Compute aggregate buffer metrics for wandb scalar logging."""
+    total_active = 0
+    total_inactive = 0
+    total_persistent = 0
+    for buf in rubric_buffer.values():
+        total_active += len(buf.get("active_rubrics", []))
+        total_inactive += len(buf.get("inactive_rubrics", []))
+        total_persistent += len(buf.get("persistent_rubrics", []))
+    return {
+        "evolving_rubrics/total_active": total_active,
+        "evolving_rubrics/total_inactive": total_inactive,
+        "evolving_rubrics/total_persistent": total_persistent,
+        "evolving_rubrics/total_rubrics_in_use": total_active + total_persistent,
+    }
+
+
+def _build_example_rubrics_table(
+    all_evolving_rubrics: list[dict[str, Any] | None], ground_truths: list, num_samples: int, step: int
+) -> list[list]:
+    """Build row data for a wandb table showing example rubrics.
+
+    Returns a list of rows, each ``[step, query, type, title, description, weight]``.
+    The table columns are defined in ``RUBRIC_TABLE_COLUMNS``.
+    """
+    parsed_gts = [json.loads(gt[0] if isinstance(gt, list) else gt) for gt in ground_truths]
+    query_key = "query" if "query" in parsed_gts[0] else "Question"
+
+    rows: list[list] = []
+    for i, rubrics in enumerate(all_evolving_rubrics):
+        if rubrics is None:
+            continue
+        query = parsed_gts[i * num_samples].get(query_key, "<unknown>")
+        short_query = query[:200]
+        for r in rubrics.get("positive_rubrics", []):
+            rows.append([step, short_query, "positive", r.get("title", ""), r.get("description", ""), 1.0])
+        for r in rubrics.get("negative_rubrics", []):
+            rows.append([step, short_query, "negative", r.get("title", ""), r.get("description", ""), -1.0])
+    return rows
+
+
+RUBRIC_TABLE_COLUMNS = ["step", "query", "type", "title", "description", "weight"]
 
 
 def _build_ground_truth_overrides(updated_ground_truths: list, indices: list[int] | None) -> dict[int, Any]:
