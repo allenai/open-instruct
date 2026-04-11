@@ -36,7 +36,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        --mount_docker_socket \
-       -- git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- docker network prune -f \&\& git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/openthoughts-tblite-harbor 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/openthoughts-tblite-harbor 8 \
@@ -48,12 +48,12 @@ uv run python mason.py \
     --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_samples_per_prompt_rollout 2 \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --temperature 0.7 \
     --exp_name harbor_grpo_tblite \
     --learning_rate 3e-7 \
-    --total_episodes $((5 * 4 * 4)) \
+    --total_episodes $((5 * 4 * 2)) \
     --deepspeed_stage 3 \
     --with_tracking \
     --num_epochs 1 \
