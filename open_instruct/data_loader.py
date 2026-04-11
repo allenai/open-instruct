@@ -849,9 +849,9 @@ def _parse_manufactoria_test_cases(ground_truth: Any) -> list[Any]:
     return parsed_ground_truth if isinstance(parsed_ground_truth, list) else []
 
 
-def _is_manufactoria_example(example: dict[str, Any]) -> bool:
-    dataset_name = _normalize_dataset_metric_key(example.get(VERIFIER_SOURCE_KEY, ""))
-    return dataset_name.lower().startswith("manufactoria")
+def _has_list_like_test_difficulty(example: dict[str, Any]) -> bool:
+    difficulties = example.get("difficulty")
+    return isinstance(difficulties, list | tuple | np.ndarray)
 
 
 def _coerce_manufactoria_difficulties(difficulties: Any, num_tests: int, prompt_index: int) -> list[int] | None:
@@ -887,8 +887,6 @@ def build_manufactoria_prompt_test_metadata(dataset: Dataset) -> tuple[dict[int,
 
     for dataset_position in range(len(dataset)):
         example = dataset[dataset_position]
-        if not _is_manufactoria_example(example):
-            continue
         prompt_index = int(example["index"])
         test_cases = _parse_manufactoria_test_cases(example.get(GROUND_TRUTHS_KEY))
         if not test_cases:
@@ -897,6 +895,8 @@ def build_manufactoria_prompt_test_metadata(dataset: Dataset) -> tuple[dict[int,
         prompt_test_index_map[prompt_index] = list(range(next_test_index, next_test_index + len(test_cases)))
         next_test_index += len(test_cases)
 
+        if not _has_list_like_test_difficulty(example):
+            continue
         difficulties = _coerce_manufactoria_difficulties(example.get("difficulty"), len(test_cases), prompt_index)
         if difficulties is not None:
             prompt_test_difficulty_map[prompt_index] = difficulties

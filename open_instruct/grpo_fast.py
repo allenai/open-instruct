@@ -1552,6 +1552,45 @@ def _move_index_value_rows_to_wandb_table(
         table_metrics[table_key] = wandb.Table(columns=[index_column, value_column], data=table_rows)
 
 
+def _compute_manufactoria_test_pass_at_k_by_difficulty(
+    batch_stats: data_loader_lib.BatchStatistics | None, pass_at_ks: list[int]
+) -> dict[str, float]:
+    if batch_stats is None:
+        return {}
+    if not batch_stats.test_passes or len(batch_stats.test_difficulties) != len(batch_stats.test_passes):
+        return {}
+
+    test_index_to_passes: dict[int, list[float]] = {}
+    test_index_to_difficulty: dict[int, int] = {}
+    for test_index, test_pass, difficulty in zip(
+        batch_stats.test_indices, batch_stats.test_passes, batch_stats.test_difficulties
+    ):
+        test_index = int(test_index)
+        test_index_to_passes.setdefault(test_index, []).append(float(test_pass))
+        test_index_to_difficulty.setdefault(test_index, int(difficulty))
+
+    difficulty_to_test_pass_at: dict[int, dict[int, list[float]]] = {}
+    for test_index, passes in test_index_to_passes.items():
+        difficulty = test_index_to_difficulty.get(test_index)
+        if difficulty is None:
+            continue
+        num_samples = len(passes)
+        num_correct = sum(1 for passed in passes if passed > 0.0)
+        for k in pass_at_ks:
+            if num_samples < k:
+                continue
+            difficulty_to_test_pass_at.setdefault(difficulty, {}).setdefault(k, []).append(
+                float(grpo_utils.estimate_pass_at_k(num_samples, num_correct, k))
+            )
+
+    metrics: dict[str, float] = {}
+    for difficulty, pass_at_by_k in sorted(difficulty_to_test_pass_at.items(), key=lambda item: item[0]):
+        for k, values in sorted(pass_at_by_k.items(), key=lambda item: item[0]):
+            if values:
+                metrics[f"eval/test_pass_at_{k}/difficulty_{difficulty}"] = float(np.mean(values))
+    return metrics
+
+
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1804,6 +1843,7 @@ def maybe_evaluate(
         scores = np.array(eval_batch.scores)
         pass_at_by_k: dict[int, float] = {}
         dataset_pass_at_by_k: dict[str, dict[int, float]] = {}
+        manufactoria_test_pass_at_by_difficulty: dict[str, float] = {}
         if max_possible_score <= 0:
             logger.warning("Max possible score is %s; skipping pass@k metrics.", max_possible_score)
         elif scores.size and scores.size % eval_k == 0:
@@ -1820,6 +1860,9 @@ def maybe_evaluate(
             )
             for col, k in enumerate(pass_at_ks):
                 pass_at_by_k[k] = float(per_prompt_pass_at_by_k[:, col].mean())
+            manufactoria_test_pass_at_by_difficulty = _compute_manufactoria_test_pass_at_k_by_difficulty(
+                eval_batch_stats, pass_at_ks
+            )
             if eval_batch_stats is not None and len(eval_batch_stats.prompt_datasets) == scores_per_prompt.shape[0]:
                 dataset_to_indices: dict[str, list[int]] = {}
                 for prompt_idx, dataset_name in enumerate(eval_batch_stats.prompt_datasets):
@@ -1909,6 +1952,7 @@ def maybe_evaluate(
             eval_metrics["global_step"] = 0
         for k, pass_rate in pass_at_by_k.items():
             eval_metrics[f"eval/pass_at_{k}"] = pass_rate
+        eval_metrics.update(manufactoria_test_pass_at_by_difficulty)
         for metric_name, pass_rates in dataset_pass_at_by_k.items():
             for k, pass_rate in pass_rates.items():
                 eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
