@@ -509,12 +509,16 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 FALLBACK_CHAT_TEMPLATE = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
 
 
-def _create_server_args(model_path: str, has_chat_template: bool) -> argparse.Namespace:
+def _create_server_args(
+    model_path: str, has_chat_template: bool, served_model_name: str | None = None
+) -> argparse.Namespace:
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
     cli_args = ["--model", model_path]
     if not has_chat_template:
         cli_args.extend(["--chat-template", FALLBACK_CHAT_TEMPLATE])
+    if served_model_name:
+        cli_args.extend(["--served-model-name", served_model_name])
     args = parser.parse_args(cli_args)
     args.disable_fastapi_docs = True
     return args
@@ -743,21 +747,25 @@ class LLMRayActor:
             tokenizer = engine_client.tokenizer
             inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
             has_chat_template = getattr(inner_tokenizer, "chat_template", None) is not None
-            args = _create_server_args(engine_client.vllm_config.model_config.model, has_chat_template)
+            served_name = None
+            if self.use_harbor:
+                served_name = engine_client.vllm_config.model_config.model.split("/")[-1]
+            args = _create_server_args(engine_client.vllm_config.model_config.model, has_chat_template, served_name)
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
             # Create a socket and bind to port 0 to let the OS assign an available port.
             # We pass the socket to serve_http to avoid race conditions where another
             # process could claim the port between bind() and server startup.
+            bind_host = "0.0.0.0" if self.use_harbor else "127.0.0.1"
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("127.0.0.1", 0))
+            sock.bind((bind_host, 0))
             sock.listen(1)
             self.server_port = sock.getsockname()[1]
 
-            logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
+            logger.info(f"Starting vLLM OpenAI API server on {bind_host}:{self.server_port}")
 
-            config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
+            config = uvicorn.Config(app, host=bind_host, port=self.server_port, log_level="warning")
             asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
 
             # Yield control to allow the server task to start before returning.
