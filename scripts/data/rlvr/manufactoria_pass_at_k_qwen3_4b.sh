@@ -17,7 +17,7 @@ set -euo pipefail
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-Instruct-2507}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-from_model}"
-NUM_SAMPLES="${NUM_SAMPLES:-32}"
+NUM_SAMPLES="${NUM_SAMPLES:-128}"
 MAX_PROMPT_TOKEN_LENGTH="${MAX_PROMPT_TOKEN_LENGTH:-2048}"
 RESPONSE_LENGTH="${RESPONSE_LENGTH:-8192}"
 TEMPERATURE="${TEMPERATURE:-1.0}"
@@ -37,8 +37,8 @@ SPLIT="${SPLIT:-train}"
 
 HF_DATASETS_OWNER="${HF_DATASETS_OWNER:-mnoukhov}"
 # Use ${var-word} (not :-) so PUSH_*="" explicitly skips push for that split.
-PUSH_TRAIN_REPO="${PUSH_TRAIN_REPO-${HF_DATASETS_OWNER}/manufactoria-has-train-qwen3-4b-instruct-pass32-codex}"
-PUSH_TEST_REPO="${PUSH_TEST_REPO-${HF_DATASETS_OWNER}/manufactoria-has-test-qwen3-4b-instruct-pass32-codex}"
+PUSH_TRAIN_REPO="${PUSH_TRAIN_REPO-${HF_DATASETS_OWNER}/manufactoria-has-train-qwen3-4b-instruct-pass128}"
+PUSH_TEST_REPO="${PUSH_TEST_REPO-${HF_DATASETS_OWNER}/manufactoria-has-test-qwen3-4b-instruct-pass128}"
 PRIVATE_FLAG="${PRIVATE_FLAG:-}"
 
 _extra_limit=()
