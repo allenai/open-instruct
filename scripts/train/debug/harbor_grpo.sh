@@ -42,7 +42,7 @@ uv run python mason.py \
     --dataset_mixer_eval_list ai2-adapt-dev/openthoughts-tblite-harbor 8 \
     --dataset_mixer_eval_list_splits train \
     --dataset_transform_fn harbor_tokenize_v1 rlvr_max_length_filter_v1 \
-    --max_prompt_token_length 2048 \
+    --max_prompt_token_length 16384 \
     --response_length 16384 \
     --pack_length 32768 \
     --inflight_updates True \

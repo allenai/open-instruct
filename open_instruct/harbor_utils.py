@@ -66,8 +66,8 @@ def make_harbor_trial_config(
         "linear_history": True,
         "temperature": sampling_params.temperature,
         "model_info": {
-            "max_input_tokens": max_model_len,
-            "max_output_tokens": sampling_params.max_tokens,
+            "max_output_tokens": 32768,
+            "max_input_tokens": max_model_len + 32768,
             "input_cost_per_token": 0.0,
             "output_cost_per_token": 0.0,
         },
