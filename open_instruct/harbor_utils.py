@@ -58,18 +58,13 @@ def make_harbor_trial_config(
     _ensure_harbor()
 
     env_type = EnvironmentType.DAYTONA if environment == "daytona" else EnvironmentType.DOCKER
+    node_ip = ray.util.get_node_ip_address()
     max_model_len = getattr(actor.llm_engine.model_config, "max_model_len", 32768)
     merged_kwargs: dict[str, Any] = {
-        "base_url": f"http://{ray.util.get_node_ip_address()}:{actor.server_port}/v1",
+        "api_base": f"http://{node_ip}:{actor.server_port}/v1",
         "collect_rollout_details": True,
         "linear_history": True,
         "temperature": sampling_params.temperature,
-        "model_info": {
-            "max_input_tokens": max_model_len,
-            "max_output_tokens": sampling_params.max_tokens,
-            "input_cost_per_token": 0.0,
-            "output_cost_per_token": 0.0,
-        },
     }
     if agent_kwargs:
         merged_kwargs.update(agent_kwargs)
@@ -79,9 +74,7 @@ def make_harbor_trial_config(
 
     return TrialConfig(
         task=task_cfg,
-        agent=AgentConfig(
-            name=agent_name, model_name=f"hosted_vllm/{actor.model_name.split('/')[-1]}", kwargs=merged_kwargs
-        ),
+        agent=AgentConfig(name=agent_name, model_name=f"openai/{actor.model_name}", kwargs=merged_kwargs),
         environment=EnvironmentConfig(type=env_type),
     )
 
