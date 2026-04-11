@@ -1667,8 +1667,11 @@ class DatasetConfig:
         self.is_upsampled = dataset_range > original_size
 
     def select_samples(self, target_size: int):
-        """Upsample dataset to target_size by repeating samples."""
+        """Select samples deterministically for downsampling and repeat with random indices for upsampling."""
         original_size = len(self.dataset)
+
+        if target_size <= original_size:
+            return self.dataset.select(range(target_size))
 
         # Calculate how many full repeats and how many extra samples
         full_repeats = target_size // original_size

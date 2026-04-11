@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
+- Deterministic downsampling of dataset to enable reproducibility ()
 
 ### Added
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
