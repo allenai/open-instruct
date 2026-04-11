@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCORE_MODE=pass_rate
+EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${SCORE_MODE}}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+
+source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
+python open_instruct/grpo_fast.py \
+--run_name "${RUN_NAME}" \
+--exp_name "${EXP_NAME}" \
+--beta 0.0 \
+--eval_pass_at_k 32 \
+--load_ref_policy false \
+--num_unique_prompts_rollout 48 \
+--num_samples_per_prompt_rollout 16 \
+--num_mini_batches 1 \
+--num_epochs 1 \
+--learning_rate 5e-7 \
+--lr_scheduler_type constant \
+--per_device_train_batch_size 1 \
+--dataset_mixer_list mnoukhov/manufactoria-qwen3-4b-instruct-pass128 1.0 \
+--dataset_mixer_list_splits train \
+--dataset_mixer_eval_list mnoukhov/manufactoria-qwen3-4b-instruct-pass128 50 \
+--dataset_mixer_eval_list_splits test \
+--max_prompt_token_length 2048 \
+--response_length 8192 \
+--pack_length 10240 \
+--model_name_or_path "Qwen/Qwen3-4B-Instruct-2507" \
+--apply_verifiable_reward true \
+--manufactoria_api_url \$MANUFACTORIA_API_URL/test_solution \
+--manufactoria_scoring_mode "${SCORE_MODE}" \
+--temperature 1.0 \
+--total_episodes 768000 \
+--deepspeed_stage 2 \
+--num_learners_per_node 4 \
+--vllm_num_engines 4 \
+--clip_higher 0.28 \
+--seed 1 \
+--local_eval_every 10 \
+--save_freq 10 \
+--checkpoint_state_freq 10 \
+--gradient_checkpointing \
+--with_tracking \
+--push_to_hub false \
+"$@"
