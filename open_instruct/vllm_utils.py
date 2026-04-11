@@ -32,7 +32,6 @@ from typing import Any
 
 import aiohttp
 import backoff
-import datasets
 import deepspeed
 import openai
 import ray
@@ -547,33 +546,28 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     )
 
     metadata = actor.request_metadata.get(base_request_id, {})
-    ground_truth_override = metadata.get("ground_truth")
 
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(
-        actor, result, dataset, is_eval, ground_truth_override=ground_truth_override
-    )
+    index_map = actor._eval_index_map if is_eval else actor._train_index_map
+    example = dict(dataset[index_map[result.index]])
+
+    ground_truth_from_request = metadata.get("ground_truth")
+    if ground_truth_from_request is not None and not is_eval:
+        example[GROUND_TRUTHS_KEY] = ground_truth_from_request
+
+    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, example)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
 
 
-async def compute_rewards(
-    actor: "LLMRayActor",
-    result: GenerationResult,
-    dataset: datasets.Dataset,
-    is_eval: bool,
-    ground_truth_override: Any = None,
-) -> tuple[list[float], dict]:
-    index_map = actor._eval_index_map if is_eval else actor._train_index_map
-    example = dataset[index_map[result.index]]
+async def compute_rewards(actor: "LLMRayActor", result: GenerationResult, example: dict) -> tuple[list[float], dict]:
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
-    ground_truth = example[GROUND_TRUTHS_KEY] if is_eval or ground_truth_override is None else ground_truth_override
-    k_ground_truths = [ground_truth] * k
+    k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
     k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
     k_raw_queries = [example[RAW_PROMPT_KEY]] * k
 

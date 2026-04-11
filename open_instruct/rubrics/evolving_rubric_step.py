@@ -6,6 +6,7 @@ state management to it.
 """
 
 import asyncio
+import json
 from typing import Any
 
 from open_instruct import logger_utils
@@ -107,6 +108,8 @@ def _run_evolving_rubric_step(
         rubric_buffer=rubric_buffer,
     )
 
+    _log_new_rubrics(all_evolving_rubrics, ground_truths, num_samples, step)
+
     if rubric_buffer is not None:
         _cap_active_rubrics(rubric_buffer, max_active)
 
@@ -135,6 +138,8 @@ def _run_evolving_rubric_step(
         f"valid_rate={valid_rate:.2f}, avg_new={avg_evolving_rubrics:.1f}, "
         f"avg_active_buffer={avg_active_buffer:.1f}, skipped={skipped}"
     )
+    if rubric_buffer is not None:
+        _log_buffer_summary(rubric_buffer, step)
 
     return metrics, overrides, rubric_buffer
 
@@ -154,6 +159,41 @@ def _cap_active_rubrics(rubric_buffer: dict[str, Any], max_active: int) -> None:
             buf["active_rubrics"] = active[-max_active:]
             buf.setdefault("inactive_rubrics", []).extend(evicted)
             logger.debug(f"Capped {len(evicted)} rubrics for query '{query[:60]}...'")
+
+
+def _log_new_rubrics(
+    all_evolving_rubrics: list[dict[str, Any] | None], ground_truths: list, num_samples: int, step: int
+) -> None:
+    """Log details of newly generated rubrics for each query."""
+    parsed_gts = [json.loads(gt[0] if isinstance(gt, list) else gt) for gt in ground_truths]
+    query_key = "query" if "query" in parsed_gts[0] else "Question"
+
+    for i, rubrics in enumerate(all_evolving_rubrics):
+        query = parsed_gts[i * num_samples].get(query_key, "<unknown>")
+        short_query = query[:80]
+        if rubrics is None:
+            logger.info(f"  Step {step} | query={short_query!r} | generation FAILED (None)")
+            continue
+        pos = rubrics.get("positive_rubrics", [])
+        neg = rubrics.get("negative_rubrics", [])
+        titles = [r.get("title", "?") for r in pos + neg]
+        logger.info(
+            f"  Step {step} | query={short_query!r} | +{len(pos)} positive, -{len(neg)} negative | titles={titles}"
+        )
+
+
+def _log_buffer_summary(rubric_buffer: dict[str, Any], step: int) -> None:
+    """Log per-query rubric buffer state after an evolving rubric step."""
+    for query, buf in rubric_buffer.items():
+        active = buf.get("active_rubrics", [])
+        inactive = buf.get("inactive_rubrics", [])
+        persistent = buf.get("persistent_rubrics", [])
+        active_titles = [r.get("title", r.get("description", "?")[:30]) for r in active]
+        logger.info(
+            f"  Step {step} buffer | query={query[:80]!r} | "
+            f"persistent={len(persistent)}, active={len(active)}, inactive={len(inactive)} | "
+            f"active_titles={active_titles}"
+        )
 
 
 def _build_ground_truth_overrides(updated_ground_truths: list, indices: list[int] | None) -> dict[int, Any]:
