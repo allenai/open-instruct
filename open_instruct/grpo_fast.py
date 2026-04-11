@@ -46,7 +46,9 @@ from open_instruct.data_loader import (
     DataPreparationActor,
     accumulate_inference_batches,
     add_prompt_to_generator,
+    build_manufactoria_prompt_test_metadata,
     compute_filtered_batch_metrics,
+    compute_manufactoria_test_pass_rate_metrics,
     compute_prompt_solve_rate_metrics,
 )
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
@@ -1519,8 +1521,13 @@ def _can_log_metric_as_wandb_histogram(value: np.ndarray | list[Any]) -> bool:
     return arr.dtype.kind in ("b", "i", "u", "f")
 
 
-def _move_dataset_index_solve_rate_to_wandb_table(
-    metrics: dict[str, Any], table_metrics: dict[str, Any], source_key: str, table_key: str
+def _move_index_value_rows_to_wandb_table(
+    metrics: dict[str, Any],
+    table_metrics: dict[str, Any],
+    source_key: str,
+    table_key: str,
+    index_column: str,
+    value_column: str,
 ) -> None:
     rows = metrics.pop(source_key, None)
     if rows is None:
@@ -1538,11 +1545,11 @@ def _move_dataset_index_solve_rate_to_wandb_table(
         if not isinstance(row, (list, tuple)) or len(row) != 2:
             logger.warning("Expected 2-item rows for %s, got %r; skipping malformed row.", source_key, row)
             continue
-        dataset_index, solve_rate = row
-        table_rows.append([int(dataset_index), float(solve_rate)])
+        index_value, metric_value = row
+        table_rows.append([int(index_value), float(metric_value)])
 
     if table_rows:
-        table_metrics[table_key] = wandb.Table(columns=["dataset_index", "solve_rate"], data=table_rows)
+        table_metrics[table_key] = wandb.Table(columns=[index_column, value_column], data=table_rows)
 
 
 def one_training_step(
@@ -1666,11 +1673,21 @@ def one_training_step(
     if args.with_tracking:
         metrics_to_log = dict(metrics)
         table_metrics: dict[str, Any] = {}
-        _move_dataset_index_solve_rate_to_wandb_table(
+        _move_index_value_rows_to_wandb_table(
             metrics_to_log,
             table_metrics,
             source_key="val/train_prompt_solve_rate_by_index",
             table_key="val/train_prompt_solve_rate_by_index_table",
+            index_column="dataset_index",
+            value_column="solve_rate",
+        )
+        _move_index_value_rows_to_wandb_table(
+            metrics_to_log,
+            table_metrics,
+            source_key="val/train_manufactoria_test_pass_rate_by_index",
+            table_key="val/train_manufactoria_test_pass_rate_by_index_table",
+            index_column="test_index",
+            value_column="pass_rate",
         )
         # Convert numeric array/list metrics to wandb histograms (skip strings, tuples, etc.)
         for key, value in list(metrics_to_log.items()):
@@ -1750,6 +1767,8 @@ def maybe_evaluate(
         if training_step >= args.num_training_steps:
             timeout = 60 * (args.eval_timeout_minutes if args.eval_timeout_minutes is not None else 120)
 
+        prompt_test_index_map, prompt_test_difficulty_map = build_manufactoria_prompt_test_metadata(eval_dataset)
+
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, eval_batch_stats = accumulate_inference_batches(
             evaluation_inference_results_Q,
@@ -1758,6 +1777,8 @@ def maybe_evaluate(
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
+            prompt_test_index_map=prompt_test_index_map,
+            prompt_test_difficulty_map=prompt_test_difficulty_map,
             base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
@@ -1905,6 +1926,15 @@ def maybe_evaluate(
                     dataset_mean_prefix="eval/prompt_solve_rate_mean",
                 )
             )
+            eval_metrics.update(
+                compute_manufactoria_test_pass_rate_metrics(
+                    batch_stats=eval_batch_stats,
+                    count_key="eval/manufactoria_test_pass_count",
+                    by_index_key="eval/manufactoria_test_pass_rate_by_index",
+                    by_index_count_key="eval/manufactoria_test_pass_rate_by_index_count",
+                    difficulty_mean_prefix="eval/manufactoria_test_pass_rate_mean_difficulty",
+                )
+            )
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -1926,11 +1956,21 @@ def maybe_evaluate(
         if args.with_tracking:
             metrics_to_log = dict(eval_metrics)
             table_metrics = {"sample_completions": wandb.Table(dataframe=df)}
-            _move_dataset_index_solve_rate_to_wandb_table(
+            _move_index_value_rows_to_wandb_table(
                 metrics_to_log,
                 table_metrics,
                 source_key="eval/prompt_solve_rate_by_index",
                 table_key="eval/prompt_solve_rate_by_index_table",
+                index_column="dataset_index",
+                value_column="solve_rate",
+            )
+            _move_index_value_rows_to_wandb_table(
+                metrics_to_log,
+                table_metrics,
+                source_key="eval/manufactoria_test_pass_rate_by_index",
+                table_key="eval/manufactoria_test_pass_rate_by_index_table",
+                index_column="test_index",
+                value_column="pass_rate",
             )
             wandb.log({**metrics_to_log, **table_metrics}, step=training_step)
         else:

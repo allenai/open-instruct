@@ -1359,7 +1359,7 @@ class ManufactoriaVerifier(VerifierFunction):
                 score = pass_rate_score
             else:
                 score = all_pass_score
-            return VerificationResult(score=score)
+            return VerificationResult(score=score, metadata={"per_test_passes": [float(passed) for passed in passes]})
         except Exception as e:
             logger.warning(f"Error verifying Manufactoria code sample: {e}")
             return VerificationResult(score=0.0)
@@ -1721,6 +1721,7 @@ async def apply_verifiable_reward(
     response_per_func_rewards = [{} for _ in range(len(responses))]
     fallback_used_counts: Counter[str] = Counter()
     fallback_correct_counts: Counter[str] = Counter()
+    manufactoria_test_pass_rows: list[tuple[int, float]] = []
 
     for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
@@ -1743,7 +1744,13 @@ async def apply_verifiable_reward(
                 result_metadata.get("llm_judge_correct_when_primary_wrong", 0)
             )
 
-    extra_metrics: dict[str, float] = {}
+        per_test_passes = result_metadata.get("per_test_passes")
+        if dataset == "manufactoria" and isinstance(per_test_passes, list):
+            manufactoria_test_pass_rows.extend(
+                (test_offset, float(passed)) for test_offset, passed in enumerate(per_test_passes)
+            )
+
+    extra_metrics: dict[str, Any] = {}
     total_fallback_uses = sum(fallback_used_counts.values())
     total_fallback_correct = sum(fallback_correct_counts.values())
     if total_fallback_uses > 0:
@@ -1761,6 +1768,9 @@ async def apply_verifiable_reward(
             extra_metrics[f"objective/{verifier_name}_llm_judge_correct_when_primary_wrong_rate"] = (
                 correct_count / used_count
             )
+
+    if manufactoria_test_pass_rows:
+        extra_metrics["objective/manufactoria_test_pass_rows"] = manufactoria_test_pass_rows
 
     return response_rewards, response_per_func_rewards, extra_metrics
 

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import os
 import re
@@ -50,6 +51,7 @@ from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
+MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
 
 
 def _sanitize_metric_name(name: str) -> str:
@@ -711,6 +713,9 @@ class BatchStatistics:
     filtered_prompt_datasets_zero: list[str]
     filtered_prompt_datasets_solved: list[str]
     filtered_prompt_datasets_nonzero: list[str]
+    test_indices: list[int]
+    test_passes: list[float]
+    test_difficulties: list[int]
     no_resampled_prompts: int
     total_prompts: int
 
@@ -828,6 +833,110 @@ def compute_prompt_solve_rate_metrics(
         dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
     for dataset_name, rates in dataset_to_solve_rates.items():
         metrics[f"{dataset_mean_prefix}_{dataset_name}"] = float(np.mean(rates))
+
+    return metrics
+
+
+def _parse_manufactoria_test_cases(ground_truth: Any) -> list[Any]:
+    if isinstance(ground_truth, str):
+        try:
+            parsed_ground_truth = json.loads(ground_truth)
+        except json.JSONDecodeError:
+            return []
+    else:
+        parsed_ground_truth = ground_truth
+
+    return parsed_ground_truth if isinstance(parsed_ground_truth, list) else []
+
+
+def _is_manufactoria_example(example: dict[str, Any]) -> bool:
+    dataset_name = _normalize_dataset_metric_key(example.get(VERIFIER_SOURCE_KEY, ""))
+    return dataset_name.lower().startswith("manufactoria")
+
+
+def _coerce_manufactoria_difficulties(difficulties: Any, num_tests: int, prompt_index: int) -> list[int] | None:
+    if difficulties is None:
+        return None
+    if isinstance(difficulties, np.ndarray):
+        coerced = difficulties.tolist()
+    elif isinstance(difficulties, (list, tuple)):
+        coerced = list(difficulties)
+    else:
+        coerced = [difficulties] * num_tests
+
+    if len(coerced) != num_tests:
+        logger.warning(
+            "Manufactoria difficulty length mismatch for prompt %s: expected %s, got %s.",
+            prompt_index,
+            num_tests,
+            len(coerced),
+        )
+        return None
+
+    try:
+        return [int(difficulty) for difficulty in coerced]
+    except (TypeError, ValueError):
+        logger.warning("Invalid Manufactoria difficulty values for prompt %s: %r", prompt_index, coerced)
+        return None
+
+
+def build_manufactoria_prompt_test_metadata(dataset: Dataset) -> tuple[dict[int, list[int]], dict[int, list[int]]]:
+    prompt_test_index_map: dict[int, list[int]] = {}
+    prompt_test_difficulty_map: dict[int, list[int]] = {}
+    next_test_index = 0
+
+    for dataset_position in range(len(dataset)):
+        example = dataset[dataset_position]
+        if not _is_manufactoria_example(example):
+            continue
+        prompt_index = int(example["index"])
+        test_cases = _parse_manufactoria_test_cases(example.get(GROUND_TRUTHS_KEY))
+        if not test_cases:
+            continue
+
+        prompt_test_index_map[prompt_index] = list(range(next_test_index, next_test_index + len(test_cases)))
+        next_test_index += len(test_cases)
+
+        difficulties = _coerce_manufactoria_difficulties(example.get("difficulty"), len(test_cases), prompt_index)
+        if difficulties is not None:
+            prompt_test_difficulty_map[prompt_index] = difficulties
+
+    return prompt_test_index_map, prompt_test_difficulty_map
+
+
+def compute_manufactoria_test_pass_rate_metrics(
+    batch_stats: BatchStatistics,
+    count_key: str | None,
+    by_index_key: str,
+    by_index_count_key: str,
+    difficulty_mean_prefix: str,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    if count_key is not None:
+        metrics[count_key] = len(batch_stats.test_passes)
+
+    if not enabled or not batch_stats.test_passes:
+        return metrics
+
+    test_index_to_passes: dict[int, list[float]] = {}
+    for test_index, test_pass in zip(batch_stats.test_indices, batch_stats.test_passes):
+        test_index_to_passes.setdefault(int(test_index), []).append(float(test_pass))
+    test_pass_rate_by_index = [
+        (test_index, float(np.mean(passes)))
+        for test_index, passes in sorted(test_index_to_passes.items(), key=lambda item: item[0])
+    ]
+    metrics[by_index_key] = test_pass_rate_by_index
+    metrics[by_index_count_key] = len(test_pass_rate_by_index)
+
+    if len(batch_stats.test_difficulties) != len(batch_stats.test_passes):
+        return metrics
+
+    difficulty_to_passes: dict[int, list[float]] = {}
+    for difficulty, test_pass in zip(batch_stats.test_difficulties, batch_stats.test_passes):
+        difficulty_to_passes.setdefault(int(difficulty), []).append(float(test_pass))
+    for difficulty, passes in sorted(difficulty_to_passes.items(), key=lambda item: item[0]):
+        metrics[f"{difficulty_mean_prefix}_{difficulty}"] = float(np.mean(passes))
 
     return metrics
 
@@ -1041,6 +1150,8 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     dataset_index_map: dict[int, int] | None = None,
+    prompt_test_index_map: dict[int, list[int]] | None = None,
+    prompt_test_difficulty_map: dict[int, list[int]] | None = None,
     base_env_config: EnvConfig | None = None,
     actor_manager=None,
     timeout: float | None = None,
@@ -1065,6 +1176,8 @@ def accumulate_inference_batches(
 ):
     if dataset_index_map is None:
         dataset_index_map = {dataset[i]["index"]: i for i in range(len(dataset))}
+    if prompt_test_index_map is None or prompt_test_difficulty_map is None:
+        prompt_test_index_map, prompt_test_difficulty_map = build_manufactoria_prompt_test_metadata(dataset)
     if base_env_config is None:
         base_env_config = EnvConfig()
 
@@ -1089,6 +1202,9 @@ def accumulate_inference_batches(
     all_prompt_indices = []
     all_prompt_sample_counts = []
     all_prompt_datasets = []
+    all_test_indices = []
+    all_test_passes = []
+    all_test_difficulties = []
     all_model_steps = []
     accepted_prompt_lengths = []
     total_filtered_prompts = 0
@@ -1266,6 +1382,38 @@ def accumulate_inference_batches(
             merged_reward_metrics = result.reward_metrics
             sample_count = generation_config.n
 
+        manufactoria_test_pass_rows = []
+        if merged_reward_metrics is not None:
+            manufactoria_test_pass_rows = merged_reward_metrics.pop(MANUFACTORIA_TEST_PASS_ROWS_KEY, [])
+        if result.index is None:
+            raise ValueError("Expected result.index to be set when aggregating Manufactoria test metrics.")
+        prompt_index = int(result.index)
+        prompt_test_indices = prompt_test_index_map.get(prompt_index, [])
+        prompt_test_difficulties = prompt_test_difficulty_map.get(prompt_index, [])
+        for row in manufactoria_test_pass_rows:
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
+                logger.warning("Malformed Manufactoria test pass row for prompt %s: %r", result.index, row)
+                continue
+            relative_test_index, test_pass = row
+            try:
+                relative_test_index = int(relative_test_index)
+                test_pass = float(test_pass)
+            except (TypeError, ValueError):
+                logger.warning("Invalid Manufactoria test pass row for prompt %s: %r", result.index, row)
+                continue
+            if relative_test_index < 0 or relative_test_index >= len(prompt_test_indices):
+                logger.warning(
+                    "Manufactoria test index %s out of range for prompt %s with %s tests.",
+                    relative_test_index,
+                    result.index,
+                    len(prompt_test_indices),
+                )
+                continue
+            all_test_indices.append(prompt_test_indices[relative_test_index])
+            all_test_passes.append(test_pass)
+            if relative_test_index < len(prompt_test_difficulties):
+                all_test_difficulties.append(prompt_test_difficulties[relative_test_index])
+
         percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
@@ -1430,6 +1578,9 @@ def accumulate_inference_batches(
         filtered_prompt_datasets_zero=filtered_prompt_datasets_zero,
         filtered_prompt_datasets_solved=filtered_prompt_datasets_solved,
         filtered_prompt_datasets_nonzero=filtered_prompt_datasets_nonzero,
+        test_indices=all_test_indices,
+        test_passes=all_test_passes,
+        test_difficulties=all_test_difficulties,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
@@ -1572,6 +1723,7 @@ class DataPreparationActor:
         self.verbose = verbose
         self.dataset = dataset
         self.dataset_index_map = {dataset[i]["index"]: i for i in range(len(dataset))}
+        self.prompt_test_index_map, self.prompt_test_difficulty_map = build_manufactoria_prompt_test_metadata(dataset)
         self.dataset_metric_names = sorted(
             {_normalize_dataset_metric_key(dataset_name) for dataset_name in dataset[VERIFIER_SOURCE_KEY]}
         )
@@ -1659,6 +1811,8 @@ class DataPreparationActor:
                 tokenizer=self.tokenizer,
                 dataset=self.dataset,
                 dataset_index_map=self.dataset_index_map,
+                prompt_test_index_map=self.prompt_test_index_map,
+                prompt_test_difficulty_map=self.prompt_test_difficulty_map,
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
@@ -1794,6 +1948,9 @@ class DataPreparationActor:
                     "filtered_prompt_datasets_zero",
                     "filtered_prompt_datasets_solved",
                     "filtered_prompt_datasets_nonzero",
+                    "test_indices",
+                    "test_passes",
+                    "test_difficulties",
                 ):
                     batch_metrics_dict.pop(key, None)
                 batch_metrics = compute_filtered_batch_metrics(
@@ -1842,6 +1999,16 @@ class DataPreparationActor:
                         by_index_key="val/train_prompt_solve_rate_by_index",
                         by_index_count_key="val/train_prompt_solve_rate_by_index_count",
                         dataset_mean_prefix="val/train_prompt_solve_rate_mean",
+                        enabled=self.config.log_train_solve_rate_metrics,
+                    )
+                )
+                step_metrics.update(
+                    compute_manufactoria_test_pass_rate_metrics(
+                        batch_stats=batch_stats,
+                        count_key="val/train_manufactoria_test_pass_count",
+                        by_index_key="val/train_manufactoria_test_pass_rate_by_index",
+                        by_index_count_key="val/train_manufactoria_test_pass_rate_by_index_count",
+                        difficulty_mean_prefix="val/train_manufactoria_test_pass_rate_mean_difficulty",
                         enabled=self.config.log_train_solve_rate_metrics,
                     )
                 )
