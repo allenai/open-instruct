@@ -21,6 +21,8 @@ PRICE_PER_TOKEN = {
     "deepseek-chat": {"input": 0.00000007, "output": 0.000001},
     "deepseek-reasoner": {"input": 0.00000014, "output": 0.000002},
     "claude-3-7-sonnet-20250219": {"input": 0.000003, "output": 0.000015},
+    "MiniMax-M2.7": {"input": 0.0000003, "output": 0.0000012},
+    "MiniMax-M2.7-highspeed": {"input": 0.0000006, "output": 0.0000024},
 }
 
 # Define the templates for different judge types
