@@ -1670,34 +1670,37 @@ class DatasetConfig:
         """Select samples deterministically for downsampling and repeat with random indices for upsampling."""
         original_size = len(self.dataset)
 
-        if target_size <= original_size:
+        if target_size == original_size:
+            return self.dataset
+
+        elif target_size < original_size:
             return self.dataset.select(range(target_size))
 
-        # Calculate how many full repeats and how many extra samples
-        full_repeats = target_size // original_size
-        extra_samples = target_size % original_size
+        else:
+            # Calculate how many full repeats and how many extra samples
+            full_repeats = target_size // original_size
+            extra_samples = target_size % original_size
 
-        # Create indices for upsampling
-        indices = []
+            # Create indices for upsampling
+            indices = []
 
-        # Add full repeats
-        for _ in range(full_repeats):
-            indices.extend(range(original_size))
+            # Add full repeats
+            for _ in range(full_repeats):
+                indices.extend(range(original_size))
 
-        # Add randomly sampled extra samples
-        if extra_samples > 0:
-            # Use numpy for reproducible random sampling
-            rng = np.random.RandomState(self.dataset_config_seed)
-            extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
-            indices.extend(extra_indices.tolist())
+            # Add randomly sampled extra samples
+            if extra_samples > 0:
+                # Use numpy for reproducible random sampling
+                rng = np.random.RandomState(self.dataset_config_seed)
+                extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
+                indices.extend(extra_indices.tolist())
 
-        if target_size > original_size:
-            print(
+            logger.info(
                 f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
                 f"({full_repeats} full repeats + {extra_samples} random samples)"
             )
 
-        return self.dataset.select(indices)
+            return self.dataset.select(indices)
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
