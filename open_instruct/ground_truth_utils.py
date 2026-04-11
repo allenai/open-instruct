@@ -1300,6 +1300,8 @@ class ManufactoriaVerifier(VerifierFunction):
         query: str | None = None,
         rollout_state: dict | None = None,
     ) -> VerificationResult:
+        passes: list[bool] = []
+
         if isinstance(label, str):
             try:
                 test_cases = json.loads(label)
@@ -1359,7 +1361,8 @@ class ManufactoriaVerifier(VerifierFunction):
                 score = pass_rate_score
             else:
                 score = all_pass_score
-            return VerificationResult(score=score, metadata={"per_test_passes": [float(passed) for passed in passes]})
+            metadata = {"per_test_passes": [float(passed) for passed in passes]} if passes else {}
+            return VerificationResult(score=score, metadata=metadata)
         except Exception as e:
             logger.warning(f"Error verifying Manufactoria code sample: {e}")
             return VerificationResult(score=0.0)

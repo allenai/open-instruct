@@ -838,6 +838,13 @@ def compute_prompt_solve_rate_metrics(
 
 
 def _parse_manufactoria_test_cases(ground_truth: Any) -> list[Any]:
+    # RLVR rows may wrap the actual Manufactoria test payload in a singleton list so it
+    # can align with the verifier-source list shape used by multi-verifier examples.
+    if isinstance(ground_truth, list) and len(ground_truth) == 1:
+        first_item = ground_truth[0]
+        if isinstance(first_item, str | list):
+            ground_truth = first_item
+
     if isinstance(ground_truth, str):
         try:
             parsed_ground_truth = json.loads(ground_truth)
