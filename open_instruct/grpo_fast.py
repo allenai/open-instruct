@@ -642,14 +642,39 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         nan_grads = []
+                        grad_norms_pre_clip = []
                         for name, param in self.model.module.named_parameters():
-                            if param.grad is not None and torch.isnan(param.grad).any():
-                                nan_grads.append(name)
+                            if param.grad is not None:
+                                if torch.isnan(param.grad).any():
+                                    nan_grads.append(name)
+                                grad_norms_pre_clip.append((name, float(param.grad.data.norm(2))))
                         if nan_grads:
                             raise ValueError(
                                 f"NaN gradients before optimizer step: {len(nan_grads)} params: {nan_grads[:10]}"
                             )
+                        grad_norms_pre_clip.sort(key=lambda x: x[1], reverse=True)
+                        logger.info("[Grad Check] Pre-clip top-5 grad norms: %s", grad_norms_pre_clip[:5])
+                        pre_step_nan_shards = []
+                        for name, param in self.model.module.named_parameters():
+                            if hasattr(param, "ds_tensor") and param.ds_tensor.data.isnan().any():
+                                pre_step_nan_shards.append(name)
+                        if pre_step_nan_shards:
+                            logger.error(
+                                "[Grad Check] NaN in DS3 shards BEFORE model.step(): %d params: %s",
+                                len(pre_step_nan_shards),
+                                pre_step_nan_shards[:10],
+                            )
                         self.model.step()
+                        post_step_nan_shards = []
+                        for name, param in self.model.module.named_parameters():
+                            if hasattr(param, "ds_tensor") and param.ds_tensor.data.isnan().any():
+                                post_step_nan_shards.append(name)
+                        if post_step_nan_shards:
+                            logger.error(
+                                "[Grad Check] NaN in DS3 shards AFTER model.step(): %d params: %s",
+                                len(post_step_nan_shards),
+                                post_step_nan_shards[:10],
+                            )
                         grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(

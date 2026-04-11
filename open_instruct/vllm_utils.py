@@ -1448,6 +1448,7 @@ def broadcast_weights_to_vllm(
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     if deepspeed_stage_3:
         nan_shards = []
         for n, p in params:
@@ -1455,9 +1456,10 @@ def broadcast_weights_to_vllm(
                 nan_shards.append((n, list(p.ds_tensor.shape)))
         if nan_shards:
             raise ValueError(
-                f"[Weight Sync] NaN in DS3 shards BEFORE gather: {len(nan_shards)} params: {nan_shards[:10]}"
+                f"[Weight Sync] [rank {rank}] NaN in DS3 shards BEFORE gather: "
+                f"{len(nan_shards)} params: {nan_shards[:10]}"
             )
-        logger.info("[Weight Sync] All %d DS3 shards clean before gather", len(params))
+        logger.info("[Weight Sync] [rank %d] All %d DS3 shards clean before gather", rank, len(params))
 
     if gather_whole_model:
         if isinstance(model, FSDP):
