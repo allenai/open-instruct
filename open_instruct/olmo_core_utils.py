@@ -73,8 +73,8 @@ class TrainingConfig:
     """Linear warmup over warmup_ratio fraction of total steps."""
     weight_decay: float = 0.0
     """Weight decay for AdamW if we apply some."""
-    max_grad_norm: float = -1
-    """Maximum gradient norm for clipping. -1 means no clipping."""
+    max_grad_norm: float | None = None
+    """Maximum gradient norm for clipping. None means no clipping."""
     max_seq_length: int = 4096
     """The maximum total input sequence length after tokenization."""
     lr_scheduler_type: str = "linear"
