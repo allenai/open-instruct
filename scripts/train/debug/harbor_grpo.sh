@@ -46,6 +46,7 @@ uv run python mason.py \
     --response_length 16384 \
     --pack_length 32768 \
     --inflight_updates True \
+    --async_steps 1 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 2 \
