@@ -84,7 +84,7 @@ def test_build_output_row_recomputes_full_and_per_test_metrics():
     assert row["Full pass rate"] == "1/3"
     assert row["Per-test pass count"] == [2, 2]
     assert row["Per-test pass rate"] == ["2/3", "2/3"]
-    assert row["difficulty"] == [1, 2]
+    assert "difficulty" not in row
     assert row["num_samples"] == 3
     assert "generator_model" not in row
 
@@ -93,3 +93,17 @@ def test_existing_completions_are_loaded_per_row():
     ds = Dataset.from_list([{"completions": ["a", "b"]}, {"completions": ["c"]}])
 
     assert [list(sample["completions"]) for sample in ds] == [["a", "b"], ["c"]]
+
+
+def test_assign_global_difficulty_quartiles_uses_whole_dataset():
+    rows = [
+        {"Per-test pass count": [4, 4, 4], "num_samples": 32},
+        {"Per-test pass count": [2, 2, 0], "num_samples": 32},
+        {"Per-test pass count": [0, 2, 4], "num_samples": 32},
+    ]
+
+    manufactoria_pass_module.assign_global_difficulty_quartiles(rows)
+
+    assert rows[0]["difficulty"] == [4, 4, 4]
+    assert rows[1]["difficulty"] == [2, 2, 1]
+    assert rows[2]["difficulty"] == [1, 2, 4]

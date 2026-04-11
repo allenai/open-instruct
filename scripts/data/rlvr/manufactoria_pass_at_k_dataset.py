@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -321,20 +322,46 @@ def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int)
     return per_test_pass
 
 
-def per_test_solve_rates_to_difficulty_quartiles(rates: list[float]) -> list[int]:
-    """Map per-test solve rates (length N) to quartiles 1–4 within this prompt (low rate → 1, high → 4)."""
-    n = len(rates)
-    if n == 0:
-        return []
-    arr = np.asarray(rates, dtype=float)
-    order = np.argsort(arr, kind="stable")
-    difficulty = np.empty(n, dtype=int)
-    chunks = np.array_split(order, 4)
-    for quartile, chunk in enumerate(chunks):
-        if chunk.size == 0:
+def _nearest_rank_threshold(sorted_rates: list[float], quantile: float) -> float:
+    if not sorted_rates:
+        raise ValueError("sorted_rates must be non-empty")
+    rank = max(1, math.ceil(quantile * len(sorted_rates)))
+    return sorted_rates[rank - 1]
+
+
+def assign_global_difficulty_quartiles(rows: list[dict[str, Any]]) -> None:
+    """Assign dataset-level quartiles from per-test pass rates across all rows."""
+    indexed_rates: list[tuple[int, int, float]] = []
+    for row_idx, row in enumerate(rows):
+        pass_counts = row.get("Per-test pass count", []) or []
+        num_samples = int(row.get("num_samples", 0) or 0)
+        if num_samples <= 0:
+            row[DIFFICULTY_KEY] = [1] * len(pass_counts)
             continue
-        difficulty[chunk] = quartile + 1
-    return difficulty.tolist()
+        for test_idx, pass_count in enumerate(pass_counts):
+            indexed_rates.append((row_idx, test_idx, float(pass_count) / float(num_samples)))
+
+    if not indexed_rates:
+        return
+
+    sorted_rates = sorted(rate for _, _, rate in indexed_rates)
+    q1 = _nearest_rank_threshold(sorted_rates, 0.25)
+    q2 = _nearest_rank_threshold(sorted_rates, 0.50)
+    q3 = _nearest_rank_threshold(sorted_rates, 0.75)
+
+    for row in rows:
+        row[DIFFICULTY_KEY] = [1] * len(row.get("Per-test pass count", []) or [])
+
+    for row_idx, test_idx, rate in indexed_rates:
+        if rate <= q1:
+            difficulty = 1
+        elif rate <= q2:
+            difficulty = 2
+        elif rate <= q3:
+            difficulty = 3
+        else:
+            difficulty = 4
+        rows[row_idx][DIFFICULTY_KEY][test_idx] = difficulty
 
 
 def _score_completions(
@@ -344,7 +371,7 @@ def _score_completions(
     threshold: float,
     max_workers: int,
     with_difficulty: bool,
-) -> tuple[int, list[int], list[int]]:
+) -> tuple[int, list[int]]:
     n_tests = _num_tests_in_label(label)
 
     def score_one(text: str) -> tuple[int, list[float] | None]:
@@ -362,13 +389,11 @@ def _score_completions(
 
     pass_count = sum(r[0] for r in results)
     if not with_difficulty or n_tests <= 0:
-        return pass_count, [], []
+        return pass_count, []
 
     matrix = np.array([r[1] for r in results], dtype=float)
     per_test_pass_count = matrix.sum(axis=0).astype(int).tolist()
-    rates = matrix.mean(axis=0).tolist()
-    difficulty = per_test_solve_rates_to_difficulty_quartiles(rates)
-    return pass_count, per_test_pass_count, difficulty
+    return pass_count, per_test_pass_count
 
 
 def _row_num_samples(completions: list[str], fallback_num_samples: int) -> int:
@@ -386,7 +411,7 @@ def build_output_row(
 
     label = normalize_manufactoria_ground_truth(sample["ground_truth"])
     with_difficulty = not args.no_difficulty
-    full_pass_count, per_test_pass_count, difficulty = _score_completions(
+    full_pass_count, per_test_pass_count = _score_completions(
         verifier,
         label,
         completions,
@@ -414,7 +439,6 @@ def build_output_row(
     if with_difficulty:
         row["Per-test pass count"] = per_test_pass_count
         row["Per-test pass rate"] = [_format_pass_rate(count, num_samples) for count in per_test_pass_count]
-        row[DIFFICULTY_KEY] = difficulty
     return row
 
 
@@ -492,6 +516,9 @@ def main() -> None:
     logger.info("Scoring completions via Manufactoria API (%s)", args.manufactoria_api_url)
     for sample, completions in zip(ds, completions_by_prompt):
         rows.append(build_output_row(sample, completions, verifier, args))
+
+    if not args.no_difficulty:
+        assign_global_difficulty_quartiles(rows)
 
     out_ds = Dataset.from_list(rows)
     logger.info("Built output dataset with %d rows and columns: %s", len(out_ds), out_ds.column_names)
