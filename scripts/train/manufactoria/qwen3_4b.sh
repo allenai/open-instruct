@@ -4,9 +4,8 @@ set -euo pipefail
 
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
-SCORE_MODE=pass_rate
 EXP="${EXP:-}"
-EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${SCORE_MODE}_${EXP}}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
@@ -50,7 +49,7 @@ uv run python mason.py \
     --model_name_or_path "Qwen/Qwen3-4B-Instruct-2507" \
     --apply_verifiable_reward true \
     --manufactoria_api_url \$MANUFACTORIA_API_URL/test_solution \
-    --manufactoria_scoring_mode "${SCORE_MODE}" \
+    --manufactoria_scoring_mode pass_rate \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
