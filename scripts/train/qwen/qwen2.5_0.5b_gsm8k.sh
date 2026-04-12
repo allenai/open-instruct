@@ -1,6 +1,7 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k}"
+EXP="${EXP:-}"
+EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 DATASETS="${DATASETS:-ai2-adapt-dev/rlvr_gsm8k_zs 1.0}"

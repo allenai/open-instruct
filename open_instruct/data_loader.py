@@ -436,7 +436,7 @@ class StreamingDataLoaderConfig:
     # GRPO sampling/filtering
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
-    active_sampling_max_samples_multiplier: int | None = None
+    max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "centered"
@@ -550,9 +550,9 @@ class StreamingDataLoaderConfig:
             )
         if not 0.0 <= self.never_give_up <= 1.0:
             raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
-        if self.active_sampling_max_samples_multiplier is not None and self.active_sampling_max_samples_multiplier < 0:
+        if self.max_samples_multiplier is not None and self.max_samples_multiplier < 0:
             raise ValueError(
-                f"`active_sampling_max_samples_multiplier` must be non-negative, got {self.active_sampling_max_samples_multiplier}."
+                f"`active_sampling_max_samples_multiplier` must be non-negative, got {self.max_samples_multiplier}."
             )
         if self.never_give_up > 0.0 and not self.active_sampling:
             raise ValueError("`never_give_up > 0.0` requires `active_sampling=True`.")
@@ -1823,7 +1823,7 @@ class DataPreparationActor:
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
-                active_sampling_max_samples_multiplier=self.config.active_sampling_max_samples_multiplier,
+                active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
                 replenish_prompts=True,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
