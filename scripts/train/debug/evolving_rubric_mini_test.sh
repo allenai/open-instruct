@@ -69,7 +69,7 @@ echo "Exp name: ${exp_name}"
 echo "Repo root: ${REPO_ROOT}"
 echo "=============================================="
 
-python open_instruct/grpo_fast.py \
+uv run python open_instruct/grpo_fast.py \
     --exp_name "${exp_name}" \
     --beta 0.001 \
     --num_samples_per_prompt_rollout 4 \

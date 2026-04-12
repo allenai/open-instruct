@@ -297,7 +297,7 @@ def split_request_id(full_request_id: str) -> dict:
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
-def process_completed_request(request_id, outs, current_time, use_tools, request_metadata):
+def process_completed_request(request_id, outs, current_time, use_tools, request_metadata, dataset_lookup=None):
     """Process a completed request with all its samples and return the result.
 
     Args:
@@ -306,9 +306,14 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         current_time: Current timestamp for performance metrics
         use_tools: Boolean indicating if tools were used
         request_metadata: Dictionary containing metadata for all requests
+        dataset_lookup: Optional callable ``(index, is_eval) -> dict`` that resolves
+            the dataset example for this request, applying any ground-truth overrides
+            from the request metadata.
 
     Returns:
-        Tuple of (result, is_eval) where result is a GenerationResult and is_eval is a boolean
+        Tuple of (result, is_eval, example) where example is the resolved dataset
+        row (with any ground-truth override applied), or None if no dataset_lookup
+        was provided.
     """
     final_output = RequestOutput(
         request_id=request_id,
@@ -373,8 +378,18 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
+        model_step=metadata.get("model_step"),
     )
-    return result, metadata["is_eval"]
+    is_eval = metadata["is_eval"]
+
+    example = None
+    if dataset_lookup is not None:
+        example = dataset_lookup(metadata["index"], is_eval)
+        ground_truth_from_request = metadata.get("ground_truth")
+        if ground_truth_from_request is not None and not is_eval:
+            example[GROUND_TRUTHS_KEY] = ground_truth_from_request
+
+    return result, is_eval, example
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -481,6 +496,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "index": request.index,
         "prompt_id": request.prompt_id,
+        "model_step": actor.current_model_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
@@ -537,26 +553,23 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
     current_time = time.perf_counter()
-    result, is_eval = process_completed_request(
+
+    def _dataset_lookup(index: int, is_eval_req: bool) -> dict:
+        ds = actor.eval_dataset if is_eval_req else actor.train_dataset
+        idx_map = actor._eval_index_map if is_eval_req else actor._train_index_map
+        return dict(ds[idx_map[index]])
+
+    result, is_eval, example = process_completed_request(
         base_request_id,
         ordered_outs,
         current_time,
         actor.request_outputs[base_request_id]["use_tools"],
         actor.request_metadata,
+        dataset_lookup=_dataset_lookup,
     )
-
-    metadata = actor.request_metadata.get(base_request_id, {})
 
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
-
-    dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    index_map = actor._eval_index_map if is_eval else actor._train_index_map
-    example = dict(dataset[index_map[result.index]])
-
-    ground_truth_from_request = metadata.get("ground_truth")
-    if ground_truth_from_request is not None and not is_eval:
-        example[GROUND_TRUTHS_KEY] = ground_truth_from_request
 
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, example)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
@@ -654,6 +667,7 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.current_model_step: int = 0
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -868,6 +882,9 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
+
+    def set_model_step(self, model_step: int) -> None:
+        self.current_model_step = model_step
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
@@ -1349,6 +1366,7 @@ def create_vllm_engines(
                 eval_dataset=eval_dataset,
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
+                language_model_only=True,
             )
         )
 

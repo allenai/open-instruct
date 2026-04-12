@@ -114,6 +114,7 @@ def _run_evolving_rubric_step(
 
     if rubric_buffer is not None:
         _cap_active_rubrics(rubric_buffer, max_active)
+        _rebuild_ground_truths_from_buffer(updated_ground_truths, rubric_buffer, num_samples)
 
     overrides = _build_ground_truth_overrides(updated_ground_truths, indices)
 
@@ -270,6 +271,31 @@ def _build_example_rubrics_table(
 
 
 RUBRIC_TABLE_COLUMNS = ["step", "query", "type", "title", "description", "weight"]
+
+
+def _rebuild_ground_truths_from_buffer(
+    updated_ground_truths: list, rubric_buffer: dict[str, Any], num_samples: int
+) -> None:
+    """Rebuild ground truths in-place from the (capped) rubric buffer.
+
+    After ``_cap_active_rubrics`` evicts excess rubrics, the ``updated_ground_truths``
+    built by ``update_ground_truths_with_evolving_rubrics`` may still reference the
+    pre-cap rubric set. This function re-derives each ground truth's rubrics list from
+    the now-capped buffer so that overrides sent to vLLM respect ``max_active_rubrics``.
+    """
+    for i, gt in enumerate(updated_ground_truths):
+        is_wrapped = isinstance(gt, list)
+        gt_str = gt[0] if is_wrapped else gt
+        gt_obj = json.loads(gt_str)
+        query = gt_obj.get("query") or gt_obj.get("Question")
+        if query and query in rubric_buffer:
+            buf = rubric_buffer[query]
+            gt_obj["rubrics"] = buf["persistent_rubrics"] + buf["active_rubrics"]
+            gt_obj["rubrics_types"] = ["persistent"] * len(buf["persistent_rubrics"]) + ["evolving"] * len(
+                buf["active_rubrics"]
+            )
+            new_str = json.dumps(gt_obj)
+            updated_ground_truths[i] = [new_str] if is_wrapped else new_str
 
 
 def _build_ground_truth_overrides(updated_ground_truths: list, indices: list[int] | None) -> dict[int, Any]:

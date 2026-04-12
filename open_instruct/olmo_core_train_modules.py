@@ -109,7 +109,7 @@ class DPOTrainModule(TransformerTrainModule):
         optim: OptimConfig,
         sample_microbatch_size: int,
         max_sequence_length: int,
-        dpo_config: dpo_utils.ExperimentConfig,
+        dpo_config: dpo_utils.DPOExperimentConfig,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
         cp_config: transformer_config.TransformerContextParallelConfig | None = None,
@@ -284,11 +284,12 @@ class GRPOTrainModule(TransformerTrainModule):
         optim: OptimConfig,
         sample_microbatch_size: int,
         max_sequence_length: int,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         temperature: float,
         tokenizer: PreTrainedTokenizer,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
+        ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
         max_grad_norm: float | None = None,
         scheduler: Scheduler | None = None,
         device: torch.device | None = None,
@@ -302,6 +303,7 @@ class GRPOTrainModule(TransformerTrainModule):
             rank_microbatch_size=rank_microbatch_size_tokens,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
+            ac_config=ac_config,
             max_grad_norm=max_grad_norm,
             scheduler=scheduler,
             device=device,
@@ -363,16 +365,6 @@ class GRPOTrainModule(TransformerTrainModule):
             else:
                 ref_logprobs_BT = None
 
-        with torch.no_grad():
-            old_logprobs_BT = grpo_utils.compute_logprobs(
-                self.model,
-                data_BT,
-                self.pad_token_id,
-                self.temperature,
-                use_grad=False,
-                batch_size=3 * self.rank_microbatch_size,
-            )
-
         num_samples = len(data_BT.query_responses)
         num_mini_batches = self.grpo_config.num_mini_batches
         accumulation_steps = max(math.ceil(num_samples / num_mini_batches), 1)
@@ -386,7 +378,7 @@ class GRPOTrainModule(TransformerTrainModule):
                         self.model,
                         data_BT,
                         self.pad_token_id,
-                        self.grpo_config.temperature,
+                        self.temperature,
                         use_grad=False,
                         batch_size=3 * self.rank_microbatch_size,
                     )
@@ -415,7 +407,9 @@ class GRPOTrainModule(TransformerTrainModule):
         token_counts = torch.tensor(
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
-        loss_stats_B = grpo_utils.create_loss_stats(num_samples, token_counts, self.device)
+        loss_stats_B = grpo_utils.create_loss_stats(
+            num_samples, self.device, record_entropy=self.grpo_config.record_entropy
+        )
 
         num_steps = 0
         local_step = 0
@@ -432,7 +426,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
+                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool()
                 new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
 
                 vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
@@ -447,7 +441,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     new_logprobs,
                 )
 
-                advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
+                advantages = data_BT.advantages[sample_idx]
 
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
@@ -503,8 +497,8 @@ class GRPOTrainModule(TransformerTrainModule):
             self.zero_grads()
 
         if not dry_run and num_steps > 0:
-            local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, self.grpo_config)
-            local_tokens = local_metrics.pop("_token_count")
+            local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
+            local_tokens = token_counts.sum().item()
 
             keys = sorted(local_metrics.keys())
             values = [local_tokens] + [local_metrics[k] * local_tokens for k in keys]

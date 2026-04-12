@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import hashlib
 import os
 import random
@@ -470,24 +471,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     raise Exception(f"Error code {return_code} when creating cached dataset")
                 console.log("✅✅✅ Finished running the caching command")
 
-                if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
-                    need_to_override_checkpoint_state_dir = True
-                    default_checkpoint_state_freq = 200
-                    for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
-                            need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
-                            default_checkpoint_state_freq = command[idx + 1]
-
-                    if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
-                        new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-                        console.log(
-                            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-                        )
-                        command.append("--checkpoint_state_dir")
-                        command.append(new_checkpoint_state_dir)
-                        command.append("--checkpoint_state_freq")
-                        command.append(str(default_checkpoint_state_freq))
+        command = maybe_override_checkpoint_dir(command, args.auto_checkpoint_state_dir, whoami, is_external_user)
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -642,6 +626,42 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     filtered_command[model_name_idx] = local_cache_folder
 
     return filtered_command
+
+
+def maybe_override_checkpoint_dir(
+    command: list[str], auto_checkpoint_state_dir: str, whoami: str, is_external_user: bool
+):
+    """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
+
+    --checkpoint_state_dir is not overriden if it is already set and is on /weka (useful for restarting from a checkpoint)
+    """
+
+    if not any(file in command for file in OPEN_INSTRUCT_RESUMABLES):
+        return command
+
+    if not auto_checkpoint_state_dir or is_external_user:
+        return command
+
+    # get the last .index, not the first
+    checkpoint_arg_last_index = None
+    with contextlib.suppress(ValueError):
+        checkpoint_arg_last_index = len(command) - 1 - command[::-1].index("--checkpoint_state_dir")
+
+    # don't override if the checkpoint dir is on /weka/
+    if (
+        checkpoint_arg_last_index is not None
+        and checkpoint_arg_last_index + 1 < len(command)
+        and "/weka/" in command[checkpoint_arg_last_index + 1]
+    ):
+        return command
+
+    new_checkpoint_state_dir = f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+    console.log(
+        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+    )
+    command.extend(["--checkpoint_state_dir", new_checkpoint_state_dir])
+
+    return command
 
 
 def main():
