@@ -20,10 +20,18 @@
 # What this tests:
 #   - GRPO training with evolving rubric rewards enabled
 #   - RubricVerifier scoring via LLM judge (gpt-4.1-mini)
-#   - Rubric buffer initialization and update across steps
+#   - Rubric buffer initialization and accumulation across 3 steps
+#   - Ground truth overrides flowing through PromptRequest to vLLM
 #   - Single-GPU mode with DeepSpeed stage 3 + vLLM
 #
-# Expected runtime: ~8-10 minutes on a single H100/A100.
+# Expected runtime: ~10-15 minutes on a single H100/A100.
+#
+# What to look for in the logs:
+#   - "Initialized rubric buffer with N unique queries"
+#   - "Step X | query=... | +N positive, -N negative" with [+]/[-] rubric details
+#   - "Built N ground truth overrides for future prompts"
+#   - "Step X buffer totals | queries=N, persistent=N, active=N, inactive=N"
+#   - Active rubric count should grow across steps (e.g. 9 -> 21 -> 26)
 # ==========================================================================
 
 set -e
@@ -38,6 +46,7 @@ export VLLM_ATTENTION_BACKEND=FLASHINFER
 export VLLM_USE_V1=0
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export RUBRIC_JUDGE_MODEL=gpt-4.1-mini
+export RUBRIC_GENERATION_MODEL=gpt-4.1-mini
 
 # Set PYTHONPATH to repo root (auto-detect from script location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,9 +69,8 @@ echo "Exp name: ${exp_name}"
 echo "Repo root: ${REPO_ROOT}"
 echo "=============================================="
 
-uv run python open_instruct/grpo_fast.py \
-    --exp_name ${exp_name} \
-    --wandb_project_name rl-rag \
+python open_instruct/grpo_fast.py \
+    --exp_name "${exp_name}" \
     --beta 0.001 \
     --num_samples_per_prompt_rollout 4 \
     --num_unique_prompts_rollout 4 \
@@ -81,7 +89,7 @@ uv run python open_instruct/grpo_fast.py \
     --max_prompt_token_length 512 \
     --response_length 1024 \
     --pack_length 2048 \
-    --model_name_or_path ${model_path} \
+    --model_name_or_path "${model_path}" \
     --non_stop_penalty False \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
@@ -102,11 +110,20 @@ uv run python open_instruct/grpo_fast.py \
     --save_freq 25 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --gradient_checkpointing \
-    --max_steps 1 \
+    --max_steps 3 \
     --remap_verifier general_rubric=rubric \
     --only_reward_good_outputs False \
+    --push_to_hub false \
     2>&1 | tee /tmp/evolving_rubric_test.log
 
+EXIT_CODE=$?
+
 echo "=============================================="
-echo "Test completed! Log saved to /tmp/evolving_rubric_test.log"
+echo "Test completed with exit code ${EXIT_CODE}!"
+echo "Log saved to /tmp/evolving_rubric_test.log"
+echo ""
+echo "Quick check — look for rubric accumulation:"
+grep "buffer totals" /tmp/evolving_rubric_test.log || echo "(no buffer totals found)"
 echo "=============================================="
+
+exit ${EXIT_CODE}
