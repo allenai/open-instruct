@@ -919,7 +919,7 @@ class LLMRayActor:
             self._prefetch_future.result()
         if self._process_future.done():
             self._process_future.result()
-        for task in self.active_tasks.values():
+        for task in list(self.active_tasks.values()):
             if task.done():
                 task.result()
         if not self.loop_thread.is_alive():

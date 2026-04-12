@@ -304,8 +304,11 @@ class TestProcessRequest(unittest.IsolatedAsyncioTestCase):
         actor.model_name = "test-model"
         actor.tool_actor_map = {}
         actor.tool_actors = {}
-        actor.tool_parser = None
+        actor.tool_parser = mock.Mock()
+        actor.tool_parser.get_tool_calls.return_value = []
+        actor.pools = {}
         actor.mask_tool_use = False
+        actor.per_turn_max_tokens = None
         actor.active_tasks = {}
         actor.completion_queue = mock.Mock()
         actor.request_metadata = {
