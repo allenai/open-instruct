@@ -1422,3 +1422,6 @@ class RewardConfig:
             return scores, metrics
 
         return reward_fn
+
+
+import open_instruct.nemo_verifiers  # noqa: E402, F401  — registers NeMo verifier subclasses
