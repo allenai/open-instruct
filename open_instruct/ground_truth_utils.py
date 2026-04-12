@@ -345,7 +345,11 @@ class IFEvalVerifier(VerifierFunction):
             if args is None:
                 args = {}
             args = {k: v for k, v in args.items() if v is not None}
-            instruction_cls = instruction_dict[instruction_key]
+            instruction_cls = instruction_dict.get(instruction_key)
+            if instruction_cls is None:
+                logger.warning("Unknown IFEval instruction_id %r, treating as failed", instruction_key)
+                rewards.append(0.0)
+                continue
             instruction_instance = instruction_cls(instruction_key)
             instruction_instance.build_description(**args)
             if prediction.strip() and instruction_instance.check_following(answer):
