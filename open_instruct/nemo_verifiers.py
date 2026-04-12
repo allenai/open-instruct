@@ -226,6 +226,8 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
         matches = re.findall(pattern, text, re.DOTALL)
         return matches[-1].strip() if matches else text
 
+    _code_api_warned: bool = False
+
     def __call__(
         self,
         tokenized_prediction: list[int],
@@ -236,6 +238,13 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
     ) -> VerificationResult:
         import requests as _requests
 
+        url = getattr(self.verifier_config, "code_api_url", "")
+        if not url or "localhost" in url:
+            if not NemoCompetitiveCodingVerifier._code_api_warned:
+                logger.warning("NemoCompetitiveCodingVerifier: no remote code_api_url configured (got %r), returning 0.0", url)
+                NemoCompetitiveCodingVerifier._code_api_warned = True
+            return VerificationResult(score=0.0)
+
         code = self._extract_code(prediction)
         tests = _parse_label(label)
         payload = {
@@ -244,10 +253,6 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
             "max_execution_time": getattr(self.verifier_config, "code_max_execution_time", 10.0),
         }
         try:
-            url = getattr(self.verifier_config, "code_api_url", "")
-            if not url:
-                logger.warning("NemoCompetitiveCodingVerifier: no code_api_url configured")
-                return VerificationResult(score=0.0)
             resp = _requests.post(url, json=payload, timeout=120)
             resp.raise_for_status()
             results = resp.json()["results"]
