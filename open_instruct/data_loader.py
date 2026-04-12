@@ -554,8 +554,6 @@ class StreamingDataLoaderConfig:
             raise ValueError(
                 f"`active_sampling_max_samples_multiplier` must be non-negative, got {self.max_samples_multiplier}."
             )
-        if self.never_give_up > 0.0 and not self.active_sampling:
-            raise ValueError("`never_give_up > 0.0` requires `active_sampling=True`.")
         if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
             raise ValueError(
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
@@ -1312,11 +1310,9 @@ def accumulate_inference_batches(
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         requeue_same_prompt = False
         if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+            requeue_same_prompt = result.reward_scores[0] == 0 and np.random.random() < never_give_up
             if replenish_prompts:
                 assert param_prompt_Q is not None
-                requeue_same_prompt = (
-                    active_sampling and result.reward_scores[0] == 0 and np.random.random() < never_give_up
-                )
                 replacement_example = example
                 prompt_id_suffix = None
                 if requeue_same_prompt:
@@ -1335,7 +1331,7 @@ def accumulate_inference_batches(
                     base_env_config=base_env_config,
                     prompt_id_suffix=prompt_id_suffix,
                 )
-            if requeue_same_prompt and chain_id is not None:
+            if requeue_same_prompt and chain_id is not None and active_sampling:
                 pending_results.append(result)
                 pending_metrics.append(result.reward_metrics)
                 pending_never_give_up_results[chain_id] = pending_results
