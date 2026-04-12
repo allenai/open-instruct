@@ -5,13 +5,14 @@ set -euo pipefail
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 SCORE_MODE=pass_rate
-EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${SCORE_MODE}}"
+EXP="${EXP:-}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${SCORE_MODE}_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
 
 uv run python mason.py \
-    --cluster ai2/jupiter ai2/ceres ai2/saturn ai2/neptune \
+    --cluster ai2/jupiter ai2/ceres ai2/saturn \
     --workspace ai2/oe-adapt-code \
     --priority high \
     --preemptible \
@@ -22,6 +23,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --gpus $NUM_GPUS \
     --max_retries 0 \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     source configs/beaker_configs/manufactoria_api_setup.sh \&\& \
@@ -56,9 +58,9 @@ uv run python mason.py \
     --vllm_num_engines 4 \
     --clip_higher 0.28 \
     --seed 1 \
-    --local_eval_every 10 \
-    --save_freq 10 \
-    --checkpoint_state_freq 10 \
+    --local_eval_every 25 \
+    --save_freq 25 \
+    --checkpoint_state_freq 25 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub false \
