@@ -12,7 +12,7 @@ LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 BEAKER_IMAGE="michaeln/open_instruct"
 
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres}"
+CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/rhea ai2/saturn}"
 PRIORITY="${PRIORITY:-high}"
 NUM_GPUS="${NUM_GPUS:-3}"
 
