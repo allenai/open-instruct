@@ -78,7 +78,10 @@ def _verify_math(prediction: str, label: str) -> float:
     Uses the same extraction + equivalence pipeline as the existing
     open-instruct MathVerifier.
     """
-    label = str(_parse_label(label))
+    parsed = _parse_label(label)
+    if isinstance(parsed, list) and len(parsed) == 1:
+        parsed = parsed[0]
+    label = str(parsed)
     raw = prediction
     candidates: list[str] = []
 
