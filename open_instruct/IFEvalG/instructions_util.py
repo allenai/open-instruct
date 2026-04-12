@@ -1,4 +1,4 @@
-# Copyright 2024 The Google Research Authors.
+# Copyright 2023 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,18 @@ import re
 
 import immutabledict
 import nltk
+import ast
+
+
+def download_nltk_resources():
+    """Download 'punkt' if not already installed"""
+    try:
+        nltk.data.find("tokenizers/punkt")
+    except LookupError:
+        nltk.download("punkt")
+
+
+download_nltk_resources()
 
 WORD_LIST = [
     "western",
@@ -1588,9 +1600,7 @@ LANGUAGE_CODES = immutabledict.immutabledict(
 _ALPHABETS = "([A-Za-z])"
 _PREFIXES = "(Mr|St|Mrs|Ms|Dr)[.]"
 _SUFFIXES = "(Inc|Ltd|Jr|Sr|Co)"
-_STARTERS = (
-    r"(Mr|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|He\s|She\s|It\s|They\s|Their\s|Our\s|We\s|But\s|However\s|That\s|This\s|Wherever)"
-)
+_STARTERS = r"(Mr|Mrs|Ms|Dr|Prof|Capt|Cpt|Lt|He\s|She\s|It\s|They\s|Their\s|Our\s|We\s|But\s|However\s|That\s|This\s|Wherever)"
 _ACRONYMS = "([A-Z][.][A-Z][.](?:[A-Z][.])?)"
 _WEBSITES = "[.](com|net|org|io|gov|edu|me)"
 _DIGITS = "([0-9])"
@@ -1611,12 +1621,20 @@ def split_into_sentences(text):
     text = re.sub(_PREFIXES, "\\1<prd>", text)
     text = re.sub(_WEBSITES, "<prd>\\1", text)
     text = re.sub(_DIGITS + "[.]" + _DIGITS, "\\1<prd>\\2", text)
-    text = re.sub(_MULTIPLE_DOTS, lambda match: "<prd>" * len(match.group(0)) + "<stop>", text)
+    text = re.sub(
+        _MULTIPLE_DOTS,
+        lambda match: "<prd>" * len(match.group(0)) + "<stop>",
+        text,
+    )
     if "Ph.D" in text:
         text = text.replace("Ph.D.", "Ph<prd>D<prd>")
     text = re.sub(r"\s" + _ALPHABETS + "[.] ", " \\1<prd> ", text)
     text = re.sub(_ACRONYMS + " " + _STARTERS, "\\1<stop> \\2", text)
-    text = re.sub(_ALPHABETS + "[.]" + _ALPHABETS + "[.]" + _ALPHABETS + "[.]", "\\1<prd>\\2<prd>\\3<prd>", text)
+    text = re.sub(
+        _ALPHABETS + "[.]" + _ALPHABETS + "[.]" + _ALPHABETS + "[.]",
+        "\\1<prd>\\2<prd>\\3<prd>",
+        text,
+    )
     text = re.sub(_ALPHABETS + "[.]" + _ALPHABETS + "[.]", "\\1<prd>\\2<prd>", text)
     text = re.sub(" " + _SUFFIXES + "[.] " + _STARTERS, " \\1<stop> \\2", text)
     text = re.sub(" " + _SUFFIXES + "[.]", " \\1<prd>", text)
@@ -1648,7 +1666,7 @@ def count_words(text):
     return num_words
 
 
-@functools.cache
+@functools.lru_cache(maxsize=None)
 def _get_sentence_tokenizer():
     return nltk.data.load("nltk:tokenizers/punkt/english.pickle")
 
@@ -1659,7 +1677,97 @@ def count_sentences(text):
     tokenized_sentences = tokenizer.tokenize(text)
     return len(tokenized_sentences)
 
+def count_stopwords(text):
+    """Counts the number of stopwords."""
+    nltk.download('stopwords')
+    stopwords = nltk.corpus.stopwords.words('english')
+    tokenizer = nltk.tokenize.RegexpTokenizer(r"\w+")
+    tokens = tokenizer.tokenize(text)
+    num_stopwords = len([t for t in tokens if t.lower() in stopwords])
+    return num_stopwords
 
 def generate_keywords(num_keywords):
     """Randomly generates a few keywords."""
     return random.sample(WORD_LIST, k=num_keywords)
+
+
+# below, helper class and function for CamelCaseVariablesChecker
+class VariableVisitor(ast.NodeVisitor):
+    """AST Visitor that collects variable names from different contexts."""
+    
+    def __init__(self):
+        self.variables: Set[str] = set()
+        self.assignments: Set[str] = set()
+        self.function_params: Set[str] = set()
+        
+    def visit_Name(self, node: ast.Name):
+        """Visit a name node in the AST."""
+        if isinstance(node.ctx, ast.Store):
+            self.assignments.add(node.id)
+        self.variables.add(node.id)
+        
+    def visit_arg(self, node: ast.arg):
+        """Visit a function argument node."""
+        self.function_params.add(node.arg)
+
+def extract_variables(code: str) -> dict:
+    """
+    Extract variable names from a Python code string.
+    
+    Args:
+        code (str): Python code as a string
+        
+    Returns:
+        dict: Dictionary containing different types of variables found
+    """
+    try:
+        # Parse the code into an AST
+        tree = ast.parse(code)
+        
+        # Create and run our visitor
+        visitor = VariableVisitor()
+        visitor.visit(tree)
+        
+        return {
+            'all_variables': sorted(visitor.variables),
+            'assignments': sorted(visitor.assignments),
+            'function_params': sorted(visitor.function_params)
+        }
+        
+    except SyntaxError as e:
+        return {'error': f'Invalid Python code: {str(e)}'}
+
+def is_camelcase(variable_name: str) -> bool:
+    """
+    Verify if a variable name follows camelCase convention.
+    
+    Rules for camelCase:
+    1. Starts with lowercase letter
+    2. No underscores or hyphens
+    3. Contains only letters and numbers
+    4. Each new word starts with uppercase letter
+    
+    Args:
+        variable_name: String to check for camelCase compliance
+        
+    Returns:
+        bool: True if variable name is in camelCase, False otherwise
+    """
+    # Assume empty strings are errors, do not penalize
+    if not variable_name:
+        return True
+    
+    # Must start with lowercase letter
+    if not variable_name[0].strip().islower():
+        return False
+    
+    # Check for invalid characters (only letters and numbers allowed)
+    if not variable_name.isalnum():
+        return False
+    
+    # No consecutive uppercase letters (would indicate CONSTANT or PascalCase)
+    for i in range(len(variable_name) - 1):
+        if variable_name[i].isupper() and variable_name[i + 1].isupper():
+            return False
+    
+    return True

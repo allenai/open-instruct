@@ -1,4 +1,4 @@
-# Copyright 2024 The Google Research Authors.
+# Copyright 2023 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,11 +16,8 @@
 
 from open_instruct.IFEvalG import instructions
 
-_PARAGRAPH = "paragraphs:"
 
 _KEYWORD = "keywords:"
-
-_LETTER = "letters:"
 
 _LANGUAGE = "language:"
 
@@ -39,86 +36,6 @@ _STARTEND = "startend:"
 _CHANGE_CASES = "change_case:"
 
 _PUNCTUATION = "punctuation:"
-
-_NEW = "new:"
-
-_COPY = "copy:"
-
-_BASIC = "basic:"
-
-_FIRSTWORD = "first_word:"
-
-_LASTWORD = "last_word:"
-
-_COUNT = "count:"
-
-
-FUNCTION_DICT = {
-    # IFEval Constraints
-    _KEYWORD + "existence": instructions.KeywordChecker,
-    _KEYWORD + "frequency": instructions.KeywordFrequencyChecker,
-    # TODO(jeffreyzhou): make a proper set of sentences to choose from
-    # _KEYWORD + "key_sentences": instructions.KeySentenceChecker,
-    _KEYWORD + "forbidden_words": instructions.ForbiddenWords,
-    _KEYWORD + "letter_frequency": instructions.LetterFrequencyChecker,
-    _LANGUAGE + "response_language": instructions.ResponseLanguageChecker,
-    _LENGTH + "number_sentences": instructions.NumberOfSentences,
-    _LENGTH + "number_paragraphs": instructions.ParagraphChecker,
-    _LENGTH + "number_words": instructions.NumberOfWords,
-    _LENGTH + "nth_paragraph_first_word": instructions.ParagraphFirstWordCheck,
-    _CONTENT + "number_placeholders": instructions.PlaceholderChecker,
-    _CONTENT + "postscript": instructions.PostscriptChecker,
-    _FORMAT + "number_bullet_lists": instructions.BulletListChecker,
-    # TODO(jeffreyzhou): Pre-create paragraph or use prompt to replace
-    # _CONTENT + "rephrase_paragraph": instructions.RephraseParagraph,
-    _FORMAT + "constrained_response": instructions.ConstrainedResponseChecker,
-    _FORMAT + "number_highlighted_sections": (instructions.HighlightSectionChecker),
-    _FORMAT + "multiple_sections": instructions.SectionChecker,
-    # TODO(tianjianlu): Re-enable rephrasing with preprocessing the message.
-    # _FORMAT + "rephrase": instructions.RephraseChecker,
-    _FORMAT + "json_format": instructions.JsonFormat,
-    _FORMAT + "title": instructions.TitleChecker,
-    # TODO(tianjianlu): Re-enable with specific prompts.
-    # _MULTITURN + "constrained_start": instructions.ConstrainedStartChecker,
-    _COMBINATION + "two_responses": instructions.TwoResponsesChecker,
-    _COMBINATION + "repeat_prompt": instructions.RepeatPromptThenAnswer,
-    _STARTEND + "end_checker": instructions.EndChecker,
-    _CHANGE_CASES + "capital_word_frequency": instructions.CapitalWordFrequencyChecker,
-    _CHANGE_CASES + "english_capital": instructions.CapitalLettersEnglishChecker,
-    _CHANGE_CASES + "english_lowercase": instructions.LowercaseLettersEnglishChecker,
-    _PUNCTUATION + "no_comma": instructions.CommaChecker,
-    _STARTEND + "quotation": instructions.QuotationChecker,
-    # New Constraints!
-    _COPY + "repeat_phrase": instructions.RepeatPhraseChecker,
-    _COPY + "copy": instructions.CopyChecker,
-    _NEW + "copy_span_idx": instructions.CopySpanIdxChecker,
-    _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
-    _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
-    _FORMAT + "square_brackets": instructions.SquareBracketChecker,
-    _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
-    _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
-    _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
-    _PARAGRAPH + "paragraphs": instructions.ParagraphBasicChecker,
-    _PARAGRAPH + "paragraphs2": instructions.ParagraphBasicChecker2,
-    _FIRSTWORD + "first_word_sent": instructions.FirstWordSentChecker,
-    _FIRSTWORD + "first_word_answer": instructions.FirstWordAnswerChecker,
-    _LASTWORD + "last_word_sent": instructions.LastWordSentChecker,
-    _LASTWORD + "last_word_answer": instructions.LastWordAnswerChecker,
-    _FORMAT + "bigram_wrapping": instructions.BiGramWrappingChecker,
-    _COPY + "copying_simple": instructions.CopyingSimpleChecker,
-    _COPY + "copying_multiple": instructions.CopyingMultipleChecker,
-    _PUNCTUATION + "punctuation_dot": instructions.PunctuationDotChecker,
-    _PUNCTUATION + "punctuation_exclamation": instructions.PunctuationExclamationChecker,
-    _COUNT + "lowercase_counting": instructions.LowercaseCountingChecker,
-    _LETTER + "letter_counting": instructions.LetterCountingChecker,
-    _LETTER + "letter_counting2": instructions.LetterFrequencyChecker,
-    _COUNT + "counting_composition": instructions.CountingCompositionChecker,
-    _COUNT + "count_unique": instructions.CountUniqueChecker,
-    _COUNT + "count_increment_word": instructions.CountIncrementWordChecker,
-    _KEYWORD + "palindrome": instructions.PalindromeBasicChecker,
-    _KEYWORD + "keyword_specific_position": instructions.KeywordSpecificPositionChecker,
-    _KEYWORD + "start_end": instructions.StartEndChecker,
-}
 
 INSTRUCTION_DICT = {
     _KEYWORD + "existence": instructions.KeywordChecker,
@@ -154,36 +71,81 @@ INSTRUCTION_DICT = {
     _CHANGE_CASES + "english_lowercase": instructions.LowercaseLettersEnglishChecker,
     _PUNCTUATION + "no_comma": instructions.CommaChecker,
     _STARTEND + "quotation": instructions.QuotationChecker,
-    # New Constraints!
-    _COPY + "repeat_phrase": instructions.RepeatPhraseChecker,
-    _COPY + "copy": instructions.CopyChecker,
-    _NEW + "copy_span_idx": instructions.CopySpanIdxChecker,
-    _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
-    _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
-    _FORMAT + "square_brackets": instructions.SquareBracketChecker,
-    _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
-    _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
-    _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
-    _PARAGRAPH + "paragraphs": instructions.ParagraphBasicChecker,
-    _PARAGRAPH + "paragraphs2": instructions.ParagraphBasicChecker2,
-    _FIRSTWORD + "first_word_sent": instructions.FirstWordSentChecker,
-    _FIRSTWORD + "first_word_answer": instructions.FirstWordAnswerChecker,
-    _LASTWORD + "last_word_sent": instructions.LastWordSentChecker,
-    _LASTWORD + "last_word_answer": instructions.LastWordAnswerChecker,
-    _FORMAT + "bigram_wrapping": instructions.BiGramWrappingChecker,
-    _COPY + "copying_simple": instructions.CopyingSimpleChecker,
-    _COPY + "copying_multiple": instructions.CopyingMultipleChecker,
-    _PUNCTUATION + "punctuation_dot": instructions.PunctuationDotChecker,
-    _PUNCTUATION + "punctuation_exclamation": instructions.PunctuationExclamationChecker,
-    _COUNT + "lowercase_counting": instructions.LowercaseCountingChecker,
-    _LETTER + "letter_counting": instructions.LetterCountingChecker,
-    _LETTER + "letter_counting2": instructions.LetterFrequencyChecker,
-    _COUNT + "counting_composition": instructions.CountingCompositionChecker,
-    _COUNT + "count_unique": instructions.CountUniqueChecker,
-    _COUNT + "count_increment_word": instructions.CountIncrementWordChecker,
-    _KEYWORD + "palindrome": instructions.PalindromeBasicChecker,
-    _KEYWORD + "keyword_specific_position": instructions.KeywordSpecificPositionChecker,
-    _KEYWORD + "start_end": instructions.StartEndChecker,
+    # the following are added for ifeval_mt variants
+    # "type:translate": instructions.LanguageChecker, 
+    # "type:repeat": instructions.RepeatChecker, 
+    # "type:repeat_N": instructions.RewriteSentChecker,
+    # "type:num_words": instructions.NumWordsChecker,
+    # "type:num_words_N": instructions.NumWordsSentChecker, 
+    # "constraint:increment": instructions.IncrementChecker, 
+    # "constraint:digits": instructions.DigitsChecker, 
+    # "constraint:nonalpha": instructions.NonAlphaNumChecker, 
+    # "constraint:palindrome": instructions.PalindromeCountChecker,  
+    # "constraint:chars": instructions.DiffNumCharsChecker, 
+    # "constraint:punctuation": instructions.NumPunctuationChecker, 
+    # "constraint:nochar": instructions.NoLetterChecker, 
+    # "constraint:conjunctions": instructions.NoConjunctionsChecker, 
+    # "constraint:vowels": instructions.VowelStartWordsChecker, 
+    # "constraint:top_bottom": instructions.BeginEndLetterChecker, 
+    # back to ood
+    "count:word_count_range": instructions.WordCountRangeChecker,
+    "count:unique_word_count" : instructions.UniqueWordCountChecker,
+    "ratio:stop_words" : instructions.StopWordPercentageChecker,
+    "ratio:sentence_type" : instructions.SentTypeRatioChecker,
+    "ratio:sentence_balance" : instructions.SentBalanceChecker,
+    "count:conjunctions" : instructions.ConjunctionCountChecker,
+    "count:person_names" : instructions.PersonNameCountChecker,
+    "ratio:overlap" : instructions.NGramOverlapChecker,
+    "count:numbers" : instructions.NumbersCountChecker,
+    "words:alphabet" : instructions.AlphabetLoopChecker,
+    "words:vowel" : instructions.SingleVowelParagraphChecker,
+    "words:consonants" : instructions.ConsonantClusterChecker,
+    "sentence:alliteration_increment" : instructions.IncrementingAlliterationChecker,
+    "words:palindrome" : instructions.PalindromeChecker,
+    "count:punctuation" : instructions.PunctuationCoverChecker,
+    "format:parentheses" : instructions.NestedParenthesesChecker,
+    "format:quotes" : instructions.NestedQuotesChecker,
+    "words:prime_lengths" : instructions.PrimeLengthsChecker,
+    "format:options" : instructions.OptionsResponseChecker,
+    "format:newline" : instructions.NewLineWordsChecker,
+    "format:emoji" : instructions.EmojiSentenceChecker,
+    "ratio:sentence_words" : instructions.CharacterCountUniqueWordsChecker,
+    "count:words_japanese" : instructions.NthWordJapaneseChecker,
+    "words:start_verb" : instructions.StartWithVerbChecker,
+    "words:repeats" : instructions.LimitedWordRepeatChecker,
+    "sentence:keyword" : instructions.IncludeKeywordChecker,
+    "count:pronouns" : instructions.PronounCountChecker,
+    "words:odd_even_syllables" : instructions.AlternateParitySyllablesChecker,
+    "words:last_first" : instructions.LastWordFirstNextChecker,
+    "words:paragraph_last_first" : instructions.ParagraphLastFirstWordMatchChecker,
+    "sentence:increment" : instructions.IncrementingWordCountChecker,
+    "words:no_consecutive" : instructions.NoConsecutiveFirstLetterChecker,
+    "format:line_indent" : instructions.IndentStairsChecker,
+    "format:quote_unquote" : instructions.QuoteExplanationChecker,
+    "format:list" : instructions.SpecialBulletPointsChecker,
+    "format:thesis" : instructions.ItalicsThesisChecker,
+    "format:sub-bullets" : instructions.SubBulletPointsChecker,
+    "format:no_bullets_bullets" : instructions.SomeBulletPointsChecker,
+    "custom:multiples" : instructions.PrintMultiplesChecker,
+    "custom:mcq_count_length": instructions.MultipleChoiceQuestionsChecker,
+    "custom:reverse_newline": instructions.ReverseNewlineChecker,
+    "custom:word_reverse": instructions.WordReverseOrderChecker,
+    "custom:character_reverse": instructions.CharacterReverseOrderChecker,
+    "custom:sentence_alphabet": instructions.SentenceAlphabetChecker,
+    "custom:european_capitals_sort": instructions.EuropeanCapitalsSortChecker,
+    "custom:csv_city": instructions.CityCSVChecker,
+    "custom:csv_special_character": instructions.SpecialCharacterCSVChecker,
+    "custom:csv_quotes": instructions.QuotesCSVChecker,
+    "custom:date_format_list": instructions.DateFormatListChecker,
+    "count:keywords_multiple" : instructions.KeywordsMultipleChecker,
+    "words:keywords_specific_position" : instructions.KeywordSpecificPositionChecker,
+    "words:words_position" : instructions.WordsPositionChecker,
+    "repeat:repeat_change" : instructions.RepeatChangeChecker,
+    "repeat:repeat_simple" : instructions.RepeatSimpleChecker,
+    "repeat:repeat_span" : instructions.RepeatSpanChecker,
+    "format:title_case" : instructions.TitleCaseChecker,
+    "format:output_template" : instructions.OutputTemplateChecker,
+    "format:no_whitespace" : instructions.NoWhitespaceChecker,
 }
 
 INSTRUCTION_CONFLICTS = {
@@ -211,7 +173,10 @@ INSTRUCTION_CONFLICTS = {
         _LENGTH + "nth_paragraph_first_word",
     },
     _LENGTH + "number_words": {_LENGTH + "number_words"},
-    _LENGTH + "nth_paragraph_first_word": {_LENGTH + "nth_paragraph_first_word", _LENGTH + "number_paragraphs"},
+    _LENGTH + "nth_paragraph_first_word": {
+        _LENGTH + "nth_paragraph_first_word",
+        _LENGTH + "number_paragraphs",
+    },
     _CONTENT + "number_placeholders": {_CONTENT + "number_placeholders"},
     _CONTENT + "postscript": {_CONTENT + "postscript"},
     _FORMAT + "number_bullet_lists": {_FORMAT + "number_bullet_lists"},
@@ -251,46 +216,21 @@ INSTRUCTION_CONFLICTS = {
         _CHANGE_CASES + "english_capital",
     },
     _CHANGE_CASES + "english_capital": {_CHANGE_CASES + "english_capital"},
-    _CHANGE_CASES + "english_lowercase": {_CHANGE_CASES + "english_lowercase", _CHANGE_CASES + "english_capital"},
+    _CHANGE_CASES + "english_lowercase": {
+        _CHANGE_CASES + "english_lowercase",
+        _CHANGE_CASES + "english_capital",
+    },
     _PUNCTUATION + "no_comma": {_PUNCTUATION + "no_comma"},
     _STARTEND + "quotation": {_STARTEND + "quotation", _FORMAT + "title"},
-    _COPY + "repeat_phrase": {_COPY + "repeat_phrase"},
-    _COPY + "copy": set(INSTRUCTION_DICT.keys()),
-    _NEW + "copy_span_idx": set(INSTRUCTION_DICT.keys()),
-    _FORMAT + "sentence_hyphens": {_FORMAT + "sentence_hyphens"},
-    _KEYWORD + "no_adjacent_consecutive": {_KEYWORD + "no_adjacent_consecutive"},
-    _FORMAT + "square_brackets": {_FORMAT + "square_brackets"},
-    _KEYWORD + "word_once": {_KEYWORD + "word_once"},
-    _KEYWORD + "word_count_different_numbers": {_KEYWORD + "word_count_different_numbers"},
-    _KEYWORD + "exclude_word_harder": {_KEYWORD + "exclude_word_harder"},
-    _PARAGRAPH + "paragraphs": {_PARAGRAPH + "paragraphs", _PARAGRAPH + "paragraphs2"},
-    _PARAGRAPH + "paragraphs2": {_PARAGRAPH + "paragraphs", _PARAGRAPH + "paragraphs2"},
-    _FIRSTWORD + "first_word_sent": {_FIRSTWORD + "first_word_sent", _FIRSTWORD + "first_word_answer"},
-    _FIRSTWORD + "first_word_answer": {_FIRSTWORD + "first_word_sent", _FIRSTWORD + "first_word_answer"},
-    _LASTWORD + "last_word_sent": {_LASTWORD + "last_word_sent"},
-    _LASTWORD + "last_word_answer": {_LASTWORD + "last_word_answer"},
-    _FORMAT + "bigram_wrapping": {_FORMAT + "bigram_wrapping"},
-    _COPY + "copying_simple": set(INSTRUCTION_DICT.keys()),
-    _COPY + "copying_multiple": set(INSTRUCTION_DICT.keys()),
-    _PUNCTUATION + "punctuation_dot": {_PUNCTUATION + "punctuation_dot"},
-    _PUNCTUATION + "punctuation_exclamation": {_PUNCTUATION + "punctuation_exclamation"},
-    _COUNT + "lowercase_counting": {_COUNT + "lowercase_counting"},
-    _LETTER + "letter_counting": {_LETTER + "letter_counting"},
-    _LETTER + "letter_counting2": {_LETTER + "letter_counting2"},
-    _COUNT + "counting_composition": {
-        _COUNT + "counting_composition",
-        _COUNT + "count_unique",
-        _COUNT + "count_increment_word",
-        _PARAGRAPH + "paragraphs",
-        _PARAGRAPH + "paragraphs2",
-        _KEYWORD + "letter_frequency",
-        _KEYWORD + "frequency",
-    },
-    _COUNT + "count_unique": {_COUNT + "count_unique"},
-    _COUNT + "count_increment_word": {_COUNT + "count_increment_word"},
-    _KEYWORD + "palindrome": {_KEYWORD + "palindrome"},
-    _KEYWORD + "keyword_specific_position": {_KEYWORD + "keyword_specific_position"},
-    _KEYWORD + "start_end": {_KEYWORD + "start_end"},
+    "count:keywords_multiple" : {"count:keywords_multiple"},
+    "words:words_position" : {"words:words_position"},
+    "repeat:repeat_change" : {"repeat:repeat_change"},
+    "repeat:repeat_simple" : {"repeat:repeat_simple"},
+"repeat:repeat_span" : {"repeat:repeat_span"},
+    "format:title_case" : {"format:title_case"},
+    "format:output_template" : {"format:output_template"},
+    "format:no_whitespace" : {'format:no_whitespace'},
+    "words:keywords_specific_position": {"words:keywords_specific_position"},
 }
 
 

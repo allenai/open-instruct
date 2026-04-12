@@ -460,6 +460,23 @@ class StringMatcherVerifier(VerifierFunction):
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_matcher", verifier_config=verifier_config, weight=1.0)
 
+    @staticmethod
+    def _extract_mcq_answer(prediction: str) -> str | None:
+        """Fallback extraction for single-letter MCQ answers (A/B/C/D)."""
+        # "Therefore, the answer is (X)" / "the answer is: X" / "the answer is X"
+        m = re.search(r"the answer is[:\s]*\(?([A-D])\)?", prediction, re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
+        # Last parenthesized letter, e.g. "(B)"
+        parens = re.findall(r"\(([A-D])\)", prediction)
+        if parens:
+            return parens[-1].upper()
+        # Last standalone A/B/C/D (word-boundary on both sides)
+        standalone = re.findall(r"\b([A-D])\b", prediction)
+        if standalone:
+            return standalone[-1].upper()
+        return None
+
     def __call__(
         self,
         tokenized_prediction: list[int],
@@ -468,13 +485,19 @@ class StringMatcherVerifier(VerifierFunction):
         query: str | None = None,
         rollout_state: dict | None = None,
     ) -> VerificationResult:
-        if "<answer>" not in prediction or "</answer>" not in prediction:
-            return VerificationResult(score=0.0)
-        # extract out of answer tag
-        answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
-        # normalize
-        score = float(normalize_answer(answer_string) == normalize_answer(label))
-        return VerificationResult(score=score)
+        if "<answer>" in prediction and "</answer>" in prediction:
+            answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
+            score = float(normalize_answer(answer_string) == normalize_answer(label))
+            return VerificationResult(score=score)
+
+        # Fallback: regex extraction for single-letter MCQ labels (A-D)
+        if re.fullmatch(r"[A-D]", label.strip()):
+            extracted = self._extract_mcq_answer(prediction)
+            if extracted is not None:
+                score = float(normalize_answer(extracted) == normalize_answer(label))
+                return VerificationResult(score=score)
+
+        return VerificationResult(score=0.0)
 
 
 class F1Verifier(VerifierFunction):
