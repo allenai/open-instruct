@@ -57,7 +57,7 @@ uv run python mason.py \
     --pool_size 256 \
     --max_steps 100 \
     --verification_reward 1.0 \
-    --tool_parser_type vllm_hermes \
+    --tool_parser_type vllm_qwen3_coder \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
     --backend_timeout 1200 \
