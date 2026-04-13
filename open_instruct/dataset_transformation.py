@@ -1718,11 +1718,15 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()[:16]
     tokenizer_files_hash = json.dumps(tc.tokenizer_files_hash, sort_keys=True)
 
-    # Add dataset source field to track origin after shuffling
+    # Add dataset source field to track origin after shuffling.
+    # Include the split so that different splits of the same HF dataset
+    # (e.g. davidheineman/eval-openinstruct humanevalplus vs mbppplus)
+    # remain distinguishable after concatenation.
+    _ds_origin = f"{dc.dataset_name}/{dc.dataset_split}" if dc.dataset_split else dc.dataset_name
     dataset = dataset.map(
-        lambda example: {**example, DATASET_ORIGIN_KEY: dc.dataset_name},
+        lambda example: {**example, DATASET_ORIGIN_KEY: _ds_origin},
         num_proc=num_proc,
-        desc=f"Adding dataset source field for {dc.dataset_name}",
+        desc=f"Adding dataset source field for {_ds_origin}",
     )
 
     # Normalize env_config before tokenization so downstream always sees canonical payloads.
@@ -2189,6 +2193,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    drop_dataset_source: bool = True,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2202,7 +2207,7 @@ def get_cached_dataset_tulu(
         hf_entity=hf_entity,
         dataset_local_cache_dir=dataset_local_cache_dir,
         dataset_skip_cache=dataset_skip_cache,
-        drop_dataset_source=True,
+        drop_dataset_source=drop_dataset_source,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
     )[0]

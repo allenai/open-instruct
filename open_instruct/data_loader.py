@@ -36,6 +36,7 @@ from transformers import PreTrainedTokenizer
 from open_instruct import data_types, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
+    DATASET_ORIGIN_KEY,
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -775,6 +776,8 @@ def accumulate_inference_batches(
     all_scores = []
     all_percent_solved = []
     all_model_steps = []
+    all_task_names = []
+    has_task_names = dataset is not None and DATASET_ORIGIN_KEY in dataset.column_names
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -825,6 +828,7 @@ def accumulate_inference_batches(
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
+        task_name = example.get(DATASET_ORIGIN_KEY) if has_task_names else None
 
         if replenish_prompts:
             assert iter_dataloader is not None
@@ -852,6 +856,7 @@ def accumulate_inference_batches(
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
+        k_task_names = repeat_each([task_name], generation_config.n) if has_task_names else []
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -888,6 +893,7 @@ def accumulate_inference_batches(
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
+        all_task_names.extend(k_task_names)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
@@ -991,6 +997,7 @@ def accumulate_inference_batches(
         indices=None,
         scores=all_scores,
         active_tools=all_active_tools if all_active_tools else None,
+        task_names=all_task_names if all_task_names else None,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
