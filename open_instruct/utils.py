@@ -81,8 +81,6 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 DISK_USAGE_WARNING_THRESHOLD = 0.85
 CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
 INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
-_WARNED_LOW_DISK_SPACE_PATHS: set[str] = set()
-_WARNED_LOW_DISK_SPACE_PATHS_LOCK = threading.Lock()
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -127,19 +125,13 @@ def warn_if_low_disk_space(
     if usage.total == 0:
         return
 
-    normalized_path = os.path.abspath(path)
     used_ratio = usage.used / usage.total
     if used_ratio >= threshold:
-        with _WARNED_LOW_DISK_SPACE_PATHS_LOCK:
-            if normalized_path in _WARNED_LOW_DISK_SPACE_PATHS:
-                return
-            _WARNED_LOW_DISK_SPACE_PATHS.add(normalized_path)
-
         used_percent = used_ratio * 100
         free_gib = usage.free / (1024**3)
         total_gib = usage.total / (1024**3)
         warning_message = (
-            f"Disk usage near capacity for {normalized_path}: {used_percent:.1f}% used "
+            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
             f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
         )
         logger.warning(warning_message)
