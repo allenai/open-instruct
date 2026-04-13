@@ -10,7 +10,7 @@
 
 We migrated from a custom `WorkerWrap`-based weight sync (using `torch.distributed.broadcast` + `model_runner.model.load_weights`) to vLLM's native `NCCLWeightTransferEngine` API. After the first weight sync, all vLLM engines produce NaN outputs and crash.
 
-19 experiments progressively narrowed the cause. The NaN is NOT introduced by vLLM's layerwise reload — it exists in DS3 weight shards after `model.step()`, before any gathering or sending. The mystery is that training code is identical between the branch and `origin/main`, and the only differences are vLLM engine configuration on separate GPU processes. DS2 with the same engine config works fine.
+22 experiments progressively narrowed the cause. The NaN is NOT introduced by vLLM's layerwise reload or the actual sync tensor path. The strongest current evidence is that **startup-time native weight sync initialization** (`setup_model_update_group()` / `NCCLWeightTransferEngine.trainer_init()`) poisons DS3 training. If that native init is delayed until after the first few DS3 steps, training and subsequent native syncs are clean.
 
 ## Experiments
 
@@ -425,45 +425,103 @@ Added DS3 shard NaN checks immediately before and after `model.step()` to pinpoi
 
 **Key finding**: `model.step()` is where NaN is introduced. Shards are clean before the step, NaN after. The pre-clip gradient norm check returns an empty list because DS3 partitions gradients internally — `param.grad` is always `None` on `model.module` parameters. The reported `grad_norm` of 67 billion (post-clip, with `max_grad_norm=1.0`) indicates catastrophic gradient values that DeepSpeed's internal clipping could not save.
 
+## Experiment 20: Native init only, no broadcasts
+
+**Experiment**: [01KP3NS8F3X6F3TDSG5W6M382K](https://beaker.org/ex/01KP3NS8F3X6F3TDSG5W6M382K)
+**W&B run**: [9pzl73mr](https://wandb.ai/ai2-llm/open_instruct_internal/runs/9pzl73mr)
+
+Added `--native_weight_sync_init_only`, which runs native `setup_model_update_group()` at startup but never starts the weight sync thread and never broadcasts weights.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 15:13:08 | `Native vLLM weight sync init-only mode enabled` | OK |
+| 15:13:30 | **NaN in DS3 shards AFTER model.step()**: 38 params | **FAIL** |
+| 15:13:37 | **NaN in DS3 shards BEFORE model.step()**: 339 params | **FAIL** |
+| 15:13:37 | **NaN in DS3 shards AFTER model.step()**: 339 params | **FAIL** |
+
+**Key finding**: Native init alone is sufficient to reproduce the DS3 corruption. No weight broadcasts happened in this run.
+
+## Experiment 21: Delay native init until after 3 completed steps
+
+**Experiment**: [01KP3NSQ8GRN9GP6T6JQDS6PCJ](https://beaker.org/ex/01KP3NSQ8GRN9GP6T6JQDS6PCJ)
+**W&B run**: [gpu315yj](https://wandb.ai/ai2-llm/open_instruct_internal/runs/gpu315yj)
+
+Added `--delay_native_weight_sync_init_steps 3`, which skips startup native init and only initializes native sync before step 4.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 15:09:34 | Step 1 completes (grad_norm: 1.47) | OK |
+| 15:09:39 | Step 2 completes (grad_norm: 1.09) | OK |
+| 15:10:12 | Step 3 completes (grad_norm: 0.80) | OK |
+| 15:10:13 | Native init runs before step 4 | OK |
+| 15:10:13 | `All 339 DS3 shards clean before gather` | OK |
+| 15:10:14 | `WEIGHT VALIDATION OK` on vLLM workers | OK |
+| 15:10:14+ | Later syncs and steps continue cleanly | OK |
+
+**Key finding**: Delaying native init until after a few completed DS3 steps avoids the corruption entirely.
+
+## Experiment 22: Default lazy init before step 2
+
+**Experiment**: [01KP3V92TKD0D50GKAW2B5787G](https://beaker.org/ex/01KP3V92TKD0D50GKAW2B5787G)
+**W&B run**: [gfeu1x23](https://wandb.ai/ai2-llm/open_instruct_internal/runs/gfeu1x23)
+
+Changed the default path to skip startup `setup_model_update_group()` and lazily initialize native sync only when the first sync is actually needed. Since sync happens after `one_training_step(...)`, this means init now happens before step 2 rather than at startup.
+
+| Time | Event | Status |
+|------|-------|--------|
+| 16:46:31 | `all models initialized` | OK |
+| 16:46:31 | `lazily initializing native vLLM weight sync on the first required sync after step 1` | OK |
+| 16:46:54 | Step 1 completes (grad_norm: 1.50) | OK |
+| 16:46:55 | Native init runs and sync thread starts | OK |
+| 16:46:55 | `Triggering initial native vLLM weight sync before step 2` | OK |
+| 16:46:56 | `All 339 DS3 shards clean before gather` | OK |
+| 16:46:56 | `WEIGHT VALIDATION OK` on vLLM workers | OK |
+| 16:47:01+ | Later steps/syncs remain clean (`grad_norm` ~1.11, 0.82, 0.81, 0.73, 0.79, 0.85) | OK |
+
+**Key finding**: Step-1 lazy init is sufficient. We do not need startup native init, and the actual native sync tensor operations work fine once init is moved out of startup.
+
 ## Updated Root Cause Analysis
 
-**The NaN is introduced by `model.step()` under DS3.** Experiments 17 and 19 confirmed:
+**The NaN is introduced by `model.step()` under DS3, but the trigger is startup-time native weight sync initialization.** Experiments 17, 19, 20, 21, and 22 together show:
 - Shards are clean before `model.step()`
 - Shards contain NaN after `model.step()`
-- `grad_norm` is catastrophically large (67B even after clipping with `max_grad_norm=1.0`)
-- Loss (0.03) and rewards are normal — the forward pass and reward computation are fine
+- Startup native init with no broadcasts still corrupts DS3 (experiment 20)
+- Delayed native init after a few steps is clean (experiment 21)
+- Lazy init before step 2 is also clean (experiment 22)
+- The actual native weight sync tensor path is healthy once initialization is delayed (experiments 21-22)
 
-**The central mystery: why does DS3 training diverge only on this branch?**
+**The central question is no longer "does the sync path corrupt weights?" but "why does startup native init interact badly with early DS3?"**
 
-The training code (forward pass, loss computation, backward pass, optimizer config) is byte-for-byte identical between the branch and `origin/main`. The ONLY differences are in vLLM engine configuration:
+The training code (forward pass, loss computation, backward pass, optimizer config) is byte-for-byte identical between the branch and `origin/main`. The relevant branch differences are:
 
 1. **Engine creation**: `weight_transfer_config=WeightTransferConfig(backend="nccl")` (branch) vs `worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap"` (main)
-2. **Sleep/wake_up calls**: Branch adds `engine.sleep.remote()` before sync and `engine.wake_up.remote()` after
-3. **`setup_model_update_group()`**: Branch uses `NCCLWeightTransferEngine.trainer_init()` instead of `vllm_utils.init_process_group()`
+2. **`setup_model_update_group()`**: Branch uses `engine.init_weight_transfer_engine()` + `NCCLWeightTransferEngine.trainer_init()` instead of `init_process_group()` / `WorkerWrap`
+3. **Sleep/wake_up calls**: Branch adds `engine.sleep.remote()` before sync and `engine.wake_up.remote()` after, but experiments 21-22 show these are not sufficient to break DS3 by themselves once init timing is fixed
 
-These are all vLLM-side operations on separate Ray actor processes running on separate GPUs. They should have no effect on DS3 training, which happens on the trainer GPUs. Yet DS3 training consistently produces catastrophic gradient explosions only on this branch.
+Experiments 20-22 narrow the problem further:
+- vLLM actor creation with `weight_transfer_config="nccl"` is not enough to break DS3 by itself
+- startup `setup_model_update_group()` is enough to break DS3 even with no broadcasts
+- delayed `setup_model_update_group()` plus the same later broadcasts is clean
 
 **Possible mechanisms (unverified):**
-1. **NCCL group interaction**: `NCCLWeightTransferEngine.trainer_init()` creates an NCCL communicator group that may interfere with DS3's internal NCCL groups (used for all-reduce, all-gather). If the groups share resources or the initialization changes NCCL state globally, it could cause silent corruption in DS3's collective operations.
-2. **GPU memory pressure**: The `WeightTransferConfig` approach may allocate different NCCL buffers or GPU memory compared to `WorkerWrap`, changing DS3's available memory and triggering different partitioning or offloading behavior.
-3. **Timing/ordering**: The `sleep.remote()` call before weight sync may interact with DS3's async operations in unexpected ways, though this seems unlikely since they're on different processes.
+1. **NCCL group interaction**: `NCCLWeightTransferEngine.trainer_init()` creates a trainer-side NCCL communicator that may interfere with DS3's own early NCCL collectives or internal state.
+2. **Startup ordering / warmup boundary**: Early DS3 steps may still be finalizing internal trace, partitioning, or optimizer state transitions when native init runs. Delaying init past that boundary avoids the failure.
+3. **Resource pressure during early steps**: Startup native init may allocate communicator buffers or reserve memory on trainer GPUs at exactly the wrong time, changing DS3 behavior only during the first steps.
 
 **Contradictions to investigate:**
-- Experiment 3 (early code) had healthy grad_norm (1.41) but still NaN'd after weight sync. This may represent a *different* bug (vLLM layerwise reload issue) that was subsequently fixed, while the DS3 training instability is a separate, more common issue.
-- DS2 with the same `NCCLWeightTransferEngine` setup works fine (experiment 14). This means the NCCL group interaction theory would need to be specific to DS3's collective operations.
+- Experiment 3 (early code) had healthy grad_norm (1.41) but still NaN'd after weight sync. That may have been a separate earlier issue, or the instrumentation at that point may have missed where corruption first appeared.
+- DS2 with the same native sync setup works fine (experiment 14). Whatever the interaction is, it appears specific to DS3.
 
 ## Next Steps
 
-1. ~~Experiments 10-13~~ ✅ Minimal repros all pass. Bug is not in vLLM's core weight sync.
-2. ~~Experiment 14~~ ✅ DS2 works. DS3 is the trigger.
-3. ~~Add weight validation~~ ✅ Experiment 15 confirmed NaN exists before send, not introduced by vLLM.
-4. ~~Try `.contiguous().clone()` before sending~~ ✅ Tensor layout is fine. Problem is NaN values.
-5. ~~Check DS3 shards pre-gather~~ ✅ Experiment 16 confirmed shards are NaN before gather.
-6. ~~Check pre/post model.step()~~ ✅ Experiment 19 confirmed model.step() introduces NaN.
-7. **Test NCCL group interaction**: Run DS3 with `NCCLWeightTransferEngine.trainer_init()` but WITHOUT actually syncing weights. If training still diverges, the NCCL group creation is the cause.
-8. **Test without sleep/wake_up**: Remove `sleep.remote()` / `wake_up.remote()` calls to rule them out.
-9. **Compare NCCL communicator counts**: Check how many NCCL groups exist on trainer GPUs on branch vs main.
-10. **Run DS3 on main with branch's engine config**: Cherry-pick only the engine creation change to main to isolate whether it's the engine config or some other branch change.
+1. ~~Experiment 20~~ ✅ Startup native init without broadcasts still corrupts DS3.
+2. ~~Experiment 21~~ ✅ Delayed native init after 3 steps is clean.
+3. ~~Experiment 22~~ ✅ Default lazy init before step 2 is clean.
+4. **Compare startup init order to `origin/main`**: isolate whether the only necessary change is delaying `setup_model_update_group()`, or whether some lower-level communicator creation order also changed.
+5. **Test delayed `init_only`**: initialize native sync after step 1 or step 3 but still never broadcast. This would separate "late trainer_init is safe" from "the later sync is what matters."
+6. **Pin down the safety threshold**: test delayed init after exactly 1 completed step vs 2 completed steps to see whether step 1 is sufficient in all cases.
+7. **Compare NCCL communicator counts / memory snapshots**: branch vs main, before and after `trainer_init()`.
+8. **Keep lazy init as the default mitigation** unless a lower-level root cause is found.
 
 ## Files Changed
 
