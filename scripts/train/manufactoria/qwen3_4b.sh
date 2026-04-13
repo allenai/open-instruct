@@ -32,6 +32,7 @@ uv run python mason.py \
     --async_steps 2 \
     --beta 0.0 \
     --eval_pass_at_k 32 \
+    --log_train_solve_rate_metrics \
     --load_ref_policy false \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
