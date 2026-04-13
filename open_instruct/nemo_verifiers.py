@@ -132,12 +132,57 @@ class NemoSkyworkMathVerifier(VerifierFunction):
 
 
 class NemoMathProofsVerifier(VerifierFunction):
+    """Verifier for Lean 4 math proofs.
+
+    The ground truth is a Lean formal statement/proof, not a numerical answer,
+    so we delegate to LMJudgeVerifier("quality") for semantic comparison.
+    """
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("nemo_math_proofs", verifier_config=verifier_config)
+        self._delegate = None
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
+    def _get_delegate(self):
+        if self._delegate is None:
+            from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
+            try:
+                cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
+                self._delegate = LMJudgeVerifier("quality", cfg)
+            except Exception:
+                pass
+        return self._delegate
 
     def __call__(self, tokenized_prediction: list[int], prediction: str, label: Any,
                  query: str | None = None, rollout_state: dict | None = None) -> VerificationResult:
-        return VerificationResult(score=_verify_math(prediction, label))
+        delegate = self._get_delegate()
+        if delegate is None:
+            return VerificationResult(score=0.0)
+        return delegate(tokenized_prediction, prediction, label, query, rollout_state)
+
+    async def async_call(self, tokenized_prediction: list[int], prediction: str, label: Any,
+                         query: str | None = None, rollout_state: dict | None = None) -> VerificationResult:
+        delegate = self._get_delegate()
+        if delegate is None:
+            return VerificationResult(score=0.0)
+        return await delegate.async_call(tokenized_prediction, prediction, label, query, rollout_state)
 
 
 # ===================================================================
@@ -245,6 +290,9 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
                 logger.warning("NemoCompetitiveCodingVerifier: no remote code_api_url configured (got %r), returning 0.0", url)
                 NemoCompetitiveCodingVerifier._code_api_warned = True
             return VerificationResult(score=0.0)
+
+        # Competitive coding uses stdin/stdout tests, needs the stdio endpoint
+        url = url.replace("/test_program", "/test_program_stdio")
 
         code = self._extract_code(prediction)
         tests = _parse_label(label)
@@ -659,20 +707,29 @@ class NemoWorkplaceAssistantVerifier(VerifierFunction):
         self._gym_available: bool | None = None
         self._judge_delegate = None
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
     def _get_judge(self):
         if self._judge_delegate is None:
             from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
             try:
                 cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-                if cfg is None:
-                    cfg = LMJudgeVerifierConfig(
-                        llm_judge_model="gpt-4.1",
-                        llm_judge_max_tokens=2048,
-                        llm_judge_max_context_length=128000,
-                        llm_judge_temperature=0.0,
-                        llm_judge_timeout=60,
-                        seed=42,
-                    )
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
                 self._judge_delegate = LMJudgeVerifier("quality", cfg)
             except Exception:
                 pass
@@ -863,20 +920,29 @@ class NemoAgenticToolUseVerifier(VerifierFunction):
         super().__init__("nemo_agentic_tool_use", verifier_config=verifier_config)
         self._judge_delegate = None
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
     def _get_judge(self):
         if self._judge_delegate is None:
             from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
             try:
                 cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-                if cfg is None:
-                    cfg = LMJudgeVerifierConfig(
-                        llm_judge_model="gpt-4.1",
-                        llm_judge_max_tokens=2048,
-                        llm_judge_max_context_length=128000,
-                        llm_judge_temperature=0.0,
-                        llm_judge_timeout=60,
-                        seed=42,
-                    )
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
                 self._judge_delegate = LMJudgeVerifier("quality", cfg)
             except Exception:
                 pass
@@ -1017,20 +1083,29 @@ class NemoSafetyVerifier(VerifierFunction):
         super().__init__("nemo_safety", verifier_config=verifier_config)
         self._judge_delegate = None
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
     def _get_judge(self):
         if self._judge_delegate is None:
             from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
             try:
                 cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-                if cfg is None:
-                    cfg = LMJudgeVerifierConfig(
-                        llm_judge_model="gpt-4.1",
-                        llm_judge_max_tokens=2048,
-                        llm_judge_max_context_length=128000,
-                        llm_judge_temperature=0.0,
-                        llm_judge_timeout=60,
-                        seed=42,
-                    )
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
                 self._judge_delegate = LMJudgeVerifier("safety", cfg)
             except Exception:
                 pass
@@ -1101,20 +1176,29 @@ class NemoIdentityFollowingVerifier(VerifierFunction):
         super().__init__("nemo_identity_following", verifier_config=verifier_config)
         self._delegate = None
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
     def _get_delegate(self):
         if self._delegate is None:
             from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
             try:
                 cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-                if cfg is None:
-                    cfg = LMJudgeVerifierConfig(
-                        llm_judge_model="gpt-4.1",
-                        llm_judge_max_tokens=2048,
-                        llm_judge_max_context_length=128000,
-                        llm_judge_temperature=0.0,
-                        llm_judge_timeout=60,
-                        seed=42,
-                    )
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
                 self._delegate = LMJudgeVerifier("quality", cfg)
             except Exception:
                 self._delegate = None
@@ -1154,20 +1238,29 @@ class NemoMultiturnChatVerifier(VerifierFunction):
         super().__init__("nemo_multiturn_chat", verifier_config=verifier_config)
         self._delegate = None
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
     def _get_delegate(self):
         if self._delegate is None:
             from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
             try:
                 cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-                if cfg is None:
-                    cfg = LMJudgeVerifierConfig(
-                        llm_judge_model="gpt-4.1",
-                        llm_judge_max_tokens=2048,
-                        llm_judge_max_context_length=128000,
-                        llm_judge_temperature=0.0,
-                        llm_judge_timeout=60,
-                        seed=42,
-                    )
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
                 self._delegate = LMJudgeVerifier("quality", cfg)
             except Exception:
                 self._delegate = None
@@ -1215,20 +1308,29 @@ class NemoGenRMVerifier(VerifierFunction):
         super().__init__("nemo_genrm", verifier_config=verifier_config)
         self._delegate = None
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
+        return LMJudgeVerifierConfig
+
     def _get_delegate(self):
         if self._delegate is None:
             from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
+            cfg = None
             try:
                 cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-                if cfg is None:
-                    cfg = LMJudgeVerifierConfig(
-                        llm_judge_model="gpt-4.1",
-                        llm_judge_max_tokens=2048,
-                        llm_judge_max_context_length=128000,
-                        llm_judge_temperature=0.0,
-                        llm_judge_timeout=60,
-                        seed=42,
-                    )
+            except Exception:
+                pass
+            if cfg is None:
+                cfg = LMJudgeVerifierConfig(
+                    llm_judge_model="gpt-4.1",
+                    llm_judge_max_tokens=2048,
+                    llm_judge_max_context_length=128000,
+                    llm_judge_temperature=0.0,
+                    llm_judge_timeout=60,
+                    seed=42,
+                )
+            try:
                 self._delegate = LMJudgeVerifier("quality", cfg)
             except Exception:
                 self._delegate = None
