@@ -132,57 +132,113 @@ class NemoSkyworkMathVerifier(VerifierFunction):
 
 
 class NemoMathProofsVerifier(VerifierFunction):
-    """Verifier for Lean 4 math proofs.
+    """Verifier for Lean 4 math proofs via a Lean sandbox compiler.
 
-    The ground truth is a Lean formal statement/proof, not a numerical answer,
-    so we delegate to LMJudgeVerifier("quality") for semantic comparison.
+    The ground truth (label) is the Lean formal_statement (theorem + ``by sorry``).
+    Verification works by:
+      1. Extracting Lean code from the model's response
+      2. Replacing ``by sorry`` in the formal_statement with the extracted proof
+      3. Sending the full code to a Lean4 sandbox for compilation
+      4. reward = 1.0 if it compiles without sorry/errors, 0.0 otherwise
+
+    Requires a running Lean4 sandbox at the URL given by the
+    ``LEAN_SANDBOX_URL`` environment variable (default ``http://localhost:6000``).
     """
+
+    _sandbox_warned: bool = False
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("nemo_math_proofs", verifier_config=verifier_config)
-        self._delegate = None
+        import os
+        self._sandbox_url = os.environ.get("LEAN_SANDBOX_URL", "http://localhost:6000")
 
-    @classmethod
-    def get_config_class(cls) -> type:
-        from open_instruct.ground_truth_utils import LMJudgeVerifierConfig
-        return LMJudgeVerifierConfig
+    @staticmethod
+    def _extract_lean_code(text: str) -> str:
+        """Extract Lean code from markdown code blocks or raw text."""
+        for lang in ["lean4", "lean", ""]:
+            matches = re.findall(rf"```{lang}\s*\n?(.*?)\n?```", text, re.DOTALL)
+            if matches:
+                return matches[-1].strip()
+        return re.sub(r"^\s*```(?:lean4|lean)?\s*|\s*```[\s]*$", "", text).strip()
 
-    def _get_delegate(self):
-        if self._delegate is None:
-            from open_instruct.ground_truth_utils import LMJudgeVerifier, LMJudgeVerifierConfig
-            cfg = None
-            try:
-                cfg = LMJudgeVerifierConfig.from_args(self.verifier_config) if self.verifier_config else None
-            except Exception:
-                pass
-            if cfg is None:
-                cfg = LMJudgeVerifierConfig(
-                    llm_judge_model="gpt-4.1",
-                    llm_judge_max_tokens=2048,
-                    llm_judge_max_context_length=128000,
-                    llm_judge_temperature=0.0,
-                    llm_judge_timeout=60,
-                    seed=42,
-                )
-            try:
-                self._delegate = LMJudgeVerifier("quality", cfg)
-            except Exception:
-                pass
-        return self._delegate
+    @staticmethod
+    def _extract_proof_only(lean_code: str) -> str:
+        """Strip the theorem header, returning only the proof body after ``:=``."""
+        lines = lean_code.strip().splitlines()
+        if not lines:
+            return ""
+        header_pat = re.compile(r"^\s*(theorem|example)\b")
+        header_start = next((i for i, l in enumerate(lines) if header_pat.match(l)), None)
+        if header_start is None:
+            return lean_code.strip()
+        header_end = next((i for i in range(header_start, len(lines)) if ":=" in lines[i]), None)
+        if header_end is None:
+            return lean_code.strip()
+        _, after = lines[header_end].split(":=", 1)
+        proof_first = after.strip()
+        proof_lines = ([proof_first] + lines[header_end + 1:]) if proof_first else lines[header_end + 1:]
+        if proof_lines:
+            first = proof_lines[0].lstrip()
+            if first == "by":
+                proof_lines = proof_lines[1:]
+            elif first.startswith("by "):
+                proof_lines[0] = first[3:]
+        return "\n".join(proof_lines).rstrip()
+
+    @staticmethod
+    def _extract_code_block_from_query(query: str) -> str:
+        """Extract the lean4 code block from the prompt (contains header + formal_statement)."""
+        for lang in ["lean4", "lean", ""]:
+            matches = re.findall(rf"```{lang}\s*\n?(.*?)\n?```", query, re.DOTALL)
+            if matches:
+                return matches[0].strip()
+        return ""
+
+    def _build_full_proof(self, prediction: str, label: str, query: str | None = None) -> str:
+        """Build compilable Lean code: original code block with sorry replaced by model's proof."""
+        # The query contains the full code (header + formal_statement) in a ```lean4 block
+        original_code = self._extract_code_block_from_query(query) if query else ""
+        if not original_code:
+            # Fallback: use the ground truth (formal_statement without header)
+            original_code = str(_parse_label(label))
+
+        cleaned = self._extract_lean_code(prediction)
+        proof_body = self._extract_proof_only(cleaned)
+
+        if "by sorry" in original_code:
+            return original_code.replace("by sorry", "by\n" + proof_body)
+        return original_code + "\n" + proof_body
 
     def __call__(self, tokenized_prediction: list[int], prediction: str, label: Any,
                  query: str | None = None, rollout_state: dict | None = None) -> VerificationResult:
-        delegate = self._get_delegate()
-        if delegate is None:
-            return VerificationResult(score=0.0)
-        return delegate(tokenized_prediction, prediction, label, query, rollout_state)
+        import requests as _requests
 
-    async def async_call(self, tokenized_prediction: list[int], prediction: str, label: Any,
-                         query: str | None = None, rollout_state: dict | None = None) -> VerificationResult:
-        delegate = self._get_delegate()
-        if delegate is None:
+        url = self._sandbox_url
+        if "localhost" in url or "127.0.0.1" in url:
+            try:
+                _requests.get(f"{url}/health", timeout=2)
+            except Exception:
+                if not NemoMathProofsVerifier._sandbox_warned:
+                    logger.warning("NemoMathProofsVerifier: Lean sandbox not reachable at %s, returning 0.0", url)
+                    NemoMathProofsVerifier._sandbox_warned = True
+                return VerificationResult(score=0.0)
+
+        full_code = self._build_full_proof(prediction, label, query)
+        try:
+            resp = _requests.post(
+                f"{url}/execute",
+                json={"generated_code": full_code, "language": "lean4", "timeout": 30, "max_output_characters": 1000},
+                timeout=35,
+            )
+            result = resp.json()
+            status = result.get("process_status", "unknown")
+            combined = (result.get("stdout", "") + result.get("stderr", "")).lower()
+            if status == "completed" and "sorry" not in combined:
+                return VerificationResult(score=1.0)
             return VerificationResult(score=0.0)
-        return await delegate.async_call(tokenized_prediction, prediction, label, query, rollout_state)
+        except Exception as e:
+            logger.warning("NemoMathProofsVerifier error: %s", e)
+            return VerificationResult(score=0.0)
 
 
 # ===================================================================
