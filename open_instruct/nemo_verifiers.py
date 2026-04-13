@@ -273,6 +273,24 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
         return matches[-1].strip() if matches else text
 
     _code_api_warned: bool = False
+    _session = None
+
+    @classmethod
+    def _get_session(cls):
+        if cls._session is None:
+            import requests as _requests
+            cls._session = _requests.Session()
+            adapter = _requests.adapters.HTTPAdapter(
+                pool_connections=50,
+                pool_maxsize=50,
+                max_retries=_requests.adapters.Retry(
+                    total=5, backoff_factor=1.0,
+                    status_forcelist=[500, 502, 503, 504],
+                ),
+            )
+            cls._session.mount("http://", adapter)
+            cls._session.mount("https://", adapter)
+        return cls._session
 
     def __call__(
         self,
@@ -282,8 +300,6 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
         query: str | None = None,
         rollout_state: dict | None = None,
     ) -> VerificationResult:
-        import requests as _requests
-
         url = getattr(self.verifier_config, "code_api_url", "")
         if not url or "localhost" in url:
             if not NemoCompetitiveCodingVerifier._code_api_warned:
@@ -302,7 +318,8 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
             "max_execution_time": getattr(self.verifier_config, "code_max_execution_time", 10.0),
         }
         try:
-            resp = _requests.post(url, json=payload, timeout=120)
+            session = self._get_session()
+            resp = session.post(url, json=payload, timeout=120)
             resp.raise_for_status()
             results = resp.json()["results"]
             score = 1.0 if all(r is True or r == 1 for r in results) else 0.0
