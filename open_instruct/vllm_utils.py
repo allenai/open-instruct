@@ -1297,40 +1297,15 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
 def _prepare_params_for_sync(
     params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
 ) -> list[tuple[str, torch.Tensor]]:
-    """Clone params into contiguous tensors and log diagnostics.
+    """Map parameter names and clone into contiguous tensors for NCCL send.
 
     DS3 gathered tensors may be non-contiguous or views into temporary buffers.
     Cloning ensures we send independent, contiguous tensors over NCCL.
     """
     mapped_params = []
-    non_contiguous = []
-    views = []
-    bad_params = []
     for n, p in params:
         mapped_name = name_mapper(n) if name_mapper else n
-        t = p.data
-        if not t.is_contiguous():
-            non_contiguous.append((mapped_name, t.stride(), t.shape))
-        if t._base is not None:
-            views.append((mapped_name, t.storage_offset()))
-        ds_shape = getattr(p, "ds_shape", None)
-        if ds_shape is not None and list(ds_shape) != list(t.shape):
-            logger.warning(
-                "[Weight Sync] Shape mismatch: %s ds_shape=%s actual=%s", mapped_name, list(ds_shape), list(t.shape)
-            )
-        cloned = t.contiguous().clone()
-        if torch.isnan(cloned).any():
-            bad_params.append((mapped_name, "NaN", cloned.shape))
-        elif torch.isinf(cloned).any():
-            bad_params.append((mapped_name, "Inf", cloned.shape))
-        mapped_params.append((mapped_name, cloned))
-    if non_contiguous:
-        logger.warning("[Weight Sync] %d non-contiguous params: %s", len(non_contiguous), non_contiguous[:5])
-    if views:
-        logger.warning("[Weight Sync] %d view params: %s", len(views), views[:5])
-    if bad_params:
-        raise ValueError(f"[Weight Sync] BAD WEIGHTS before send: {bad_params}")
-    logger.info("[Weight Sync] All %d params validated: no NaN/Inf", len(mapped_params))
+        mapped_params.append((mapped_name, p.data.contiguous().clone()))
     return mapped_params
 
 
@@ -1362,7 +1337,6 @@ def _collect_weight_metadata(
             shape = getattr(param, "ds_shape", param.shape)
             shapes.append(list(shape))
 
-    logger.info("[Weight Metadata] %d params. All names:\n%s", len(names), "\n".join(names))
     return names, dtype_names, shapes
 
 
@@ -1447,19 +1421,6 @@ def broadcast_weights_to_vllm(
 
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
-
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    if deepspeed_stage_3:
-        nan_shards = []
-        for n, p in params:
-            if hasattr(p, "ds_tensor") and p.ds_tensor.data.isnan().any():
-                nan_shards.append((n, list(p.ds_tensor.shape)))
-        if nan_shards:
-            raise ValueError(
-                f"[Weight Sync] [rank {rank}] NaN in DS3 shards BEFORE gather: "
-                f"{len(nan_shards)} params: {nan_shards[:10]}"
-            )
-        logger.info("[Weight Sync] [rank %d] All %d DS3 shards clean before gather", rank, len(params))
 
     if gather_whole_model:
         if isinstance(model, FSDP):

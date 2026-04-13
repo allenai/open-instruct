@@ -641,40 +641,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
                     if is_accumulation_boundary:
-                        nan_grads = []
-                        grad_norms_pre_clip = []
-                        for name, param in self.model.module.named_parameters():
-                            if param.grad is not None:
-                                if torch.isnan(param.grad).any():
-                                    nan_grads.append(name)
-                                grad_norms_pre_clip.append((name, float(param.grad.data.norm(2))))
-                        if nan_grads:
-                            raise ValueError(
-                                f"NaN gradients before optimizer step: {len(nan_grads)} params: {nan_grads[:10]}"
-                            )
-                        grad_norms_pre_clip.sort(key=lambda x: x[1], reverse=True)
-                        logger.info("[Grad Check] Pre-clip top-5 grad norms: %s", grad_norms_pre_clip[:5])
-                        pre_step_nan_shards = []
-                        for name, param in self.model.module.named_parameters():
-                            if hasattr(param, "ds_tensor") and param.ds_tensor.data.isnan().any():
-                                pre_step_nan_shards.append(name)
-                        if pre_step_nan_shards:
-                            logger.error(
-                                "[Grad Check] NaN in DS3 shards BEFORE model.step(): %d params: %s",
-                                len(pre_step_nan_shards),
-                                pre_step_nan_shards[:10],
-                            )
                         self.model.step()
-                        post_step_nan_shards = []
-                        for name, param in self.model.module.named_parameters():
-                            if hasattr(param, "ds_tensor") and param.ds_tensor.data.isnan().any():
-                                post_step_nan_shards.append(name)
-                        if post_step_nan_shards:
-                            logger.error(
-                                "[Grad Check] NaN in DS3 shards AFTER model.step(): %d params: %s",
-                                len(post_step_nan_shards),
-                                post_step_nan_shards[:10],
-                            )
                         grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
@@ -1351,18 +1318,7 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
-    if args.native_weight_sync_init_only and vllm_engines:
-        ray_get_with_progress(
-            [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
-            desc="Setting up model update group",
-        )
-        logger.info("======== ✅ model update group setup successfully =========")
-    elif args.delay_native_weight_sync_init_steps > 0 and vllm_engines:
-        logger.info(
-            "======== ⏸️ delaying native vLLM weight sync init until after %d completed training steps =========",
-            args.delay_native_weight_sync_init_steps,
-        )
-    elif vllm_engines:
+    if vllm_engines:
         logger.info(
             "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
         )
@@ -1866,14 +1822,7 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     has_vllm_engines = bool(vllm_engines)
-    delayed_weight_sync_init = has_vllm_engines and args.delay_native_weight_sync_init_steps > 0
-    lazy_weight_sync_init = has_vllm_engines and not args.native_weight_sync_init_only and not delayed_weight_sync_init
-    weight_sync_init_completed_steps: int | None = None
-    if delayed_weight_sync_init:
-        weight_sync_init_completed_steps = args.delay_native_weight_sync_init_steps
-    elif lazy_weight_sync_init:
-        weight_sync_init_completed_steps = 1
-    weight_sync_initialized = not has_vllm_engines or args.native_weight_sync_init_only
+    weight_sync_initialized = not has_vllm_engines
     weight_sync_trigger_event: threading.Event | None = None
     weight_sync_thread_future: futures.Future | None = None
 
@@ -1895,20 +1844,6 @@ def run_training(
             initial_resume_training_step,
             streaming_config.inflight_updates,
         )
-
-    if args.native_weight_sync_init_only:
-        logger.info("[Main Thread] Native vLLM weight sync init-only mode enabled; broadcasts will be skipped.")
-    elif delayed_weight_sync_init:
-        logger.info(
-            "[Main Thread] Native vLLM weight sync init will be delayed until after %d completed training steps.",
-            args.delay_native_weight_sync_init_steps,
-        )
-    elif lazy_weight_sync_init:
-        logger.info(
-            "[Main Thread] Native vLLM weight sync will be lazily initialized on the first required sync after step 1."
-        )
-    elif has_vllm_engines:
-        start_weight_sync_thread(resume_training_step)
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -1939,32 +1874,15 @@ def run_training(
 
     def maybe_initialize_weight_sync(training_step: int) -> None:
         nonlocal weight_sync_initialized
-        if weight_sync_initialized or weight_sync_init_completed_steps is None:
+        if weight_sync_initialized:
+            return
+        if training_step < 2:
             return
 
-        completed_training_steps = training_step - 1
-        if completed_training_steps < weight_sync_init_completed_steps:
-            return
-
-        if delayed_weight_sync_init:
-            logger.info(
-                "[Main Thread] Initializing native vLLM weight sync at step %d after %d completed training steps.",
-                training_step,
-                completed_training_steps,
-            )
-        else:
-            logger.info(
-                "[Main Thread] Lazily initializing native vLLM weight sync before step %d after %d completed training steps.",
-                training_step,
-                completed_training_steps,
-            )
+        logger.info("[Main Thread] Lazily initializing native vLLM weight sync before step %d.", training_step)
 
         initialize_model_update_group(policy_group, vllm_engines)
         weight_sync_initialized = True
-
-        if args.native_weight_sync_init_only:
-            logger.info("[Main Thread] Native vLLM weight sync init-only mode enabled; skipping delayed sync thread.")
-            return
 
         start_weight_sync_thread(initial_resume_training_step=1)
         assert weight_sync_trigger_event is not None
