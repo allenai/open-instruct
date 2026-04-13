@@ -312,6 +312,13 @@ class NemoCompetitiveCodingVerifier(VerifierFunction):
 
         code = self._extract_code(prediction)
         tests = _parse_label(label)
+        # Strip \r from test cases — dataset uses \r\n but programs output \n
+        if isinstance(tests, list):
+            for t in tests:
+                if isinstance(t, dict):
+                    for k in ("input", "output"):
+                        if k in t and isinstance(t[k], str):
+                            t[k] = t[k].replace("\r", "")
         payload = {
             "program": code,
             "tests": tests,
