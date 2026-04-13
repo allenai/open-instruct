@@ -190,7 +190,8 @@ class NemoInstructionFollowingVerifier(VerifierFunction):
                 if kwargs is None:
                     kwargs = {}
                 inst.build_description(**{k: v for k, v in kwargs.items() if v is not None})
-                results.append(inst.check_following(answer))
+                result = inst.check_following(answer)
+                results.append(bool(result) if result is not None else False)
             except Exception:
                 results.append(False)
 
