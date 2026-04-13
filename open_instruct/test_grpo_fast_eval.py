@@ -16,7 +16,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
+from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate, validate_allocated_gpus
 
 
 class _QueueWithSize:
@@ -54,6 +54,20 @@ class TestCreateGenerationConfigs(unittest.TestCase):
             streaming_config.response_length, streaming_config.eval_response_length
         )
         self.assertEqual(max_model_len, 1536)
+
+
+class TestValidateAllocatedGpus(unittest.TestCase):
+    def test_accepts_matching_gpu_count(self):
+        with patch("open_instruct.grpo_fast.ray.cluster_resources", return_value={"GPU": 16.0}):
+            validate_allocated_gpus((4, 4), 8)
+
+    def test_rejects_mismatched_gpu_count(self):
+        with patch("open_instruct.grpo_fast.ray.cluster_resources", return_value={"GPU": 15.0}):
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Ray reports 15\.0 allocated GPUs.*num_learners_per_node=\[4, 4\].*vllm_num_engines \(8\) = 16",
+            ):
+                validate_allocated_gpus((4, 4), 8)
 
 
 class TestMaybeEvaluate(unittest.TestCase):
