@@ -109,6 +109,10 @@ class GRPOExperimentConfig(
     """DeepSpeed checkpoint.load_universal: load checkpoints across different parallel configs"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    native_weight_sync_init_only: bool = False
+    """Initialize native vLLM weight-sync groups, but skip all later sync broadcasts."""
+    delay_native_weight_sync_init_steps: int = 0
+    """Delay native vLLM weight-sync group initialization until after this many completed training steps."""
     fsdp_shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
     fsdp_num_replicas: int | None = None
@@ -191,6 +195,14 @@ class GRPOExperimentConfig(
             raise ValueError(
                 "`eval_on_step_0` requires `local_eval_every` > 0. "
                 "Set `local_eval_every` to a positive value or disable `eval_on_step_0`."
+            )
+        if self.delay_native_weight_sync_init_steps < 0:
+            raise ValueError(
+                f"`delay_native_weight_sync_init_steps` must be >= 0, got: {self.delay_native_weight_sync_init_steps}"
+            )
+        if self.native_weight_sync_init_only and self.delay_native_weight_sync_init_steps > 0:
+            raise ValueError(
+                "`native_weight_sync_init_only` and `delay_native_weight_sync_init_steps` cannot both be enabled."
             )
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")

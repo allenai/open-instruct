@@ -1351,11 +1351,17 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
-    ray_get_with_progress(
-        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
-        desc="Setting up model update group",
-    )
-    logger.info("======== ✅ model update group setup successfully =========")
+    if args.delay_native_weight_sync_init_steps > 0:
+        logger.info(
+            "======== ⏸️ delaying native vLLM weight sync init until after %d completed training steps =========",
+            args.delay_native_weight_sync_init_steps,
+        )
+    else:
+        ray_get_with_progress(
+            [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+            desc="Setting up model update group",
+        )
+        logger.info("======== ✅ model update group setup successfully =========")
 
     return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
@@ -1377,6 +1383,14 @@ def create_generation_configs(
     )
     eval_generation_config = dataclasses.replace(generation_config, n=1)
     return {"train": generation_config, "eval": eval_generation_config}
+
+
+def initialize_model_update_group(policy_group: ModelGroup, vllm_engines: list[ray.actor.ActorHandle]) -> None:
+    ray_get_with_progress(
+        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+        desc="Setting up model update group",
+    )
+    logger.info("======== ✅ model update group setup successfully =========")
 
 
 def weight_sync_thread(
@@ -1847,20 +1861,39 @@ def run_training(
         )
         logger.info("Restored dataloader state from checkpoint")
 
-    logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
-    weight_sync_thread_future = executor.submit(
-        weight_sync_thread,
-        args,
-        stop_event,
-        weight_sync_trigger_event,
-        policy_group,
-        actor_manager,
-        weight_sync_metrics_Q,
-        vllm_engines,
-        resume_training_step,
-        streaming_config.inflight_updates,
-    )
+    delayed_weight_sync_init = bool(vllm_engines) and args.delay_native_weight_sync_init_steps > 0
+    weight_sync_initialized = not delayed_weight_sync_init
+    weight_sync_trigger_event: threading.Event | None = None
+    weight_sync_thread_future: futures.Future | None = None
+
+    def start_weight_sync_thread(initial_resume_training_step: int) -> None:
+        nonlocal weight_sync_thread_future, weight_sync_trigger_event
+        if weight_sync_thread_future is not None:
+            return
+        logger.info("======== ✅ weight sync thread starts =========")
+        weight_sync_trigger_event = threading.Event()
+        weight_sync_thread_future = executor.submit(
+            weight_sync_thread,
+            args,
+            stop_event,
+            weight_sync_trigger_event,
+            policy_group,
+            actor_manager,
+            weight_sync_metrics_Q,
+            vllm_engines,
+            initial_resume_training_step,
+            streaming_config.inflight_updates,
+        )
+
+    if args.native_weight_sync_init_only:
+        logger.info("[Main Thread] Native vLLM weight sync init-only mode enabled; broadcasts will be skipped.")
+    elif delayed_weight_sync_init:
+        logger.info(
+            "[Main Thread] Native vLLM weight sync init will be delayed until after %d completed training steps.",
+            args.delay_native_weight_sync_init_steps,
+        )
+    else:
+        start_weight_sync_thread(resume_training_step)
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -1869,11 +1902,17 @@ def run_training(
 
     logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
-    def health_check_fn():
-        [f.result() for f in [weight_sync_thread_future] if f.done()]
-        # Wait for weight sync to complete (should_stop becomes False)
+    def health_check_fn(expect_new_weight_sync: bool = False):
+        saw_weight_sync = False
         start = time.perf_counter()
-        while ray.get(actor_manager.should_stop.remote()):
+        while True:
+            if weight_sync_thread_future is not None and weight_sync_thread_future.done():
+                weight_sync_thread_future.result()
+            should_stop = ray.get(actor_manager.should_stop.remote())
+            if should_stop:
+                saw_weight_sync = True
+            if not should_stop and (not expect_new_weight_sync or saw_weight_sync):
+                break
             if time.perf_counter() - start > WEIGHT_SYNC_TIMEOUT_S:
                 raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
             time.sleep(0.1)
@@ -1882,6 +1921,33 @@ def run_training(
             desc="Checking vLLM engine health",
             enable=False,
         )
+
+    def maybe_initialize_delayed_weight_sync(training_step: int) -> None:
+        nonlocal weight_sync_initialized
+        if (
+            not delayed_weight_sync_init
+            or weight_sync_initialized
+            or training_step <= args.delay_native_weight_sync_init_steps
+        ):
+            return
+
+        logger.info(
+            "[Main Thread] Initializing native vLLM weight sync at step %d after %d completed training steps.",
+            training_step,
+            args.delay_native_weight_sync_init_steps,
+        )
+        initialize_model_update_group(policy_group, vllm_engines)
+        weight_sync_initialized = True
+
+        if args.native_weight_sync_init_only:
+            logger.info("[Main Thread] Native vLLM weight sync init-only mode enabled; skipping delayed sync thread.")
+            return
+
+        start_weight_sync_thread(initial_resume_training_step=1)
+        assert weight_sync_trigger_event is not None
+        logger.info("[Main Thread] Triggering initial native vLLM weight sync after delayed init.")
+        weight_sync_trigger_event.set()
+        health_check_fn(expect_new_weight_sync=True)
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -1916,6 +1982,7 @@ def run_training(
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
         health_check_fn()
+        maybe_initialize_delayed_weight_sync(training_step)
         health_check_time = time.perf_counter() - health_check_start
 
         if (
@@ -2003,8 +2070,9 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        if weight_sync_trigger_event is not None:
+            logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+            weight_sync_trigger_event.set()
 
         last_eval_collected = maybe_evaluate(
             args,

@@ -10,7 +10,7 @@
 
 We migrated from a custom `WorkerWrap`-based weight sync (using `torch.distributed.broadcast` + `model_runner.model.load_weights`) to vLLM's native `NCCLWeightTransferEngine` API. After the first weight sync, all vLLM engines produce NaN outputs and crash.
 
-Three experiments and deep code analysis confirmed that the issue is inside vLLM's layerwise reload path. Our integration code (name mapping, transport, metadata) is correct.
+19 experiments progressively narrowed the cause. The NaN is NOT introduced by vLLM's layerwise reload — it exists in DS3 weight shards after `model.step()`, before any gathering or sending. The mystery is that training code is identical between the branch and `origin/main`, and the only differences are vLLM engine configuration on separate GPU processes. DS2 with the same engine config works fine.
 
 ## Experiments
 
@@ -199,8 +199,15 @@ Note: grad_norm was 50.5e9 (catastrophically exploded), but experiment 3 proved 
 | 7 | Yes | No | — | Only RotaryEmbedding | NaN |
 | 8 | Yes | No | — | Only RotaryEmbedding | NaN |
 | 9 | Yes | No | — | Only RotaryEmbedding | NaN |
+| 10-13 | N/A | N/A | N/A | N/A | ✅ (minimal repros, no DS) |
+| 14 | Yes | No | healthy | N/A | ✅ (DS2 works) |
+| 15 | Yes | No | 1.00, 1.41 | N/A | NaN (in gathered tensors before send) |
+| 16 | Yes | No | 582M | N/A | NaN (in ds_tensor shards before gather) |
+| 17 | Yes | No | 1.00 | N/A | NaN (crash-on-NaN, SP=1) |
+| 18 | Yes | No | 9B | N/A | NaN (weight sync timeout, SP=2) |
+| 19 | Yes | No | 67B | N/A | NaN (model.step() introduces NaN) |
 
-**Conclusion**: The NaN is caused by the interaction between **DeepSpeed stage 3 weight gathering** and vLLM's layerwise reload path. Minimal repro experiments (10-13) confirmed that the weight sync works correctly with TP=1, TP=2, `packed=False`, `p.data`, `LLM`, and `AsyncLLMEngine` — all on single-node without DeepSpeed. Experiment 14 (full GRPO with DeepSpeed stage 2) runs without NaN, confirming that DS3 gathering is the trigger.
+**Conclusion**: The NaN is NOT caused by vLLM's layerwise reload or weight sync transport. Experiments 10-14 confirmed the weight sync works correctly without DS3. Experiments 15-19 progressively narrowed the cause: NaN exists in `ds_tensor` shards after `model.step()`, before any gathering or sending occurs. The training itself diverges under DS3 on this branch, despite identical training code — the only differences are vLLM engine configuration (`NCCLWeightTransferEngine` vs `WorkerWrap`) on separate GPUs.
 
 ## Experiment 5: Parameter name logging
 
@@ -369,28 +376,94 @@ Added `ds_tensor` shard validation before `GatheredParameters` to determine whet
 
 **Key finding**: The NaN is in the `ds_tensor` shards themselves, not introduced by `GatheredParameters`. The training step produced a catastrophic `grad_norm` of 582M, which caused NaN in the optimizer states and weights.
 
-## Updated Root Cause
+## Updated Root Cause (after experiment 16)
 
-**The NaN is a DS3 training instability, not a weight sync or vLLM bug.** DS3 training with this config produces gradient explosions (grad_norm 582M) that cause NaN in the optimizer states and weight shards. DS2 with identical hyperparameters (experiment 14) is stable.
+**The NaN is a DS3 training instability, not a weight sync or vLLM bug.** DS3 training with this config produces gradient explosions (grad_norm 582M in exp 16, 67B in exp 19) that cause NaN in optimizer states and weight shards. DS2 with identical hyperparameters (experiment 14) is stable.
 
-However, experiment 3 (earlier code) had healthy grad_norm (1.41) and still NaN'd. This suggests either:
-1. The grad_norm explosion is intermittent — some runs are unlucky
-2. The earlier experiments had a different bug that was masked by the DS3 training instability
-3. The grad_norm is reported after clipping, but the pre-clip overflow already poisoned optimizer states
+However, the training code is byte-for-byte identical between the branch and `origin/main`, where DS3 works. See the "Updated Root Cause Analysis" section after experiment 19 for the current understanding.
 
-The root cause is now clearly **training-side**, not weight-sync-side. vLLM's layerwise reload works correctly when given valid weights (experiments 10-14). The investigation should shift to understanding why DS3 training is unstable with GRPO.
+## Experiment 17: SP=1, crash-on-NaN checks
+
+**Experiment**: [01KNWN21Q281WD69625YP2V1FF](https://beaker.org/ex/01KNWN21Q281WD69625YP2V1FF)
+
+Changed shard validation from logging to `raise ValueError` so the run crashes immediately on NaN instead of proceeding. Used `--sequence_parallel_size 1` to reduce variables. Same DS3 config otherwise.
+
+| Time | Event | Status |
+|------|-------|--------|
+| — | Training steps complete (grad_norm: 1.00, clipped) | OK |
+| — | NaN in DS3 shards BEFORE gather: 81 params | **CRASH** |
+| — | Gradient NaN check did not fire (DS3 doesn't expose `param.grad`) | NOTE |
+
+**Result**: NaN in shards before gather, despite healthy grad_norm (1.00). The gradient NaN check was ineffective because DS3 does not expose `param.grad` on `model.module` parameters — gradients are reduced and partitioned internally by DeepSpeed.
+
+## Experiment 18: SP=2, matching main config
+
+**Experiment**: [01KNWRCSQ6W0HRJG33888E23FQ](https://beaker.org/ex/01KNWRCSQ6W0HRJG33888E23FQ)
+
+Restored `--sequence_parallel_size 2` to match `origin/main`'s `large_test_script.sh` config exactly.
+
+| Time | Event | Status |
+|------|-------|--------|
+| — | Training steps complete (grad_norm: 9,000,000,000) | BAD |
+| — | Weight sync timed out (120s) | FAIL |
+
+**Result**: Catastrophic gradient explosion. Weight sync timed out before crash-on-NaN could trigger.
+
+## Experiment 19: SP=2, pre/post model.step() diagnostics
+
+**Experiment**: [01KNYM0YW1K0YJQW31PBFV7QQW](https://beaker.org/ex/01KNYM0YW1K0YJQW31PBFV7QQW)
+
+Added DS3 shard NaN checks immediately before and after `model.step()` to pinpoint when NaN is introduced.
+
+| Time | Event | Status |
+|------|-------|--------|
+| — | Loss: 0.03, rewards normal | OK |
+| — | DS3 shards clean BEFORE model.step() | OK |
+| — | Pre-clip grad norms: empty list (DS3 doesn't expose `param.grad`) | NOTE |
+| — | grad_norm (post-clip): 67,270,000,000 | BAD |
+| — | **NaN in DS3 shards AFTER model.step()**: 57 params (rank 0), 43 params (other ranks) | **KEY FINDING** |
+
+**Key finding**: `model.step()` is where NaN is introduced. Shards are clean before the step, NaN after. The pre-clip gradient norm check returns an empty list because DS3 partitions gradients internally — `param.grad` is always `None` on `model.module` parameters. The reported `grad_norm` of 67 billion (post-clip, with `max_grad_norm=1.0`) indicates catastrophic gradient values that DeepSpeed's internal clipping could not save.
+
+## Updated Root Cause Analysis
+
+**The NaN is introduced by `model.step()` under DS3.** Experiments 17 and 19 confirmed:
+- Shards are clean before `model.step()`
+- Shards contain NaN after `model.step()`
+- `grad_norm` is catastrophically large (67B even after clipping with `max_grad_norm=1.0`)
+- Loss (0.03) and rewards are normal — the forward pass and reward computation are fine
+
+**The central mystery: why does DS3 training diverge only on this branch?**
+
+The training code (forward pass, loss computation, backward pass, optimizer config) is byte-for-byte identical between the branch and `origin/main`. The ONLY differences are in vLLM engine configuration:
+
+1. **Engine creation**: `weight_transfer_config=WeightTransferConfig(backend="nccl")` (branch) vs `worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap"` (main)
+2. **Sleep/wake_up calls**: Branch adds `engine.sleep.remote()` before sync and `engine.wake_up.remote()` after
+3. **`setup_model_update_group()`**: Branch uses `NCCLWeightTransferEngine.trainer_init()` instead of `vllm_utils.init_process_group()`
+
+These are all vLLM-side operations on separate Ray actor processes running on separate GPUs. They should have no effect on DS3 training, which happens on the trainer GPUs. Yet DS3 training consistently produces catastrophic gradient explosions only on this branch.
+
+**Possible mechanisms (unverified):**
+1. **NCCL group interaction**: `NCCLWeightTransferEngine.trainer_init()` creates an NCCL communicator group that may interfere with DS3's internal NCCL groups (used for all-reduce, all-gather). If the groups share resources or the initialization changes NCCL state globally, it could cause silent corruption in DS3's collective operations.
+2. **GPU memory pressure**: The `WeightTransferConfig` approach may allocate different NCCL buffers or GPU memory compared to `WorkerWrap`, changing DS3's available memory and triggering different partitioning or offloading behavior.
+3. **Timing/ordering**: The `sleep.remote()` call before weight sync may interact with DS3's async operations in unexpected ways, though this seems unlikely since they're on different processes.
+
+**Contradictions to investigate:**
+- Experiment 3 (early code) had healthy grad_norm (1.41) but still NaN'd after weight sync. This may represent a *different* bug (vLLM layerwise reload issue) that was subsequently fixed, while the DS3 training instability is a separate, more common issue.
+- DS2 with the same `NCCLWeightTransferEngine` setup works fine (experiment 14). This means the NCCL group interaction theory would need to be specific to DS3's collective operations.
 
 ## Next Steps
 
 1. ~~Experiments 10-13~~ ✅ Minimal repros all pass. Bug is not in vLLM's core weight sync.
 2. ~~Experiment 14~~ ✅ DS2 works. DS3 is the trigger.
 3. ~~Add weight validation~~ ✅ Experiment 15 confirmed NaN exists before send, not introduced by vLLM.
-4. ~~Try `.contiguous().clone()` before sending~~ ✅ Tensor layout is fine (no non-contiguous, no views). Problem is NaN values.
-5. **Check DS3 shards pre-gather**: Are `ds_tensor` shards NaN before `GatheredParameters`, or does the gather introduce it?
-6. ~~Check DS3 shards pre-gather~~ ✅ Experiment 16 confirmed shards are NaN before gather. Training itself produces NaN weights under DS3.
-7. **Investigate DS3 training instability**: Why does DS3 produce grad_norm 582M while DS2 is stable with same hyperparameters? Check loss function, gradient accumulation, mixed precision handling differences between DS2 and DS3.
-8. **Re-run DS3 with `--fused_optimizer False`**: The fused optimizer might handle NaN differently under DS3.
-9. **Add gradient NaN detection**: Check gradients for NaN before the optimizer step to determine if NaN originates in the backward pass or optimizer.
+4. ~~Try `.contiguous().clone()` before sending~~ ✅ Tensor layout is fine. Problem is NaN values.
+5. ~~Check DS3 shards pre-gather~~ ✅ Experiment 16 confirmed shards are NaN before gather.
+6. ~~Check pre/post model.step()~~ ✅ Experiment 19 confirmed model.step() introduces NaN.
+7. **Test NCCL group interaction**: Run DS3 with `NCCLWeightTransferEngine.trainer_init()` but WITHOUT actually syncing weights. If training still diverges, the NCCL group creation is the cause.
+8. **Test without sleep/wake_up**: Remove `sleep.remote()` / `wake_up.remote()` calls to rule them out.
+9. **Compare NCCL communicator counts**: Check how many NCCL groups exist on trainer GPUs on branch vs main.
+10. **Run DS3 on main with branch's engine config**: Cherry-pick only the engine creation change to main to isolate whether it's the engine config or some other branch change.
 
 ## Files Changed
 

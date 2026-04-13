@@ -1,7 +1,9 @@
 #!/bin/bash
 num_prompts=25376
-exp_name=weight_sync_ds3_contiguous_clone
+exp_name="${GRPO_EXP_NAME:-weight_sync_ds3_contiguous_clone}"
+beaker_description="${BEAKER_DESCRIPTION:-DS3 weight sync test: contiguous().clone() fix}"
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+extra_grpo_args=("${@:2}")
 uv run python mason.py \
         --cluster ai2/jupiter \
         --image "$BEAKER_IMAGE" \
@@ -10,7 +12,7 @@ uv run python mason.py \
         --priority urgent \
 	--preemptible \
         --num_nodes 2 \
-	--description "DS3 weight sync test: contiguous().clone() fix" \
+	--description "$beaker_description" \
         --timeout 1h \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -65,4 +67,5 @@ uv run python mason.py \
         --checkpoint_state_dir /tmp/checkpoint_test \
         --active_sampling \
         --async_steps 4 \
-	--push_to_hub False
+	--push_to_hub False \
+        "${extra_grpo_args[@]}"
