@@ -711,6 +711,7 @@ class BatchStatistics:
     filtered_prompt_datasets_zero: list[str]
     filtered_prompt_datasets_solved: list[str]
     filtered_prompt_datasets_nonzero: list[str]
+    test_prompt_indices: list[int]
     test_indices: list[int]
     test_passes: list[float]
     test_difficulties: list[int]
@@ -915,6 +916,8 @@ def compute_manufactoria_test_pass_rate_metrics(
     by_index_key: str,
     by_index_count_key: str,
     difficulty_mean_prefix: str,
+    prompt_hist_key: str,
+    test_hist_key: str,
     enabled: bool = True,
 ) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
@@ -923,6 +926,16 @@ def compute_manufactoria_test_pass_rate_metrics(
 
     if not enabled or not batch_stats.test_passes:
         return metrics
+    if len(batch_stats.test_indices) != len(batch_stats.test_passes):
+        raise ValueError(
+            "Manufactoria test_indices and test_passes must have the same length, "
+            f"got {len(batch_stats.test_indices)} and {len(batch_stats.test_passes)}."
+        )
+    if len(batch_stats.test_prompt_indices) != len(batch_stats.test_passes):
+        raise ValueError(
+            "Manufactoria test_prompt_indices and test_passes must have the same length, "
+            f"got {len(batch_stats.test_prompt_indices)} and {len(batch_stats.test_passes)}."
+        )
 
     test_index_to_passes: dict[int, list[float]] = {}
     for test_index, test_pass in zip(batch_stats.test_indices, batch_stats.test_passes):
@@ -933,6 +946,18 @@ def compute_manufactoria_test_pass_rate_metrics(
     ]
     metrics[by_index_key] = test_pass_rate_by_index
     metrics[by_index_count_key] = len(test_pass_rate_by_index)
+    metrics[test_hist_key] = np.array([pass_rate for _, pass_rate in test_pass_rate_by_index], dtype=np.float64)
+
+    prompt_index_to_test_passes: dict[int, list[float]] = {}
+    for prompt_index, test_pass in zip(batch_stats.test_prompt_indices, batch_stats.test_passes):
+        prompt_index_to_test_passes.setdefault(int(prompt_index), []).append(float(test_pass))
+    metrics[prompt_hist_key] = np.array(
+        [
+            float(np.mean(passes))
+            for _, passes in sorted(prompt_index_to_test_passes.items(), key=lambda item: item[0])
+        ],
+        dtype=np.float64,
+    )
 
     if len(batch_stats.test_difficulties) != len(batch_stats.test_passes):
         return metrics
@@ -1207,6 +1232,7 @@ def accumulate_inference_batches(
     all_prompt_indices = []
     all_prompt_sample_counts = []
     all_prompt_datasets = []
+    all_test_prompt_indices = []
     all_test_indices = []
     all_test_passes = []
     all_test_difficulties = []
@@ -1412,6 +1438,7 @@ def accumulate_inference_batches(
                     len(prompt_test_indices),
                 )
                 continue
+            all_test_prompt_indices.append(prompt_index)
             all_test_indices.append(prompt_test_indices[relative_test_index])
             all_test_passes.append(test_pass)
             if relative_test_index < len(prompt_test_difficulties):
@@ -1581,6 +1608,7 @@ def accumulate_inference_batches(
         filtered_prompt_datasets_zero=filtered_prompt_datasets_zero,
         filtered_prompt_datasets_solved=filtered_prompt_datasets_solved,
         filtered_prompt_datasets_nonzero=filtered_prompt_datasets_nonzero,
+        test_prompt_indices=all_test_prompt_indices,
         test_indices=all_test_indices,
         test_passes=all_test_passes,
         test_difficulties=all_test_difficulties,
@@ -1951,6 +1979,7 @@ class DataPreparationActor:
                     "filtered_prompt_datasets_zero",
                     "filtered_prompt_datasets_solved",
                     "filtered_prompt_datasets_nonzero",
+                    "test_prompt_indices",
                     "test_indices",
                     "test_passes",
                     "test_difficulties",
@@ -2012,6 +2041,8 @@ class DataPreparationActor:
                         by_index_key="val/train_manufactoria_test_pass_rate_by_index",
                         by_index_count_key="val/train_manufactoria_test_pass_rate_by_index_count",
                         difficulty_mean_prefix="val/train_manufactoria_test_pass_rate_mean_difficulty",
+                        prompt_hist_key="val/prompt_test_pass_rate_hist",
+                        test_hist_key="val/test_pass_rate_hist",
                         enabled=self.config.log_train_solve_rate_metrics,
                     )
                 )

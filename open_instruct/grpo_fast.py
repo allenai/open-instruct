@@ -1977,6 +1977,8 @@ def maybe_evaluate(
                     by_index_key="eval/manufactoria_test_pass_rate_by_index",
                     by_index_count_key="eval/manufactoria_test_pass_rate_by_index_count",
                     difficulty_mean_prefix="eval/manufactoria_test_pass_rate_mean_difficulty",
+                    prompt_hist_key="eval/prompt_test_pass_rate_hist",
+                    test_hist_key="eval/test_pass_rate_hist",
                 )
             )
 
@@ -2016,6 +2018,9 @@ def maybe_evaluate(
                 index_column="test_index",
                 value_column="pass_rate",
             )
+            for key, value in list(metrics_to_log.items()):
+                if isinstance(value, np.ndarray | list) and _can_log_metric_as_wandb_histogram(value):
+                    metrics_to_log[key] = wandb.Histogram(np.asanyarray(value, dtype=np.float64).ravel())
             wandb.log({**metrics_to_log, **table_metrics}, step=training_step)
         else:
             print_rich_table(df.iloc[:1])

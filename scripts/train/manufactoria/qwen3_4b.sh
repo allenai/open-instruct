@@ -29,6 +29,7 @@ uv run python mason.py \
     python open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
+    --async_steps 2 \
     --beta 0.0 \
     --eval_pass_at_k 32 \
     --load_ref_policy false \

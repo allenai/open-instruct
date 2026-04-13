@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 from datasets import Dataset
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -237,6 +238,10 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
+            test_prompt_indices=[],
+            test_indices=[],
+            test_passes=[],
+            test_difficulties=[],
         )
 
         with (
@@ -312,6 +317,10 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=[],
             filtered_prompt_datasets_solved=[],
             filtered_prompt_datasets_nonzero=[],
+            test_prompt_indices=[],
+            test_indices=[],
+            test_passes=[],
+            test_difficulties=[],
         )
 
         with (
@@ -390,6 +399,10 @@ class TestMaybeEvaluate(unittest.TestCase):
             filtered_prompt_datasets_zero=["subset_a"],
             filtered_prompt_datasets_solved=["subset_b"],
             filtered_prompt_datasets_nonzero=["subset_b"],
+            test_prompt_indices=[],
+            test_indices=[],
+            test_passes=[],
+            test_difficulties=[],
         )
 
         with (
@@ -473,6 +486,44 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=1), 0.25)
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=2), 0.5)
         self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=4), 1.0)
+
+    def test_compute_manufactoria_histograms(self):
+        batch_stats = data_loader_lib.BatchStatistics(
+            prompt_lengths=[],
+            response_lengths=[],
+            filtered_prompts=0,
+            filtered_prompts_zero=0,
+            filtered_prompts_solved=0,
+            filtered_prompts_nonzero=0,
+            percent_solved_mean=0.0,
+            percent_solved_hist=np.array([]),
+            prompt_indices=[10, 11],
+            prompt_sample_counts=[2, 2],
+            prompt_datasets=["manufactoria", "manufactoria"],
+            filtered_prompt_datasets=[],
+            filtered_prompt_datasets_zero=[],
+            filtered_prompt_datasets_solved=[],
+            filtered_prompt_datasets_nonzero=[],
+            test_prompt_indices=[10, 10, 10, 10, 11, 11, 11, 11],
+            test_indices=[0, 1, 0, 1, 2, 3, 2, 3],
+            test_passes=[1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            test_difficulties=[],
+            no_resampled_prompts=0,
+            total_prompts=2,
+        )
+
+        metrics = data_loader_lib.compute_manufactoria_test_pass_rate_metrics(
+            batch_stats=batch_stats,
+            count_key="val/train_manufactoria_test_pass_count",
+            by_index_key="val/train_manufactoria_test_pass_rate_by_index",
+            by_index_count_key="val/train_manufactoria_test_pass_rate_by_index_count",
+            difficulty_mean_prefix="val/train_manufactoria_test_pass_rate_mean_difficulty",
+            prompt_hist_key="val/prompt_test_pass_rate_hist",
+            test_hist_key="val/test_pass_rate_hist",
+        )
+
+        np.testing.assert_array_equal(metrics["val/test_pass_rate_hist"], np.array([1.0, 0.5, 0.0, 0.5]))
+        np.testing.assert_array_equal(metrics["val/prompt_test_pass_rate_hist"], np.array([0.75, 0.25]))
 
 
 if __name__ == "__main__":
