@@ -2285,6 +2285,12 @@ def main(
             "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
         }
     )
+    grpo_utils.validate_allocated_gpus(
+        tuple(args.num_learners_per_node),
+        vllm_config.vllm_num_engines,
+        vllm_config.vllm_tensor_parallel_size,
+        args.single_gpu_mode,
+    )
 
     pool_size = tools_config.pool_size
     if pool_size is None:

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+import ray
 import torch
 import torch.distributed as dist
 
@@ -20,6 +21,34 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+
+def validate_allocated_gpus(
+    num_learners_per_node: tuple[int, ...],
+    vllm_num_engines: int,
+    vllm_tensor_parallel_size: int,
+    single_gpu_mode: bool,
+) -> None:
+    """Validate that Ray sees the expected number of GPUs for this job."""
+    total_learners = sum(num_learners_per_node)
+    if single_gpu_mode and (total_learners != 1 or vllm_num_engines != 1):
+        raise ValueError(
+            "single_gpu_mode requires exactly one learner and one vLLM engine, but got "
+            f"sum(num_learners_per_node={list(num_learners_per_node)})={total_learners} and "
+            f"vllm_num_engines={vllm_num_engines}."
+        )
+    expected_vllm_gpus = 0 if single_gpu_mode else vllm_num_engines * vllm_tensor_parallel_size
+    expected_gpus = total_learners + expected_vllm_gpus
+    allocated_gpus: float = ray.cluster_resources().get("GPU", 0.0)
+    if not math.isclose(allocated_gpus, expected_gpus):
+        raise ValueError(
+            f"Ray reports {allocated_gpus} allocated GPUs for this job, but "
+            f"sum(num_learners_per_node={list(num_learners_per_node)}) + "
+            f"vllm_num_engines ({vllm_num_engines}) * "
+            f"vllm_tensor_parallel_size ({vllm_tensor_parallel_size}) if not "
+            f"single_gpu_mode ({single_gpu_mode}) = {expected_gpus}. "
+            "These must match."
+        )
 
 
 def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:

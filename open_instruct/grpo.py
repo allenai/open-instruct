@@ -136,6 +136,12 @@ def main(
     if ray_address := utils.get_ray_address():
         ray_init_kwargs["address"] = ray_address
     ray.init(**ray_init_kwargs)
+    grpo_utils.validate_allocated_gpus(
+        tuple(args.num_learners_per_node),
+        vllm_config.vllm_num_engines,
+        vllm_config.vllm_tensor_parallel_size,
+        args.single_gpu_mode,
+    )
 
     pool_size = tools_config.pool_size
     if pool_size is None:
