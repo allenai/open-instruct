@@ -1351,17 +1351,21 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
-    if args.delay_native_weight_sync_init_steps > 0:
-        logger.info(
-            "======== ⏸️ delaying native vLLM weight sync init until after %d completed training steps =========",
-            args.delay_native_weight_sync_init_steps,
-        )
-    else:
+    if args.native_weight_sync_init_only and vllm_engines:
         ray_get_with_progress(
             [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
             desc="Setting up model update group",
         )
         logger.info("======== ✅ model update group setup successfully =========")
+    elif args.delay_native_weight_sync_init_steps > 0 and vllm_engines:
+        logger.info(
+            "======== ⏸️ delaying native vLLM weight sync init until after %d completed training steps =========",
+            args.delay_native_weight_sync_init_steps,
+        )
+    elif vllm_engines:
+        logger.info(
+            "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
+        )
 
     return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
@@ -1861,8 +1865,15 @@ def run_training(
         )
         logger.info("Restored dataloader state from checkpoint")
 
-    delayed_weight_sync_init = bool(vllm_engines) and args.delay_native_weight_sync_init_steps > 0
-    weight_sync_initialized = not delayed_weight_sync_init
+    has_vllm_engines = bool(vllm_engines)
+    delayed_weight_sync_init = has_vllm_engines and args.delay_native_weight_sync_init_steps > 0
+    lazy_weight_sync_init = has_vllm_engines and not args.native_weight_sync_init_only and not delayed_weight_sync_init
+    weight_sync_init_completed_steps: int | None = None
+    if delayed_weight_sync_init:
+        weight_sync_init_completed_steps = args.delay_native_weight_sync_init_steps
+    elif lazy_weight_sync_init:
+        weight_sync_init_completed_steps = 1
+    weight_sync_initialized = not has_vllm_engines or args.native_weight_sync_init_only
     weight_sync_trigger_event: threading.Event | None = None
     weight_sync_thread_future: futures.Future | None = None
 
@@ -1892,7 +1903,11 @@ def run_training(
             "[Main Thread] Native vLLM weight sync init will be delayed until after %d completed training steps.",
             args.delay_native_weight_sync_init_steps,
         )
-    else:
+    elif lazy_weight_sync_init:
+        logger.info(
+            "[Main Thread] Native vLLM weight sync will be lazily initialized on the first required sync after step 1."
+        )
+    elif has_vllm_engines:
         start_weight_sync_thread(resume_training_step)
 
     """Run the main training loop with worker threads."""
@@ -1922,20 +1937,28 @@ def run_training(
             enable=False,
         )
 
-    def maybe_initialize_delayed_weight_sync(training_step: int) -> None:
+    def maybe_initialize_weight_sync(training_step: int) -> None:
         nonlocal weight_sync_initialized
-        if (
-            not delayed_weight_sync_init
-            or weight_sync_initialized
-            or training_step <= args.delay_native_weight_sync_init_steps
-        ):
+        if weight_sync_initialized or weight_sync_init_completed_steps is None:
             return
 
-        logger.info(
-            "[Main Thread] Initializing native vLLM weight sync at step %d after %d completed training steps.",
-            training_step,
-            args.delay_native_weight_sync_init_steps,
-        )
+        completed_training_steps = training_step - 1
+        if completed_training_steps < weight_sync_init_completed_steps:
+            return
+
+        if delayed_weight_sync_init:
+            logger.info(
+                "[Main Thread] Initializing native vLLM weight sync at step %d after %d completed training steps.",
+                training_step,
+                completed_training_steps,
+            )
+        else:
+            logger.info(
+                "[Main Thread] Lazily initializing native vLLM weight sync before step %d after %d completed training steps.",
+                training_step,
+                completed_training_steps,
+            )
+
         initialize_model_update_group(policy_group, vllm_engines)
         weight_sync_initialized = True
 
@@ -1945,7 +1968,7 @@ def run_training(
 
         start_weight_sync_thread(initial_resume_training_step=1)
         assert weight_sync_trigger_event is not None
-        logger.info("[Main Thread] Triggering initial native vLLM weight sync after delayed init.")
+        logger.info("[Main Thread] Triggering initial native vLLM weight sync before step %d.", training_step)
         weight_sync_trigger_event.set()
         health_check_fn(expect_new_weight_sync=True)
 
@@ -1982,7 +2005,7 @@ def run_training(
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
         health_check_fn()
-        maybe_initialize_delayed_weight_sync(training_step)
+        maybe_initialize_weight_sync(training_step)
         health_check_time = time.perf_counter() - health_check_start
 
         if (
