@@ -1,9 +1,10 @@
 """Generate or recompute Manufactoria pass@k metrics and difficulty for RLVR datasets.
 
-Adds a `difficulty` column: length-N list (one entry per ground-truth test), integers 1–4, quartiles within
-that prompt from per-test solve rates across the k completions (1 = hardest tests for this model, 4 = easiest).
-Also stores explicit full-pass and per-test pass metrics so difficulty can be recomputed from an existing
-dataset that already contains a `completions` column.
+Adds a `difficulty` column: length-N list (one entry per ground-truth test), integers 1–4.
+Difficulty 1 is reserved for tests with zero per-test solve rate across the k completions.
+The remaining non-zero tests are split into three dataset-level buckets (2 = harder, 4 = easier).
+Also stores explicit full-pass and per-test pass metrics so difficulty can be recomputed from an
+existing dataset that already contains a `completions` column.
 
 Requires a running Manufactoria API (same as training). Set MANUFACTORIA_API_URL or pass --manufactoria-api-url.
 
@@ -322,15 +323,12 @@ def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int)
     return per_test_pass
 
 
-def _nearest_rank_threshold(sorted_rates: list[float], quantile: float) -> float:
-    if not sorted_rates:
-        raise ValueError("sorted_rates must be non-empty")
-    rank = max(1, math.ceil(quantile * len(sorted_rates)))
-    return sorted_rates[rank - 1]
-
-
 def assign_global_difficulty_quartiles(rows: list[dict[str, Any]]) -> None:
-    """Assign dataset-level quartiles from per-test pass rates across all rows."""
+    """Assign dataset-level difficulty buckets from per-test pass rates across all rows.
+
+    Difficulty 1 is assigned to every zero-pass test and only zero-pass tests.
+    Remaining tests are split into three stable buckets with difficulties 2, 3, and 4.
+    """
     indexed_rates: list[tuple[int, int, float]] = []
     for row_idx, row in enumerate(rows):
         pass_counts = row.get("Per-test pass count", []) or []
@@ -344,24 +342,19 @@ def assign_global_difficulty_quartiles(rows: list[dict[str, Any]]) -> None:
     if not indexed_rates:
         return
 
-    sorted_rates = sorted(rate for _, _, rate in indexed_rates)
-    q1 = _nearest_rank_threshold(sorted_rates, 0.25)
-    q2 = _nearest_rank_threshold(sorted_rates, 0.50)
-    q3 = _nearest_rank_threshold(sorted_rates, 0.75)
-
     for row in rows:
         row[DIFFICULTY_KEY] = [1] * len(row.get("Per-test pass count", []) or [])
 
-    for row_idx, test_idx, rate in indexed_rates:
-        if rate <= q1:
-            difficulty = 1
-        elif rate <= q2:
-            difficulty = 2
-        elif rate <= q3:
-            difficulty = 3
-        else:
-            difficulty = 4
-        rows[row_idx][DIFFICULTY_KEY][test_idx] = difficulty
+    nonzero_rates = [(row_idx, test_idx, rate) for row_idx, test_idx, rate in indexed_rates if rate > 0.0]
+    if not nonzero_rates:
+        return
+
+    ordered_nonzero_rates = sorted(nonzero_rates, key=lambda item: item[2])
+    bucket_size = math.ceil(len(ordered_nonzero_rates) / 3)
+    for bucket_idx, start in enumerate(range(0, len(ordered_nonzero_rates), bucket_size), start=2):
+        difficulty = min(bucket_idx, 4)
+        for row_idx, test_idx, _rate in ordered_nonzero_rates[start : start + bucket_size]:
+            rows[row_idx][DIFFICULTY_KEY][test_idx] = difficulty
 
 
 def _score_completions(
