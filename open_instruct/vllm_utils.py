@@ -20,6 +20,7 @@ import asyncio
 import dataclasses
 import os
 import queue
+import socket
 import sys
 import threading
 import time
@@ -669,14 +670,15 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
-            # There is a TOCTOU race: another process could claim the port between
-            # find_free_port() and uvicorn binding. Unlikely in practice.
-            self.server_port = utils.find_free_port()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            self.server_port = sock.getsockname()[1]
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
             config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
-            asyncio.create_task(uvicorn.Server(config).serve())
+            asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
 
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
@@ -741,20 +743,21 @@ class LLMRayActor:
             finalize_futures = list(not_done)
 
     def init_weight_transfer_engine(
-        self, master_address: str, master_port: int, rank_offset: int, world_size: int
+        self,
+        master_address: str | None = None,
+        master_port: int | None = None,
+        rank_offset: int | None = None,
+        world_size: int | None = None,
     ) -> None:
-        request = WeightTransferInitRequest(
-            init_info={
+        init_info = {}
+        if master_address is not None:
+            init_info = {
                 "master_address": master_address,
                 "master_port": master_port,
                 "rank_offset": rank_offset,
                 "world_size": world_size,
             }
-        )
-        return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
-
-    def init_weight_transfer_engine_ipc(self) -> None:
-        request = WeightTransferInitRequest(init_info={})
+        request = WeightTransferInitRequest(init_info=init_info)
         return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
 
     def _run_async(self, coro: Awaitable[Any]) -> Any:
@@ -767,20 +770,15 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, request_or_names, dtype_names=None, shapes=None, packed=True) -> None:
+    def update_weights(
+        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], packed: bool = True
+    ) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        if isinstance(request_or_names, (dict, WeightTransferUpdateRequest)):
-            request = (
-                WeightTransferUpdateRequest(**request_or_names)
-                if isinstance(request_or_names, dict)
-                else request_or_names
-            )
-        else:
-            request = WeightTransferUpdateRequest(
-                update_info={"names": request_or_names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-            )
+        request = WeightTransferUpdateRequest(
+            update_info={"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
+        )
         return self._run_async(self.llm_engine.update_weights(request))
 
     def reset_prefix_cache(self) -> None:
@@ -1305,7 +1303,9 @@ def _prepare_params_for_sync(
 
 
 def _collect_weight_metadata(
-    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
+    model: torch.nn.Module,
+    name_mapper: Callable[[str], str] | None,
+    fsdp_submodules: list[tuple[str, FSDPModule]] | None = None,
 ) -> tuple[list[str], list[str], list[list[int]]]:
     """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
 
@@ -1317,7 +1317,9 @@ def _collect_weight_metadata(
     shapes: list[list[int]] = []
 
     if isinstance(model, FSDPModule):
-        for block_name, block in _get_fsdp2_submodules(model):
+        if fsdp_submodules is None:
+            fsdp_submodules = _get_fsdp2_submodules(model)
+        for block_name, block in fsdp_submodules:
             for name, param in block.named_parameters():
                 full_name = f"{block_name}.{name}" if block_name else name
                 mapped_name = name_mapper(full_name) if name_mapper else full_name
@@ -1385,7 +1387,8 @@ def broadcast_weights_to_vllm(
     if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model)
 
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
+    fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
+    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
     use_packed = False
 
     if is_rank_0:
@@ -1396,7 +1399,6 @@ def broadcast_weights_to_vllm(
     trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=use_packed)
 
     if isinstance(model, FSDPModule):
-        fsdp_submodules = _get_fsdp2_submodules(model)
         if not fsdp_submodules:
             raise ValueError("FSDP2 model has no FSDP submodules.")
         for block_name, block in fsdp_submodules:

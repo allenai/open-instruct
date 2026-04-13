@@ -404,9 +404,9 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model_update_group = None
         if self.rank == 0:
             if self.args.single_gpu_mode:
-                refs = [engine.init_weight_transfer_engine_ipc.remote() for engine in vllm_engines]
+                refs = [engine.init_weight_transfer_engine.remote() for engine in vllm_engines]
             else:
-                master_address = ray._private.services.get_node_ip_address()
+                master_address = self.get_current_node_ip()
                 master_port = utils.find_free_port()
                 vllm_num_engines, vllm_tensor_parallel_size = (
                     self.vllm_config.vllm_num_engines,
@@ -1810,8 +1810,7 @@ def run_training(
         )
         logger.info("Restored dataloader state from checkpoint")
 
-    has_vllm_engines = bool(vllm_engines)
-    weight_sync_initialized = not has_vllm_engines
+    weight_sync_initialized = not vllm_engines
     weight_sync_trigger_event: threading.Event | None = None
     weight_sync_thread_future: futures.Future | None = None
 
