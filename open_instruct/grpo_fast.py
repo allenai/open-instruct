@@ -52,7 +52,6 @@ import logging
 import math
 import random
 import shutil
-import socket
 import threading
 import time
 from dataclasses import asdict
@@ -408,9 +407,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 refs = [engine.init_weight_transfer_engine_ipc.remote() for engine in vllm_engines]
             else:
                 master_address = ray._private.services.get_node_ip_address()
-                with socket.socket() as sock:
-                    sock.bind(("", 0))
-                    master_port = sock.getsockname()[1]
+                master_port = utils.find_free_port()
                 vllm_num_engines, vllm_tensor_parallel_size = (
                     self.vllm_config.vllm_num_engines,
                     self.vllm_config.vllm_tensor_parallel_size,

@@ -5,7 +5,6 @@ To run:
 """
 
 import os
-import socket
 import unittest
 
 import datasets
@@ -17,7 +16,7 @@ from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import logger_utils, utils, vllm_utils
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
@@ -39,9 +38,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         AutoTokenizer.from_pretrained(tokenizer_name)
 
         master_address = ray._private.services.get_node_ip_address()
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            master_port = sock.getsockname()[1]
+        master_port = utils.find_free_port()
 
         os.environ["MASTER_ADDR"] = master_address
         os.environ["MASTER_PORT"] = str(master_port)
@@ -85,9 +82,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         )
         ray.get(engines[0].ready.remote())
 
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            weight_transfer_port = sock.getsockname()[1]
+        weight_transfer_port = utils.find_free_port()
 
         world_size = 2
         ray.get(

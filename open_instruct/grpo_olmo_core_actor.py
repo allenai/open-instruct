@@ -26,7 +26,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -201,7 +201,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         master_address = self.get_current_node_ip()
-        master_port = self.get_free_port()
+        master_port = utils.find_free_port()
 
         vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
 
