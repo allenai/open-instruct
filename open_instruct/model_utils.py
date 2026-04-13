@@ -132,11 +132,11 @@ class Batch:
     indices: list[int] | None
     scores: list[float] | None
     active_tools: list[list[str] | None] | None = None
+    task_names: list[str] | None = None
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
         if isinstance(key, slice):
-            # Handle slice object: batch[start:end]
             return Batch(
                 queries=self.queries[key],
                 ground_truths=self.ground_truths[key],
@@ -146,9 +146,9 @@ class Batch:
                 indices=self.indices[key] if self.indices is not None else None,
                 scores=self.scores[key] if self.scores is not None else None,
                 active_tools=self.active_tools[key] if self.active_tools is not None else None,
+                task_names=self.task_names[key] if self.task_names is not None else None,
             )
         elif isinstance(key, int):
-            # Handle single index: batch[5]
             return Batch(
                 queries=[self.queries[key]],
                 ground_truths=[self.ground_truths[key]],
@@ -158,9 +158,9 @@ class Batch:
                 indices=[self.indices[key]] if self.indices is not None else None,
                 scores=[self.scores[key]] if self.scores is not None else None,
                 active_tools=[self.active_tools[key]] if self.active_tools is not None else None,
+                task_names=[self.task_names[key]] if self.task_names is not None else None,
             )
         else:
-            # Handle list of indices: batch[[1,3,5]]
             return Batch(
                 queries=[self.queries[i] for i in key],
                 ground_truths=[self.ground_truths[i] for i in key],
@@ -172,6 +172,7 @@ class Batch:
                 indices=[self.indices[i] for i in key] if self.indices is not None else None,
                 scores=[self.scores[i] for i in key] if self.scores is not None else None,
                 active_tools=[self.active_tools[i] for i in key] if self.active_tools is not None else None,
+                task_names=[self.task_names[i] for i in key] if self.task_names is not None else None,
             )
 
 

@@ -83,6 +83,7 @@ from open_instruct import logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
+    DATASET_ORIGIN_KEY,
     ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
@@ -1104,6 +1105,7 @@ def setup_datasets(
             dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
             dataset_skip_cache=streaming_config.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
+            drop_dataset_source=False,
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
@@ -1759,6 +1761,33 @@ def maybe_evaluate(
             **eval_pass_at_k_metrics,
         }
 
+        # --- Per-task metrics ---
+        if getattr(eval_batch, "task_names", None) is not None:
+            from collections import defaultdict
+
+            task_indices: dict[str, list[int]] = defaultdict(list)
+            for idx, full_origin in enumerate(eval_batch.task_names):
+                short_name = full_origin.rsplit("/", 1)[-1] if "/" in full_origin else full_origin
+                task_indices[short_name].append(idx)
+
+            finish_reasons = eval_result.finish_reasons
+            for task_name, idxs in sorted(task_indices.items()):
+                task_scores = np.array([eval_batch.scores[i] for i in idxs])
+                task_seq_lens = np.array([len(eval_result.responses[i]) for i in idxs])
+                task_stop_rate = sum(int(finish_reasons[i] == "stop") for i in idxs) / len(idxs)
+                eval_metrics[f"eval/{task_name}/scores"] = float(task_scores.mean())
+                eval_metrics[f"eval/{task_name}/num_samples"] = len(idxs)
+                eval_metrics[f"eval/{task_name}/sequence_lengths"] = float(task_seq_lens.mean())
+                eval_metrics[f"eval/{task_name}/stop_rate"] = task_stop_rate
+
+                if task_scores.size and task_scores.size % eval_k == 0:
+                    task_scores_per_prompt = task_scores.reshape(-1, eval_k)
+                    task_correct = task_scores_per_prompt >= max_possible_score - 1e-8
+                    task_pass_at_k = grpo_utils.compute_pass_at_k_metrics(task_correct)
+                    for k, v in task_pass_at_k.items():
+                        metric_suffix = k.replace("eval/", "")
+                        eval_metrics[f"eval/{task_name}/{metric_suffix}"] = v
+
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
         )
@@ -1772,6 +1801,10 @@ def maybe_evaluate(
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        if getattr(eval_batch, "task_names", None) is not None:
+            table["task"] = [
+                (name.rsplit("/", 1)[-1] if "/" in name else name) for name in eval_batch.task_names
+            ]
         if eval_batch.active_tools is not None:
             table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
