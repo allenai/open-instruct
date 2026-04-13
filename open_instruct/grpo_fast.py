@@ -955,19 +955,6 @@ def validate_configs(
     )
 
 
-def validate_allocated_gpus(num_learners_per_node: tuple[int, ...], vllm_num_engines: int) -> None:
-    """Validate that Ray sees the expected number of GPUs for this job."""
-    expected_gpus = sum(num_learners_per_node) + vllm_num_engines
-    allocated_gpus: float = ray.cluster_resources().get("GPU", 0.0)
-    if not math.isclose(allocated_gpus, expected_gpus):
-        raise ValueError(
-            f"Ray reports {allocated_gpus} allocated GPUs for this job, but "
-            f"sum(num_learners_per_node={list(num_learners_per_node)}) + "
-            f"vllm_num_engines ({vllm_num_engines}) = {expected_gpus}. "
-            "These must match."
-        )
-
-
 def setup_runtime_variables(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -2298,7 +2285,12 @@ def main(
             "env_vars": {k: v for k, v in os.environ.items() if k not in EXCLUDED_ENV_VARS},
         }
     )
-    validate_allocated_gpus(tuple(args.num_learners_per_node), vllm_config.vllm_num_engines)
+    grpo_utils.validate_allocated_gpus(
+        tuple(args.num_learners_per_node),
+        vllm_config.vllm_num_engines,
+        vllm_config.vllm_tensor_parallel_size,
+        args.single_gpu_mode,
+    )
 
     pool_size = tools_config.pool_size
     if pool_size is None:

@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add validation that allocated number of gpus correspond to requested number of GPUs (https://github.com/allenai/open-instruct/pull/1606).
 - Add model step logging for GRPO/vLLM by propagating `model_step` through generation metadata/results, syncing vLLM engines to the latest training step after weight sync, and reporting `model_step_min/max/mean` reward metrics (https://github.com/allenai/open-instruct/pull/1508).
 - Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, liger-kernel bump to 0.7.0, pre-download model on rank 0 to avoid HF cache race conditions, update vllm to 0.19.0, and fix Ulysses SP for VLM models by passing the model object to `register_with_transformers` (https://github.com/allenai/open-instruct/pull/1568).
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
