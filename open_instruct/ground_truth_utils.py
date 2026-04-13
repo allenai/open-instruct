@@ -488,7 +488,14 @@ class StringMatcherVerifier(VerifierFunction):
         if "<answer>" in prediction and "</answer>" in prediction:
             answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
             score = float(normalize_answer(answer_string) == normalize_answer(label))
-            return VerificationResult(score=score)
+            if score > 0:
+                return VerificationResult(score=score)
+            if re.fullmatch(r"[A-D]", label.strip()):
+                extracted = self._extract_mcq_answer(answer_string)
+                if extracted is not None:
+                    score = float(normalize_answer(extracted) == normalize_answer(label))
+                    if score > 0:
+                        return VerificationResult(score=score)
 
         # Fallback: regex extraction for single-letter MCQ labels (A-D)
         if re.fullmatch(r"[A-D]", label.strip()):
@@ -931,7 +938,10 @@ class CodeVerifier(VerifierFunction):
         if not matches:
             return model_output
 
-        # Return the last match, stripped of whitespace
+        text_no_think = re.sub(r"<think>.*?</think>", "", model_output, flags=re.DOTALL)
+        outside_matches = re.findall(r"```(?:python)?(.*?)```", text_no_think, re.DOTALL)
+        if outside_matches:
+            return outside_matches[-1].strip()
         return matches[-1].strip()
 
     # Create a session pool for better performance
@@ -976,10 +986,36 @@ class CodeVerifier(VerifierFunction):
         # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
 
-        # Test data
+        # Test data — handle both list-of-strings and dict-format tests
+        tests_for_api = label
+        try:
+            parsed = json.loads(label) if isinstance(label, str) else label
+            if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
+                test_entry = parsed[0]
+                test_code = test_entry.get("test_code", "")
+                # Strip numpy dependency (sandbox may not have it)
+                test_code = re.sub(r"import numpy[^\n]*\n", "", test_code)
+                test_code = re.sub(
+                    r"def is_floats\(.*?\n(?:\s+.*\n)*?\s+return False\n",
+                    "", test_code
+                )
+                test_code = re.sub(
+                    r"def assertion\(.*?\n(?:\s+.*\n)*?\s+assert exact_match\n",
+                    "def assertion(out, exp, atol):\n"
+                    "    if atol != 0:\n"
+                    "        assert abs(out - exp) <= atol if isinstance(out, (int, float)) else out == exp\n"
+                    "    else:\n"
+                    "        assert out == exp\n",
+                    test_code,
+                )
+                python_code = python_code + "\n" + test_code
+                tests_for_api = ["pass"]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
         payload = {
             "program": python_code,
-            "tests": label,
+            "tests": tests_for_api,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
 
@@ -1304,6 +1340,11 @@ async def apply_verifiable_reward(
 
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = reward_fn_mapping.get(ds.lower())
+            if reward_func is None:
+                for key in reward_fn_mapping:
+                    if ds.lower().startswith(key):
+                        reward_func = reward_fn_mapping[key]
+                        break
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
