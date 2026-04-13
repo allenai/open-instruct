@@ -11,6 +11,7 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils
 from open_instruct.data_types import EnvConfig
 from open_instruct.dataset_transformation import (
+    DATASET_ORIGIN_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
@@ -209,6 +210,151 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/pass_at_2"], 1.0)
         self.assertEqual(logged["eval/pass_at_1_unbiased"], 0.5)
         self.assertEqual(logged["eval/pass_at_2_unbiased"], 1.0)
+
+    def test_per_task_metrics_reported(self):
+        """When task_names are present on the batch, per-task metrics should be logged."""
+        args = SimpleNamespace(num_training_steps=200, with_tracking=False)
+        num_prompts = 4
+        eval_dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [[1, 2, 3] for _ in range(num_prompts)],
+                GROUND_TRUTHS_KEY: ["42" for _ in range(num_prompts)],
+                VERIFIER_SOURCE_KEY: ["string_matcher"] * 2 + ["code"] * 2,
+                RAW_PROMPT_KEY: ["prompt" for _ in range(num_prompts)],
+                DATASET_ORIGIN_KEY: [
+                    "davidheineman/eval-openinstruct/gpqa",
+                    "davidheineman/eval-openinstruct/gpqa",
+                    "davidheineman/eval-openinstruct/humanevalplus",
+                    "davidheineman/eval-openinstruct/humanevalplus",
+                ],
+                "index": list(range(num_prompts)),
+            }
+        )
+        eval_queue = _QueueWithSize(size=num_prompts)
+        eval_generation_config = SimpleNamespace(n=2)
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["prompt"] * (num_prompts * 2)
+        tokenizer.pad_token = "<pad>"
+
+        eval_result = SimpleNamespace(
+            responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
+            finish_reasons=["stop"] * 8,
+            token_statistics=SimpleNamespace(num_prompt_tokens=20, num_response_tokens=8, generation_time=2.0),
+        )
+        eval_batch = SimpleNamespace(
+            scores=[1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0],
+            queries=[[1, 2, 3]] * 8,
+            decoded_responses=[f"resp_{i}" for i in range(8)],
+            ground_truths=["42"] * 8,
+            active_tools=None,
+            task_names=[
+                "davidheineman/eval-openinstruct/gpqa",
+                "davidheineman/eval-openinstruct/gpqa",
+                "davidheineman/eval-openinstruct/gpqa",
+                "davidheineman/eval-openinstruct/gpqa",
+                "davidheineman/eval-openinstruct/humanevalplus",
+                "davidheineman/eval-openinstruct/humanevalplus",
+                "davidheineman/eval-openinstruct/humanevalplus",
+                "davidheineman/eval-openinstruct/humanevalplus",
+            ],
+        )
+
+        with (
+            patch(
+                "open_instruct.grpo_fast.accumulate_inference_batches",
+                return_value=(eval_result, eval_batch, {}, None),
+            ),
+            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_fast.print_rich_table"),
+        ):
+            maybe_evaluate(
+                args=args,
+                training_step=100,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=tokenizer,
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                base_env_config=EnvConfig(),
+                max_possible_score=1.0,
+            )
+
+        logged = mock_print_metrics.call_args.args[0]
+
+        # Global aggregate should still be present
+        self.assertIn("eval/scores", logged)
+        self.assertAlmostEqual(logged["eval/scores"], 0.5)
+
+        # Per-task metrics should be present
+        self.assertIn("eval/gpqa/scores", logged)
+        self.assertIn("eval/humanevalplus/scores", logged)
+
+        # gpqa: scores [1.0, 0.0, 1.0, 0.0] -> mean 0.5
+        self.assertAlmostEqual(logged["eval/gpqa/scores"], 0.5)
+        self.assertEqual(logged["eval/gpqa/num_samples"], 4)
+        self.assertEqual(logged["eval/gpqa/stop_rate"], 1.0)
+
+        # humanevalplus: scores [0.0, 0.0, 1.0, 1.0] -> mean 0.5
+        self.assertAlmostEqual(logged["eval/humanevalplus/scores"], 0.5)
+        self.assertEqual(logged["eval/humanevalplus/num_samples"], 4)
+
+        # Per-task pass@k should also be present (n=2, so pass@1 and pass@2)
+        self.assertIn("eval/gpqa/pass_at_1", logged)
+        self.assertIn("eval/humanevalplus/pass_at_1", logged)
+
+    def test_no_per_task_metrics_without_task_names(self):
+        """Without task_names (legacy behavior), no per-task metrics should appear."""
+        args = SimpleNamespace(num_training_steps=200, with_tracking=False)
+        eval_dataset = self._build_eval_dataset(num_prompts=2)
+        eval_queue = _QueueWithSize(size=2)
+        eval_generation_config = SimpleNamespace(n=1)
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["prompt"] * 2
+        tokenizer.pad_token = "<pad>"
+
+        eval_result = SimpleNamespace(
+            responses=[[1], [2]],
+            finish_reasons=["stop", "stop"],
+            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=2, generation_time=1.0),
+        )
+        eval_batch = SimpleNamespace(
+            scores=[1.0, 0.0],
+            queries=[[1, 2, 3]] * 2,
+            decoded_responses=["resp_a", "resp_b"],
+            ground_truths=["42"] * 2,
+            active_tools=None,
+        )
+
+        with (
+            patch(
+                "open_instruct.grpo_fast.accumulate_inference_batches",
+                return_value=(eval_result, eval_batch, {}, None),
+            ),
+            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_fast.print_rich_table"),
+        ):
+            maybe_evaluate(
+                args=args,
+                training_step=100,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=tokenizer,
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                base_env_config=EnvConfig(),
+                max_possible_score=1.0,
+            )
+
+        logged = mock_print_metrics.call_args.args[0]
+        self.assertIn("eval/scores", logged)
+        per_task_keys = [k for k in logged if k.count("/") >= 2 and k.startswith("eval/")]
+        # Only eval/xxx keys that already existed (like eval/pass_at_1_unbiased) should be here
+        # No eval/task_name/metric keys should be present
+        for key in per_task_keys:
+            parts = key.split("/")
+            self.assertNotIn(parts[1], ["gpqa", "humanevalplus", "mbppplus", "unit_test"])
 
 
 class TestComputePassAtKMetrics(unittest.TestCase):
