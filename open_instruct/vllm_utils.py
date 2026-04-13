@@ -20,7 +20,6 @@ import asyncio
 import dataclasses
 import os
 import queue
-import socket
 import sys
 import threading
 import time
@@ -733,18 +732,14 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
-            # Create a socket and bind to port 0 to let the OS assign an available port.
-            # We pass the socket to serve_http to avoid race conditions where another
-            # process could claim the port between bind() and server startup.
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("127.0.0.1", 0))
-            sock.listen(1)
-            self.server_port = sock.getsockname()[1]
+            # There is a TOCTOU race: another process could claim the port between
+            # find_free_port() and uvicorn binding. Unlikely in practice.
+            self.server_port = utils.find_free_port()
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
             config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
-            asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
+            asyncio.create_task(uvicorn.Server(config).serve())
 
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
