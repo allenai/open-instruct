@@ -29,15 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from ray.util import queue as ray_queue
 
 from open_instruct import data_loader, logger_utils
-
-
-def find_free_port():
-    """Find and return a free port number."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
+from open_instruct.utils import find_free_port
 
 
 class ActorManager:

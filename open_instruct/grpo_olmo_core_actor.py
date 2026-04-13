@@ -29,7 +29,7 @@ from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
-from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
+from open_instruct.utils import RayProcess, find_free_port, is_beaker_job, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -197,7 +197,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         master_address = self.get_current_node_ip()
-        master_port = self.get_free_port()
+        master_port = find_free_port()
 
         vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
         backend = self.vllm_config.vllm_sync_backend
