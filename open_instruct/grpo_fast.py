@@ -1345,14 +1345,6 @@ def create_generation_configs(
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-def initialize_model_update_group(policy_group: ModelGroup, vllm_engines: list[ray.actor.ActorHandle]) -> None:
-    ray_get_with_progress(
-        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
-        desc="Setting up model update group",
-    )
-    logger.info("======== ✅ model update group setup successfully =========")
-
-
 def weight_sync_thread(
     args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
@@ -1881,7 +1873,11 @@ def run_training(
 
         logger.info("[Main Thread] Lazily initializing native vLLM weight sync before step %d.", training_step)
 
-        initialize_model_update_group(policy_group, vllm_engines)
+        ray_get_with_progress(
+            [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+            desc="Setting up model update group",
+        )
+        logger.info("======== ✅ model update group setup successfully =========")
         weight_sync_initialized = True
 
         start_weight_sync_thread(initial_resume_training_step=1)
