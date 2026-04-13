@@ -311,6 +311,9 @@ class TestSlackMessage(unittest.TestCase):
 
 
 class TestWarnIfLowDiskSpace(unittest.TestCase):
+    def setUp(self):
+        utils._WARNED_LOW_DISK_SPACE_PATHS.clear()
+
     @parameterized.expand(
         [
             ("gcs", "gs://bucket/path"),
@@ -340,6 +343,15 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
             mock_warning.assert_called_once()
             self.assertIn("90.0%", mock_warning.call_args[0][0])
 
+    @mock.patch("shutil.disk_usage")
+    def test_warning_only_logged_once_per_path(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
+            utils.warn_if_low_disk_space("/tmp/../tmp/test", threshold=0.85)
+            mock_warning.assert_called_once()
+
     @responses.activate
     @mock.patch("shutil.disk_usage")
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
@@ -356,6 +368,22 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
         self.assertEqual(len(responses.calls), 1)
         request_body = json.loads(responses.calls[0].request.body)
         self.assertIn("Disk usage near capacity", request_body["text"])
+
+    @responses.activate
+    @mock.patch("shutil.disk_usage")
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
+    @mock.patch("os.environ.get")
+    def test_slack_alert_sent_once_per_path(self, mock_environ_get, mock_get_beaker_url, mock_disk_usage):
+        webhook_url = "https://hooks.slack.com/services/test"
+        mock_environ_get.return_value = webhook_url
+        mock_get_beaker_url.return_value = None
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
+
+        utils.warn_if_low_disk_space("/tmp/test", send_slack_alerts=True)
+        utils.warn_if_low_disk_space("/tmp/test", send_slack_alerts=True)
+
+        self.assertEqual(len(responses.calls), 1)
 
     @mock.patch("shutil.disk_usage")
     def test_zero_total_disk_space_returns_early(self, mock_disk_usage):
