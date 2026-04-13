@@ -28,8 +28,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from ray.util import queue as ray_queue
 
-from open_instruct import data_loader, logger_utils
-from open_instruct.utils import find_free_port
+from open_instruct import data_loader, logger_utils, utils
 
 
 class ActorManager:
@@ -83,7 +82,7 @@ class ActorManager:
     def _start_dashboard(self):
         """Start the FastAPI dashboard server in a background thread."""
         if self._args.queue_dashboard_port is None:
-            self._dashboard_port = find_free_port()
+            self._dashboard_port = utils.find_free_port()
         else:
             self._dashboard_port = self._args.queue_dashboard_port
         assert self._dashboard_port is not None

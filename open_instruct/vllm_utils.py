@@ -732,6 +732,8 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
+            # There is a TOCTOU race: another process could claim the port between
+            # find_free_port() and uvicorn binding. Unlikely in practice.
             self.server_port = utils.find_free_port()
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
