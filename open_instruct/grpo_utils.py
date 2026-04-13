@@ -170,7 +170,7 @@ class GRPOExperimentConfig(
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    checkpoint_state_freq: int = -1
+    checkpoint_state_freq: int = 200
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
@@ -219,8 +219,6 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
-        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
-            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
