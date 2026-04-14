@@ -367,6 +367,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
+        model_step=metadata.get("model_step"),
     )
     return result, metadata["is_eval"]
 
@@ -392,7 +393,7 @@ def ray_noset_visible_devices(env_vars=os.environ):
     return any(env_vars.get(env_var) for env_var in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST)
 
 
-@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
+@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError, TimeoutError), max_time=60, interval=0.5)
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
@@ -422,6 +423,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "index": request.index,
         "prompt_id": request.prompt_id,
+        "model_step": actor.current_model_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
@@ -589,6 +591,7 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.current_model_step: int = 0
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -678,7 +681,7 @@ class LLMRayActor:
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
             config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
-            asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
+            asyncio.create_task(uvicorn.Server(config).serve())
 
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
@@ -786,6 +789,9 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
+
+    def set_model_step(self, model_step: int) -> None:
+        self.current_model_step = model_step
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
