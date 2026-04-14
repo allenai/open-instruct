@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from queue import Empty
 from typing import Any, Literal
 
 import numpy as np
@@ -32,19 +33,25 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, utils
+from open_instruct import data_types, padding_free_collator, utils
+from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
+    TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
 )
+from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
-from open_instruct.rl_utils import PackedSequences, pack_sequences
-from open_instruct.tools.utils import ToolStatistics
+from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
+from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
+
+DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -59,7 +66,7 @@ def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, A
     """
     if device is None:
         return batch
-    return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -81,12 +88,15 @@ class HFDataLoader(data_loader.DataLoaderBase):
         automatic_reshuffle: bool = False,
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
         device: torch.device | None = None,
+        drop_last: bool = True,
+        fs_local_rank: int | None = None,
+        max_seq_length: int = 1,
     ) -> None:
         """Initialize the HFDataLoader.
 
         Args:
             dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
-            batch_size: The global batch size.
+            batch_size: The global batch size (in sequences).
             seed: Random seed for shuffling.
             dp_rank: The rank of the current process in the distributed setup.
             dp_world_size: Total number of data-parallel processes in the distributed setup.
@@ -95,18 +105,24 @@ class HFDataLoader(data_loader.DataLoaderBase):
             collator: Optional collation function for batching examples. If None, batches will be
                 dictionaries of the form `{'examples': [example_1, example_2, ...]}`.
             device: Device to move tensors to.
+            drop_last: If True, drop the last incomplete batch. If False, pad the last batch
+                with repeated indices to fill a complete batch.
+            fs_local_rank: File system local rank. Defaults to dp_rank when None.
+            max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
+                to the trainer for batch-size validation.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
+        # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
-            global_batch_size=batch_size,
+            global_batch_size=batch_size * max_seq_length,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
-            fs_local_rank=dp_rank,
+            fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
         )
 
         if "index" not in dataset.column_names:
@@ -130,7 +146,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._per_rank_batch_size = batch_size // dp_world_size
         self._collator = collator if collator is not None else (lambda x: {"examples": x})
         self._automatic_reshuffle = automatic_reshuffle
+        self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
+        self._overflow: list[dict[str, Any]] = []
+        self._precomputed_batch_sizes: list[int] | None = None
+        self._num_padding_batches: int = 0
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
@@ -156,18 +176,50 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
+        # World-aware packing: batch boundaries were precomputed by
+        # _reshard_with_packing so that every rank has the same number of
+        # batches. Each entry in _precomputed_batch_sizes is the number of
+        # examples in that batch (variable due to packing).
+        if self._precomputed_batch_sizes is not None:
+            num_real = len(self._precomputed_batch_sizes) - self._num_padding_batches
+            offset = 0
+            for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
+                if batch_idx < self.batches_processed:
+                    offset += batch_size
+                    continue
+                examples = []
+                for i in range(offset, offset + batch_size):
+                    example = self.dataset[i]
+                    examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
+                offset += batch_size
+                yield batch
+            return
+
         start_example = self.batches_processed * self._per_rank_batch_size
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
             example = self.dataset[i]
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
-                yield to_device(self._collator(batch_examples), self._device)
+                all_examples = self._overflow + batch_examples
+                batch = to_device(self._collator(all_examples), self._device)
+                self._overflow = all_examples[len(batch["index"]) :]
+                yield batch
                 batch_examples = []
+        while self._overflow:
+            batch = to_device(self._collator(self._overflow), self._device)
+            assert len(batch["index"]) > 0, (
+                f"Collator consumed 0 examples from {len(self._overflow)} overflow examples"
+            )
+            self._overflow = self._overflow[len(batch["index"]) :]
+            yield batch
 
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
+        if self._precomputed_batch_sizes is not None:
+            return len(self._precomputed_batch_sizes)
         return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
@@ -212,16 +264,33 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
         Uses index-based shuffling to avoid copying the dataset.
         """
-        rng = np.random.default_rng(self.seed + epoch)
-        all_indices = np.arange(len(self._full_dataset))
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + epoch)
+        dataset_len = len(self._full_dataset)
+        all_indices = torch.randperm(dataset_len, generator=generator).numpy()
         if self._excluded_indices:
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
-        rng.shuffle(all_indices)
+
+        packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
+        if packing_enabled:
+            self._reshard_with_packing(all_indices)
+            return
+
+        self._precomputed_batch_sizes = None
+        self._num_padding_batches = 0
+        self._overflow = []
 
         global_size = len(all_indices)
         total_batches = global_size // self._batch_size
         usable_size = total_batches * self._batch_size
+
+        if not self._drop_last and usable_size < global_size:
+            remainder = global_size - usable_size
+            pad_indices = all_indices[: self._batch_size - remainder]
+            all_indices = np.concatenate([all_indices, pad_indices])
+            total_batches += 1
+            usable_size = total_batches * self._batch_size
 
         # Distribute examples from global batches to ranks. This is a form of strided sampling where each
         # rank gets a subset of examples from each global batch, ensuring a diverse set of examples.
@@ -231,6 +300,68 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
 
+    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
+        """Reshard with world-aware packing so all ranks get the same batch count.
+
+        Instead of distributing examples to ranks and letting each rank pack
+        independently (which can produce different batch counts due to variable
+        overflow), this packs globally first and then distributes packed batches
+        round-robin to ranks.
+        """
+        max_seq_length = self._collator.max_seq_length
+        column_names = self._full_dataset.column_names
+        subset = self._full_dataset.select(all_indices.tolist())
+        if "chosen_input_ids" in column_names:
+            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
+        else:
+            lengths = [[len(x)] for x in subset["input_ids"]]
+
+        num_streams = len(lengths[0])
+        batches: list[list[int]] = []
+        current_batch: list[int] = []
+        running_totals = [0] * num_streams
+
+        for i in range(len(all_indices)):
+            new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
+            would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
+            at_max_samples = len(current_batch) >= self._per_rank_batch_size
+
+            if would_exceed or at_max_samples:
+                batches.append(current_batch)
+                current_batch = [i]
+                running_totals = list(lengths[i])
+            else:
+                current_batch.append(i)
+                running_totals = new_totals
+
+        if current_batch:
+            batches.append(current_batch)
+
+        num_batches = len(batches)
+        padding_start = num_batches
+        if self._drop_last:
+            num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
+            batches = batches[:num_batches]
+        else:
+            if (remainder := num_batches % self.dp_world_size) > 0:
+                for _ in range(self.dp_world_size - remainder):
+                    batches.append(batches[-1])
+
+        rank_global_indices = list(range(self.dp_rank, len(batches), self.dp_world_size))
+        self._num_padding_batches = sum(1 for gi in rank_global_indices if gi >= padding_start)
+
+        rank_batches = batches[self.dp_rank :: self.dp_world_size]
+
+        rank_indices: list[int] = []
+        self._precomputed_batch_sizes = []
+        for batch in rank_batches:
+            for pos in batch:
+                rank_indices.append(int(all_indices[pos]))
+            self._precomputed_batch_sizes.append(len(batch))
+
+        self.effective_size = len(rank_indices)
+        self.dataset = self._full_dataset.select(rank_indices)
+
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
 
@@ -239,7 +370,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
         examples = [self.dataset[i] for i in range(num_examples)]
-        return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
+        return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:
         """Return the total number of tokens in the batch across all ranks.
@@ -255,12 +386,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
-        num_tokens = 0
-        for key, value in batch.items():
-            if "input_ids" in key and isinstance(value, torch.Tensor):
-                num_tokens += value.numel()
-        if num_tokens == 0:
-            raise ValueError("Batch contains no input_ids tensors. Cannot compute token count.")
+        num_tokens = padding_free_collator.get_num_tokens(batch)
         return num_tokens * self.dp_world_size
 
 
@@ -269,16 +395,11 @@ class VLLMConfig:
     vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
+    vllm_attention_backend: str | None = None
     vllm_sync_backend: str = "nccl"
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0
-
-    def __post_init__(self):
-        if os.environ.get("VLLM_USE_V1") == "0":
-            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
-            if self.vllm_enable_prefix_caching:
-                raise ValueError("Prefix caching is currently not supported for v0.")
 
 
 @dataclass
@@ -289,7 +410,7 @@ class StreamingDataLoaderConfig:
     pack_length: int = 512
 
     # Batching
-    async_steps: int = 1
+    async_steps: int = 8
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -297,13 +418,13 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
-    advantage_normalization_type: str = "standard"
+    advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_eval_list: list[str] = field(default_factory=list)
     dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
@@ -312,13 +433,14 @@ class StreamingDataLoaderConfig:
     dataset_config_hash: str | None = None
     dataset_config_eval_hash: str | None = None
     dataset_skip_cache: bool = False
-    shuffle_eval_dataset: bool = False
     system_prompt_override_file: str | None = None
 
     # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
-    inflight_updates: bool = False
+    inflight_updates: bool = True
+    eval_response_length: int | None = None
+    """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -329,6 +451,10 @@ class StreamingDataLoaderConfig:
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
     remap_verifier: str | None = None
+
+    # Reward aggregation
+    reward_aggregator: Literal["last", "sum"] = "last"
+    """How to combine per-turn rewards: 'last' (use last turn reward) or 'sum' (sum all rewards across turns)."""
 
     # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
@@ -352,10 +478,26 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
+    # Evolving rubric reward
+    apply_evolving_rubric_reward: bool = False
+    """Whether to generate and apply evolving rubrics for reward computation.
+    When enabled, a rubric buffer is automatically maintained across training steps."""
+    max_active_rubrics: int = 5
+    """Maximum number of active evolving rubrics per query."""
+    cache_evolving_rubric_data_dir: str | None = None
+    """Directory to cache evolving rubric generation data for debugging/analysis. If set, rubric data will be saved."""
+
+    # Rollout saving
+    save_traces: bool = False
+    rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
+
     # Computed at post_init
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if self.eval_response_length is None:
+            self.eval_response_length = self.response_length
+
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -381,9 +523,12 @@ class StreamingDataLoaderConfig:
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
+        assert (
+            self.apply_verifiable_reward
+            or self.apply_r1_style_format_reward
+            or self.non_stop_penalty
+            or self.apply_evolving_rubric_reward
+        ), "At least one reward must be applied!"
 
         if self.stop_strings is None:
             self.stop_strings = []
@@ -394,9 +539,11 @@ class StreamingDataLoaderConfig:
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
 
+        if self.save_traces and not self.rollouts_save_path:
+            raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
+
     def build_dataloader(
         self,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         dp_rank: int,
         fs_local_rank: int,
@@ -406,7 +553,6 @@ class StreamingDataLoaderConfig:
     ) -> "StreamingDataLoader":
         """Build a thin wrapper dataloader that pulls from the DataPreparationActor singleton."""
         return StreamingDataLoader(
-            data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             work_dir=work_dir,
             global_batch_size=self.num_unique_prompts_rollout,
@@ -423,7 +569,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
     def __init__(
         self,
         *,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
         work_dir: Path | str,
         global_batch_size: int,
@@ -440,7 +585,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             fs_local_rank=fs_local_rank,
         )
 
-        self.data_prep_actor = ray.get_actor(data_prep_actor_name)
+        self.data_prep_actor = ray.get_actor(DATA_PREP_ACTOR_NAME)
         self.tokenizer = tokenizer
         self.num_training_steps = num_training_steps
         self.training_step = 0
@@ -462,11 +607,11 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.current_epoch = epoch
 
     def get_mock_batch(self) -> dict[str, Any]:
-        dummy_qr = torch.tensor([self.tokenizer.pad_token_id, self.tokenizer.eos_token_id], dtype=torch.long)
-        dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-        dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-        dummy_response_mask = torch.zeros_like(dummy_qr)
-        dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+        dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
+        dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
+        dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
+        dummy_response_mask = torch.tensor([[0, 1]], dtype=torch.long)
+        dummy_advantage = torch.tensor([[0.0, 1.0]], dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
             query_responses=[dummy_qr],
@@ -480,13 +625,17 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
+            wait_start_time = time.perf_counter()
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
+            trainer_idle_wait_time = time.perf_counter() - wait_start_time
+            batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
             yield batch_data
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
+    padded_tensor = torch.atleast_2d(padded_tensor)
     if pin_memory and torch.cuda.is_available():
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor
@@ -506,10 +655,74 @@ class BatchStatistics:
     total_prompts: int
 
 
+def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
+    assert len(examples) == 1, f"Expected 1 example, got {len(examples)}"
+    example = examples[0]
+    return example | {"index": torch.tensor([example["index"]])}
+
+
+def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, Any] | None) -> EnvConfig:
+    """Merge base and sample env config into canonical payload.
+    Sample env_config overrides any base env_configs with the same name.
+    """
+    if sample_env_config is None:
+        return base_env_config
+
+    max_steps = sample_env_config.get("max_steps", base_env_config.max_steps)
+
+    merged = dict(base_env_config.env_configs)
+    for sample_entry in sample_env_config.get("env_configs", []):
+        env_name = sample_entry["env_name"]
+        base = merged.get(env_name)
+        is_text_env = sample_entry.get("is_text_env", base.is_text_env if base else False)
+        extra = {k: v for k, v in sample_entry.items() if k not in ("env_name", "is_text_env")}
+        merged_kwargs = {**(base.kwargs if base else {}), **extra}
+        merged[env_name] = EnvConfigEntry(env_name=env_name, is_text_env=is_text_env, kwargs=merged_kwargs)
+
+    return EnvConfig(max_steps=max_steps, env_configs=merged)
+
+
+def _aggregate_env_metrics(rollout_states: list[dict]) -> dict[str, float]:
+    env_metrics: dict[str, dict[str, list[float]]] = {}
+    for rs in rollout_states:
+        info = rs.get("info", {})
+        multi_env_metrics = info.get("env_metrics")
+        if multi_env_metrics is not None:
+            for ename, per_env in multi_env_metrics.items():
+                bucket = env_metrics.setdefault(ename, {})
+                for k, v in per_env.items():
+                    bucket.setdefault(k, []).append(float(v))
+            continue
+
+        ename = info.get("env_name", "unknown")
+        bucket = env_metrics.setdefault(ename, {})
+        for k, v in info.items():
+            if k != "env_name" and isinstance(v, (int, float)):
+                bucket.setdefault(k, []).append(float(v))
+
+    return {
+        f"env/{ename}/{k}": float(np.mean(vals))
+        for ename, metrics in env_metrics.items()
+        for k, vals in metrics.items()
+    }
+
+
 def add_prompt_to_generator(
-    example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
+    example: dict[str, Any],
+    epoch_number: int,
+    param_prompt_Q: ray_queue.Queue,
+    generation_config,
+    is_eval: bool,
+    base_env_config: EnvConfig,
+    ground_truth_overrides: dict[int, Any] | None = None,
 ) -> None:
-    index = example["index"]
+    index = int(example["index"])
+
+    sample_env_config = example.get(ENV_CONFIG_KEY)
+    env_config = _merge_env_config(base_env_config, sample_env_config)
+
+    ground_truth = ground_truth_overrides.get(index) if ground_truth_overrides else None
+
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
@@ -517,6 +730,9 @@ def add_prompt_to_generator(
             index=index,
             prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
+            active_tools=example.get(TOOLS_COLUMN_KEY),
+            env_config=env_config,
+            ground_truth=ground_truth,
         )
     )
 
@@ -528,6 +744,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
+    base_env_config: EnvConfig,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -539,6 +756,8 @@ def accumulate_inference_batches(
     training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
+    requeue_on_timeout: bool = True,
+    ground_truth_overrides: dict[int, Any] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -558,8 +777,11 @@ def accumulate_inference_batches(
     all_raw_queries = []
     all_decoded_responses = []
     all_reward_metrics = []
+    all_active_tools = []
     all_scores = []
+    all_indices = []
     all_percent_solved = []
+    all_model_steps = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -575,11 +797,22 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
+    collected_results = []  # Track results for potential requeue on timeout
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
         )
-        result = inference_results_Q.get(timeout=timeout)
+        try:
+            result = inference_results_Q.get(timeout=timeout)
+        except Empty:
+            if requeue_on_timeout and collected_results:
+                logger.info(
+                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                )
+                for r in collected_results:
+                    inference_results_Q.put(r)
+            raise
+        collected_results.append(result)
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )
@@ -598,12 +831,21 @@ def accumulate_inference_batches(
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
+        sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
         if replenish_prompts:
             assert iter_dataloader is not None
             assert param_prompt_Q is not None
             example = next(iter_dataloader)
-            add_prompt_to_generator(example, iter_dataloader._epoch, param_prompt_Q, generation_config, is_eval=False)
+            add_prompt_to_generator(
+                example,
+                iter_dataloader._epoch,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+                base_env_config=base_env_config,
+                ground_truth_overrides=ground_truth_overrides,
+            )
 
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
@@ -611,12 +853,14 @@ def accumulate_inference_batches(
                 result.masks[i].append(1)
                 result.logprobs[i].append(float("nan"))
 
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
+        k_active_tools = repeat_each([sample_active_tools], generation_config.n)
+        k_indices = repeat_each([result.index], generation_config.n)
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -652,10 +896,14 @@ def accumulate_inference_batches(
         all_ground_truths.extend(k_ground_truths)
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
+        all_active_tools.extend(k_active_tools)
+        all_indices.extend(k_indices)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
+        if result.model_step is not None:
+            all_model_steps.append(result.model_step)
 
     if len(results) == 0:
         logging.warning(
@@ -675,6 +923,7 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
     combined_tool_call_stats = []
+    combined_rollout_states = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -696,6 +945,7 @@ def accumulate_inference_batches(
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
         combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_rollout_states.extend(result.request_info.rollout_states)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -725,6 +975,7 @@ def accumulate_inference_batches(
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
         tool_call_stats=combined_tool_call_stats,
+        rollout_states=combined_rollout_states,
     )
 
     combined_result = data_types.GenerationResult(
@@ -747,11 +998,17 @@ def accumulate_inference_batches(
         datasets=all_datasets,
         raw_queries=all_raw_queries,
         decoded_responses=all_decoded_responses,
-        indices=None,
+        indices=all_indices,
         scores=all_scores,
+        active_tools=all_active_tools if all_active_tools else None,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    if all_model_steps:
+        model_steps_array = np.array(all_model_steps, dtype=float)
+        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
@@ -884,6 +1141,9 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         tool_names: list[str],
+        run_name: str,
+        model_name: str | None,
+        base_env_config: EnvConfig,
         initial_state: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
@@ -901,6 +1161,9 @@ class DataPreparationActor:
         self.verbose = verbose
         self.dataset = dataset
         self.tool_names = tool_names
+        self.run_name = run_name
+        self.model_name = model_name
+        self.base_env_config = base_env_config
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -910,26 +1173,45 @@ class DataPreparationActor:
             dp_world_size=1,
             work_dir=work_dir,
             automatic_reshuffle=True,
-            collator=lambda x: x[0],
+            collator=single_example_collator,
         )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
         self.metrics: dict[int, dict] = {}
         self.current_prepared_step = -1
+        self._last_consumed_step = -1
         self.lock = threading.Lock()
         self.shutdown_requested = False
         self.training_step = 0
+        self.total_samples_written = 0
+        self.metadata_saved = False
+        self._executor: ThreadPoolExecutor | None = None
+        self._prep_future = None
+
+        self.rubric_manager: RubricManager | None = None
+        self.ground_truth_overrides: dict[int, Any] = {}
+        if self.config.apply_evolving_rubric_reward:
+            self.rubric_manager = RubricManager(self.config, dataset[GROUND_TRUTHS_KEY])
 
         if initial_state is not None:
-            self.training_step = initial_state["training_step"]
-            self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
-            logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
+            logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
+            self.set_state(initial_state)
+            self.start()
 
+    def start(self):
+        if self._prep_future is not None:
+            return
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
         self._prep_future = self._executor.submit(self._data_preparation_loop)
+        logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
+
+        if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
+            save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
+            self.metadata_saved = True
+
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
         for _ in range(num_initial_prompts):
@@ -939,11 +1221,23 @@ class DataPreparationActor:
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
+                base_env_config=self.base_env_config,
+                ground_truth_overrides=self.ground_truth_overrides,
             )
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
                 return
+
+            generation_idle_wait_start_time = time.perf_counter()
+            while step - self._last_consumed_step > self.config.async_steps:
+                if self.shutdown_requested:
+                    return
+                logger.info(
+                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                )
+                time.sleep(0.1)
+            generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -965,6 +1259,8 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+                base_env_config=self.base_env_config,
+                ground_truth_overrides=self.ground_truth_overrides,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -987,12 +1283,23 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {}
+                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
                     self.current_prepared_step = step
                 continue
 
             assert batch is not None
             assert batch_stats is not None
+
+            if self.rubric_manager and batch.decoded_responses:
+                rubric_metrics, new_overrides = self.rubric_manager.run_step(
+                    decoded_responses=batch.decoded_responses,
+                    ground_truths=batch.ground_truths,
+                    indices=batch.indices,
+                    step=step,
+                )
+                reward_metrics.update(rubric_metrics)
+                self.ground_truth_overrides.update(new_overrides)
+
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1006,6 +1313,19 @@ class DataPreparationActor:
                 advantages = scores - mean_grouped_rewards
             else:
                 raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+
+            if self.config.save_traces and self.config.rollouts_save_path:
+                save_rollouts_to_disk(
+                    self.config.rollouts_save_path,
+                    self.run_name,
+                    step,
+                    batch,
+                    result,
+                    advantages,
+                    self.config.num_samples_per_prompt_rollout,
+                    self.total_samples_written,
+                )
+                self.total_samples_written += len(batch.queries)
 
             if self.config.mask_truncated_completions:
                 stop_idxes = torch.tensor(
@@ -1050,7 +1370,7 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {}
+                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1072,6 +1392,7 @@ class DataPreparationActor:
                 batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
                 step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "scores": scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
@@ -1098,13 +1419,12 @@ class DataPreparationActor:
                     **batch_metrics_prefixed,
                 }
 
-                tool_stats = ToolStatistics(tool_names=self.tool_names)
-                excess_calls = result.request_info.excess_tool_calls or [
-                    {} for _ in range(len(result.request_info.tool_call_stats))
-                ]
-                for rollout_stats, excess in zip(result.request_info.tool_call_stats, excess_calls):
-                    tool_stats.add_rollout(rollout_stats, excess)
+                tool_stats = EnvStatistics(tool_names=self.tool_names)
+                for rollout_stats in result.request_info.tool_call_stats:
+                    tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
+
+                step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
@@ -1118,6 +1438,8 @@ class DataPreparationActor:
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
+        if self._prep_future is None:
+            self.start()
         logger.info(
             f"[DataPreparationActor.get_data] rank={rank} requesting step={step}, current_prepared_step={self.current_prepared_step}"
         )
@@ -1129,6 +1451,7 @@ class DataPreparationActor:
                 if step <= self.current_prepared_step:
                     batch_data = self.prepared_data[step][rank]
                     result = {"batch": batch_data, "metrics": self.metrics[step]}
+                    self._last_consumed_step = max(self._last_consumed_step, step)
                     self._cleanup_old_steps(step)
                     logger.info(
                         f"[DataPreparationActor.get_data] rank={rank} got data for step={step} after {wait_count} waits"
@@ -1151,10 +1474,19 @@ class DataPreparationActor:
 
     def get_state(self) -> dict:
         return {
-            "training_step": self.current_prepared_step + 1,
+            "training_step": self.training_step,
+            "last_consumed_step": self._last_consumed_step,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
 
     def set_state(self, state: dict):
-        self.training_step = state["training_step"]
+        if self._prep_future is not None:
+            raise RuntimeError("Cannot update DataPreparationActor state after preparation has started")
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
+
+        self._last_consumed_step = state.get("last_consumed_step", state["training_step"] - 1)
+        self.training_step = self._last_consumed_step + 1
+
+        logger.info(
+            f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}"
+        )

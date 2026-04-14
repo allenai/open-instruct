@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import wandb
 from accelerate import Accelerator
 from accelerate.utils import gather_object
 from huggingface_hub import HfApi
@@ -19,6 +20,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForSequenceClassification, PreTrainedModel, get_scheduler
 
+from open_instruct import olmo_adapter
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     REJECTED_INPUT_IDS_KEY,
@@ -161,15 +163,8 @@ def layer_init(layer: nn.Module, std: float):
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
-    from open_instruct.olmo_adapter import (
-        Olmo2Config,
-        Olmo2ForSequenceClassification,
-        OlmoeConfig,
-        OlmoeForSequenceClassification,
-    )
-
-    AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
-    AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+    AutoModelForSequenceClassification.register(olmo_adapter.Olmo2Config, olmo_adapter.Olmo2ForSequenceClassification)
+    AutoModelForSequenceClassification.register(olmo_adapter.OlmoeConfig, olmo_adapter.OlmoeForSequenceClassification)
 
     # ------------------------------------------------------------
     # Setup tokenizer
@@ -220,17 +215,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
     all_configs = {}
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
-        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+    if (beaker_config := maybe_get_beaker_config()) is not None:
         if len(beaker_config.beaker_dataset_id_urls) > 0:
             args.output_dir = "/output"
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if accelerator.is_main_process:
         if args.with_tracking:
-            import wandb
-
             wandb.init(
                 project=args.wandb_project_name,
                 entity=args.wandb_entity,

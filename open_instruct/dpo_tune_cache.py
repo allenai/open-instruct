@@ -26,6 +26,7 @@ with contextlib.suppress(Exception):
 
 # isort: on
 import math
+import pathlib
 import random
 import shutil
 import time
@@ -42,7 +43,7 @@ from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 
@@ -59,6 +60,7 @@ from open_instruct.utils import (
     ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
+    get_optimizer_grouped_parameters,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
@@ -112,7 +114,7 @@ def build_deepspeed_config(
     return config
 
 
-def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
+def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -161,16 +163,14 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
     args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if is_beaker_job():
         args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    beaker_config = maybe_get_beaker_config() if accelerator.is_main_process else None
+
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -182,8 +182,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
@@ -196,7 +194,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        if accelerator.is_main_process and is_beaker_job():
+        if accelerator.is_main_process and beaker_config is not None:
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
@@ -214,7 +212,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if args.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
         if accelerator.is_main_process:
-            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None
 
@@ -227,7 +225,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Make one log on every process with the configuration for debugging.
     logger_utils.setup_logger()
-    logger.info(accelerator.state, main_process_only=False)
+    if accelerator.is_main_process:
+        logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -309,10 +308,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     quantization_config=bnb_config,
                     device_map=device_map,
                     dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
                 )
             elif args.use_liger_kernel:
-                from liger_kernel.transformers import AutoLigerKernelForCausalLM
+                from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
 
                 logger.info("Attempting to apply liger-kernel.")
 
@@ -324,7 +323,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
                     # liger-kernel specific args
                     fused_linear_cross_entropy=False,  # don't fuse the linear layer with CE loss, since we want logits
                 )
@@ -337,7 +336,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
                     dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
                 )
         else:
             logger.info("Training new model from scratch")
@@ -360,7 +359,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     if args.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=args.activation_memory_budget < 1
+            )
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -373,17 +374,19 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    elif args.gradient_checkpointing:
+    elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
+    # For VLM configs (e.g. Qwen3.5), model dim attributes live under text_config.
+    dims_config = getattr(config, "text_config", config)
     model_dims = ModelDims(
-        num_layers=config.num_hidden_layers,
-        hidden_size=config.hidden_size,
-        intermediate_size=config.intermediate_size,
-        vocab_size=config.vocab_size,
-        num_attn_heads=config.num_attention_heads,
-        head_dim=config.hidden_size // config.num_attention_heads,
-        num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+        num_layers=dims_config.num_hidden_layers,
+        hidden_size=dims_config.hidden_size,
+        intermediate_size=dims_config.intermediate_size,
+        vocab_size=dims_config.vocab_size,
+        num_attn_heads=dims_config.num_attention_heads,
+        head_dim=dims_config.hidden_size // dims_config.num_attention_heads,
+        num_kv_heads=getattr(dims_config, "num_key_value_heads", dims_config.num_attention_heads),
     )
 
     # Capture full dataset size by getting it from the dataset. Sharding happens inside the dataloaders, not the dataset, so we're fine to do this.
@@ -405,22 +408,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     else:
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
+    train_sampler = RandomSampler(train_dataset, generator=torch.Generator().manual_seed(args.seed))
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset, sampler=train_sampler, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
-    # Split weights in two groups, one with weight decay and the other not.
-    no_decay = ["bias", "layer_norm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-        },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
-    ]
+    optimizer_grouped_parameters = get_optimizer_grouped_parameters(model, args.weight_decay)
+
     if args.use_qlora or args.dpo_use_paged_optimizer:
-        from bitsandbytes.optim import AdamW
+        from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
         optimizer = AdamW(
             optimizer_grouped_parameters,
@@ -520,15 +517,20 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Cache the logprobs
     if args.loss_type.needs_reference_model:
+        ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
+        reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            accelerator=accelerator,
             average_log_prob=args.loss_type.is_average_loss,
             forward_fn=args.forward_fn,
             full_dataset_size=original_dataset_size,
-            reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
+            device=accelerator.device,
+            cache_path=reference_cache_path,
+            is_main_process=accelerator.is_main_process,
+            model_dims=model_dims,
             use_lora=args.use_lora,
+            disable_adapter_context=None,
         )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -567,6 +569,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     average_log_prob=args.loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
@@ -580,7 +583,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                if accelerator.sync_gradients and args.max_grad_norm:
                     accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -615,7 +618,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
                     global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
-                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
+                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= (
+                        accelerator.num_processes * args.gradient_accumulation_steps * args.logging_steps
+                    )
                     global_metrics = {
                         name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
                     }
@@ -668,7 +673,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
-                    logger.info(logger_str)
+                    if accelerator.is_main_process:
+                        logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
                     if accelerator.is_main_process:
@@ -676,7 +682,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,
                             start_time=start_time,
-                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.get_url(),
+                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.url,
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()
@@ -690,7 +696,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                     with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                         f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                    if accelerator.is_local_main_process:
+                    if accelerator.is_main_process:
                         clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                     accelerator.wait_for_everyone()
 
@@ -705,7 +711,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-            if accelerator.is_local_main_process:
+            if accelerator.is_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
@@ -714,14 +720,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
-    # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
-        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+    if accelerator.is_main_process:
+        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     if (
         args.try_auto_save_to_beaker
         and accelerator.is_main_process
-        and is_beaker_job()
+        and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
@@ -732,9 +737,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+            wandb_url=wandb_tracker.run.url if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
@@ -756,6 +760,6 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)

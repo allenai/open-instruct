@@ -5,7 +5,7 @@ import multiprocessing as mp
 import re
 from collections import defaultdict
 
-from datasets import Dataset, load_dataset
+from datasets import Dataset, Sequence, Value, load_dataset
 
 import open_instruct.utils as open_instruct_utils
 
@@ -229,8 +229,6 @@ def is_short_phrase(text: str) -> bool:
 
     # Also check for simple comparison patterns (word < word or word > word)
     # But only if it's not a code pattern
-    import re
-
     comparison_pattern = r"^\w+\s*[<>]\s*\w+$"
     if re.match(comparison_pattern, text.strip()):
         # Make sure it's not a code pattern like "import math"
@@ -719,8 +717,6 @@ def print_repetitive_examples(dataset: Dataset, column: str = "assistant", num_e
             block_type = "unknown"
 
         # Extract repetition count
-        import re
-
         count_match = re.search(r"(\d+)x", reason)
         total_repetitions = int(count_match.group(1)) if count_match else 0
         consecutive_repetitions = 1 if "consecutive" not in reason else total_repetitions
@@ -807,8 +803,6 @@ def main():
             sample = detect_repetitive_patterns(dataset[0], column=args.column, sentence_level=args.sentence_level)
 
             # Define explicit features for the new columns to avoid type inference issues
-            from datasets import Sequence, Value
-
             # Create new features for the additional columns
             new_features = {
                 "has_repetition": Value("bool"),
@@ -892,7 +886,6 @@ def main():
                     block_type = "line"
                 else:
                     block_type = "unknown"
-                import re
 
                 count_match = re.search(r"(\d+)x", reason)
                 total_repetitions = int(count_match.group(1)) if count_match else 0

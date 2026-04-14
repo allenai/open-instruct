@@ -29,7 +29,7 @@ if ! [[ "$response_length" =~ ^[0-9]+$ ]]; then
 fi
 
 echo "Running benchmarks with response length: $response_length"
-echo "Models to benchmark: $@"
+echo "Models to benchmark: $*"
 echo "----------------------------------------"
 
 git_hash=$(git rev-parse --short HEAD)
@@ -71,7 +71,7 @@ for model_name_or_path in "$@"; do
             --num_unique_prompts_rollout 16 \
             --num_samples_per_prompt_rollout 4 \
 	    --inflight_updates True \
-            --vllm_num_engines 1 \
+            --vllm_num_engines 2 \
             --vllm_tensor_parallel_size 4 \
             --vllm_enable_prefix_caching \
             --vllm_gpu_memory_utilization 0.9 \

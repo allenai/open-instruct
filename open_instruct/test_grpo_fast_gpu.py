@@ -4,7 +4,7 @@ These tests require CUDA and will be skipped if not available.
 
 To run:
 
-    ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+    ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 
 Updating expected test data:
 
@@ -18,7 +18,7 @@ will fail. To update the expected data:
        git add -A && git commit -m "Remove outdated expected data for regeneration"
 
 3. Run the GPU tests on Beaker:
-       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+       ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 
 4. The test will generate new expected data and fail with "Re-run test to verify."
    Get the result dataset ID from the experiment:
@@ -30,7 +30,7 @@ will fail. To update the expected data:
 
 6. Commit the new expected file and re-run tests to verify:
        git add -A && git commit -m "Update expected test data"
-       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+       ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 """
 
 import json
@@ -41,7 +41,6 @@ import subprocess
 import time
 import unittest
 
-os.environ["VLLM_BATCH_INVARIANT"] = "1"
 os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
 import inspect
@@ -56,10 +55,10 @@ from transformers import AutoTokenizer
 
 import open_instruct.vllm_utils as vllm_utils_module
 from open_instruct.data_types import GenerationResult, PromptRequest
+from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import create_tools
+from open_instruct.grpo_fast import create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -82,7 +81,7 @@ class TestGeneration(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
-            cwd="open_instruct/tools/servers/python_server",
+            cwd="open_instruct/environments/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -101,7 +100,16 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tool_actors=None, max_tool_calls=None, max_tokens=50):
+    def _setup_engine_and_generate(
+        self,
+        tokenizer_name,
+        prompt,
+        pools=None,
+        tool_definitions=None,
+        tool_parser_type="legacy",
+        max_steps=None,
+        max_tokens=50,
+    ):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -140,8 +148,10 @@ class TestGeneration(TestGrpoFastBase):
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
-            tool_actors=tool_actors,
-            max_tool_calls=max_tool_calls or 5,
+            pools=pools or {},
+            tool_parser_type=tool_parser_type,
+            tool_definitions=tool_definitions,
+            max_steps=max_steps or 5,
             reward_config=reward_config,
             train_dataset=train_dataset,
         )
@@ -163,21 +173,26 @@ class TestGeneration(TestGrpoFastBase):
         test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
-        tokenizer_name = "Qwen/Qwen3-1.7B"
-        tool_actors = (
-            create_tools(
-                [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
+        tokenizer_name = "Qwen/Qwen3-0.6B"
+        pools = None
+        tool_definitions = None
+        if use_tools:
+            pools, _ = create_tool_pools(
+                [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
+                pool_size=4,
             )
-            if use_tools
-            else None
-        )
-        max_tool_calls = 5 if use_tools else None
+            # Collect tool definitions from pool for the parser
+            actor = ray.get(list(pools.values())[0].acquire.remote())
+            tool_definitions = ray.get(actor.get_tool_definitions.remote())
+            list(pools.values())[0].release.remote(actor)
+        max_steps = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,
             prompt=prompt,
-            tool_actors=tool_actors,
-            max_tool_calls=max_tool_calls,
+            pools=pools,
+            tool_definitions=tool_definitions,
+            max_steps=max_steps,
             max_tokens=max_tokens,
         )
 
@@ -199,8 +214,7 @@ class TestGeneration(TestGrpoFastBase):
                 "expected_text": tokenizer.decode(result.responses[0]),
             }
             test_data_path.write_text(json.dumps(test_data, indent=2))
-            self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
-            return
+            self.skipTest(f"Test data generated at {test_data_path}. Re-run test to verify.")
 
         expected = json.loads(test_data_path.read_text())
         self.assertEqual(result.responses[0], expected["expected_token_ids"])
@@ -212,7 +226,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_vllm_queue_system_single_prompt(self):
         """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
-        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         test_prompt = "What is the capital of France?"

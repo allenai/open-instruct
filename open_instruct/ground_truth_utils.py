@@ -8,6 +8,7 @@ They are then automatically added to the REWARD_FN_MAPPING.
 import ast
 import asyncio
 import copy
+import dataclasses
 import json
 import logging
 import os
@@ -17,14 +18,13 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import requests
 from litellm import acompletion
 
-from open_instruct import logger_utils
+from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
@@ -36,6 +36,8 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
+from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
+from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
 from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
@@ -49,7 +51,7 @@ logging.getLogger("cost_calculator").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-@dataclass
+@dataclasses.dataclass
 class VerifierConfig:
     """For now this config exists to support LMJudgeVerifer, can be expanded to support other verifers"""
 
@@ -60,9 +62,7 @@ class VerifierConfig:
         Only fields that exist in both the sources and VerifierConfig will be passed through.
         Later sources override earlier ones if they have the same field.
         """
-        import dataclasses
-
-        verifier_fields = {field.name for field in dataclasses.fields(cls)}
+        verifier_fields = {f.name for f in dataclasses.fields(cls)}
 
         matching_kwargs = {}
         for source in arg_sources:
@@ -75,7 +75,7 @@ class VerifierConfig:
         return cls(**matching_kwargs)
 
 
-@dataclass
+@dataclasses.dataclass
 class LMJudgeVerifierConfig(VerifierConfig):
     # judge args
     llm_judge_model: str
@@ -86,7 +86,7 @@ class LMJudgeVerifierConfig(VerifierConfig):
     seed: int
 
 
-@dataclass
+@dataclasses.dataclass
 class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
@@ -94,14 +94,14 @@ class CodeVerifierConfig(VerifierConfig):
     code_apply_perf_penalty: bool
 
 
-@dataclass
+@dataclasses.dataclass
 class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
 
 
-@dataclass
+@dataclasses.dataclass
 class MaxLengthVerifierConfig(VerifierConfig):
     max_length_verifier_max_length: int = 32768
 
@@ -131,7 +131,12 @@ class VerifierFunction(ABC):
 
     @abstractmethod
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Evaluate the given prediction against the ground truth (or constraint).
@@ -141,13 +146,19 @@ class VerifierFunction(ABC):
             prediction (str): The model output.
             label (Any): The ground truth answer or evaluation constraint.
             query (Optional[str]): The original query
+            rollout_state (Optional[dict]): Rollout state dict (rewards, step_count, done) for env verifiers.
 
         Returns:
             VerificationResult
         """
 
     async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
@@ -158,13 +169,16 @@ class VerifierFunction(ABC):
             prediction (str): The model output.
             label (Any): The ground truth answer or evaluation constraint.
             query (Optional[str]): The original query.
+            rollout_state (Optional[dict]): Rollout state dict for env verifiers.
 
         Returns:
             VerificationResult
         """
         # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self.__call__(tokenized_prediction, prediction, label, query))
+        return await loop.run_in_executor(
+            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state)
+        )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
@@ -193,10 +207,16 @@ class GSM8KVerifier(VerifierFunction):
         super().__init__("gsm8k", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
-        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
+        # Preserve explicit signs on both decimals and integers when extracting the final answer.
+        numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", response)
         extracted = numbers[-1] if numbers else response
         score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
@@ -214,7 +234,12 @@ class MathVerifier(VerifierFunction):
         super().__init__("math", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -263,7 +288,12 @@ class StrictMathVerifier(VerifierFunction):
         super().__init__("strict_math", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -292,7 +322,12 @@ class IFEvalVerifier(VerifierFunction):
         super().__init__("ifeval", weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | dict, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | dict,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
@@ -333,7 +368,12 @@ class IFEvalVerifierOld(VerifierFunction):
         super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | dict, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | dict,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         constraint = label
         answer = remove_thinking_section(prediction)
@@ -394,7 +434,12 @@ class FlanVerifier(VerifierFunction):
         super().__init__("flan", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         answer_string = prediction.split("The answer is: ")[-1].strip()
         score = float(normalize_answer(answer_string) == normalize_answer(label))
@@ -412,7 +457,12 @@ class StringMatcherVerifier(VerifierFunction):
         super().__init__("string_matcher", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         if "<answer>" not in prediction or "</answer>" not in prediction:
             return VerificationResult(score=0.0)
@@ -435,7 +485,12 @@ class F1Verifier(VerifierFunction):
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | list[str],
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         prediction = remove_thinking_section(prediction)
         labels: list[str] = label if isinstance(label, list) else [label]
@@ -454,7 +509,12 @@ class PuzzleMatcherVerifier(VerifierFunction):
         super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         # remove answer tags from the prediction
         prediction = remove_thinking_section(prediction)
@@ -474,7 +534,12 @@ class ReSearchVerifierF1(VerifierFunction):
         super().__init__("re_search_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         try:
             label = json.loads(label)
@@ -514,7 +579,12 @@ class R1SearchVerifier(VerifierFunction):
         super().__init__(name="re_search", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | list[str],
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         # 1. Parse JSON label safely
         parsed_labels: list | str
@@ -563,7 +633,12 @@ class MaxLenVerifier(VerifierFunction):
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         desired_length = float(label)
         # return absolute difference between the length of the prediction and the max length
@@ -593,7 +668,12 @@ class UpToMaxLenVerifier(VerifierFunction):
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         desired_length = float(label)
         length_diff = len(tokenized_prediction) - desired_length
@@ -672,7 +752,12 @@ class LMJudgeVerifier(VerifierFunction):
         )
 
     async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
@@ -689,21 +774,8 @@ class LMJudgeVerifier(VerifierFunction):
             try:
                 messages = build_messages(prompt)
 
-                # Faeze: check if the request would exceed context window
-                # Import the context window checker
-                try:
-                    from open_instruct.context_window_checker import (
-                        check_context_window_limit,
-                        truncate_messages_to_fit_context,
-                    )
-
-                    context_check_available = True
-                except ImportError:
-                    logger.warning("Context window checker not available. Proceeding without context checking.")
-                    context_check_available = False
-
                 # Check if the request would exceed context window
-                if context_check_available and not check_context_window_limit(
+                if not context_window_checker.check_context_window_limit(
                     messages=messages,
                     max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                     model_name=self.verifier_config.llm_judge_model,
@@ -711,7 +783,7 @@ class LMJudgeVerifier(VerifierFunction):
                     safety_margin=150,
                 ):
                     # Try to truncate messages to fit
-                    messages = truncate_messages_to_fit_context(
+                    messages = context_window_checker.truncate_messages_to_fit_context(
                         messages=messages,
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
@@ -720,7 +792,7 @@ class LMJudgeVerifier(VerifierFunction):
                     )
 
                     # Check again after truncation
-                    if not check_context_window_limit(
+                    if not context_window_checker.check_context_window_limit(
                         messages=messages,
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
@@ -752,7 +824,14 @@ class LMJudgeVerifier(VerifierFunction):
                     await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
         return VerificationResult(score=0.0, cost=0.0, reasoning="Unknown error after all retries.")
 
-    def __call__(self, tokenized_prediction: list[int], prediction: str, label: str, query: str) -> VerificationResult:
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
         """
         Evaluates the prediction based on an LLM's judgement.
 
@@ -848,7 +927,12 @@ class CodeVerifier(VerifierFunction):
         return cls._session_pool
 
     async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronously verify code execution against test cases.
@@ -910,7 +994,12 @@ class CodeVerifier(VerifierFunction):
             return VerificationResult(score=0.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Synchronously verify code execution against test cases.
@@ -935,6 +1024,171 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+
+
+class PassthroughVerifier(VerifierFunction):
+    """Passthrough verifier for environment-only tasks.
+
+    Returns 0.0 score — contributes nothing from the verifier side.
+    Per-turn rewards from the rollout are handled by the RewardAggregator.
+    """
+
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
+        super().__init__("passthrough", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        return VerificationResult(score=0.0)
+
+
+class RewardAggregator(ABC):
+    """Combines per-turn rewards into a final scalar."""
+
+    @abstractmethod
+    def __call__(self, rewards: list[float]) -> float: ...
+
+
+class LastRewardAggregator(RewardAggregator):
+    """Return the last reward (sparse reward envs)."""
+
+    def __call__(self, rewards: list[float]) -> float:
+        return rewards[-1] if rewards else 0.0
+
+
+class SumRewardAggregator(RewardAggregator):
+    """Sum all rewards (dense reward envs)."""
+
+    def __call__(self, rewards: list[float]) -> float:
+        return sum(rewards)
+
+
+@dataclasses.dataclass
+class RubricVerifierConfig(VerifierConfig):
+    """Configuration for rubric verifier."""
+
+    rubric_judge_model: str = "gpt-4.1"
+    rubric_judge_max_tokens: int = 2048
+    rubric_judge_temperature: float = 0.0
+    rubric_judge_timeout: int = 60
+    seed: int = 42
+
+
+class RubricVerifier(VerifierFunction):
+    """
+    Verifier that scores responses against rubrics defined in the ground truth.
+
+    The ground truth label should be a JSON string or dict with:
+    - "query": The original question
+    - "rubrics": List of rubric dicts with "description" and "weight" keys
+
+    Returns weighted average of rubric scores.
+
+    Environment Variables:
+        RUBRIC_JUDGE_MODEL: Override the LLM model used for rubric scoring.
+            Defaults to RubricVerifierConfig.rubric_judge_model ("gpt-4.1").
+    """
+
+    def __init__(self, verifier_config: RubricVerifierConfig) -> None:
+        super().__init__("rubric", verifier_config=verifier_config, weight=1.0)
+        self.config = verifier_config
+
+    async def async_call(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        """Score response against all rubrics in the ground truth."""
+        if isinstance(label, str):
+            try:
+                label = json.loads(label)
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse rubric label as JSON: {label[:100]}")
+                return VerificationResult(score=0.0)
+
+        if not isinstance(label, dict):
+            logger.warning(f"Rubric label is not a dict: {type(label)}")
+            return VerificationResult(score=0.0)
+
+        question = label.get("query") or label.get("Question") or query
+        rubrics = label.get("rubrics", [])
+
+        if not rubrics:
+            logger.warning("No rubrics found in ground truth")
+            return VerificationResult(score=0.0)
+
+        # Score each rubric in parallel
+        async def score_rubric(rubric: dict) -> tuple[float, float]:
+            description = rubric.get("description") or rubric.get("rubric_item") or rubric.get("Ingredient", "")
+            weight = rubric.get("weight", 1.0)
+
+            if not description:
+                logger.warning("Rubric with empty description found, skipping.")
+                return 0.0, 0.0
+
+            user_prompt = f"<question>{question}</question>\n<response>{prediction}</response>\n<criterion>{description}</criterion>"
+
+            try:
+                model_name = os.environ.get("RUBRIC_JUDGE_MODEL", self.config.rubric_judge_model)
+                resp = await run_litellm_async(
+                    model_name=model_name,
+                    system_prompt=RUBRIC_SCORING_PROMPT,
+                    user_prompt=user_prompt,
+                    temperature=self.config.rubric_judge_temperature,
+                    max_tokens=self.config.rubric_judge_max_tokens,
+                    timeout=self.config.rubric_judge_timeout,
+                )
+
+                obj = extract_json_from_response(resp)
+                if obj and isinstance(obj, dict) and "score" in obj:
+                    score = float(obj["score"]) / 2.0  # Normalize from 0-2 to 0-1
+                    return score, weight
+            except Exception as e:
+                logger.warning(f"Error scoring rubric: {e}")
+
+            return 0.0, weight
+
+        # Run all rubric scoring in parallel
+        results = await asyncio.gather(*[score_rubric(r) for r in rubrics])
+
+        # Compute weighted average
+        total_weight = sum(abs(w) for _, w in results)
+        if total_weight == 0:
+            return VerificationResult(score=0.0)
+
+        weighted_sum = sum(s * w for s, w in results)
+        final_score = weighted_sum / total_weight
+
+        return VerificationResult(score=final_score)
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        """Synchronous wrapper for async_call."""
+        try:
+            asyncio.get_running_loop()
+            raise RuntimeError("Cannot call synchronous method from async context. Use async_call instead.")
+        except RuntimeError:
+            # No loop is running, which is expected for a sync call
+            pass
+        return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return RubricVerifierConfig
 
 
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
@@ -1002,17 +1256,20 @@ async def apply_verifiable_reward(
     decoded_responses: list[str],
     ground_truths: list,
     datasets: list[str],
-    reward_mult: int = 10,
+    reward_mult: float = 1.0,
     queries: list[str] | None = None,
+    rollout_states: list[dict | None] | None = None,
 ):
     if queries is None:
         queries = [None] * len(responses)
+    if rollout_states is None:
+        rollout_states = [None] * len(responses)
 
     async_tasks = []
     task_metadata = []
 
-    for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, ground_truths, datasets, queries)
+    for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(
+        zip(responses, decoded_responses, ground_truths, datasets, queries, rollout_states)
     ):
         ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
         dataset_list = [dataset] if isinstance(dataset, str) else dataset
@@ -1025,17 +1282,14 @@ async def apply_verifiable_reward(
                 continue
 
             task = reward_func.async_call(
-                tokenized_prediction=tok_prediction, prediction=prediction, label=gt, query=query
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+                query=query,
+                rollout_state=rollout_state,
             )
             async_tasks.append(task)
-            task_metadata.append(
-                {
-                    "response_idx": i,
-                    "dataset": reward_func.name,
-                    "reward_weight": reward_func.weight,
-                    "reward_mult": reward_mult,
-                }
-            )
+            task_metadata.append({"response_idx": i, "dataset": reward_func.name, "reward_weight": reward_func.weight})
 
     if async_tasks:
         reward_results = await asyncio.gather(*async_tasks)
@@ -1050,7 +1304,6 @@ async def apply_verifiable_reward(
         response_idx = metadata["response_idx"]
         dataset = metadata["dataset"]
         reward_weight = metadata["reward_weight"]
-        reward_mult = metadata["reward_mult"]
 
         score = result.score if hasattr(result, "score") else result
         weighted_reward = reward_mult * score * reward_weight
@@ -1063,22 +1316,27 @@ async def apply_verifiable_reward(
     return response_rewards, response_per_func_rewards
 
 
-@dataclass
+@dataclasses.dataclass
 class RewardConfig:
     """Configuration for reward function computation."""
 
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
     apply_verifiable_reward: bool = True
-    verification_reward: int = 10
+    verification_reward: float = 10.0
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False
     additive_format_reward: bool = False
-    verifier_functions: dict[str, VerifierFunction] = field(default_factory=dict)
+    verifier_functions: dict[str, VerifierFunction] = dataclasses.field(default_factory=dict)
+    reward_aggregator: Literal["last", "sum"] = "last"
+    """How to combine per-turn rewards: 'last' (use last turn reward) or 'sum' (sum all rewards across turns)."""
 
     def build(self) -> Callable:
         """Build and return the reward function."""
+        aggregator: RewardAggregator = {"last": LastRewardAggregator(), "sum": SumRewardAggregator()}[
+            self.reward_aggregator
+        ]
 
         async def reward_fn(
             responses: list,
@@ -1093,6 +1351,7 @@ class RewardConfig:
             tool_errors = infos.tool_errors
             tool_outputs = infos.tool_outputs
             tool_calleds = infos.tool_calleds
+            rollout_states = infos.rollout_states or [{}] * len(decoded_responses)
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1118,17 +1377,30 @@ class RewardConfig:
                     datasets,
                     reward_mult=self.verification_reward,
                     queries=queries,
+                    rollout_states=rollout_states,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+
                 for i in range(len(verifiable_rewards)):
                     if not self.only_reward_good_outputs or (good_outputs[i] and self.only_reward_good_outputs):
-                        if self.apply_r1_style_format_reward and self.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                        turn_rewards = list(rollout_states[i].get("rewards", []))
+                        verifier_score = verifiable_rewards[i]
+
+                        if turn_rewards:
+                            turn_rewards[-1] += verifier_score
                         else:
-                            scores[i] = verifiable_rewards[i]
+                            turn_rewards = [verifier_score]
+
+                        raw_score = aggregator(turn_rewards)
+
+                        if self.apply_r1_style_format_reward and self.additive_format_reward:
+                            scores[i] = raw_score + scores[i]
+                        elif self.apply_r1_style_format_reward and not self.additive_format_reward:
+                            scores[i] = raw_score if format_scores[i] == 1 else 0
+                        else:
+                            scores[i] = raw_score
+
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()

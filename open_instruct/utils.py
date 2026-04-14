@@ -19,7 +19,7 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum, OffloadStateTypeEnum
     import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
@@ -54,11 +54,14 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
 import beaker
+import huggingface_hub
 import numpy as np
 import ray
 import requests
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
+import wandb
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -70,7 +73,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
+from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -166,6 +169,12 @@ class MetricsTracker:
         # Convert to Python floats for logging systems (wandb, tensorboard)
         metrics_list = self.metrics.tolist()
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
+
+
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 def max_num_processes() -> int:
@@ -676,7 +685,9 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
+    def parse_yaml_and_args(
+        self, yaml_arg: str, other_args: list[str] | None = None, allow_extra_keys: bool = False
+    ) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.
 
@@ -689,7 +700,7 @@ class ArgumentParserPlus(HfArgumentParser):
         Returns:
             [`List[dataclass]`]: a list of dataclasses with the values from the YAML file and the command line
         """
-        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg))
+        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg), allow_extra_keys=allow_extra_keys)
 
         outputs = []
         # strip other args list into dict of key-value pairs
@@ -733,14 +744,16 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> DataClassType | tuple[DataClassType]:
+    def parse(self, allow_extra_keys: bool = False) -> DataClassType | tuple[DataClassType]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
-            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]))
+            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]), allow_extra_keys=allow_extra_keys)
         # parse command line args and yaml file
         elif len(sys.argv) > 2 and sys.argv[1].endswith(".yaml"):
-            output = self.parse_yaml_and_args(os.path.abspath(sys.argv[1]), sys.argv[2:])
+            output = self.parse_yaml_and_args(
+                os.path.abspath(sys.argv[1]), sys.argv[2:], allow_extra_keys=allow_extra_keys
+            )
         # parse command line args only
         else:
             output = self.parse_args_into_dataclasses()
@@ -752,11 +765,15 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
+def get_git_commit() -> str:
+    """Get the current git commit hash from environment variable."""
+    return os.environ.get("GIT_COMMIT", "unknown")
+
+
 def get_wandb_tags() -> list[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
-    if "GIT_COMMIT" in os.environ:
-        git_commit = os.environ["GIT_COMMIT"]
+    if (git_commit := get_git_commit()) != "unknown":
         tags.append(f"commit: {git_commit}")
         try:
             # try finding the pull request number on github
@@ -820,7 +837,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             logger.info(f"Removing checkpoint {checkpoint}")
-            shutil.rmtree(os.path.join(output_dir, checkpoint))
+            shutil.rmtree(os.path.join(output_dir, checkpoint), ignore_errors=True)
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
@@ -841,7 +858,7 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
             print(f"Removing checkpoint {checkpoint}")
             checkpoint_path = os.path.join(output_dir, checkpoint)
             if os.path.isdir(checkpoint_path):
-                shutil.rmtree(checkpoint_path)
+                shutil.rmtree(checkpoint_path, ignore_errors=True)
             elif os.path.isfile(checkpoint_path):
                 os.remove(checkpoint_path)
 
@@ -915,6 +932,44 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     )
 
 
+def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
+    latest_path = os.path.join(checkpoint_state_dir, "latest")
+    if not os.path.isfile(latest_path):
+        return
+
+    with open(latest_path) as f:
+        latest_checkpoint_tag = f.read().strip()
+
+    if not latest_checkpoint_tag or os.path.basename(latest_checkpoint_tag) != latest_checkpoint_tag:
+        return
+
+    latest_checkpoint_dir = os.path.join(checkpoint_state_dir, latest_checkpoint_tag)
+    if not os.path.isdir(latest_checkpoint_dir):
+        raise ValueError(f"Invalid checkpoint: {latest_checkpoint_dir} does not exist")
+
+    latest_universal_tag = f"ds_universal_{latest_checkpoint_tag}"
+    latest_universal_path = os.path.join(checkpoint_state_dir, "latest_universal")
+    latest_universal_dir = os.path.join(checkpoint_state_dir, latest_universal_tag)
+    if os.path.isdir(latest_universal_dir):
+        with open(latest_universal_path, "w") as f:
+            f.write(latest_universal_tag)
+        return
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "deepspeed.checkpoint.ds_to_universal",
+            "--input_folder",
+            latest_checkpoint_dir,
+            "--output_folder",
+            latest_universal_dir,
+            "--inject_missing_state",
+        ],
+        check=True,
+    )
+
+
 # ----------------------------------------------------------------------------
 # Ai2 user utilities
 @dataclass
@@ -928,6 +983,18 @@ class BeakerRuntimeConfig:
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
+
+
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
+    """Download a HF repo if not a local path, then verify it is available locally or in cache."""
+    if os.path.exists(repo_id):
+        return
+    huggingface_hub.snapshot_download(repo_id, revision=revision)
+    result = huggingface_hub.try_to_load_from_cache(repo_id, "config.json", revision=revision)
+    if not isinstance(result, str):
+        raise RuntimeError(
+            f"Model repo '{repo_id}' (revision={revision}) is not available locally or in the HF cache."
+        )
 
 
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
@@ -1010,6 +1077,8 @@ def get_beaker_whoami() -> str | None:
 
 
 def maybe_get_beaker_config():
+    if not is_beaker_job():
+        return None
     beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
     # fix condition on basic interactive jobs
     if beaker_dataset_ids is None:
@@ -1162,48 +1231,23 @@ def launch_ai2_evals_on_weka(
     training_step: int | None = None,
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
-    gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    beaker_users = get_beaker_whoami()
-
-    if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
-        if beaker_users is not None:
-            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
-        else:
-            gs_saved_path = f"{gs_bucket_path}/{path}"
-        # save the model to the gs bucket first
-        # TODO: use upload_to_gs_bucket instead
-        gs_command = f"""gsutil \\
-            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
-            cp -r {path} \\
-            {gs_saved_path}"""
-        print(f"Copying model to GS bucket with command: {gs_command}")
-        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(f"GS bucket copy stdout:\n{stdout.decode()}")
-        print(f"GS bucket copy stderr:\n{stderr.decode()}")
-        print(f"GS bucket copy process return code: {process.returncode}")
-
-        # Update path to use the GS bucket path for evaluation
-        path = gs_saved_path
-    else:
-        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} {cluster_str} \
+--location {path} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
---skip_oi_evals"""
+--skip_oi_evals \
+--evaluate_on_weka"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
         wandb_run_path = wandb_url_to_run_path(wandb_url)
@@ -1212,8 +1256,6 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if gs_bucket_path is None:
-        command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
@@ -1301,8 +1343,6 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 @functools.lru_cache(maxsize=1)
 def maybe_use_ai2_wandb_entity() -> str | None:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    import wandb
-
     wandb.login()
     api = wandb.Api()
     current_user = api.viewer
@@ -1328,6 +1368,39 @@ def maybe_use_ai2_hf_entity() -> str | None:
         return "allenai"
     else:
         return None
+
+
+def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig | None:
+    """Set up exp_name, output_dir, HF Hub config, wandb_entity.
+
+    Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
+    """
+    args.exp_name = f"{args.exp_name}__{args.seed}"
+    args.output_dir = os.path.join(args.output_dir, args.exp_name)
+
+    if dist.is_initialized():
+        path_list = [args.output_dir]
+        dist.broadcast_object_list(path_list, src=0)
+        args.output_dir = path_list[0]
+
+    beaker_config = maybe_get_beaker_config() if is_main_process else None
+
+    if getattr(args, "push_to_hub", False) and is_main_process:
+        if args.hf_repo_id is None:
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.exp_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if getattr(args, "wandb_entity", None) is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    return beaker_config
 
 
 @retry_on_exception()
@@ -1460,6 +1533,10 @@ def get_optimizer_grouped_parameters(
             "weight_decay": 0.0,
         },
     ]
+
+    # Filter empty groups to avoid issues with torch 2.10 and deepspeed
+    optimizer_grouped_parameters = [group for group in optimizer_grouped_parameters if group["params"]]
+
     return optimizer_grouped_parameters
 
 
@@ -1482,7 +1559,7 @@ class RayProcess:
         self.rank = rank
         self.local_rank = local_rank
         self.master_addr = master_addr if master_addr else self.get_current_node_ip()
-        self.master_port = master_port if master_port else self.get_free_port()
+        self.master_port = master_port if master_port else find_free_port()
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -1500,12 +1577,6 @@ class RayProcess:
         address = ray._private.services.get_node_ip_address()
         # strip ipv6 address
         return address.strip("[]")
-
-    @staticmethod
-    def get_free_port():
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            return sock.getsockname()[1]
 
     def get_master_addr_port(self):
         return self.master_addr, self.master_port
@@ -1526,7 +1597,7 @@ class RayProcess:
         if _SET_AFFINITY:
             return
 
-        from ctypes.util import find_library
+        from ctypes.util import find_library  # noqa: PLC0415
 
         class bitmask_t(Structure):
             _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
@@ -1556,8 +1627,6 @@ class RayProcess:
         self._set_numa_affinity(torch.distributed.get_rank() % torch.cuda.device_count())
 
         if model.zero_optimization_stage() == 3:
-            from deepspeed.runtime.zero.offload_config import OffloadStateTypeEnum
-
             model.optimizer.offload_states(
                 include=[
                     OffloadStateTypeEnum.optim_states,
@@ -1743,6 +1812,7 @@ GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "h200": {"flops": 989e12, "memory_size": 141e9, "memory_bandwidth": 4.8e12},  # 4.8 TB/s HBM3e
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
@@ -1812,6 +1882,7 @@ class ModelDims:
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        config = config.get_text_config()
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)
@@ -1902,8 +1973,8 @@ class ModelDims:
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
 
-            # Always include a single LM head after prefill (next-token logits)
-            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+            # LM head is applied to each token position during training
+            total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
 
         return total
 
@@ -2422,8 +2493,6 @@ def check_calculation(
     if percentage <= 100:
         return
 
-    import json
-
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
     avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
@@ -2508,9 +2577,9 @@ def send_slack_message(message: str) -> None:
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
 
     beaker_url = get_beaker_experiment_url()
@@ -2585,16 +2654,3 @@ class UlyssesSPSplitter:
             kwargs[field.name] = sharded
 
         return data_types.CollatedBatchData(**kwargs)
-
-
-def get_denominator(loss_denominator: str | float) -> float | str:
-    """
-    Validates and converts the loss_denominator argument.
-    """
-    if loss_denominator == "token":
-        return "token"
-
-    val = float(loss_denominator)
-    if val <= 0:
-        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
-    return val

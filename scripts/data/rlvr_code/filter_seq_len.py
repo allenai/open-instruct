@@ -81,6 +81,7 @@ import json  # For saving streaming data
 import os
 import sys
 import tempfile  # For streaming upload
+import traceback
 
 import datasets
 from huggingface_hub import HfApi, HfFolder, create_repo  # For Hub upload
@@ -164,8 +165,6 @@ def main(args):
         )
     except Exception as e:
         logger.error(f"Error during the mapping phase for length checking: {e}")
-        import traceback
-
         traceback.print_exc()
         sys.exit(1)
 

@@ -1,4 +1,5 @@
 import argparse
+import json
 from functools import partial
 
 from datasets import DatasetDict, load_dataset
@@ -336,9 +337,6 @@ def main():
     try:
         first_split_name = next(iter(processed_dataset.keys()))
         logger.info(f"\n--- Sample Processed Example (from split '{first_split_name}') ---")
-        # Pretty print the dictionary for better readability
-        import json
-
         print(json.dumps(processed_dataset[first_split_name][0], indent=2))
         logger.info("--- End Sample ---")
     except Exception as e:

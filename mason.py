@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import hashlib
 import os
 import random
@@ -7,6 +8,7 @@ import secrets
 import select
 import shlex
 import string
+import subprocess
 import sys
 import time
 
@@ -25,9 +27,9 @@ console = Console()
 # Open Instruct logic
 OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
+    "open_instruct/dpo.py",
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
-    "open_instruct/ppo.py",
     "open_instruct/reward_modeling.py",
 ]
 
@@ -98,9 +100,7 @@ DEFAULT_ENV_VARS = {
     "VLLM_DISABLE_COMPILE_CACHE": "1",
     "NCCL_DEBUG": "ERROR",
     "VLLM_LOGGING_LEVEL": "WARNING",
-    "VLLM_USE_V1": "1",
     "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
-    "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
 }
 
 
@@ -142,12 +142,15 @@ def get_args():
         "--description",
         type=str,
         help="Optionally, a description for this job in Beaker.",
-        default="Beaker-Mason job.",
+        default=os.environ.get("RUN_NAME", "Beaker-Mason job."),
     )
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
+    parser.add_argument(
+        "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
+    )
     parser.add_argument("--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing")
     parser.add_argument("--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing")
     parser.add_argument("--non_resumable", action="store_true", help="If given, disable resumable mode")
@@ -165,12 +168,6 @@ def get_args():
         type=str,
         default="/weka/oe-adapt-default/allennlp/deletable_checkpoint_states",
         help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix",
-    )
-    parser.add_argument(
-        "--gs_model_name",
-        type=str,
-        default=None,
-        help="If given, set as the name of the model uploaded to GS for Augusta",
     )
     parser.add_argument(
         "--env",
@@ -291,6 +288,7 @@ def get_env_vars(
         "AZURE_API_KEY",
         "AZURE_API_BASE",
         "ANTHROPIC_API_KEY",
+        "SLACK_WEBHOOK_URL",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
@@ -324,61 +322,6 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_IB_HCA", value="^=mlx5_bond_0"),
                 ]
             )
-    # if all cluster is in gcp we add the following env
-
-    elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
-        env_vars.extend(
-            [
-                beaker.BeakerEnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
-                beaker.BeakerEnvVar(name="HF_DATASETS_CACHE", value="/filestore/.cache/huggingface"),
-                beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/filestore/.cache/hub"),
-                beaker.BeakerEnvVar(
-                    name="HF_HUB_ENABLE_HF_TRANSFER",
-                    value="0",  # we disable it because GCP is weird on uploading to the hub
-                ),
-            ]
-        )
-        if num_nodes > 1:
-            env_vars.extend(
-                [
-                    # NOTE: For single-node training we still need all of these settings and we also
-                    # need host networking enabled so that the ethernet interface names don't change.
-                    beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
-                    beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_PCI_CHUNKSIZE", value="524288"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_NVL_CHUNKSIZE", value="1048576"),
-                    beaker.BeakerEnvVar(name="NCCL_NVLSTREE_MAX_CHUNKSIZE", value="131072"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_NUM_FLOWS", value="2"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_BUFFSIZE", value="8388608"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="CUDA_VISIBLE_DEVICES", value="0,1,2,3,4,5,6,7"),
-                    beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
-                    beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
-                    ),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
-                        value="/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto",
-                    ),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_FASTRAK_IFNAME",
-                        value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
-                    ),
-                    beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
-                    # Add COLL here to log all collective operations. Extreamly verbose, dont use for production.
-                    beaker.BeakerEnvVar(name="NCCL_DEBUG_SUBSYS", value="INIT,NET"),
-                ]
-            )
     # don't mount anything; assume no cache
     else:
         pass
@@ -394,7 +337,7 @@ def get_env_vars(
     return env_vars
 
 
-def get_datasets(beaker_datasets, cluster: list[str]):
+def get_datasets(beaker_datasets, cluster: list[str], mount_docker_socket: bool = False):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
@@ -407,12 +350,12 @@ def get_datasets(beaker_datasets, cluster: list[str]):
                 source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
             ),
         ]
-    elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
-        res = [
+    if mount_docker_socket:
+        res.append(
             beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
+                source=beaker.BeakerDataSource(host_path="/var/run/docker.sock"), mount_path="/var/run/docker.sock"
             )
-        ]
+        )
     for beaker_dataset in beaker_datasets:
         to_append = beaker.BeakerDataMount(
             source=beaker.BeakerDataSource(beaker=beaker_dataset["beaker"]), mount_path=beaker_dataset["mount_path"]
@@ -478,7 +421,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     "python " + " ".join(shlex.quote(arg) for arg in filtered_command) + " --cache_dataset_only"
                 )
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                import subprocess
 
                 # Use Popen to get real-time output while also capturing it
                 process = subprocess.Popen(
@@ -529,24 +471,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     raise Exception(f"Error code {return_code} when creating cached dataset")
                 console.log("✅✅✅ Finished running the caching command")
 
-                if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
-                    need_to_override_checkpoint_state_dir = True
-                    default_checkpoint_state_freq = 200
-                    for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
-                            need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
-                            default_checkpoint_state_freq = command[idx + 1]
-
-                    if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
-                        new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-                        console.log(
-                            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-                        )
-                        command.append("--checkpoint_state_dir")
-                        command.append(new_checkpoint_state_dir)
-                        command.append("--checkpoint_state_freq")
-                        command.append(str(default_checkpoint_state_freq))
+        command = maybe_override_checkpoint_dir(command, args.auto_checkpoint_state_dir, whoami, is_external_user)
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -582,145 +507,17 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         "3. in the training command, use a `--output_dir` that starts with `/weka/`"
                     )
 
-        # For GCP clusters, since shared storage is slow, we optimize model loading by:
-        if any(c in launch_utils.GCP_CLUSTERS for c in args.cluster):
-            # 1. First downloading the model from HuggingFace to a local path
-            # 2. Uploading it to a Google Storage bucket (if not already there)
-            # 3. Then downloading it from the bucket to the compute node
-            # 4. Finally, replacing the original --model_name_or_path argument with the local path
-            model_name_or_path = None
-            for idx, cmd in enumerate(command):
-                if cmd == "--model_name_or_path":
-                    model_name_or_path = command[idx + 1]
-                    break
-            model_revision = "main"
-            for idx, cmd in enumerate(command):
-                if cmd == "--model_revision":
-                    model_revision = command[idx + 1]
-                    break
-
-            if model_name_or_path is None:
-                raise ValueError("--model_name_or_path is required for GCP clusters")
-
-            if model_name_or_path.startswith("gs://"):
-                gs_saved_path = model_name_or_path
-            else:
-                commit_hash = launch_utils.get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
-                if os.path.exists(model_name_or_path):
-                    path = model_name_or_path
-                    assert args.gs_model_name is not None, (
-                        "for local models to upload to gs, you must set --gs_model_name"
-                    )
-                    model_name_or_path = args.gs_model_name
-                    # get the short commit hash (first 8 chars)
-                    commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
-                    console.log(
-                        f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
-                    )
-                else:
-                    launch_utils.download_from_hf(model_name_or_path, model_revision)  # first download the model
-                    path = launch_utils.download_from_hf(model_name_or_path, model_revision)  # then get the path
-                gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
-                gs_folder = launch_utils.gs_folder_exists(
-                    gs_saved_path
-                )  # race condition exists, but it's fine since we are launching mason sequentially
-                if not gs_folder:
-                    launch_utils.upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
-
-            download_path = gs_saved_path.replace("gs://", "/gs/")
-            download_path_without_last_folder = download_path.rsplit("/", 1)[0]
-            gs_download_command = [
-                "mkdir",
-                "-p",
-                download_path,
-                "&&",
-                "gsutil",
-                "-o",
-                "GSUtil:parallel_thread_count=1",
-                "-o",
-                "GSUtil:sliced_object_download_threshold=150",
-                "-m",
-                "cp",
-                "-r",
-                gs_saved_path,
-                download_path_without_last_folder,
-                "&&",
-                "ls",
-                download_path_without_last_folder,
-                "&&",
-                "ls",
-                download_path,
-                "&&",
-            ]
-
-            command.append("--gs_bucket_path")
-            command.append("gs://ai2-llm/post-training/")
-
-            # Replace the model_name_or_path with the downloaded path
-            for idx, cmd in enumerate(command):
-                if cmd == "--model_name_or_path":
-                    command[idx + 1] = download_path
-                    break
-            for idx, cmd in enumerate(command):
-                if cmd == "--model_revision":
-                    command[idx + 1] = "main"
-                    break
-
-            # Save dataset to GCS
-            if len(dataset_cache_paths) > 0:
-                for cidx, (dataset_cache_path, dataset_config_hash) in enumerate(
-                    zip(dataset_cache_paths, dataset_config_hashes)
-                ):
-                    gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
-                    gs_folder = launch_utils.gs_folder_exists(
-                        gs_saved_path
-                    )  # race condition exists, but it's fine since we are launching mason sequentially
-                    if not gs_folder:
-                        launch_utils.upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
-                    dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
-                    gs_download_command += [
-                        "mkdir",
-                        "-p",
-                        dataset_cache_path_without_last_folder,
-                        "&&",
-                        "gsutil",
-                        "cp",
-                        "-r",
-                        gs_saved_path,
-                        dataset_cache_path_without_last_folder,
-                        "&&",
-                        "ls",
-                        dataset_cache_path_without_last_folder,
-                        "&&",
-                        "ls",
-                        dataset_cache_path,
-                        "&&",
-                    ]
-                    if cidx == 0:
-                        command.append("--dataset_config_hash")
-                        command.append(dataset_config_hash)
-                    elif cidx == 1:
-                        command.append("--dataset_config_eval_hash")
-                        command.append(dataset_config_hash)
-            command = gs_download_command + command
-
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
     for idx in range(len(command)):
         if "{" in command[idx]:
             command[idx] = "'" + command[idx] + "'"
-    full_command = command
-    setup_commands = ""
-    if not args.pure_docker_mode:
-        setup_commands = f"cd {os.getcwd()} && "
-
-    join_full_command = " ".join(full_command)
-    # override accelerate call
+    joined_command = " ".join(command)
     if args.num_nodes > 1:
-        if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
+        if "--num_processes" not in joined_command and "accelerate" in joined_command:
             raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
-        join_full_command = re.sub(
+        joined_command = re.sub(
             r"--num_processes (\d+)",
             lambda m: (
                 f"--num_processes {int(m.group(1)) * args.num_nodes} "
@@ -729,9 +526,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 "--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME "
                 "--main_process_port 29400 "
             ),
-            join_full_command,
+            joined_command,
         )
-    full_command = setup_commands + join_full_command
+
+    setup_commands = ""
+    if not args.pure_docker_mode:
+        setup_commands = f"cd {os.getcwd()} && "
+    full_command = setup_commands + joined_command
     console.log("🔍🔍🔍 Full command")
     print(full_command)
     return full_command
@@ -753,11 +554,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
                 )
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(
-        c in launch_utils.GCP_CLUSTERS for c in args.cluster
-    ):
-        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
-
     if args.hostname is not None:
         constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
@@ -768,7 +564,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         command=["/bin/bash", "-c"],
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.cluster),
+        datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
         ),
@@ -799,7 +595,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
     return spec
 
 
-def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_dir_path: str, whoami: str):
+def maybe_download_tokenizer_from_gs_bucket(
+    filtered_command: list[str], auto_output_dir_path: str, whoami: str
+) -> list[str]:
     """if model is only on gs, download tokenizer from gs to local cache folder for dataset preprocessing"""
 
     if "--model_name_or_path" not in filtered_command:
@@ -828,6 +626,42 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     filtered_command[model_name_idx] = local_cache_folder
 
     return filtered_command
+
+
+def maybe_override_checkpoint_dir(
+    command: list[str], auto_checkpoint_state_dir: str, whoami: str, is_external_user: bool
+):
+    """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
+
+    --checkpoint_state_dir is not overriden if it is already set and is on /weka (useful for restarting from a checkpoint)
+    """
+
+    if not any(file in command for file in OPEN_INSTRUCT_RESUMABLES):
+        return command
+
+    if not auto_checkpoint_state_dir or is_external_user:
+        return command
+
+    # get the last .index, not the first
+    checkpoint_arg_last_index = None
+    with contextlib.suppress(ValueError):
+        checkpoint_arg_last_index = len(command) - 1 - command[::-1].index("--checkpoint_state_dir")
+
+    # don't override if the checkpoint dir is on /weka/
+    if (
+        checkpoint_arg_last_index is not None
+        and checkpoint_arg_last_index + 1 < len(command)
+        and "/weka/" in command[checkpoint_arg_last_index + 1]
+    ):
+        return command
+
+    new_checkpoint_state_dir = f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+    console.log(
+        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+    )
+    command.extend(["--checkpoint_state_dir", new_checkpoint_state_dir])
+
+    return command
 
 
 def main():
