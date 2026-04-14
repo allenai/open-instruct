@@ -89,4 +89,4 @@ source configs/beaker_configs/ray_node_setup.sh \
     --vllm_enable_prefix_caching \
     --keep_last_n_checkpoints -1 \
     --kl_estimator 3 \
-    --push_to_hub False "$@"
+    --push_to_hub False
