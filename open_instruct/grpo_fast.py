@@ -157,7 +157,7 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-WEIGHT_SYNC_TIMEOUT_S = 120.0
+WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
