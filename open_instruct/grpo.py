@@ -171,7 +171,7 @@ def main(
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=queue_size)
     evaluation_inference_results_Q = ray_queue.Queue()
 
     reward_config = RewardConfig(

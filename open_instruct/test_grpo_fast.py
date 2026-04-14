@@ -14,7 +14,7 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import rl_utils, utils
+from open_instruct import rl_utils, utils, vllm_utils
 from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -224,7 +224,7 @@ class TestGrpoFastBase(unittest.TestCase):
         """Setup queues and add prompts to generator - common pattern."""
         # Queue size must be at least as large as the number of queries to avoid blocking
         queue_size = max(len(queries), num_engines * 2)
-        prompt_Q = ray_queue.Queue(maxsize=queue_size)
+        prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=queue_size)
         inference_results_Q = ray_queue.Queue(maxsize=queue_size)
 
         # Track queues for cleanup
@@ -588,7 +588,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        prompt_Q = ray_queue.Queue(maxsize=num_queries)
+        prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=num_queries)
 
         self._ray_queues.append(prompt_Q)
 
@@ -625,7 +625,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 7
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        prompt_Q = ray_queue.Queue(maxsize=num_queries)
+        prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=num_queries)
 
         self._ray_queues.append(prompt_Q)
 

@@ -1193,7 +1193,7 @@ def create_model_and_optimizer(
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
-    prompt_Q: ray_queue.Queue,
+    prompt_Q: vllm_utils.PriorityPromptQueue,
     evaluation_inference_results_Q: ray_queue.Queue,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1698,21 +1698,21 @@ def maybe_evaluate(
 
     try:
         is_final_step = training_step >= args.num_training_steps
-        num_eval_prompts = len(eval_dataset)
         # On non-final steps, only evaluate when we have a full batch ready.
         # This avoids partially draining the queue and losing results.
         if not is_final_step:
             queued_results = evaluation_inference_results_Q.qsize()
-            if queued_results < num_eval_prompts:
+            if queued_results < len(eval_dataset):
                 logger.info(
-                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
+                    "[Main Thread] Eval responses pending (%s/%s); deferring evaluation.",
                     queued_results,
-                    num_eval_prompts,
+                    len(eval_dataset),
                 )
                 return False
 
-        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        timeout = 100 if is_final_step else 0.01
+        # timeout 0.01 if this is not the last training step
+        # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
@@ -1843,7 +1843,7 @@ def cleanup_judge_clients():
 def cleanup_training_resources(
     stop_event: threading.Event,
     executor: futures.ThreadPoolExecutor,
-    queues: list[ray_queue.Queue],
+    queues: list[vllm_utils.PriorityPromptQueue | ray_queue.Queue],
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
@@ -2336,7 +2336,7 @@ def main(
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 

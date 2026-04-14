@@ -113,7 +113,7 @@ class TestGeneration(TestGrpoFastBase):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        param_prompt_Q = ray_queue.Queue(maxsize=100)
+        param_prompt_Q = vllm_utils_module.PriorityPromptQueue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
@@ -157,9 +157,9 @@ class TestGeneration(TestGrpoFastBase):
         )
 
         ray.get(engines[0].ready.remote())
-        param_prompt_Q.put(request)
+        param_prompt_Q.put(request, priority=vllm_utils_module.PromptQueuePriority.TRAIN)
         result = inference_results_Q.get(timeout=120)
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils_module.PromptQueuePriority.SHUTDOWN)
 
         return result
 
@@ -232,10 +232,11 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         test_prompt = "What is the capital of France?"
         prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
 
-        param_prompt_Q = ray_queue.Queue(maxsize=1)
+        param_prompt_Q = vllm_utils_module.PriorityPromptQueue(maxsize=1)
         inference_results_Q = ray_queue.Queue(maxsize=1)
+        eval_results_Q = ray_queue.Queue(maxsize=1)
 
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
         train_dataset = datasets.Dataset.from_dict(
             {"ground_truth": [["Paris"]], "dataset": ["test"], "prompt": [test_prompt], "index": [0]}
@@ -255,6 +256,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             vllm_gpu_memory_utilization=0.5,
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
+            eval_results_queue=eval_results_Q,
             reward_config=reward_config,
             train_dataset=train_dataset,
         )
@@ -265,7 +267,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
 
-        param_prompt_Q.put(request)
+        param_prompt_Q.put(request, priority=vllm_utils_module.PromptQueuePriority.TRAIN)
         result = inference_results_Q.get()
 
         self.assertIsInstance(result, GenerationResult)
@@ -278,7 +280,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self.assertIsInstance(generated_text, str)
         self.assertGreater(len(generated_text), 0)
 
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils_module.PromptQueuePriority.SHUTDOWN)
 
 
 if __name__ == "__main__":

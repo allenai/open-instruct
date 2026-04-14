@@ -20,7 +20,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
-from open_instruct import data_loader, data_types
+from open_instruct import data_loader, data_types, vllm_utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -93,7 +93,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         ground_truths = [["4"], ["6"], ["8"], ["10"]]
         train_dataset = self._create_test_dataset(tokenizer, prompts, ground_truths)
 
-        param_prompt_Q = ray_queue.Queue(maxsize=100)
+        param_prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
@@ -171,7 +171,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         self.assertEqual(batches_received, 2)
 
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils.PromptQueuePriority.SHUTDOWN)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_with_tools(self):
@@ -187,7 +187,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         ground_truths = [["1"], ["2"], ["3"], ["4"]]
         train_dataset = self._create_test_dataset(tokenizer, prompts, ground_truths)
 
-        param_prompt_Q = ray_queue.Queue(maxsize=100)
+        param_prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
@@ -283,7 +283,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         self.assertEqual(batches_received, 2)
 
-        param_prompt_Q.put(None)
+        param_prompt_Q.put(None, priority=vllm_utils.PromptQueuePriority.SHUTDOWN)
 
 
 if __name__ == "__main__":

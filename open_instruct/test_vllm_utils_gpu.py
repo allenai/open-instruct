@@ -48,7 +48,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         model = config.build(init_device="cuda")
         model.apply_fsdp()
 
-        param_prompt_Q = ray_queue.Queue(maxsize=100)
+        param_prompt_Q = vllm_utils.PriorityPromptQueue(maxsize=100)
         inference_results_Q = ray_queue.Queue(maxsize=100)
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])

@@ -17,7 +17,9 @@
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
+import enum
 import os
 import queue
 import sys
@@ -103,6 +105,101 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+class PromptQueuePriority(enum.IntEnum):
+    EVAL = 0
+    TRAIN = 1
+    SHUTDOWN = 2
+
+
+@ray.remote
+class _PriorityPromptQueueActor:
+    """Exactly like Ray's regular prompt queue actor but backed with a Priority Queue."""
+
+    def __init__(self, maxsize: int = 0):
+        self.maxsize = maxsize
+        self.queue = asyncio.PriorityQueue(self.maxsize)
+        self._next_seq = 0
+
+    def qsize(self):
+        return self.queue.qsize()
+
+    def empty(self):
+        return self.queue.empty()
+
+    def full(self):
+        return self.queue.full()
+
+    def _pack(self, item: Any, priority: PromptQueuePriority) -> tuple[int, int, Any]:
+        packed = (int(priority), self._next_seq, item)
+        self._next_seq += 1
+        return packed
+
+    async def put(self, item: Any, priority: PromptQueuePriority, timeout=None):
+        try:
+            await asyncio.wait_for(self.queue.put(self._pack(item, priority)), timeout)
+        except asyncio.TimeoutError as err:
+            raise queue.Full from err
+
+    async def get(self, timeout=None):
+        try:
+            return await asyncio.wait_for(self.queue.get(), timeout)
+        except asyncio.TimeoutError as err:
+            raise queue.Empty from err
+
+    def put_nowait(self, item: Any, priority: PromptQueuePriority):
+        self.queue.put_nowait(self._pack(item, priority))
+
+    def get_nowait(self):
+        return self.queue.get_nowait()
+
+
+class PriorityPromptQueue:
+    """Ray-backed prompt queue that prioritizes eval requests over train requests."""
+
+    def __init__(self, maxsize: int = 0):
+        self.maxsize = maxsize
+        self.actor = _PriorityPromptQueueActor.remote(maxsize=maxsize)
+
+    def put(
+        self,
+        item: Any,
+        block: bool = True,
+        timeout: float | None = None,
+        priority: PromptQueuePriority = PromptQueuePriority.TRAIN,
+    ) -> None:
+        if not block:
+            try:
+                ray.get(self.actor.put_nowait.remote(item, priority))
+            except asyncio.QueueFull as err:
+                raise queue.Full from err
+        else:
+            if timeout is not None and timeout < 0:
+                raise ValueError("'timeout' must be a non-negative number")
+            ray.get(self.actor.put.remote(item, priority, timeout))
+
+    def get(self, block: bool = True, timeout: float | None = None) -> Any:
+        if not block:
+            try:
+                return ray.get(self.actor.get_nowait.remote())[2]
+            except asyncio.QueueEmpty as err:
+                raise queue.Empty from err
+        if timeout is not None and timeout < 0:
+            raise ValueError("'timeout' must be a non-negative number")
+        return ray.get(self.actor.get.remote(timeout))[2]
+
+    def qsize(self) -> int:
+        return ray.get(self.actor.qsize.remote())
+
+    def empty(self) -> bool:
+        return ray.get(self.actor.empty.remote())
+
+    def full(self) -> bool:
+        return ray.get(self.actor.full.remote())
+
+    def shutdown(self) -> None:
+        ray.kill(self.actor, no_restart=True)
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -465,13 +562,15 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    poll_timeout_s = 0.1
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        request = actor.prompt_queue.get()
-        add_request(actor, request)
+        with contextlib.suppress(queue.Empty):
+            request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+            add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:

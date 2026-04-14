@@ -215,6 +215,72 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_calleds, [False, False])
         self.assertEqual(result.request_info.rollout_states, [{}, {}])
 
+    def test_priority_prompt_queue_dequeues_eval_before_train(self):
+        queued_items = []
+        next_seq = 0
+
+        def put_item(item, priority, timeout=None):
+            nonlocal next_seq
+            queued_items.append((int(priority), next_seq, item))
+            next_seq += 1
+            queued_items.sort()
+
+        actor = mock.Mock()
+        actor.put.remote.side_effect = put_item
+        actor.get.remote.side_effect = lambda timeout=None: queued_items.pop(0)
+        actor.qsize.remote.side_effect = lambda: len(queued_items)
+        actor.empty.remote.side_effect = lambda: len(queued_items) == 0
+        actor.full.remote.return_value = False
+
+        train_request = PromptRequest(prompt=[1], generation_config=None, index=0, prompt_id="train", is_eval=False)
+        eval_request = PromptRequest(prompt=[2], generation_config=None, index=1, prompt_id="eval", is_eval=True)
+
+        with (
+            mock.patch.object(vllm_utils, "ray") as mock_ray,
+            mock.patch.object(vllm_utils._PriorityPromptQueueActor, "remote", return_value=actor),
+        ):
+            mock_ray.get.side_effect = lambda ref: ref
+            priority_queue = vllm_utils.PriorityPromptQueue()
+
+            priority_queue.put(train_request, priority=vllm_utils.PromptQueuePriority.TRAIN)
+            priority_queue.put(eval_request, priority=vllm_utils.PromptQueuePriority.EVAL)
+
+            self.assertIs(priority_queue.get(), eval_request)
+            self.assertIs(priority_queue.get(), train_request)
+
+    def test_priority_prompt_queue_defaults_to_train_priority(self):
+        queued_items = []
+        next_seq = 0
+
+        def put_item(item, priority, timeout=None):
+            nonlocal next_seq
+            queued_items.append((int(priority), next_seq, item))
+            next_seq += 1
+            queued_items.sort()
+
+        actor = mock.Mock()
+        actor.put.remote.side_effect = put_item
+        actor.get.remote.side_effect = lambda timeout=None: queued_items.pop(0)
+        actor.qsize.remote.side_effect = lambda: len(queued_items)
+        actor.empty.remote.side_effect = lambda: len(queued_items) == 0
+        actor.full.remote.return_value = False
+
+        train_request = PromptRequest(prompt=[1], generation_config=None, index=0, prompt_id="train", is_eval=False)
+        shutdown_request = None
+
+        with (
+            mock.patch.object(vllm_utils, "ray") as mock_ray,
+            mock.patch.object(vllm_utils._PriorityPromptQueueActor, "remote", return_value=actor),
+        ):
+            mock_ray.get.side_effect = lambda ref: ref
+            priority_queue = vllm_utils.PriorityPromptQueue()
+
+            priority_queue.put(shutdown_request, priority=vllm_utils.PromptQueuePriority.SHUTDOWN)
+            priority_queue.put(train_request)
+
+            self.assertIs(priority_queue.get(), train_request)
+            self.assertIsNone(priority_queue.get())
+
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):
     def test_model_dims_from_vllm_config(self):

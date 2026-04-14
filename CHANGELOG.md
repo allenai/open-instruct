@@ -64,6 +64,7 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Add a dedicated Ray eval prompt queue (always allocated; unused queues stay empty) for `grpo_fast` and legacy `grpo`, prioritize eval work in vLLM prefetch workers so eval is not starved by training backlog, and on non-final training steps defer `maybe_evaluate` until the full eval batch is present in the results queue (https://github.com/allenai/open-instruct/pull/1553).
 - Add support for loading DeepSpeed universal checkpoints when resuming GRPO runs so checkpoints can be reused across different parallelisms and cluster sizes (https://github.com/allenai/open-instruct/pull/1517).
 - Extract shared GRPO metric helpers into `grpo_utils.py` and align `grpo.py` metrics with `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1552).
 - Add a configurable vLLM attention backend option and switch remaining `flash_attention_2` defaults/references to `flash_attention_3` (https://github.com/allenai/open-instruct/pull/1559).
