@@ -171,6 +171,12 @@ class MetricsTracker:
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 def max_num_processes() -> int:
     """Returns a reasonable default number of processes to run for multiprocessing."""
     if hasattr(os, "sched_getaffinity"):
@@ -1549,7 +1555,7 @@ class RayProcess:
         self.rank = rank
         self.local_rank = local_rank
         self.master_addr = master_addr if master_addr else self.get_current_node_ip()
-        self.master_port = master_port if master_port else self.get_free_port()
+        self.master_port = master_port if master_port else find_free_port()
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -1567,12 +1573,6 @@ class RayProcess:
         address = ray._private.services.get_node_ip_address()
         # strip ipv6 address
         return address.strip("[]")
-
-    @staticmethod
-    def get_free_port():
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            return sock.getsockname()[1]
 
     def get_master_addr_port(self):
         return self.master_addr, self.master_port
