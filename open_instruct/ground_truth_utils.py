@@ -1125,6 +1125,12 @@ class RubricVerifier(VerifierFunction):
             logger.warning("No rubrics found in ground truth")
             return VerificationResult(score=0.0)
 
+        # Extract content from <answer> tags if present, otherwise use full response
+        response_for_scoring = prediction
+        answer_match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
+        if answer_match:
+            response_for_scoring = answer_match.group(1).strip()
+
         # Score each rubric in parallel
         async def score_rubric(rubric: dict) -> tuple[float, float]:
             description = rubric.get("description") or rubric.get("rubric_item") or rubric.get("Ingredient", "")
@@ -1134,7 +1140,7 @@ class RubricVerifier(VerifierFunction):
                 logger.warning("Rubric with empty description found, skipping.")
                 return 0.0, 0.0
 
-            user_prompt = f"<question>{question}</question>\n<response>{prediction}</response>\n<criterion>{description}</criterion>"
+            user_prompt = f"<question>{question}</question>\n<response>{response_for_scoring}</response>\n<criterion>{description}</criterion>"
 
             try:
                 model_name = os.environ.get("RUBRIC_JUDGE_MODEL", self.config.rubric_judge_model)
