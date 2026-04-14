@@ -596,6 +596,7 @@ class LLMRayActor:
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
         per_turn_max_tokens: int | None = None,
+        tool_call_timeout: float = 120.0,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
@@ -615,6 +616,7 @@ class LLMRayActor:
         self._init_config(
             max_steps,
             per_turn_max_tokens,
+            tool_call_timeout,
             mask_tool_use,
             pools,
             inflight_updates,
@@ -638,6 +640,7 @@ class LLMRayActor:
         self,
         max_steps: int,
         per_turn_max_tokens: int | None,
+        tool_call_timeout: float,
         mask_tool_use: bool,
         pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
@@ -647,6 +650,7 @@ class LLMRayActor:
     ) -> None:
         self.max_steps = max_steps
         self.per_turn_max_tokens = per_turn_max_tokens
+        self.tool_call_timeout = tool_call_timeout
         self.mask_tool_use = mask_tool_use
         self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
@@ -1121,8 +1125,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 rollout.step_count += 1
 
                 try:
-                    step_result: StepResult = await target.step.remote(
-                        EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
+                    step_result: StepResult = await asyncio.wait_for(
+                        target.step.remote(
+                            EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
+                        ),
+                        timeout=actor.tool_call_timeout,
                     )
                     observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
                     rollout.tool_output += step_result.result
@@ -1140,6 +1147,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                             runtime=meta.get("runtime", 0.0),
                         )
                     )
+                except asyncio.TimeoutError:
+                    error_msg = f"Step '{tc.name}' timed out after {actor.tool_call_timeout}s. Args: {tc.args}"
+                    logger.warning(error_msg)
+                    observations.append((error_msg, "tool"))
+                    rollout.tool_error += error_msg
+                    rollout.timeout = True
+                    rollout.rewards.append(0.0)
+                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout))
                 except Exception as e:
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
