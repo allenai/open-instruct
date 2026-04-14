@@ -64,10 +64,9 @@ source configs/beaker_configs/ray_node_setup.sh \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
     --total_episodes 1024000 \
-    --deepspeed_stage 2 \
+    --deepspeed_stage 3 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
-    --sequence_parallel_size 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --apply_evolving_rubric_reward true \
