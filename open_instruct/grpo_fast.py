@@ -2267,12 +2267,13 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
-    # Pre-download model on local_rank 0 of each node to avoid HF cache race
-    # conditions when multiple local ranks try to download concurrently.
-    # Uses /tmp barrier file (node-local) so each node downloads independently.
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    barrier_file = f"/tmp/.model_download_done_{os.environ.get('BEAKER_JOB_ID', 'local')}"
-    if local_rank == 0:
+    # Pre-download model on rank 0 to avoid HF cache race conditions
+    # when multiple ranks try to download concurrently on shared filesystem.
+    # Barrier file goes next to the HF cache so all nodes can see it.
+    rank = int(os.environ.get("RANK", "0"))
+    hf_cache = os.environ.get("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub"))
+    barrier_file = os.path.join(hf_cache, f".model_download_done_{os.environ.get('BEAKER_JOB_ID', 'local')}")
+    if rank == 0:
         logger.info(f"Pre-downloading model {model_config.model_name_or_path}...")
         snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
         open(barrier_file, "w").close()
