@@ -268,10 +268,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
         Uses index-based shuffling to avoid copying the dataset.
         """
-        generator = torch.Generator()
-        generator.manual_seed(self.seed + epoch)
         dataset_len = len(self._full_dataset)
-        all_indices = torch.randperm(dataset_len, generator=generator).numpy()
+        rng = np.random.Generator(np.random.PCG64(seed=self.seed + epoch))
+        all_indices = np.arange(dataset_len, dtype=np.uint32)
+        rng.shuffle(all_indices)
         if self._excluded_indices:
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]

@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from olmo_core.data.utils import InstancePacker
 from transformers import DefaultDataCollator
 
 from open_instruct import tensor_utils
@@ -182,6 +184,66 @@ class PackedSFTCollator:
             packed_label_mask.append(cat_mask)
 
         result = {"input_ids": torch.stack(packed_input_ids), "label_mask": torch.stack(packed_label_mask)}
+        if features and "index" in features[0]:
+            result["index"] = torch.tensor([f["index"] for f in features])
+        return result
+
+
+@dataclass
+class OBFDCollator:
+    """Collator that uses olmo-core's OBFD packing algorithm.
+
+    This replicates the packing logic of NumpyPackedFSLDataset so that
+    HFDataLoader produces batches identical to the numpy path.
+    """
+
+    sequence_length: int
+    pad_token_id: int
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        lengths = np.array([len(f["input_ids"]) for f in features])
+        doc_indices = np.zeros((len(features), 2), dtype=np.uint64)
+        pos = 0
+        for i, length in enumerate(lengths):
+            doc_indices[i] = [pos, pos + length]
+            pos += length
+
+        packer = InstancePacker(self.sequence_length)
+        instances, sorted_doc_indices, _ = packer.pack_documents(doc_indices)
+
+        sorted_lengths = sorted_doc_indices[:, 1] - sorted_doc_indices[:, 0]
+        original_sort_order = np.argsort(-1 * lengths.astype(np.int64))
+
+        packed_input_ids = []
+        packed_label_mask = []
+        for instance in instances:
+            row_ids = []
+            row_mask = []
+            for sorted_doc_id in instance:
+                original_idx = original_sort_order[sorted_doc_id]
+                f = features[original_idx]
+                ids = f["input_ids"]
+                doc_len = int(sorted_lengths[sorted_doc_id])
+                ids = ids[:doc_len]
+                if "labels" in f:
+                    labels = f["labels"][:doc_len]
+                    mask = labels != -100
+                else:
+                    mask = torch.ones(doc_len, dtype=torch.bool)
+                row_ids.append(ids)
+                row_mask.append(mask)
+
+            cat_ids = torch.cat(row_ids)
+            cat_mask = torch.cat(row_mask)
+            cat_ids = F.pad(cat_ids, (0, self.sequence_length - len(cat_ids)), value=self.pad_token_id)
+            cat_mask = F.pad(cat_mask, (0, self.sequence_length - len(cat_mask)), value=False)
+            packed_input_ids.append(cat_ids)
+            packed_label_mask.append(cat_mask)
+
+        result: dict[str, torch.Tensor] = {
+            "input_ids": torch.stack(packed_input_ids),
+            "label_mask": torch.stack(packed_label_mask),
+        }
         if features and "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
         return result

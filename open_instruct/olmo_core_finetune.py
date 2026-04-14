@@ -130,7 +130,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     global_batch_size_seqs = rank_batch_size_seqs * world_size
 
-    collator = padding_free_collator.PackedSFTCollator(
+    collator = padding_free_collator.OBFDCollator(
         sequence_length=args.training.max_seq_length, pad_token_id=tokenizer.pad_token_id
     )
 
@@ -161,7 +161,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size_seqs,
-        seed=args.tracking.seed,
+        seed=args.tracking.data_loader_seed if args.tracking.data_loader_seed is not None else args.tracking.seed,
         dp_rank=global_rank,
         dp_world_size=world_size,
         work_dir=args.checkpoint.output_dir,

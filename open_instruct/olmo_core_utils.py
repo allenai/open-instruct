@@ -38,6 +38,8 @@ class ExperimentConfig:
     """A unique name of this run"""
     seed: int = 42
     """Random seed for initialization and dataset shuffling."""
+    data_loader_seed: int | None = None
+    """Separate seed for data loader instance ordering. If None, uses seed."""
 
 
 @dataclass
