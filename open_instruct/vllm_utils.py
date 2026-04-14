@@ -20,7 +20,6 @@ import asyncio
 import dataclasses
 import os
 import queue
-import socket
 import sys
 import threading
 import time
@@ -673,10 +672,7 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("127.0.0.1", 0))
-            sock.listen(1)
-            self.server_port = sock.getsockname()[1]
+            self.server_port = utils.find_free_port()
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
@@ -745,22 +741,7 @@ class LLMRayActor:
             [future.result() for future in done]
             finalize_futures = list(not_done)
 
-    def init_weight_transfer_engine(
-        self,
-        master_address: str | None = None,
-        master_port: int | None = None,
-        rank_offset: int | None = None,
-        world_size: int | None = None,
-    ) -> None:
-        init_info = {}
-        if master_address is not None:
-            init_info = {
-                "master_address": master_address,
-                "master_port": master_port,
-                "rank_offset": rank_offset,
-                "world_size": world_size,
-            }
-        request = WeightTransferInitRequest(init_info=init_info)
+    def init_weight_transfer_engine(self, request: WeightTransferInitRequest) -> None:
         return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
 
     def _run_async(self, coro: Awaitable[Any]) -> Any:
@@ -1425,22 +1406,19 @@ def broadcast_weights_to_vllm(
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
-    if gather_whole_model:
-        if isinstance(model, FSDP):
-            ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
-        else:
-            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+    if isinstance(model, FSDP):
+        batches = [(FSDP.summon_full_params(model, writeback=False, rank0_only=False), params)]
+    elif gather_whole_model:
+        batches = [(deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3), params)]
+    else:
+        batches = [
+            (deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3), [(name, param)])
+            for name, param in params
+        ]
+
+    for ctx, batch_params in batches:
         with ctx:
             if is_rank_0:
-                mapped_params = _prepare_params_for_sync(params, name_mapper)
+                mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-            return refs
-    else:
-        for name, param in params:
-            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
-                if is_rank_0:
-                    mapped_params = _prepare_params_for_sync([(name, param)], name_mapper)
-                    NCCLWeightTransferEngine.trainer_send_weights(
-                        iterator=iter(mapped_params), trainer_args=trainer_args
-                    )
-        return refs
+    return refs

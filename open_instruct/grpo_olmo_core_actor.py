@@ -23,6 +23,7 @@ from olmo_core.train.train_module.transformer import (
     TransformerDataParallelWrappingStrategy,
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
@@ -204,7 +205,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         refs = [
             engine.init_weight_transfer_engine.remote(
-                master_address, master_port, i * self.vllm_config.vllm_tensor_parallel_size + 1, vllm_world_size
+                WeightTransferInitRequest(
+                    init_info={
+                        "master_address": master_address,
+                        "master_port": master_port,
+                        "rank_offset": i * self.vllm_config.vllm_tensor_parallel_size + 1,
+                        "world_size": vllm_world_size,
+                    }
+                )
             )
             for i, engine in enumerate(vllm_engines)
         ]

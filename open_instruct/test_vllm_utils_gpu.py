@@ -14,6 +14,7 @@ from olmo_core.nn.transformer import TransformerConfig
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import logger_utils, utils, vllm_utils
@@ -87,7 +88,14 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         world_size = 2
         ray.get(
             engines[0].init_weight_transfer_engine.remote(
-                master_address=master_address, master_port=weight_transfer_port, rank_offset=1, world_size=world_size
+                WeightTransferInitRequest(
+                    init_info={
+                        "master_address": master_address,
+                        "master_port": weight_transfer_port,
+                        "rank_offset": 1,
+                        "world_size": world_size,
+                    }
+                )
             )
         )
 
