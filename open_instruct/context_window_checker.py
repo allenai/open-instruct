@@ -210,7 +210,7 @@ def truncate_messages_to_fit_context(
 
         # Truncate other messages to fit
         truncated_messages = system_messages.copy()
-        current_tokens = system_tokens
+        current_tokens = 0  # tracks non-system tokens; compared against remaining_tokens
 
         for msg in other_messages:
             content = msg.get("content", "")
@@ -279,7 +279,7 @@ def truncate_messages_to_fit_context(
 
             # Truncate other messages to fit
             truncated_messages = system_messages.copy()
-            current_tokens = system_tokens
+            current_tokens = 0  # tracks non-system tokens; compared against remaining_tokens
 
             for msg in other_messages:
                 content = msg.get("content", "")
