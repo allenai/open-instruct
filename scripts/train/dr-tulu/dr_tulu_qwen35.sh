@@ -67,6 +67,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --deepspeed_stage 2 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
+    --sequence_parallel_size 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --apply_evolving_rubric_reward true \
