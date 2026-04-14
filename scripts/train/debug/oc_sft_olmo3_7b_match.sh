@@ -32,6 +32,7 @@ uv run python mason.py \
     --model_name_or_path $MODEL_PATH \
     --config_name olmo3_7B \
     --tokenizer_name_or_path allenai/olmo-3-tokenizer-instruct-dev \
+    --chat_template_name olmo \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \
