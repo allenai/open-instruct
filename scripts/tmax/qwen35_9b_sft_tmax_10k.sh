@@ -33,7 +33,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
-    --async_steps 8 \
+    --async_steps 4 \
     --model_name_or_path hamishivi/qwen3.5-sftv1-9b \
     --temperature 1.0 \
     --learning_rate 1e-6 \
