@@ -5,7 +5,7 @@
 ## Changelog
 
 <!-- Pick a type and write a one-line entry. The PR URL is added automatically on merge. -->
-<!-- To skip, replace this section with: CHANGELOG=reason -->
+<!-- To skip, add a line starting with CHANGELOG=reason (outside this comment) -->
 
 **Type:** added
 Your changelog entry here.

@@ -23,7 +23,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 5
+        fetch-depth: 1
 
     - name: Find merged PR and extract changelog
       id: extract
@@ -41,12 +41,12 @@ jobs:
         fi
 
         PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
-        PR_BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+        PR_BODY=$(echo "$PR_JSON" | jq -r '.body')
         PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
 
         echo "Processing PR #${PR_NUMBER}"
 
-        if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
+        if echo "$PR_BODY" | grep -qP '^CHANGELOG='; then
           echo "PR #${PR_NUMBER} has CHANGELOG skip marker, skipping."
           echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
@@ -103,7 +103,18 @@ jobs:
           echo "ERROR: Section '### ${SECTION}' not found in CHANGELOG.md"
           exit 1
         fi
-        sed -i "0,/^### ${SECTION}$/a\\${ENTRY_LINE}" CHANGELOG.md
+        python3 -c "
+        import sys, os
+        section = os.environ['SECTION']
+        entry_line = os.environ['ENTRY_LINE']
+        lines = open('CHANGELOG.md').readlines()
+        header = '### ' + section + '\n'
+        for i, line in enumerate(lines):
+            if line == header:
+                lines.insert(i + 1, entry_line + '\n')
+                break
+        open('CHANGELOG.md', 'w').writelines(lines)
+        "
 
     - name: Commit and push
       if: steps.extract.outputs.skip != 'true'

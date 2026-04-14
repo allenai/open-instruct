@@ -28,7 +28,7 @@ jobs:
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
       run: |
-        if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
+        if echo "$PR_BODY" | grep -qP '^CHANGELOG='; then
           REASON=$(echo "$PR_BODY" | grep -oP 'CHANGELOG=\K[^\n\r]*' | head -1)
           echo "CHANGELOG check bypassed. Reason: $REASON"
           exit 0
