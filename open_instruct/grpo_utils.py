@@ -375,13 +375,17 @@ def compute_grpo_loss(
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
-    attention_mask: torch.Tensor,
+    attention_mask: torch.Tensor | None,
     position_ids: torch.Tensor,
     pad_token_id: int,
     temperature: float,
     return_entropy: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
+    # For packed sequences, pass attention_mask=None so HF flash attention uses position_ids
+    # to isolate sub-sequences instead of treating the whole pack as one sequence.
+    if (position_ids.diff(dim=-1) < 0).any():
+        attention_mask = None
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
