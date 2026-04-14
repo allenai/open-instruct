@@ -1198,6 +1198,10 @@ class DataPreparationActor:
             self.set_state(initial_state)
             self.start()
 
+    def request_shutdown(self):
+        self.shutdown_requested = True
+        logger.info("[DataPreparationActor] Shutdown requested")
+
     def start(self):
         if self._prep_future is not None:
             return
