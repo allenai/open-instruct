@@ -1135,9 +1135,13 @@ def create_tool_pools(
             available_tools = ", ".join(TOOL_REGISTRY.keys())
             raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
+        # Extract pool_size_override before passing config to the dataclass
+        tool_config = dict(parsed_tool.config)
+        per_tool_pool_size = tool_config.pop("pool_size_override", None)
+
         tool_config_class = TOOL_REGISTRY[parsed_tool.name]
         try:
-            config = tool_config_class(**parsed_tool.config)
+            config = tool_config_class(**tool_config)
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
@@ -1155,9 +1159,8 @@ def create_tool_pools(
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
-            effective_pool_size = cfg.pool_size_override if cfg.pool_size_override is not None else pool_size
+            effective_pool_size = per_tool_pool_size if per_tool_pool_size is not None else pool_size
             kwargs = asdict(cfg) | {"call_name": call_name}
-            kwargs.pop("pool_size_override", None)
             pools[call_name] = EnvironmentPool.remote(
                 pool_size=effective_pool_size, actor_class=tool_class, **kwargs
             )
