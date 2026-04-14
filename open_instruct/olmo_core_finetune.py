@@ -26,6 +26,7 @@ Usage:
 """
 
 import dataclasses
+import datetime
 import os
 from typing import Any
 
@@ -87,7 +88,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
-    prepare_training_environment(seed=args.tracking.seed)
+    prepare_training_environment(seed=args.tracking.seed, timeout=datetime.timedelta(hours=1))
 
     global_rank = get_rank() if is_distributed() else 0
     is_main_process = global_rank == 0
