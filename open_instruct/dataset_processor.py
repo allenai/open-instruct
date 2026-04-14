@@ -251,13 +251,10 @@ class PreferenceDatasetProcessor(DatasetProcessor):
                 len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
                 if self.config.max_prompt_token_length is not None
                 else (
-                    True and len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
+                    len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
+                    and len(row[INPUT_IDS_REJECTED_KEY]) <= self.config.max_token_length
                     if self.config.max_token_length is not None
-                    else (
-                        True and len(row[INPUT_IDS_REJECTED_KEY]) <= self.config.max_token_length
-                        if self.config.max_token_length is not None
-                        else True
-                    )
+                    else True
                 )
             )
 
