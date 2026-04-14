@@ -1125,11 +1125,12 @@ class RubricVerifier(VerifierFunction):
             logger.warning("No rubrics found in ground truth")
             return VerificationResult(score=0.0)
 
-        # Extract content from <answer> tags if present, otherwise use full response
+        # Extract content from <answer> tags if present, otherwise use full response.
+        # Use the last match in case the model outputs multiple answer blocks.
         response_for_scoring = prediction
-        answer_match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
-        if answer_match:
-            response_for_scoring = answer_match.group(1).strip()
+        answer_matches = re.findall(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
+        if answer_matches:
+            response_for_scoring = answer_matches[-1].strip()
 
         # Score each rubric in parallel
         async def score_rubric(rubric: dict) -> tuple[float, float]:

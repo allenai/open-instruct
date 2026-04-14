@@ -5,10 +5,10 @@
 # Launch via Beaker:
 #   ./scripts/train/build_image_and_launch.sh scripts/train/dr-tulu/dr_tulu_qwen35.sh
 
-EXP_NAME="${EXP_NAME:-dr_tulu_qwen35_9b}"
+EXP_NAME="${EXP_NAME:-dr_tulu_qwen35_4b}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-MODEL_NAME_OR_PATH="Qwen/Qwen3.5-9B"
+MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
