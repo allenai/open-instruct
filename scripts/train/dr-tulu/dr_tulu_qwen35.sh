@@ -64,7 +64,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
     --total_episodes 1024000 \
-    --deepspeed_stage 3 \
+    --deepspeed_stage 2 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
     --lr_scheduler_type constant \
@@ -75,7 +75,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tool_parser_type vllm_qwen3_coder \
     --tools serper_search jina_browse s2_search \
     --tool_call_names google_search browse_webpage snippet_search \
-    --tool_configs '{}' '{}' '{}' \
+    --tool_configs '{}' '{}' '{"pool_size_override": 100}' \
+    --pool_size 256 \
     --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
     --max_steps 10 \
     --backend_timeout 1800 \

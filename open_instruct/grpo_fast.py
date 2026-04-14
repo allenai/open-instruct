@@ -1155,8 +1155,12 @@ def create_tool_pools(
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
+            effective_pool_size = cfg.pool_size_override if cfg.pool_size_override is not None else pool_size
             kwargs = asdict(cfg) | {"call_name": call_name}
-            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
+            kwargs.pop("pool_size_override", None)
+            pools[call_name] = EnvironmentPool.remote(
+                pool_size=effective_pool_size, actor_class=tool_class, **kwargs
+            )
             tool_call_names.append(call_name)
 
     # Wait for all pools to initialize
