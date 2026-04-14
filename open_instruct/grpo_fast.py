@@ -1886,7 +1886,11 @@ def cleanup_training_resources(
     if queues and len(queues) > 0:
         [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
-    executor.shutdown(wait=True)
+    executor.shutdown(wait=False)
+    for thread in executor._threads:
+        thread.join(timeout=300)
+        if thread.is_alive():
+            logger.warning(f"Thread {thread.name} did not exit within 300s, proceeding with cleanup")
 
     # Clean up judge clients
     cleanup_judge_clients()

@@ -479,7 +479,9 @@ async def _check_health(port: int) -> None:
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
-        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
+        if actor._should_stop():
+            break
+        if len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
@@ -811,7 +813,13 @@ class LLMRayActor:
     def process_from_queue(self) -> None:
         finalize_futures: list[futures.Future] = []
         while True:
-            completion_future = accumulate_completions(self, self.completion_queue.get())
+            try:
+                sub_request = self.completion_queue.get(timeout=1.0)
+            except queue.Empty:
+                if self._should_stop():
+                    break
+                continue
+            completion_future = accumulate_completions(self, sub_request)
             if completion_future is not None:
                 finalize_futures.append(completion_future)
 
