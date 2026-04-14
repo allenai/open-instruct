@@ -44,6 +44,7 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
+from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
 
 # isort: on
 import asyncio
@@ -52,7 +53,6 @@ import logging
 import math
 import random
 import shutil
-import socket
 import threading
 import time
 from dataclasses import asdict
@@ -430,9 +430,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model_update_group = None
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
-            with socket.socket() as sock:
-                sock.bind(("", 0))
-                master_port = sock.getsockname()[1]
+            master_port = utils.find_free_port()
             vllm_num_engines, vllm_tensor_parallel_size = (
                 self.vllm_config.vllm_num_engines,
                 self.vllm_config.vllm_tensor_parallel_size,
@@ -1453,38 +1451,42 @@ def weight_sync_thread(
 
         # Clear the event for next iteration
         target_model_step = weight_sync_trigger.get_step_and_clear()
+        try:
+            with Timer("[Weight Sync]") as timer:
+                logger.debug("[Weight Sync Thread] Starting weight sync")
 
-        with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+                # Set actors to stop
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+                # Broadcast weights to vLLM engines
+                # First get the futures
+                weight_broadcast_futures: list[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Wait for all trainer-side broadcasts to finish and collect timing stats.
+                # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
+                weight_broadcast_results, actor_sync_times = ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Wait for all trainer-side broadcasts to finish and collect timing stats.
-            # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
-            weight_broadcast_results, actor_sync_times = ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
-
-            if not inflight_updates:
-                # Ensure all vLLM engine update RPCs have completed before unpausing actors.
-                # Without waiting here, should_stop may flip to False while updates are still queued.
-                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-                if engine_update_refs:
-                    ray_get_with_progress(
-                        engine_update_refs,
-                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
-                        enable=False,
-                    )
-
-            # Allow actors to resume
+                if not inflight_updates:
+                    # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+                    # Without waiting here, should_stop may flip to False while updates are still queued.
+                    engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+                    if engine_update_refs:
+                        ray_get_with_progress(
+                            engine_update_refs,
+                            desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
+                            enable=False,
+                        )
+        except Exception as e:
+            logger.exception("[Weight Sync Thread] Weight Sync failed")
+            raise RuntimeError from e
+        finally:
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
@@ -1628,6 +1630,10 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
+        # Convert evolving rubric table data to wandb.Table
+        if RUBRIC_TABLE_KEY in metrics and isinstance(metrics[RUBRIC_TABLE_KEY], list):
+            metrics[RUBRIC_TABLE_KEY] = wandb.Table(columns=RUBRIC_TABLE_COLUMNS, data=metrics[RUBRIC_TABLE_KEY])
+
         # Convert array/list metrics to wandb histograms for logging.
         metrics_to_log = {}
         for key, value in metrics.items():
