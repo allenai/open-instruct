@@ -36,7 +36,7 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.rubrics import RUBRIC_SCORING_PROMPT
+from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
 from open_instruct.utils import extract_final_answer
 
