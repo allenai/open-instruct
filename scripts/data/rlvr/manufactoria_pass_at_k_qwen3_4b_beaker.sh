@@ -10,6 +10,8 @@ sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:uppe
 IMAGE_NAME=open-instruct-integration-test-${sanitized_branch}
 BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/${IMAGE_NAME}}"
 
+NUM_GPUS="${NUM_GPUS:-8}"
+
 EXP_NAME="${EXP_NAME:-manufactoria_pass128_qwen3_4b_step650}"
 SAVE_LOCAL_DIR="${SAVE_LOCAL_DIR:-/weka/oe-adapt-default/allennlp/deletable_rollouts/${BEAKER_USER}/manufactoria_pass_at_k}"
 
@@ -20,6 +22,7 @@ MASON_ENV=()
 [[ -n "${NUM_SAMPLES+x}" ]] && MASON_ENV+=(--env "NUM_SAMPLES=${NUM_SAMPLES}")
 [[ -n "${TRAIN_SPLIT+x}" ]] && MASON_ENV+=(--env "TRAIN_SPLIT=${TRAIN_SPLIT}")
 [[ -n "${TEST_SPLIT+x}" ]] && MASON_ENV+=(--env "TEST_SPLIT=${TEST_SPLIT}")
+[[ -n "${NUM_GPUS+x}" ]] && MASON_ENV+=(--env "NUM_ENGINES=${NUM_GPUS}")
 
 uv run python mason.py \
   --cluster ai2/neptune ai2/saturn ai2/rhea \
@@ -31,7 +34,7 @@ uv run python mason.py \
   --description "${EXP_NAME}" \
   --image "${BEAKER_IMAGE}" \
   --num_nodes 1 \
-  --gpus 8 \
+  --gpus ${NUM_GPUS} \
   --max_retries 0 \
   --no_auto_dataset_cache \
   --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
