@@ -1854,16 +1854,13 @@ def cleanup_training_resources(
     """Clean up all training resources including threads and Ray queues."""
     stop_event.set()
 
-    # Stop the DataPreparationActor's background loop so it doesn't spin
-    # forever waiting for consumed steps that will never advance.
-    # Fire-and-forget: using ray.get() here could deadlock if the actor's
-    # main thread is busy with a get_data call that's waiting on the
-    # background thread, which is itself blocked on the queue that won't
-    # receive the ShutdownSentinel until later in this function.
+    # Fire-and-forget: ray.get() would deadlock when the actor's main thread
+    # is blocked in get_data, waiting on the background thread that needs
+    # the ShutdownSentinel we push later in this function.
     try:
         data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
         data_prep_actor.request_shutdown.remote()
-    except Exception as e:
+    except (ray.exceptions.RayError, ValueError) as e:
         logger.warning(f"Could not shut down DataPreparationActor: {e}")
 
     logger.info("Signaling all actors to stop...")
