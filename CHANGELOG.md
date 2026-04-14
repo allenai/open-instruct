@@ -17,6 +17,10 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix DeepSpeed gradient clipping in `grpo_fast.py` by passing `max_norm` to the DS config. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `dpo_tune_cache.py` logging on every rank. (https://github.com/allenai/open-instruct/pull/1598)
 - Fix `truncate_messages_to_fit_context` double-counting system tokens, which under-filled the judge context window by `system_tokens` worth of space (https://github.com/allenai/open-instruct/pull/1601).
 - Fix `is_equiv` returning `None` instead of `False` when expression simplification raises `ValueError` (https://github.com/allenai/open-instruct/pull/1605).
 - Fix off-by-one in `find_shared_text` so the full shared prefix is returned when one string is a prefix of another, and handle empty-input cases (https://github.com/allenai/open-instruct/pull/1604).
