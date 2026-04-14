@@ -17,12 +17,10 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
-<<<<<<< fix/find-shared-text-off-by-one
+- Fix `is_equiv` returning `None` instead of `False` when expression simplification raises `ValueError` (https://github.com/allenai/open-instruct/pull/1605).
 - Fix off-by-one in `find_shared_text` so the full shared prefix is returned when one string is a prefix of another, and handle empty-input cases (https://github.com/allenai/open-instruct/pull/1604).
-=======
 - Fix `PreferenceDatasetProcessor.filter` dropping the rejected-sequence length check, so over-long rejected completions were no longer filtered (https://github.com/allenai/open-instruct/pull/1597).
 - Fix dataset validation logic that rejected `--dataset_name` as the sole dataset mechanism in DPO and finetuning configs (https://github.com/allenai/open-instruct/pull/1595).
->>>>>>> main
 - Improve GRPO vLLM timeout handling: retry `_check_health` on `TimeoutError` and ensure `set_should_stop` is always reset in the weight sync thread to prevent training hangs (https://github.com/allenai/open-instruct/pull/1532).
 - Fix `Batch.__getitem__` handling of `active_tools` for int and list indexing (https://github.com/allenai/open-instruct/pull/1592).
 - Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
