@@ -1,4 +1,5 @@
 import gzip
+import logging
 import os
 import tempfile
 import unittest
@@ -12,6 +13,8 @@ from olmo_core.data import utils as oc_data_utils
 
 from open_instruct import data_loader, dataset_transformation
 from open_instruct.padding_free_collator import OBFDCollator, PackedSFTCollator, TensorDataCollatorWithFlatteningDPO
+
+logger = logging.getLogger(__name__)
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
@@ -251,6 +254,8 @@ class TestHFNumpyEquivalence(unittest.TestCase):
     def test_batches_match(self):
         sequence_length = 4096
         num_examples = 100
+        seed = 42
+        dp_world_size = 1
 
         tc = dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="allenai/OLMo-2-1124-7B", chat_template_name="olmo"
@@ -280,24 +285,20 @@ class TestHFNumpyEquivalence(unittest.TestCase):
             np_work_dir = os.path.join(tmpdir, "np_work")
             os.makedirs(np_work_dir)
 
+            _convert_to_numpy(dataset, numpy_dir)
+
             collator = OBFDCollator(sequence_length=sequence_length, pad_token_id=pad_token_id)
             hf_loader = data_loader.HFDataLoader(
                 dataset=dataset,
                 batch_size=len(dataset),
-                seed=42,
+                seed=seed + 1,
                 dp_rank=0,
-                dp_world_size=1,
+                dp_world_size=dp_world_size,
                 work_dir=hf_work_dir,
                 collator=collator,
                 drop_last=False,
                 max_seq_length=sequence_length,
             )
-
-            generator = torch.Generator().manual_seed(42)
-            shuffled_indices = torch.randperm(len(dataset), generator=generator).tolist()
-            shuffled_dataset = dataset.select(shuffled_indices)
-            shuffled_dataset.set_format(type="pt")
-            _convert_to_numpy(shuffled_dataset, numpy_dir)
 
             np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
                 tokenizer=oc_tokenizer_config,
@@ -312,21 +313,51 @@ class TestHFNumpyEquivalence(unittest.TestCase):
             np_dataset = np_dataset_config.build()
             np_dataset.prepare()
 
-            hf_batch = next(iter(hf_loader))
-            hf_ids = hf_batch["input_ids"]
-            hf_mask = hf_batch["label_mask"]
+            global_batch_size_tokens = len(np_dataset) * sequence_length
+            np_loader = oc_data.NumpyFSLDataLoader(
+                dataset=np_dataset,
+                global_batch_size=global_batch_size_tokens,
+                collator=oc_data.DataCollator(
+                    pad_token_id=oc_tokenizer_config.pad_token_id, vocab_size=oc_tokenizer_config.padded_vocab_size()
+                ),
+                work_dir=np_work_dir,
+                dp_world_size=dp_world_size,
+                dp_rank=0,
+                fs_local_rank=0,
+                seed=seed,
+                shuffle=True,
+            )
 
-            np_ids_list = []
-            np_mask_list = []
-            for i in range(len(np_dataset)):
-                item = np_dataset[i]
-                np_ids_list.append(item["input_ids"])
-                np_mask_list.append(item["label_mask"])
-            np_ids = torch.stack(np_ids_list)
-            np_mask = torch.stack(np_mask_list)
+            np_loader.reshuffle(epoch=1)
+
+            hf_ids_list = []
+            hf_mask_list = []
+            for hf_batch in hf_loader:
+                hf_ids_list.append(hf_batch["input_ids"])
+                hf_mask_list.append(hf_batch["label_mask"])
+            hf_ids = torch.cat(hf_ids_list, dim=0)
+            hf_mask = torch.cat(hf_mask_list, dim=0)
+
+            np_batch = np_loader[0]
+            np_ids = np_batch["input_ids"]
+            np_mask = np_batch["label_mask"]
 
             self.assertEqual(hf_ids.shape, np_ids.shape, f"Shape mismatch: HF {hf_ids.shape} vs numpy {np_ids.shape}")
             self.assertEqual(hf_mask.shape, np_mask.shape)
+
+            for row in range(min(hf_ids.shape[0], np_ids.shape[0])):
+                if not torch.equal(hf_ids[row], np_ids[row]):
+                    hf_nonpad = (hf_ids[row] != pad_token_id).sum().item()
+                    np_nonpad = (np_ids[row] != oc_tokenizer_config.pad_token_id).sum().item()
+                    logger.info(
+                        f"Row {row} mismatch: HF first 10 tokens={hf_ids[row][:10].tolist()}, "
+                        f"NP first 10 tokens={np_ids[row][:10].tolist()}, "
+                        f"HF non-pad={hf_nonpad}, NP non-pad={np_nonpad}"
+                    )
+                    break
+            else:
+                logger.info("All rows match!")
+
             self.assertTrue(torch.equal(hf_ids, np_ids), "input_ids mismatch between HF and numpy paths")
             self.assertTrue(torch.equal(hf_mask, np_mask), "label_mask mismatch between HF and numpy paths")
 

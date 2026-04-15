@@ -200,6 +200,27 @@ class OBFDCollator:
     sequence_length: int
     pad_token_id: int
 
+    @property
+    def max_seq_length(self) -> int:
+        return self.sequence_length
+
+    def compute_packing_plan(self, lengths: np.ndarray) -> list[list[int]]:
+        """Compute which documents go into which packed instance.
+
+        Returns a list of instances, where each instance is a list of original
+        document indices. Uses the same InstancePacker algorithm as
+        NumpyPackedFSLDataset so both pipelines produce identical packing.
+        """
+        doc_indices = np.zeros((len(lengths), 2), dtype=np.uint64)
+        pos = 0
+        for i, length in enumerate(lengths):
+            doc_indices[i] = [pos, pos + length]
+            pos += length
+        packer = InstancePacker(self.sequence_length)
+        instances, _, _ = packer.pack_documents(doc_indices)
+        original_sort_order = np.argsort(-1 * lengths.astype(np.int64))
+        return [[int(original_sort_order[sid]) for sid in inst] for inst in instances]
+
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
         lengths = np.array([len(f["input_ids"]) for f in features])
         doc_indices = np.zeros((len(features), 2), dtype=np.uint64)
