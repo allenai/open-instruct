@@ -1964,15 +1964,8 @@ def run_training(
             enable=False,
         )
 
-    def maybe_initialize_weight_sync(
-        training_step: int, weight_sync_future: futures.Future | None
-    ) -> tuple[futures.Future, WeightSyncTrigger] | None:
-        if weight_sync_future is not None:
-            return None
-        if training_step < 2:
-            return None
-
-        logger.info("[Main Thread] Lazily initializing native vLLM weight sync before step %d.", training_step)
+    def initialize_weight_sync() -> tuple[futures.Future, WeightSyncTrigger]:
+        logger.info("[Main Thread] Initializing native vLLM weight sync.")
 
         ray_get_with_progress(
             [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -1998,7 +1991,7 @@ def run_training(
             streaming_config.inflight_updates,
         )
 
-        logger.info("[Main Thread] Triggering initial native vLLM weight sync before step %d.", training_step)
+        logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
         trigger.notify(step=1)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
@@ -2036,9 +2029,6 @@ def run_training(
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
         health_check_fn(weight_sync_thread_future)
-        result = maybe_initialize_weight_sync(training_step, weight_sync_thread_future)
-        if result is not None:
-            weight_sync_thread_future, weight_sync_trigger = result
         health_check_time = time.perf_counter() - health_check_start
 
         if (
@@ -2126,7 +2116,9 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        if weight_sync_trigger is not None:
+        if training_step == 1:
+            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
+        elif weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
 
