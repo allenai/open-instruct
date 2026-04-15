@@ -836,7 +836,7 @@ def process_single_result(
     )
 
 
-def combine_groups(
+def make_batch_from_groups(
     groups: list[Group], generation_config: vllm.SamplingParams, actor_manager=None
 ) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics] | tuple[None, None, None, None]:
     if len(groups) == 0:
@@ -1103,7 +1103,7 @@ def accumulate_inference_batches(
         )
         return None, None, None, None
 
-    combined_result, batch, combined_reward_metrics, batch_stats = combine_groups(
+    combined_result, batch, combined_reward_metrics, batch_stats = make_batch_from_groups(
         groups, generation_config, actor_manager
     )
     assert combined_result is not None
