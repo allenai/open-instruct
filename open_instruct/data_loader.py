@@ -875,20 +875,20 @@ def make_batch_from_groups(
     total_response_tokens = 0
     max_generation_time = 0
 
-    for pr in groups:
-        result = pr.result
-        all_queries.extend(repeat_each([pr.query], generation_config.n))
-        all_ground_truths.extend(repeat_each([pr.ground_truth], generation_config.n))
-        all_datasets.extend(repeat_each([pr.dataset], generation_config.n))
-        all_raw_queries.extend(repeat_each([pr.raw_query], generation_config.n))
-        all_active_tools.extend(repeat_each([pr.active_tools], generation_config.n))
-        all_indices.extend(repeat_each([pr.index], generation_config.n))
-        all_decoded_responses.extend(pr.decoded_responses)
-        all_scores.extend(pr.reward_scores)
-        all_reward_metrics.append(pr.reward_metrics)
-        all_percent_solved.append(pr.percent_solved)
-        if pr.result.model_step is not None:
-            all_model_steps.append(pr.result.model_step)
+    for group in groups:
+        result = group.result
+        all_queries.extend(repeat_each([group.query], generation_config.n))
+        all_ground_truths.extend(repeat_each([group.ground_truth], generation_config.n))
+        all_datasets.extend(repeat_each([group.dataset], generation_config.n))
+        all_raw_queries.extend(repeat_each([group.raw_query], generation_config.n))
+        all_active_tools.extend(repeat_each([group.active_tools], generation_config.n))
+        all_indices.extend(repeat_each([group.index], generation_config.n))
+        all_decoded_responses.extend(group.decoded_responses)
+        all_scores.extend(group.reward_scores)
+        all_reward_metrics.append(group.reward_metrics)
+        all_percent_solved.append(group.percent_solved)
+        if group.result.model_step is not None:
+            all_model_steps.append(group.result.model_step)
 
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
@@ -906,7 +906,7 @@ def make_batch_from_groups(
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
-        prompt_lengths.append(len(pr.query))
+        prompt_lengths.append(len(group.query))
 
         for response in result.responses:
             response_lengths.append(len(response))
