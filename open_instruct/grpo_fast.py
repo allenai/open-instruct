@@ -436,6 +436,17 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = self.vllm_config.vllm_sync_backend
+            # Use a short NCCL timeout for weight sync so stuck broadcasts
+            # fail fast and can be retried, rather than hanging for hours.
+            weight_sync_nccl_timeout_s = 120
+            self._weight_sync_init_info = {
+                "master_address": master_address,
+                "vllm_engines": vllm_engines,
+                "world_size": world_size,
+                "backend": backend,
+                "vllm_tensor_parallel_size": vllm_tensor_parallel_size,
+                "timeout_s": weight_sync_nccl_timeout_s,
+            }
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -444,7 +455,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size,
                     "openrlhf",
                     backend=backend,
-                    timeout_minutes=self.args.backend_timeout,
+                    timeout_minutes=weight_sync_nccl_timeout_s / 60,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
@@ -455,7 +466,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
-                timeout=timedelta(minutes=self.args.backend_timeout),
+                timeout=timedelta(seconds=weight_sync_nccl_timeout_s),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
             # Warmup: force NCCL to establish GPU-to-GPU connections now rather
@@ -470,23 +481,61 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        # TODO(debug): remove verbose logging once weight sync hang is diagnosed
         logger.info("[broadcast_to_vllm] rank=%d entering", self.rank)
-        # avoid OOM
         torch.cuda.empty_cache()
-        # Ensure CUDA device is set before broadcast operations.
-        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
-        logger.info("[broadcast_to_vllm] rank=%d calling broadcast_weights_to_vllm", self.rank)
-        result = vllm_utils.broadcast_weights_to_vllm(
-            model=self.model.module,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logger.info("[broadcast_to_vllm] rank=%d attempt %d", self.rank, attempt + 1)
+                result = vllm_utils.broadcast_weights_to_vllm(
+                    model=self.model.module,
+                    vllm_engines=self.vllm_engines,
+                    model_update_group=self.model_update_group,
+                    gather_whole_model=self.args.gather_whole_model,
+                    name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+                )
+                logger.info("[broadcast_to_vllm] rank=%d done", self.rank)
+                return result
+            except Exception as e:
+                logger.warning("[broadcast_to_vllm] rank=%d attempt %d failed: %s", self.rank, attempt + 1, e)
+                if attempt == max_retries - 1:
+                    raise
+                if self.rank == 0 and hasattr(self, "_weight_sync_init_info"):
+                    logger.info("[broadcast_to_vllm] rank=0 recreating model_update_group")
+                    self._recreate_model_update_group()
+
+    def _recreate_model_update_group(self):
+        """Destroy and recreate the model_update_group after an NCCL failure."""
+        info = self._weight_sync_init_info
+        try:
+            torch.distributed.destroy_process_group(self.model_update_group)
+        except Exception:
+            pass
+        new_port = utils.find_free_port()
+        refs = [
+            engine.init_process_group.remote(
+                info["master_address"],
+                new_port,
+                i * info["vllm_tensor_parallel_size"] + 1,
+                info["world_size"],
+                "openrlhf",
+                backend=info["backend"],
+                timeout_minutes=info["timeout_s"] / 60,
+            )
+            for i, engine in enumerate(info["vllm_engines"])
+        ]
+        self.model_update_group = vllm_utils.init_process_group(
+            backend=info["backend"],
+            init_method=f"tcp://{info['master_address']}:{new_port}",
+            world_size=info["world_size"],
+            rank=0,
+            group_name="openrlhf",
+            timeout=timedelta(seconds=info["timeout_s"]),
         )
-        logger.info("[broadcast_to_vllm] rank=%d done", self.rank)
-        return result
+        ray_get_with_progress(refs, desc="Reinitializing vLLM process groups", timeout=300)
+        logger.info("[broadcast_to_vllm] model_update_group recreated")
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -2006,11 +2055,12 @@ def run_training(
     def health_check_fn():
         [f.result() for f in [weight_sync_thread_future] if f.done()]
         # Wait for weight sync to complete (should_stop becomes False)
+        # Timeout is generous: NCCL timeout (120s) + process group recreation + retry
         start = time.perf_counter()
         while ray.get(actor_manager.should_stop.remote()):
             elapsed = time.perf_counter() - start
-            # TODO(debug): removed timeout to allow debugging with ray stack traces.
-            # Log periodically so we know it's still waiting.
+            if elapsed > 600:
+                raise RuntimeError(f"Weight sync timed out after {elapsed:.0f}s - vLLM engines may be stuck")
             if int(elapsed) % 60 == 0 and int(elapsed) > 0:
                 logger.warning("[health_check_fn] Weight sync still in progress after %.0fs", elapsed)
             time.sleep(0.1)
