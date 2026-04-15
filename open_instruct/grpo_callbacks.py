@@ -23,7 +23,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -89,28 +89,24 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        if self.actor_manager is not None:
-            ray.get(self.actor_manager.set_should_stop.remote(True))
+        ray.get(self.actor_manager.set_should_stop.remote(True))
 
         model = self.train_module.model
 
-        try:
-            self._broadcast_weights(model)
-        finally:
-            if self.actor_manager is not None:
-                ray.get(self.actor_manager.set_should_stop.remote(False))
-
-    def _broadcast_weights(self, model: nn.Module) -> None:
-        """Broadcast weights from training model to vLLM engines."""
-        refs = vllm_utils.broadcast_weights_to_vllm(
-            model=model,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            name_mapper=self.name_mapper,
+        utils.ray_get_with_progress(
+            vllm_utils.broadcast_weights_to_vllm(
+                model=model,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                name_mapper=self.name_mapper,
+            ),
+            desc="Broadcasting weights to vLLM engines",
+            enable=False,
         )
-        if refs:
-            ray.get(refs)
-        ray.get([engine.wake_up.remote() for engine in self.vllm_engines])
+        utils.ray_get_with_progress(
+            [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
+        )
+        ray.get(self.actor_manager.set_should_stop.remote(False))
 
 
 @dataclass
