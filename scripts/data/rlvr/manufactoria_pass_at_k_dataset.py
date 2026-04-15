@@ -41,13 +41,14 @@ from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 from open_instruct import logger_utils
-from open_instruct.dataset_transformation import CHAT_TEMPLATES, DIFFICULTY_KEY
+from open_instruct.dataset_transformation import CHAT_TEMPLATES
 from open_instruct.ground_truth_utils import ManufactoriaVerifier, ManufactoriaVerifierConfig
 from open_instruct.utils import max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
 
 _DEFAULT_MANUFACTORIA_URL = os.environ.get("MANUFACTORIA_API_URL", "http://localhost:1235") + "/test_solution"
+DIFFICULTY_KEY = "difficulty"
 
 
 def parse_args() -> argparse.Namespace:
@@ -394,10 +395,7 @@ def _row_num_samples(completions: list[str], fallback_num_samples: int) -> int:
 
 
 def build_output_row(
-    sample: dict[str, Any],
-    completions: list[str],
-    verifier: ManufactoriaVerifier,
-    args: argparse.Namespace,
+    sample: dict[str, Any], completions: list[str], verifier: ManufactoriaVerifier, args: argparse.Namespace
 ) -> dict[str, Any]:
     if "ground_truth" not in sample:
         raise KeyError('Expected column "ground_truth" in dataset rows')
@@ -405,12 +403,7 @@ def build_output_row(
     label = normalize_manufactoria_ground_truth(sample["ground_truth"])
     with_difficulty = not args.no_difficulty
     full_pass_count, per_test_pass_count = _score_completions(
-        verifier,
-        label,
-        completions,
-        args.pass_score_threshold,
-        args.score_threads,
-        with_difficulty=with_difficulty,
+        verifier, label, completions, args.pass_score_threshold, args.score_threads, with_difficulty=with_difficulty
     )
 
     num_samples = _row_num_samples(completions, args.num_samples)
