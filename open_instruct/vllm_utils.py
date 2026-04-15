@@ -820,8 +820,6 @@ class LLMRayActor:
             try:
                 sub_request = self.completion_queue.get(timeout=1.0)
             except queue.Empty:
-                if self._should_stop():
-                    break
                 continue
             completion_future = accumulate_completions(self, sub_request)
             if completion_future is not None:
