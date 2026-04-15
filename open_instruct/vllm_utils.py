@@ -17,6 +17,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import os
 import queue
@@ -1513,29 +1514,25 @@ def broadcast_weights_to_vllm(
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
-    if gather_whole_model:
+    if gather_whole_model and not deepspeed_stage_3:
+        # DeepSpeed stage 3: gathering all params and broadcasting to vLLM inside
+        # GatheredParameters deadlocks intermittently (the exit collective races with
+        # rank 0's NCCL broadcasts on model_update_group). Use per-param gathering instead.
         if isinstance(model, FSDP):
             ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
         else:
-            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+            ctx = contextlib.nullcontext()
         # TODO(debug): remove verbose logging once weight sync hang is diagnosed
         logger.info(
-            "[broadcast_weights_to_vllm] rank=%d entering GatheredParameters (ds3=%s)",
+            "[broadcast_weights_to_vllm] rank=%d entering gather context (ds3=%s)",
             torch.distributed.get_rank(),
             deepspeed_stage_3,
         )
         with ctx:
-            logger.info("[broadcast_weights_to_vllm] rank=%d GatheredParameters entered", torch.distributed.get_rank())
+            logger.info("[broadcast_weights_to_vllm] rank=%d context entered", torch.distributed.get_rank())
             if is_rank_0:
-                refs = _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
-            else:
-                refs = []
-            # Barrier: rank 0 does NCCL broadcasts to vLLM inside GatheredParameters.
-            # Without this, ranks 1-7 exit the context (a collective) while rank 0
-            # is still broadcasting, causing a deadlock on the exit collective.
-            torch.distributed.barrier()
-            logger.info("[broadcast_weights_to_vllm] rank=%d barrier done", torch.distributed.get_rank())
-            return refs
+                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+            return []
     else:
         if is_rank_0:
             param_metadata = []
