@@ -876,9 +876,6 @@ def make_batch_from_groups(
 
     for pr in groups:
         result = pr.result
-        assert result.logprobs is not None
-        assert result.start_time is not None
-        assert result.token_statistics is not None
         n = generation_config.n
         all_queries.extend([pr.query] * n)
         all_ground_truths.extend([pr.ground_truth] * n)
