@@ -1527,8 +1527,15 @@ def broadcast_weights_to_vllm(
         with ctx:
             logger.info("[broadcast_weights_to_vllm] rank=%d GatheredParameters entered", torch.distributed.get_rank())
             if is_rank_0:
-                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
-            return []
+                refs = _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+            else:
+                refs = []
+            # Barrier: rank 0 does NCCL broadcasts to vLLM inside GatheredParameters.
+            # Without this, ranks 1-7 exit the context (a collective) while rank 0
+            # is still broadcasting, causing a deadlock on the exit collective.
+            torch.distributed.barrier()
+            logger.info("[broadcast_weights_to_vllm] rank=%d barrier done", torch.distributed.get_rank())
+            return refs
     else:
         if is_rank_0:
             param_metadata = []
