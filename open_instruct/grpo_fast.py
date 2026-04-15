@@ -1999,8 +1999,11 @@ def run_training(
         # Wait for weight sync to complete (should_stop becomes False)
         start = time.perf_counter()
         while ray.get(actor_manager.should_stop.remote()):
-            if time.perf_counter() - start > WEIGHT_SYNC_TIMEOUT_S:
-                raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
+            elapsed = time.perf_counter() - start
+            # TODO(debug): removed timeout to allow debugging with ray stack traces.
+            # Log periodically so we know it's still waiting.
+            if int(elapsed) % 60 == 0 and int(elapsed) > 0:
+                logger.warning("[health_check_fn] Weight sync still in progress after %.0fs", elapsed)
             time.sleep(0.1)
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
