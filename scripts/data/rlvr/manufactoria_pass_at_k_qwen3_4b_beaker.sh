@@ -7,8 +7,7 @@ set -euo pipefail
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-IMAGE_NAME=open-instruct-integration-test-${sanitized_branch}
-BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/${IMAGE_NAME}}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
 
