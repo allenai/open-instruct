@@ -36,7 +36,14 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        --mount_docker_socket \
-       -- docker network prune -f \&\& git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- git clone --depth 1 https://github.com/open-thoughts/OpenThoughts-TBLite.git /tmp/tblite \&\& python -c "
+import yaml, pathlib
+for d in pathlib.Path('/tmp/tblite').glob('*/environment'):
+    f = d / 'docker-compose.yaml'
+    cfg = yaml.safe_load(f.read_text()) if f.exists() else {}
+    cfg.setdefault('services', {}).setdefault('main', {})['network_mode'] = 'host'
+    f.write_text(yaml.dump(cfg))
+" \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/openthoughts-tblite-harbor 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/openthoughts-tblite-harbor 8 \
