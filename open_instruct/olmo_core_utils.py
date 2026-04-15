@@ -108,7 +108,7 @@ class TrainingConfig:
     """Whether to use fused AdamW."""
     cp_degree: int | None = None
     """Context parallelism degree. When set, enables context parallelism."""
-    cp_strategy: Literal["llama3", "zig_zag"] = "llama3"
+    cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
     ac_mode: TransformerActivationCheckpointingMode = TransformerActivationCheckpointingMode.budget
     """Activation checkpointing mode."""
@@ -140,6 +140,8 @@ def build_cp_config(training: TrainingConfig) -> TransformerContextParallelConfi
         return TransformerContextParallelConfig.llama3(degree=training.cp_degree)
     elif training.cp_strategy == "zig_zag":
         return TransformerContextParallelConfig.zig_zag(degree=training.cp_degree)
+    elif training.cp_strategy == "ulysses":
+        return TransformerContextParallelConfig.ulysses(degree=training.cp_degree)
     else:
         raise ValueError(f"Unknown cp_strategy: {training.cp_strategy}")
 
