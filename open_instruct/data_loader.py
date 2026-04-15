@@ -47,7 +47,7 @@ from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.rubrics import RubricManager
-from open_instruct.utils import combine_reward_metrics, repeat_each
+from open_instruct.utils import combine_reward_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -738,16 +738,21 @@ def add_prompt_to_generator(
 
 
 @dataclass
-class ProcessedResult:
-    """All list fields have length generation_config.n (one per sample)."""
+class Group:
+    """All the samples for a single GRPO group (one prompt, n samples).
+
+    Per-group fields (singular): result, query, ground_truth, dataset,
+    raw_query, active_tools, index, reward_metrics, percent_solved.
+    Per-sample fields (length n): decoded_responses, reward_scores.
+    """
 
     result: data_types.GenerationResult
-    queries: list[list[int]]
-    ground_truths: list[list[int]]
-    datasets: list[str]
-    raw_queries: list[str]
-    active_tools: list[list[str] | None]
-    indices: list[int]
+    query: list[int]
+    ground_truth: list[int]
+    dataset: str
+    raw_query: str
+    active_tools: list[str] | None
+    index: int
     decoded_responses: list[str]
     reward_scores: list[float]
     reward_metrics: dict[str, Any]
@@ -767,7 +772,7 @@ def process_single_result(
     param_prompt_Q: ray_queue.Queue | None,
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
-) -> ProcessedResult | None:
+) -> Group | None:
     assert result.index is not None
     assert result.logprobs is not None
     assert result.reward_scores is not None
@@ -816,14 +821,14 @@ def process_single_result(
     if filter_zero_std_samples and np.std(result.reward_scores) == 0:
         return None
 
-    return ProcessedResult(
+    return Group(
         result=result,
-        queries=repeat_each([query], generation_config.n),
-        ground_truths=repeat_each([ground_truth], generation_config.n),
-        datasets=repeat_each([dataset_name], generation_config.n),
-        raw_queries=repeat_each([raw_query], generation_config.n),
-        active_tools=repeat_each([sample_active_tools], generation_config.n),
-        indices=repeat_each([result.index], generation_config.n),
+        query=query,
+        ground_truth=ground_truth,
+        dataset=dataset_name,
+        raw_query=raw_query,
+        active_tools=sample_active_tools,
+        index=result.index,
         decoded_responses=decoded_responses,
         reward_scores=list(result.reward_scores),
         reward_metrics=result.reward_metrics or {},
@@ -831,10 +836,10 @@ def process_single_result(
     )
 
 
-def combine_processed_results(
-    processed_results: list[ProcessedResult], generation_config: vllm.SamplingParams, actor_manager=None
+def combine_groups(
+    groups: list[Group], generation_config: vllm.SamplingParams, actor_manager=None
 ) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics] | tuple[None, None, None, None]:
-    if len(processed_results) == 0:
+    if len(groups) == 0:
         return None, None, None, None
 
     all_queries: list[list[int]] = []
@@ -869,17 +874,18 @@ def combine_processed_results(
     total_response_tokens = 0
     max_generation_time = 0.0
 
-    for pr in processed_results:
+    for pr in groups:
         result = pr.result
         assert result.logprobs is not None
         assert result.start_time is not None
         assert result.token_statistics is not None
-        all_queries.extend(pr.queries)
-        all_ground_truths.extend(pr.ground_truths)
-        all_datasets.extend(pr.datasets)
-        all_raw_queries.extend(pr.raw_queries)
-        all_active_tools.extend(pr.active_tools)
-        all_indices.extend(pr.indices)
+        n = generation_config.n
+        all_queries.extend([pr.query] * n)
+        all_ground_truths.extend([pr.ground_truth] * n)
+        all_datasets.extend([pr.dataset] * n)
+        all_raw_queries.extend([pr.raw_query] * n)
+        all_active_tools.extend([pr.active_tools] * n)
+        all_indices.extend([pr.index] * n)
         all_decoded_responses.extend(pr.decoded_responses)
         all_scores.extend(pr.reward_scores)
         all_reward_metrics.append(pr.reward_metrics)
@@ -901,7 +907,7 @@ def combine_processed_results(
         combined_logprobs.extend(result.logprobs)
 
         earliest_start_time = min(earliest_start_time, result.start_time)
-        prompt_lengths.append(len(pr.queries[0]))
+        prompt_lengths.append(len(pr.query))
         for response in result.responses:
             response_lengths.append(len(response))
 
@@ -933,7 +939,7 @@ def combine_processed_results(
         masks=combined_masks,
         request_info=combined_request_info,
         index=None,
-        prompt_id=processed_results[0].result.prompt_id,
+        prompt_id=groups[0].result.prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
@@ -970,7 +976,7 @@ def combine_processed_results(
         percent_solved_mean=percent_solved_mean,
         percent_solved_hist=np.array(all_percent_solved),
         no_resampled_prompts=0,
-        total_prompts=len(processed_results),
+        total_prompts=len(groups),
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
 
@@ -1008,7 +1014,7 @@ def accumulate_inference_batches(
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
-    processed_results: list[ProcessedResult] = []
+    groups: list[Group] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -1087,9 +1093,9 @@ def accumulate_inference_batches(
 
         num_prompts_sampled += 1
         progress_bar.update(1)
-        processed_results.append(processed)
+        groups.append(processed)
 
-    if len(processed_results) == 0:
+    if len(groups) == 0:
         logger.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
@@ -1097,8 +1103,8 @@ def accumulate_inference_batches(
         )
         return None, None, None, None
 
-    combined_result, batch, combined_reward_metrics, batch_stats = combine_processed_results(
-        processed_results, generation_config, actor_manager
+    combined_result, batch, combined_reward_metrics, batch_stats = combine_groups(
+        groups, generation_config, actor_manager
     )
     assert combined_result is not None
     assert batch is not None
