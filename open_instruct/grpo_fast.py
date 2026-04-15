@@ -40,6 +40,9 @@ with contextlib.suppress(Exception):
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
+with contextlib.suppress(Exception):
+    from fla.ops.cp.context import FLACPContext
+
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
@@ -391,15 +394,36 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
+            sp_rank = groups._get_sequence_parallel_rank()
+            sp_group = groups._get_sequence_parallel_group()
+            sp_world_size = groups._get_sequence_parallel_world_size()
             self.splitter = UlyssesSPSplitter(
-                sp_rank=groups._get_sequence_parallel_rank(),
-                sp_group=groups._get_sequence_parallel_group(),
-                sp_world_size=groups._get_sequence_parallel_world_size(),
+                sp_rank=sp_rank,
+                sp_group=sp_group,
+                sp_world_size=sp_world_size,
                 device=self.device,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
+            # FLA context-parallel context so GatedDeltaNet layers can
+            # communicate recurrent state across SP ranks.  cu_seqlens is
+            # filled per-batch in _compute_packing_kwargs.
+            conv_kernel_size = getattr(self.policy.config, "linear_conv_kernel_dim", None) or getattr(
+                getattr(self.policy.config, "text_config", None), "linear_conv_kernel_dim", None
+            )
+            if "FLACPContext" in dir():
+                self.cp_context = FLACPContext(
+                    group=sp_group,
+                    is_first_rank=(sp_rank == 0),
+                    is_last_rank=(sp_rank == sp_world_size - 1),
+                    pre_num_ranks=sp_rank,
+                    post_num_ranks=sp_world_size - sp_rank - 1,
+                    conv1d_kernel_size=conv_kernel_size,
+                )
+            else:
+                self.cp_context = None
         else:
             self.splitter = None
+            self.cp_context = None
 
         # dp_rank = which data-parallel group this worker belongs to
         # With SP, workers in the same SP group share the same dp_rank
@@ -546,7 +570,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    self.ref_policy,
+                    data_BT,
+                    self.pad_token_id,
+                    self.streaming_config.temperature,
+                    use_grad=False,
+                    cp_context=self.cp_context,
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -558,7 +587,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                        self.model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        use_grad=False,
+                        cp_context=self.cp_context,
                     )
 
                 with torch.no_grad():
@@ -606,6 +640,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.pad_token_id,
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
+                        cp_context=self.cp_context,
                     )
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
