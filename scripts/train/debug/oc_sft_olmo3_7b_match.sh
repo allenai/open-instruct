@@ -48,7 +48,7 @@ uv run python mason.py \
     --cp_strategy ulysses \
     --compile_model true \
     --checkpointing_steps 999999 \
-    --ephemeral_save_interval 999999 \
+    --ephemeral_save_interval 999998 \
     --with_tracking \
     --logging_steps 1 \
     --mixer_list allenai/Dolci-Instruct-SFT 1.0 \
