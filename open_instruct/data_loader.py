@@ -47,7 +47,7 @@ from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.rubrics import RubricManager
-from open_instruct.utils import combine_reward_metrics
+from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 
@@ -842,47 +842,47 @@ def make_batch_from_groups(
     if len(groups) == 0:
         return None, None, None, None
 
-    all_queries: list[list[int]] = []
-    all_ground_truths: list[list[int]] = []
-    all_datasets: list[str] = []
-    all_raw_queries: list[str] = []
-    all_decoded_responses: list[str] = []
-    all_reward_metrics: list[dict] = []
-    all_active_tools: list[list[str] | None] = []
-    all_indices: list[int] = []
-    all_scores: list[float] = []
-    all_percent_solved: list[float] = []
-    all_model_steps: list[int] = []
+    all_queries = []
+    all_ground_truths = []
+    all_datasets = []
+    all_raw_queries = []
+    all_decoded_responses = []
+    all_reward_metrics = []
+    all_active_tools = []
+    all_scores = []
+    all_indices = []
+    all_percent_solved = []
+    all_model_steps = []
 
-    combined_responses: list[list[int]] = []
-    combined_finish_reasons: list[str] = []
-    combined_masks: list[list[int]] = []
-    combined_num_calls: list[int] = []
-    combined_timeouts: list[int] = []
-    combined_tool_errors: list[str] = []
-    combined_tool_outputs: list[str] = []
-    combined_tool_runtimes: list[float] = []
-    combined_tool_calleds: list[bool] = []
-    combined_tool_call_stats: list = []
-    combined_rollout_states: list[dict] = []
-    combined_logprobs: list[list[float]] = []
+    combined_responses = []
+    combined_finish_reasons = []
+    combined_masks = []
+    combined_num_calls = []
+    combined_timeouts = []
+    combined_tool_errors = []
+    combined_tool_outputs = []
+    combined_tool_runtimes = []
+    combined_tool_calleds = []
+    combined_tool_call_stats = []
+    combined_rollout_states = []
+    combined_logprobs = []
 
     earliest_start_time = float("inf")
-    prompt_lengths: list[int] = []
-    response_lengths: list[int] = []
+    prompt_lengths = []
+    response_lengths = []
+
     total_prompt_tokens = 0
     total_response_tokens = 0
-    max_generation_time = 0.0
+    max_generation_time = 0
 
     for pr in groups:
         result = pr.result
-        n = generation_config.n
-        all_queries.extend([pr.query] * n)
-        all_ground_truths.extend([pr.ground_truth] * n)
-        all_datasets.extend([pr.dataset] * n)
-        all_raw_queries.extend([pr.raw_query] * n)
-        all_active_tools.extend([pr.active_tools] * n)
-        all_indices.extend([pr.index] * n)
+        all_queries.extend(repeat_each([pr.query], generation_config.n))
+        all_ground_truths.extend(repeat_each([pr.ground_truth], generation_config.n))
+        all_datasets.extend(repeat_each([pr.dataset], generation_config.n))
+        all_raw_queries.extend(repeat_each([pr.raw_query], generation_config.n))
+        all_active_tools.extend(repeat_each([pr.active_tools], generation_config.n))
+        all_indices.extend(repeat_each([pr.index], generation_config.n))
         all_decoded_responses.extend(pr.decoded_responses)
         all_scores.extend(pr.reward_scores)
         all_reward_metrics.append(pr.reward_metrics)
@@ -901,10 +901,13 @@ def make_batch_from_groups(
         combined_tool_calleds.extend(result.request_info.tool_calleds)
         combined_tool_call_stats.extend(result.request_info.tool_call_stats)
         combined_rollout_states.extend(result.request_info.rollout_states)
+
         combined_logprobs.extend(result.logprobs)
 
         earliest_start_time = min(earliest_start_time, result.start_time)
+
         prompt_lengths.append(len(pr.query))
+
         for response in result.responses:
             response_lengths.append(len(response))
 
@@ -961,7 +964,7 @@ def make_batch_from_groups(
         combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
         combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
         combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
-    percent_solved_mean = float(np.mean(all_percent_solved)) if all_percent_solved else 0.0
+    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
@@ -1076,14 +1079,14 @@ def accumulate_inference_batches(
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
-            logger.debug(
+            logging.debug(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
             continue
 
         if no_resampling_pass_rate is not None and processed.percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
-            logger.debug(
+            logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {processed.percent_solved}, "
                 f"will be excluded from resampling, total no resampled: {total_no_resampled}"
             )
@@ -1093,7 +1096,7 @@ def accumulate_inference_batches(
         groups.append(processed)
 
     if len(groups) == 0:
-        logger.warning(
+        logging.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
             f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
