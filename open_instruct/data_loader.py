@@ -954,7 +954,7 @@ def make_batch_from_groups(
         decoded_responses=all_decoded_responses,
         indices=all_indices,
         scores=all_scores,
-        active_tools=all_active_tools if all_active_tools else None,
+        active_tools=all_active_tools if any(all_active_tools) else None,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
