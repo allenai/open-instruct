@@ -444,23 +444,17 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.vllm_config.vllm_tensor_parallel_size,
                 )
                 world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+                init_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
                 refs = [
                     engine.init_weight_transfer_engine.remote(
                         WeightTransferInitRequest(
-                            init_info={
-                                "master_address": master_address,
-                                "master_port": master_port,
-                                "rank_offset": i * vllm_tensor_parallel_size + 1,
-                                "world_size": world_size,
-                            }
+                            init_info=init_info | {"rank_offset": i * vllm_tensor_parallel_size + 1}
                         )
                     )
                     for i, engine in enumerate(vllm_engines)
                 ]
                 torch.cuda.set_device(self.local_rank)
-                self.model_update_group = NCCLWeightTransferEngine.trainer_init(
-                    {"master_address": master_address, "master_port": master_port, "world_size": world_size}
-                )
+                self.model_update_group = NCCLWeightTransferEngine.trainer_init(init_info)
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
