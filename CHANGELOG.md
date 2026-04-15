@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/PLACEHOLDER).
 - Set checkpoint_state_freq default in data_loader.py, not mason.py (https://github.com/allenai/open-instruct/pull/1600).
 - Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
 - Use local fixture for AceCode test instead of downloading from HuggingFace (https://github.com/allenai/open-instruct/pull/1593).
