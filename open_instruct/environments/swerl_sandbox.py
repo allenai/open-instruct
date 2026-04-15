@@ -31,8 +31,6 @@ from .tools.utils import coerce_args
 logger = logger_utils.setup_logger(__name__)
 
 
-
-
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
 MAX_OUTPUT_CHARS = 10_000
@@ -44,12 +42,7 @@ _BASH_TOOL = {
         "description": "Execute a bash command. Each command runs in a new subshell.",
         "parameters": {
             "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The bash command to execute.",
-                },
-            },
+            "properties": {"command": {"type": "string", "description": "The bash command to execute."}},
             "required": ["command"],
         },
     },
@@ -101,22 +94,27 @@ class SWERLSandboxEnv(RLEnvironment):
         self._instruction = ""
         self._tests_dir: str | None = None
 
+    @staticmethod
+    def resolve_task_data_dir(task_data_hf_repo: str) -> str:
+        """Download and extract task data once.  Call before spawning actors
+        and pass the returned path as *task_data_dir* so each actor skips
+        the redundant download."""
+        repo_dir = snapshot_download(task_data_hf_repo, repo_type="dataset")
+        tarball = os.path.join(repo_dir, "task-data.tar.gz")
+        if os.path.isfile(tarball):
+            extract_dir = tarball + ".extracted"
+            if not os.path.isdir(extract_dir):
+                logger.info(f"Extracting {tarball} to {extract_dir}...")
+                os.makedirs(extract_dir, exist_ok=True)
+                subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
+            return extract_dir
+        return repo_dir
+
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
         if self._task_data_hf_repo and not self._task_data_dir:
             logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
-            repo_dir = snapshot_download(self._task_data_hf_repo, repo_type="dataset")
-            # Extract tarball if present — HF cache is read-only so extract elsewhere
-            tarball = os.path.join(repo_dir, "task-data.tar.gz")
-            if os.path.isfile(tarball):
-                extract_dir = tarball + ".extracted"
-                if not os.path.isdir(extract_dir):
-                    logger.info(f"Extracting {tarball} to {extract_dir}...")
-                    os.makedirs(extract_dir, exist_ok=True)
-                    subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
-                self._task_data_dir = extract_dir
-            else:
-                self._task_data_dir = repo_dir
+            self._task_data_dir = self.resolve_task_data_dir(self._task_data_hf_repo)
             logger.info(f"Task data at {self._task_data_dir}")
 
     @classmethod
@@ -261,10 +259,7 @@ class SWERLSandboxEnv(RLEnvironment):
             args = coerce_args(_BASH_TOOL["function"]["parameters"], call.args)
             return self._execute_bash(args)
         else:
-            return StepResult(
-                result=f"Error: Unknown tool '{call.name}'. Available: bash",
-                reward=self._penalty,
-            )
+            return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash", reward=self._penalty)
 
     # ------------------------------------------------------------------
     # execute_bash

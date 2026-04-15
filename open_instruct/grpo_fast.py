@@ -1195,6 +1195,10 @@ def create_tool_pools(
 
         for cfg, call_name, tool_class in configs_to_create:
             kwargs = asdict(cfg) | {"call_name": call_name}
+            # Pre-resolve HF dataset so each actor skips the redundant download.
+            hf_repo = kwargs.get("task_data_hf_repo")
+            if hf_repo and not kwargs.get("task_data_dir") and hasattr(tool_class, "resolve_task_data_dir"):
+                kwargs["task_data_dir"] = tool_class.resolve_task_data_dir(hf_repo)
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
