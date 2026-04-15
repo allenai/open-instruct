@@ -688,6 +688,8 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
+            # There is a TOCTOU race: another process could claim the port between
+            # find_free_port() and uvicorn binding. Unlikely in practice.
             self.server_port = utils.find_free_port()
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
@@ -1358,8 +1360,8 @@ def _broadcast_weights_ipc(
 
     with ctx:
         if is_rank_0:
+            mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
             for engine in vllm_engines:
-                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
     return []

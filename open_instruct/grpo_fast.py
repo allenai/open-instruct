@@ -1435,7 +1435,7 @@ def weight_sync_thread(
     stop_event: threading.Event,
     weight_sync_trigger: WeightSyncTrigger,
     policy_group: ModelGroup,
-    vllm_engines: list[ray.actor.ActorHandle],
+    vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1476,6 +1476,8 @@ def weight_sync_thread(
                 )
 
                 if not inflight_updates:
+                    # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+                    # Without waiting here, should_stop may flip to False while updates are still queued.
                     engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
                     if engine_update_refs:
                         ray_get_with_progress(
@@ -1942,33 +1944,8 @@ def run_training(
         )
         logger.info("Restored dataloader state from checkpoint")
 
-    weight_sync_initialized = not vllm_engines
     weight_sync_trigger: WeightSyncTrigger | None = None
     weight_sync_thread_future: futures.Future | None = None
-
-    def start_weight_sync_thread(initial_resume_training_step: int) -> None:
-        nonlocal weight_sync_thread_future, weight_sync_trigger
-        if weight_sync_thread_future is not None:
-            return
-        logger.info("======== ✅ weight sync thread starts =========")
-        weight_sync_trigger = WeightSyncTrigger()
-        initial_model_step = initial_resume_training_step - 1
-        ray_get_with_progress(
-            [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
-            desc=f"Initializing vLLM model step to {initial_model_step}",
-        )
-        weight_sync_thread_future = executor.submit(
-            weight_sync_thread,
-            args,
-            stop_event,
-            weight_sync_trigger,
-            policy_group,
-            vllm_engines,
-            actor_manager,
-            weight_sync_metrics_Q,
-            initial_resume_training_step,
-            streaming_config.inflight_updates,
-        )
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -1977,16 +1954,16 @@ def run_training(
 
     logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
-    def health_check_fn(expect_new_weight_sync: bool = False):
-        saw_weight_sync = False
+    def health_check_fn(weight_sync_future: futures.Future | None, expect_new_weight_sync: bool = False):
+        seen_actors_paused = False
         start = time.perf_counter()
         while True:
-            if weight_sync_thread_future is not None and weight_sync_thread_future.done():
-                weight_sync_thread_future.result()
+            if weight_sync_future is not None and weight_sync_future.done():
+                weight_sync_future.result()
             should_stop = ray.get(actor_manager.should_stop.remote())
             if should_stop:
-                saw_weight_sync = True
-            if not should_stop and (not expect_new_weight_sync or saw_weight_sync):
+                seen_actors_paused = True
+            if not should_stop and (not expect_new_weight_sync or seen_actors_paused):
                 break
             if time.perf_counter() - start > WEIGHT_SYNC_TIMEOUT_S:
                 raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
@@ -1997,12 +1974,13 @@ def run_training(
             enable=False,
         )
 
-    def maybe_initialize_weight_sync(training_step: int) -> None:
-        nonlocal weight_sync_initialized
-        if weight_sync_initialized:
-            return
+    def maybe_initialize_weight_sync(
+        training_step: int, weight_sync_future: futures.Future | None
+    ) -> tuple[futures.Future, WeightSyncTrigger] | None:
+        if not vllm_engines or weight_sync_future is not None:
+            return None
         if training_step < 2:
-            return
+            return None
 
         logger.info("[Main Thread] Lazily initializing native vLLM weight sync before step %d.", training_step)
 
@@ -2011,13 +1989,29 @@ def run_training(
             desc="Setting up model update group",
         )
         logger.info("======== ✅ model update group setup successfully =========")
-        weight_sync_initialized = True
 
-        start_weight_sync_thread(initial_resume_training_step=1)
-        assert weight_sync_trigger is not None
+        logger.info("======== ✅ weight sync thread starts =========")
+        trigger = WeightSyncTrigger()
+        ray_get_with_progress(
+            [engine.set_model_step.remote(0) for engine in vllm_engines], desc="Initializing vLLM model step to 0"
+        )
+        future = executor.submit(
+            weight_sync_thread,
+            args,
+            stop_event,
+            trigger,
+            policy_group,
+            vllm_engines,
+            actor_manager,
+            weight_sync_metrics_Q,
+            1,
+            streaming_config.inflight_updates,
+        )
+
         logger.info("[Main Thread] Triggering initial native vLLM weight sync before step %d.", training_step)
-        weight_sync_trigger.notify(step=1)
-        health_check_fn(expect_new_weight_sync=True)
+        trigger.notify(step=1)
+        health_check_fn(future, expect_new_weight_sync=True)
+        return future, trigger
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -2051,8 +2045,10 @@ def run_training(
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
-        health_check_fn()
-        maybe_initialize_weight_sync(training_step)
+        health_check_fn(weight_sync_thread_future)
+        result = maybe_initialize_weight_sync(training_step, weight_sync_thread_future)
+        if result is not None:
+            weight_sync_thread_future, weight_sync_trigger = result
         health_check_time = time.perf_counter() - health_check_start
 
         if (
