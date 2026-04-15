@@ -711,6 +711,8 @@ class BatchStatistics:
     filtered_prompt_datasets_zero: list[str]
     filtered_prompt_datasets_solved: list[str]
     filtered_prompt_datasets_nonzero: list[str]
+    completions_used_by_dataset: dict[str, int]
+    given_up_prompts_by_dataset: dict[str, int]
     test_prompt_indices: list[int]
     test_indices: list[int]
     test_passes: list[float]
@@ -780,6 +782,11 @@ def compute_filtered_batch_metrics(
         metrics[f"{filtered_metric_prefix}/filtered_prompts_solved/{dataset_name}"] = count
     for dataset_name, count in filtered_prompts_nonzero_by_dataset.items():
         metrics[f"{filtered_metric_prefix}/filtered_prompts_nonzero/{dataset_name}"] = count
+
+    for dataset_name, count in batch_stats.completions_used_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/completions_used/{dataset_name}"] = count
+    for dataset_name, count in batch_stats.given_up_prompts_by_dataset.items():
+        metrics[f"{filtered_metric_prefix}/given_up_prompts/{dataset_name}"] = count
 
     if completions_per_prompt_prefix is None:
         return metrics
@@ -1247,6 +1254,8 @@ def accumulate_inference_batches(
     filtered_prompt_datasets_zero = []
     filtered_prompt_datasets_solved = []
     filtered_prompt_datasets_nonzero = []
+    completions_used_by_dataset: dict[str, int] = {}
+    given_up_prompts_by_dataset: dict[str, int] = {}
     progress_bar = tqdm(total=num_prompts, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
     logger.info(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
@@ -1267,6 +1276,9 @@ def accumulate_inference_batches(
         assert filtered_result.reward_scores is not None
         total_filtered_prompts += 1
         filtered_prompt_datasets.append(dataset_key)
+        completions_used_by_dataset[dataset_key] = completions_used_by_dataset.get(dataset_key, 0) + len(
+            filtered_result.responses
+        )
         if filtered_result.reward_scores[0] == 0:
             filtered_prompt_zero += 1
             filtered_prompt_datasets_zero.append(dataset_key)
@@ -1370,6 +1382,10 @@ def accumulate_inference_batches(
                 progress_bar.update(1)
                 if progress_callback is not None:
                     progress_callback(num_prompts_sampled, num_prompts)
+            if result.reward_scores[0] == 0:
+                given_up_prompts_by_dataset[prompt_dataset_key] = (
+                    given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + len(pending_results) + 1
+                )
             for pending_result in pending_results:
                 record_filtered_prompt(pending_result, prompt_dataset_key)
             record_filtered_prompt(result, prompt_dataset_key)
@@ -1410,6 +1426,10 @@ def accumulate_inference_batches(
         else:
             merged_reward_metrics = result.reward_metrics
             sample_count = generation_config.n
+
+        completions_used_by_dataset[prompt_dataset_key] = (
+            completions_used_by_dataset.get(prompt_dataset_key, 0) + sample_count
+        )
 
         manufactoria_test_pass_rows = []
         if merged_reward_metrics is not None:
@@ -1608,6 +1628,8 @@ def accumulate_inference_batches(
         filtered_prompt_datasets_zero=filtered_prompt_datasets_zero,
         filtered_prompt_datasets_solved=filtered_prompt_datasets_solved,
         filtered_prompt_datasets_nonzero=filtered_prompt_datasets_nonzero,
+        completions_used_by_dataset=completions_used_by_dataset,
+        given_up_prompts_by_dataset=given_up_prompts_by_dataset,
         test_prompt_indices=all_test_prompt_indices,
         test_indices=all_test_indices,
         test_passes=all_test_passes,
@@ -1979,6 +2001,8 @@ class DataPreparationActor:
                     "filtered_prompt_datasets_zero",
                     "filtered_prompt_datasets_solved",
                     "filtered_prompt_datasets_nonzero",
+                    "completions_used_by_dataset",
+                    "given_up_prompts_by_dataset",
                     "test_prompt_indices",
                     "test_indices",
                     "test_passes",
