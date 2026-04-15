@@ -106,6 +106,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
+from open_instruct.qwen3_5_packing_patch import patch_qwen3_5_packing
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -2289,6 +2290,9 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+
+    # Patch Qwen3.5 GatedDeltaNet to support packing (seq_idx/cu_seqlens).
+    patch_qwen3_5_packing()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)

@@ -99,7 +99,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         )
 
         if self.return_flash_attn_kwargs:
-            ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = torch.tensor(
+            ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = ret["cu_seqlens"] = torch.tensor(
                 cu_seq_lens, dtype=torch.int32, device=features[0]["input_ids"].device
             )
             ret["max_length_q"] = ret["max_length_k"] = max_length
