@@ -774,9 +774,7 @@ def process_group(
     ground_truth_overrides: dict[int, Any] | None = None,
 ) -> Group | None:
     assert result.index is not None
-    assert result.logprobs is not None
     assert result.reward_scores is not None
-    assert result.start_time is not None
     assert result.token_statistics is not None
     assert len(result.responses) == generation_config.n, (
         f"Mismatch: individual prompt result has {len(result.responses)} responses "
@@ -792,8 +790,9 @@ def process_group(
     sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
     if replenish_prompts:
-        assert iter_dataloader is not None
-        assert param_prompt_Q is not None
+        assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
+            "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
+        )
         example = next(iter_dataloader)
         add_prompt_to_generator(
             example,
@@ -1435,10 +1434,8 @@ class DataPreparationActor:
                 result.responses = [result.responses[i] for i in stop_idxes]
                 result.masks = [result.masks[i] for i in stop_idxes]
                 result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
-                assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
-            assert result.logprobs is not None
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
