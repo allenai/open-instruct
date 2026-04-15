@@ -377,7 +377,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
-        model_step=metadata.get("model_step"),
+        model_step=metadata["model_step"],
     )
     is_eval = metadata["is_eval"]
 
@@ -861,10 +861,11 @@ class LLMRayActor:
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weights_batch(self, param_metadata: list[tuple[str, str, tuple[int, ...]]]) -> None:
+    def update_weights_batch(self, param_metadata: list[tuple[str, str, tuple[int, ...]]], model_step: int) -> None:
         for name, dtype, _ in param_metadata:
             self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weights_batch", args=(param_metadata,)))
+        self._run_async(self.llm_engine.collective_rpc("update_weights_batch", args=(param_metadata,)))
+        self.current_model_step = model_step
 
     def update_weight_cuda_ipc(self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any]) -> None:
         self._prepare_weight_update(name, dtype)
@@ -877,9 +878,6 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
-
-    def set_model_step(self, model_step: int) -> None:
-        self.current_model_step = model_step
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
@@ -1376,10 +1374,11 @@ def _send_to_vllm(
     params: list[tuple[str, torch.nn.Parameter, torch.Size]],
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
+    model_step: int,
 ) -> list[ray.ObjectRef]:
     """Send parameters to vLLM engines via a single RPC + sequential NCCL broadcasts."""
     param_metadata = [(name, str(param.dtype), tuple(shape)) for name, param, shape in params]
-    refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
+    refs = [engine.update_weights_batch.remote(param_metadata, model_step) for engine in vllm_engines]
     for _, param, _ in params:
         torch.distributed.broadcast(param.data, 0, group=model_update_group)
     return refs
@@ -1401,6 +1400,7 @@ def _broadcast_fsdp2_block_params(
     model_update_group: torch.distributed.ProcessGroup,
     name_mapper: Callable[[str], str] | None,
     is_rank_0: bool,
+    model_step: int,
 ) -> list[ray.ObjectRef]:
     """Broadcast parameters from one FSDP2 block to vLLM engines.
 
@@ -1416,7 +1416,7 @@ def _broadcast_fsdp2_block_params(
                 full_name = f"{block_name}.{name}" if block_name else name
                 mapped_name = name_mapper(full_name) if name_mapper else full_name
                 batch_params.append((mapped_name, param, param.shape))
-            refs = _send_to_vllm(batch_params, vllm_engines, model_update_group)
+            refs = _send_to_vllm(batch_params, vllm_engines, model_update_group, model_step)
         return refs
     finally:
         block.reshard()
@@ -1427,6 +1427,7 @@ def _broadcast_params_to_vllm(
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
     name_mapper: Callable[[str], str] | None,
+    model_step: int,
 ) -> list[ray.ObjectRef]:
     """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
     batch_params = []
@@ -1434,13 +1435,14 @@ def _broadcast_params_to_vllm(
         mapped_name = name_mapper(name) if name_mapper else name
         shape = getattr(param, "ds_shape", param.shape)
         batch_params.append((mapped_name, param, shape))
-    return _send_to_vllm(batch_params, vllm_engines, model_update_group)
+    return _send_to_vllm(batch_params, vllm_engines, model_update_group, model_step)
 
 
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup | None,
+    model_step: int,
     name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
@@ -1454,6 +1456,7 @@ def broadcast_weights_to_vllm(
         model: The unwrapped model (model.module from DeepSpeed/FSDP engine)
         vllm_engines: List of vLLM engine actor handles
         model_update_group: Process group for distributed broadcast (only needed on rank 0)
+        model_step: The training step to stamp on the vLLM engines after updating weights.
         name_mapper: Optional function to map parameter names (e.g., OLMo-core to HF format)
         gather_whole_model: If True, gather all params at once (more memory, faster).
             If False, gather each param individually (less memory, slower).
@@ -1473,7 +1476,7 @@ def broadcast_weights_to_vllm(
         all_refs: list[ray.ObjectRef] = []
         for block_name, block in fsdp_submodules:
             refs = _broadcast_fsdp2_block_params(
-                block_name, block, vllm_engines, model_update_group, name_mapper, is_rank_0
+                block_name, block, vllm_engines, model_update_group, name_mapper, is_rank_0, model_step
             )
             all_refs.extend(refs)
         return all_refs
@@ -1488,7 +1491,7 @@ def broadcast_weights_to_vllm(
             ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
         with ctx:
             if is_rank_0:
-                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper, model_step)
             return []
     else:
         if is_rank_0:
@@ -1497,7 +1500,7 @@ def broadcast_weights_to_vllm(
                 mapped_name = name_mapper(name) if name_mapper else name
                 shape = tuple(getattr(param, "ds_shape", param.shape))
                 param_metadata.append((mapped_name, str(param.dtype), shape))
-            all_refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
+            all_refs = [engine.update_weights_batch.remote(param_metadata, model_step) for engine in vllm_engines]
         else:
             all_refs = []
         for _name, param in params:

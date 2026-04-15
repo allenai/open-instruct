@@ -461,7 +461,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
-    def broadcast_to_vllm(self):
+    def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
@@ -471,6 +471,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            model_step=model_step,
             gather_whole_model=self.args.gather_whole_model,
             name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
@@ -1462,7 +1463,7 @@ def weight_sync_thread(
                 # Broadcast weights to vLLM engines
                 # First get the futures
                 weight_broadcast_futures: list[ray.ObjectRef] = [
-                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                    m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models
                 ]
 
                 # Wait for all trainer-side broadcasts to finish and collect timing stats.
@@ -1489,13 +1490,6 @@ def weight_sync_thread(
         finally:
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1938,11 +1932,6 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger = WeightSyncTrigger()
-    initial_model_step = resume_training_step - 1
-    ray_get_with_progress(
-        [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
-        desc=f"Initializing vLLM model step to {initial_model_step}",
-    )
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,

@@ -902,8 +902,7 @@ def accumulate_inference_batches(
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
-        if result.model_step is not None:
-            all_model_steps.append(result.model_step)
+        all_model_steps.extend([result.model_step] * len(result.responses))
 
     if len(results) == 0:
         logging.warning(
@@ -1001,14 +1000,16 @@ def accumulate_inference_batches(
         indices=all_indices,
         scores=all_scores,
         active_tools=all_active_tools if all_active_tools else None,
+        model_steps=all_model_steps,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
-    if all_model_steps:
-        model_steps_array = np.array(all_model_steps, dtype=float)
-        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
-        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
-        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    model_steps_array = np.array(all_model_steps, dtype=float)
+    combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+    combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+    combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    if training_step is not None:
+        combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
