@@ -1122,9 +1122,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
                 try:
                     step_result: StepResult = await asyncio.wait_for(
-                        target.step.remote(
-                            EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
-                        ),
+                        target.step.remote(EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)),
                         timeout=actor.tool_call_timeout,
                     )
                     observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
@@ -1150,7 +1148,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.tool_error += error_msg
                     rollout.timeout = True
                     rollout.rewards.append(0.0)
-                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout))
+                    rollout.tool_call_stats.append(
+                        ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout)
+                    )
                 except Exception as e:
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
@@ -1495,8 +1495,14 @@ def broadcast_weights_to_vllm(
             ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
         with ctx:
             if is_rank_0:
-                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
-            return []
+                refs = _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
+            else:
+                refs = []
+            # Barrier: rank 0 does NCCL broadcasts to vLLM inside GatheredParameters.
+            # Without this, ranks 1-7 exit the context (a collective) while rank 0
+            # is still broadcasting, causing a deadlock on the exit collective.
+            torch.distributed.barrier()
+            return refs
     else:
         if is_rank_0:
             param_metadata = []
