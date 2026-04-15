@@ -274,6 +274,7 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            local_files_only=True,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
