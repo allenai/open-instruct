@@ -17,6 +17,15 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix DeepSpeed gradient clipping in `grpo_fast.py` by passing `max_norm` to the DS config. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `dpo_tune_cache.py` logging on every rank. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `truncate_messages_to_fit_context` double-counting system tokens, which under-filled the judge context window by `system_tokens` worth of space (https://github.com/allenai/open-instruct/pull/1601).
+- Fix `is_equiv` returning `None` instead of `False` when expression simplification raises `ValueError` (https://github.com/allenai/open-instruct/pull/1605).
+- Fix off-by-one in `find_shared_text` so the full shared prefix is returned when one string is a prefix of another, and handle empty-input cases (https://github.com/allenai/open-instruct/pull/1604).
+- Fix `PreferenceDatasetProcessor.filter` dropping the rejected-sequence length check, so over-long rejected completions were no longer filtered (https://github.com/allenai/open-instruct/pull/1597).
+- Fix dataset validation logic that rejected `--dataset_name` as the sole dataset mechanism in DPO and finetuning configs (https://github.com/allenai/open-instruct/pull/1595).
 - Improve GRPO vLLM timeout handling: retry `_check_health` on `TimeoutError` and ensure `set_should_stop` is always reset in the weight sync thread to prevent training hangs (https://github.com/allenai/open-instruct/pull/1532).
 - Fix `Batch.__getitem__` handling of `active_tools` for int and list indexing (https://github.com/allenai/open-instruct/pull/1592).
 - Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
@@ -25,6 +34,8 @@ All notable changes to this project will be documented in this file.
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add MiniMax provider support: register `minimax-m2.7` and `minimax-m2.7-highspeed` models in `PRICE_PER_TOKEN` for cost tracking and add cl100k_base encoding support in `context_window_checker` (https://github.com/allenai/open-instruct/pull/1602).
+- Wire evolving rubric config flags into the GRPO training loop so `apply_evolving_rubric_reward` actually triggers rubric generation, buffer management, and ground-truth overrides during training (https://github.com/allenai/open-instruct/pull/1581).
 - Add model step logging for GRPO/vLLM by propagating `model_step` through generation metadata/results, syncing vLLM engines to the latest training step after weight sync, and reporting `model_step_min/max/mean` reward metrics (https://github.com/allenai/open-instruct/pull/1508).
 - Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, liger-kernel bump to 0.7.0, pre-download model on rank 0 to avoid HF cache race conditions, update vllm to 0.19.0, and fix Ulysses SP for VLM models by passing the model object to `register_with_transformers` (https://github.com/allenai/open-instruct/pull/1568).
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).

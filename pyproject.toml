@@ -185,6 +185,7 @@ possibly-missing-attribute = "ignore"
 
 [tool.ty.src]
 include = [
+    "mason.py",
     "open_instruct/actor_manager.py",
     "open_instruct/benchmark_generators.py",
     "open_instruct/code_utils/api.py",
@@ -199,6 +200,7 @@ include = [
     "open_instruct/grpo_callbacks.py",
     "open_instruct/grpo_olmo_core_actor.py",
     "open_instruct/grpo_utils.py",
+    "open_instruct/launch_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
@@ -211,6 +213,7 @@ include = [
     "open_instruct/distillkit/compression/config.py",
     "open_instruct/distillkit/compression/monotonic_logprobs.py",
     "open_instruct/distillkit/sample_common.py",
+    "open_instruct/rubrics/evolving_rubric_step.py",
     "open_instruct/rubrics/metrics.py",
     "open_instruct/rubrics/prompts.py",
     "open_instruct/rubrics/rubric_utils.py",
