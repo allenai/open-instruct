@@ -870,9 +870,14 @@ class LLMRayActor:
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
     def update_weights_batch(self, param_metadata: list[tuple[str, str, tuple[int, ...]]]) -> None:
+        # TODO(debug): remove verbose logging once weight sync hang is diagnosed
+        logger.info("[LLMRayActor.update_weights_batch] Received %d params, preparing", len(param_metadata))
         for name, dtype, _ in param_metadata:
             self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weights_batch", args=(param_metadata,)))
+        logger.info("[LLMRayActor.update_weights_batch] Calling collective_rpc")
+        result = self._run_async(self.llm_engine.collective_rpc("update_weights_batch", args=(param_metadata,)))
+        logger.info("[LLMRayActor.update_weights_batch] collective_rpc completed")
+        return result
 
     def update_weight_cuda_ipc(self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any]) -> None:
         self._prepare_weight_update(name, dtype)
@@ -1134,9 +1139,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
                 try:
                     step_result: StepResult = await asyncio.wait_for(
-                        target.step.remote(
-                            EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
-                        ),
+                        target.step.remote(EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)),
                         timeout=actor.tool_call_timeout,
                     )
                     observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
@@ -1162,7 +1165,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.tool_error += error_msg
                     rollout.timeout = True
                     rollout.rewards.append(0.0)
-                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout))
+                    rollout.tool_call_stats.append(
+                        ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout)
+                    )
                 except Exception as e:
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
@@ -1397,10 +1402,18 @@ def _send_to_vllm(
     model_update_group: torch.distributed.ProcessGroup,
 ) -> list[ray.ObjectRef]:
     """Send parameters to vLLM engines via a single RPC + sequential NCCL broadcasts."""
+    # TODO(debug): remove verbose logging once weight sync hang is diagnosed
+    logger.info(
+        "[_send_to_vllm] Sending update_weights_batch RPC to %d engines for %d params", len(vllm_engines), len(params)
+    )
     param_metadata = [(name, str(param.dtype), tuple(shape)) for name, param, shape in params]
     refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
-    for _, param, _ in params:
+    logger.info("[_send_to_vllm] RPCs sent, starting NCCL broadcasts for %d params", len(params))
+    for i, (_, param, _) in enumerate(params):
         torch.distributed.broadcast(param.data, 0, group=model_update_group)
+        if i == 0:
+            logger.info("[_send_to_vllm] First NCCL broadcast completed")
+    logger.info("[_send_to_vllm] All %d NCCL broadcasts completed", len(params))
     return refs
 
 
@@ -1505,7 +1518,14 @@ def broadcast_weights_to_vllm(
             ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
         else:
             ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+        # TODO(debug): remove verbose logging once weight sync hang is diagnosed
+        logger.info(
+            "[broadcast_weights_to_vllm] rank=%d entering GatheredParameters (ds3=%s)",
+            torch.distributed.get_rank(),
+            deepspeed_stage_3,
+        )
         with ctx:
+            logger.info("[broadcast_weights_to_vllm] rank=%d GatheredParameters entered", torch.distributed.get_rank())
             if is_rank_0:
                 return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
             return []

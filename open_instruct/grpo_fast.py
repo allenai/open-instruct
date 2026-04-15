@@ -461,18 +461,23 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
+        # TODO(debug): remove verbose logging once weight sync hang is diagnosed
+        logger.info("[broadcast_to_vllm] rank=%d entering", self.rank)
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
         # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
-        return vllm_utils.broadcast_weights_to_vllm(
+        logger.info("[broadcast_to_vllm] rank=%d calling broadcast_weights_to_vllm", self.rank)
+        result = vllm_utils.broadcast_weights_to_vllm(
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
             name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
+        logger.info("[broadcast_to_vllm] rank=%d done", self.rank)
+        return result
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -1457,17 +1462,20 @@ def weight_sync_thread(
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
             with Timer("[Weight Sync]") as timer:
-                logger.debug("[Weight Sync Thread] Starting weight sync")
+                # TODO(debug): remove verbose weight sync logging once hang is diagnosed
+                logger.info("[Weight Sync Thread] Starting weight sync")
 
                 # Set actors to stop
                 ray.get(actor_manager.set_should_stop.remote(True))
-                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+                logger.info("[Weight Sync Thread] set_should_stop(True) done")
 
                 # Broadcast weights to vLLM engines
                 # First get the futures
+                logger.info("[Weight Sync Thread] Sending broadcast_to_vllm to %d models", len(policy_group.models))
                 weight_broadcast_futures: list[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
                 ]
+                logger.info("[Weight Sync Thread] broadcast_to_vllm RPCs sent, waiting for results")
 
                 # Wait for all trainer-side broadcasts to finish and collect timing stats.
                 # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
@@ -1476,30 +1484,36 @@ def weight_sync_thread(
                     desc="[Weight Sync Thread] Waiting for weight updates to complete",
                     enable=args.verbose,
                 )
+                logger.info("[Weight Sync Thread] broadcast_to_vllm completed")
 
                 if not inflight_updates:
                     # Ensure all vLLM engine update RPCs have completed before unpausing actors.
                     # Without waiting here, should_stop may flip to False while updates are still queued.
                     engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
                     if engine_update_refs:
+                        logger.info("[Weight Sync Thread] Waiting for %d engine update RPCs", len(engine_update_refs))
                         ray_get_with_progress(
                             engine_update_refs,
                             desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
                             enable=False,
                         )
+                        logger.info("[Weight Sync Thread] Engine update RPCs completed")
         except Exception as e:
             logger.exception("[Weight Sync Thread] Weight Sync failed")
             raise RuntimeError from e
         finally:
+            logger.info("[Weight Sync Thread] Entering finally block")
             ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+            logger.info("[Weight Sync Thread] set_should_stop(False) done")
 
             if target_model_step is not None:
+                logger.info("[Weight Sync Thread] Setting model step to %s", target_model_step)
                 ray_get_with_progress(
                     [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
                     desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
                     enable=args.verbose,
                 )
+                logger.info("[Weight Sync Thread] Model step set")
 
         # Calculate distribution statistics
         sync_time_stats = {
