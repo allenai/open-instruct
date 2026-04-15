@@ -470,9 +470,7 @@ async def _check_health(port: int) -> None:
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
-        if actor._should_stop():
-            break
-        if len(actor.active_tasks) >= actor.inference_batch_size:
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
