@@ -1361,7 +1361,9 @@ class ManufactoriaVerifier(VerifierFunction):
                 score = pass_rate_score
             else:
                 score = all_pass_score
-            metadata = {"per_test_passes": [float(passed) for passed in passes]} if passes else {}
+            metadata = {"pass_rate_score": float(pass_rate_score), "all_pass_score": float(all_pass_score)}
+            if passes:
+                metadata["per_test_passes"] = [float(passed) for passed in passes]
             return VerificationResult(score=score, metadata=metadata)
         except Exception as e:
             logger.warning(f"Error verifying Manufactoria code sample: {e}")
@@ -1725,6 +1727,8 @@ async def apply_verifiable_reward(
     fallback_used_counts: Counter[str] = Counter()
     fallback_correct_counts: Counter[str] = Counter()
     manufactoria_test_pass_rows: list[tuple[int, float]] = []
+    manufactoria_pass_rate_scores: list[float] = []
+    manufactoria_all_pass_scores: list[float] = []
 
     for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
@@ -1752,6 +1756,13 @@ async def apply_verifiable_reward(
             manufactoria_test_pass_rows.extend(
                 (test_offset, float(passed)) for test_offset, passed in enumerate(per_test_passes)
             )
+        if dataset == "manufactoria":
+            pass_rate_score = result_metadata.get("pass_rate_score")
+            all_pass_score = result_metadata.get("all_pass_score")
+            if isinstance(pass_rate_score, (int, float)):
+                manufactoria_pass_rate_scores.append(float(pass_rate_score))
+            if isinstance(all_pass_score, (int, float)):
+                manufactoria_all_pass_scores.append(float(all_pass_score))
 
     extra_metrics: dict[str, Any] = {}
     total_fallback_uses = sum(fallback_used_counts.values())
@@ -1774,6 +1785,10 @@ async def apply_verifiable_reward(
 
     if manufactoria_test_pass_rows:
         extra_metrics["objective/manufactoria_test_pass_rows"] = manufactoria_test_pass_rows
+    if manufactoria_pass_rate_scores:
+        extra_metrics["objective/pass_rate"] = float(np.mean(manufactoria_pass_rate_scores))
+    if manufactoria_all_pass_scores:
+        extra_metrics["objective/all_pass"] = float(np.mean(manufactoria_all_pass_scores))
 
     return response_rewards, response_per_func_rewards, extra_metrics
 

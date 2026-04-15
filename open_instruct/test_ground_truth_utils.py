@@ -228,6 +228,8 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertAlmostEqual(result.score, 2 / 3)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
+        self.assertEqual(result.metadata["all_pass_score"], 0.0)
 
     async def test_all_pass_scoring(self):
         verifier = ManufactoriaVerifier(
@@ -253,6 +255,8 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.score, 0.0)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
+        self.assertEqual(result.metadata["all_pass_score"], 0.0)
 
 
 class TestGSM8KVerifier(unittest.TestCase):
@@ -414,6 +418,37 @@ class TestApplyVerifiableRewardDatasetAliases(unittest.TestCase):
         self.assertEqual(extra_metrics["objective/llm_judge_fallback_used_count"], 1.0)
         self.assertEqual(extra_metrics["objective/llm_judge_correct_when_primary_wrong_count"], 1.0)
         self.assertEqual(extra_metrics["objective/math_llm_judge_correct_when_primary_wrong_count"], 1.0)
+
+    def test_manufactoria_logs_pass_rate_and_all_pass_objectives(self):
+        class _ManufactoriaVerifier:
+            name = "manufactoria"
+            weight = 1.0
+
+            async def async_call(self, **kwargs):
+                return VerificationResult(
+                    score=1.0,
+                    metadata={"pass_rate_score": 0.75, "all_pass_score": 0.0, "per_test_passes": [1.0, 0.0, 1.0, 1.0]},
+                )
+
+        scores, per_func_scores, extra_metrics = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"manufactoria": _ManufactoriaVerifier()},
+                responses=[[1, 2, 3]],
+                decoded_responses=["dummy"],
+                ground_truths=[[{}]],
+                datasets=["manufactoria"],
+                reward_mult=10,
+                queries=["q"],
+            )
+        )
+
+        self.assertEqual(scores, [10.0])
+        self.assertEqual(per_func_scores, [{"manufactoria": 10.0}])
+        self.assertEqual(extra_metrics["objective/pass_rate"], 0.75)
+        self.assertEqual(extra_metrics["objective/all_pass"], 0.0)
+        self.assertEqual(
+            extra_metrics["objective/manufactoria_test_pass_rows"], [(0, 1.0), (1, 0.0), (2, 1.0), (3, 1.0)]
+        )
 
 
 class TestBuildAllVerifiers(unittest.TestCase):
