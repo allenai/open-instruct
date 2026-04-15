@@ -1412,7 +1412,14 @@ def _send_to_vllm(
     )
     param_metadata = [(name, str(param.dtype), tuple(shape)) for name, param, shape in params]
     refs = [engine.update_weights_batch.remote(param_metadata) for engine in vllm_engines]
-    logger.info("[_send_to_vllm] RPCs sent, starting NCCL broadcasts for %d params", len(params))
+    logger.info("[_send_to_vllm] RPCs sent, waiting for engines to be ready")
+    # Sync broadcast: all engines do a dummy receive as the first op in
+    # update_weights_batch, ensuring they've entered the receive loop before
+    # rank 0 starts the real param broadcasts. Without this, a slow engine
+    # can desynchronize the NCCL collective and cause an intermittent hang.
+    dummy = torch.zeros(1, device=params[0][1].device)
+    torch.distributed.broadcast(dummy, 0, group=model_update_group)
+    logger.info("[_send_to_vllm] Engines ready, starting NCCL broadcasts for %d params", len(params))
     for i, (_, param, _) in enumerate(params):
         torch.distributed.broadcast(param.data, 0, group=model_update_group)
         if i == 0:

@@ -70,6 +70,12 @@ class WorkerWrap:
         del weight
 
     def update_weights_batch(self, param_metadata):
+        import torch
+
+        # Sync broadcast: signal to rank 0 that this engine is ready to receive.
+        # See _send_to_vllm for the matching send.
+        dummy = torch.zeros(1, device="cuda")
+        torch.distributed.broadcast(dummy, 0, group=self._model_update_group)
         for name, dtype, shape in param_metadata:
             self.update_weight(name, dtype, shape)
 
