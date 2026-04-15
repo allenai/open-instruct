@@ -9,6 +9,8 @@ that the rest of the pipeline consumes.
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -228,6 +230,10 @@ async def process_request_harbor(actor: LLMRayActor, sub_request_id: str, sampli
         elapsed = time.perf_counter() - start_time
         logger.exception(f"Harbor trial failed for {sub_request_id} after {elapsed:.1f}s")
         raise
+    finally:
+        asyncio.get_event_loop().run_in_executor(
+            None, lambda: subprocess.run(["docker", "network", "prune", "-f"], capture_output=True)
+        )
     generation_time = time.perf_counter() - start_time
 
     completions, reward = harbor_output_to_completions(
