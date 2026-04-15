@@ -249,6 +249,7 @@ class PolicyTrainerRayProcess(RayProcess):
             adam_offload=args.deepspeed_offload_optimizer,
             stage=args.deepspeed_stage,
             bf16=True,
+            max_norm=args.max_grad_norm if args.max_grad_norm > 0 else 0.0,
             zpg=args.deepspeed_zpg,
             sequence_parallel_size=args.sequence_parallel_size,
         )
@@ -689,7 +690,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
-                        grad_norms.append(float(self.model.get_global_grad_norm()))
+                        grad_norm = self._get_grad_norm()
+                        if grad_norm is not None:
+                            grad_norms.append(grad_norm)
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
@@ -710,7 +713,8 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
-                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
+                if grad_norms:
+                    self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
