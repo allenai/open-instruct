@@ -375,13 +375,17 @@ def compute_grpo_loss(
 def _compute_packing_kwargs(position_ids: torch.Tensor) -> dict[str, torch.Tensor]:
     """Compute seq_idx and cu_seqlens from position_ids for packed sequences.
 
-    These are required by the Qwen3.5 packing patch so that the GatedDeltaNet
+    These are consumed by the Qwen3.5 GatedDeltaNet packing patch so that the
     causal conv1d and recurrent state respect sequence boundaries.
+
+    Full-attention layers do NOT need explicit cu_seq_lens here — HF flash
+    attention already detects packing from position_ids resets.  Passing
+    cu_seq_lens_q/k would also break Ulysses sequence parallelism, which
+    slices position_ids per rank.
     """
     batch_size, seq_len = position_ids.shape
     is_start = position_ids == 0
     seq_idx = (is_start.cumsum(dim=-1) - 1).to(torch.int32)
-    # cu_seqlens: 1-D tensor of cumulative sequence lengths (batch_size must be 1 for packing)
     assert batch_size == 1, f"cu_seqlens computation assumes batch_size=1, got {batch_size}"
     starts = torch.where(is_start[0])[0].to(torch.int32)
     cu_seqlens = torch.cat([starts, torch.tensor([seq_len], dtype=torch.int32, device=position_ids.device)])

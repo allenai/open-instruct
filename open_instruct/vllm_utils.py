@@ -721,6 +721,9 @@ class LLMRayActor:
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
+        # Use float32 for the SSM recurrent state cache to avoid bf16 rounding
+        # that compounds at every decode step and inflates vLLM-vs-HF KL.
+        engine_args.mamba_ssm_cache_dtype = "float32"
 
         init_complete = threading.Event()
         self.loop = None
