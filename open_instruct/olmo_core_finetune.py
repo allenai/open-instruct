@@ -174,6 +174,21 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         dp_process_group=train_module.dp_process_group,
     )
 
+    first_batch = next(iter(data_loader))
+    if is_main_process:
+        input_ids = first_batch.get("input_ids", first_batch.get("chosen_input_ids"))
+        if input_ids is not None:
+            logger.info(f"DEBUG first batch input_ids shape: {input_ids.shape}")
+            logger.info(f"DEBUG first batch input_ids[:100]: {input_ids.flatten()[:100].tolist()}")
+            logger.info(f"DEBUG first batch input_ids[-100:]: {input_ids.flatten()[-100:].tolist()}")
+        label_ids = first_batch.get("labels")
+        if label_ids is not None:
+            non_neg = label_ids[label_ids >= 0]
+            logger.info(f"DEBUG first batch labels non-negative count: {len(non_neg)}")
+            logger.info(f"DEBUG first batch labels[:100]: {label_ids.flatten()[:100].tolist()}")
+    data_loader.batches_processed = 0
+    data_loader._current_iter = None
+
     if use_hf_ckpt:
         logger.info("Reloading HuggingFace weights after parallelization...")
         sd = train_module.model.state_dict()
