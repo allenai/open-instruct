@@ -189,7 +189,10 @@ def process_tool_tokens(
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
+    tool_outputs = [str(o) if o is not None else "" for o in tool_outputs]
     formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
+    if not isinstance(formatted_output, str):
+        formatted_output = str(formatted_output)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
     tokens, excess = truncate_tool_output_tokens(
