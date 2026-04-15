@@ -1348,7 +1348,7 @@ def accumulate_inference_batches(
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         requeue_same_prompt = False
         if filter_zero_std_samples and np.std(result.reward_scores) == 0:
-            requeue_same_prompt = result.reward_scores[0] == 0 and np.random.random() < never_give_up
+            requeue_same_prompt = result.reward_scores[0] < max_possible_score and np.random.random() < never_give_up
             if replenish_prompts:
                 assert param_prompt_Q is not None
                 replacement_example = example
