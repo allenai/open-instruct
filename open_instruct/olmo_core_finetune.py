@@ -124,7 +124,6 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
 
     dataset = olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process)
-    dataset = dataset.shuffle(seed=args.tracking.seed)
     dataset.set_format(type="pt")
     if is_main_process:
         dataset_transformation.visualize_token(dataset[0]["input_ids"], tokenizer)
