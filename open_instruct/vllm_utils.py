@@ -20,7 +20,6 @@ import asyncio
 import dataclasses
 import os
 import queue
-import socket
 import sys
 import threading
 import time
@@ -32,7 +31,6 @@ from typing import Any
 
 import aiohttp
 import backoff
-import datasets
 import deepspeed
 import openai
 import ray
@@ -298,7 +296,7 @@ def split_request_id(full_request_id: str) -> dict:
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
-def process_completed_request(request_id, outs, current_time, use_tools, request_metadata):
+def process_completed_request(request_id, outs, current_time, use_tools, request_metadata, dataset_lookup=None):
     """Process a completed request with all its samples and return the result.
 
     Args:
@@ -307,9 +305,14 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         current_time: Current timestamp for performance metrics
         use_tools: Boolean indicating if tools were used
         request_metadata: Dictionary containing metadata for all requests
+        dataset_lookup: Optional callable ``(index, is_eval) -> dict`` that resolves
+            the dataset example for this request, applying any ground-truth overrides
+            from the request metadata.
 
     Returns:
-        Tuple of (result, is_eval) where result is a GenerationResult and is_eval is a boolean
+        Tuple of (result, is_eval, example) where example is the resolved dataset
+        row (with any ground-truth override applied), or None if no dataset_lookup
+        was provided.
     """
     final_output = RequestOutput(
         request_id=request_id,
@@ -374,8 +377,18 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
+        model_step=metadata.get("model_step"),
     )
-    return result, metadata["is_eval"]
+    is_eval = metadata["is_eval"]
+
+    example = None
+    if dataset_lookup is not None:
+        example = dataset_lookup(metadata["index"], is_eval)
+        ground_truth_from_request = metadata.get("ground_truth")
+        if ground_truth_from_request is not None and not is_eval:
+            example[GROUND_TRUTHS_KEY] = ground_truth_from_request
+
+    return result, is_eval, example
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -452,7 +465,7 @@ def init_process_group(
     return pg
 
 
-@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
+@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError, TimeoutError), max_time=60, interval=0.5)
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
@@ -482,12 +495,14 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "index": request.index,
         "prompt_id": request.prompt_id,
+        "model_step": actor.current_model_step,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
         "env_config": request.env_config,
+        "ground_truth": request.ground_truth,
     }
 
     for j in range(request.generation_config.n):
@@ -537,28 +552,30 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
     current_time = time.perf_counter()
-    result, is_eval = process_completed_request(
+
+    def _dataset_lookup(index: int, is_eval_req: bool) -> dict:
+        ds = actor.eval_dataset if is_eval_req else actor.train_dataset
+        idx_map = actor._eval_index_map if is_eval_req else actor._train_index_map
+        return dict(ds[idx_map[index]])
+
+    result, is_eval, example = process_completed_request(
         base_request_id,
         ordered_outs,
         current_time,
         actor.request_outputs[base_request_id]["use_tools"],
         actor.request_metadata,
+        dataset_lookup=_dataset_lookup,
     )
 
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
-    dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, example)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
 
 
-async def compute_rewards(
-    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
-) -> tuple[list[float], dict]:
-    index_map = actor._eval_index_map if is_eval else actor._train_index_map
-    example = dataset[index_map[result.index]]
+async def compute_rewards(actor: "LLMRayActor", result: GenerationResult, example: dict) -> tuple[list[float], dict]:
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
@@ -649,6 +666,7 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.current_model_step: int = 0
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -730,18 +748,14 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
-            # Create a socket and bind to port 0 to let the OS assign an available port.
-            # We pass the socket to serve_http to avoid race conditions where another
-            # process could claim the port between bind() and server startup.
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("127.0.0.1", 0))
-            sock.listen(1)
-            self.server_port = sock.getsockname()[1]
+            # There is a TOCTOU race: another process could claim the port between
+            # find_free_port() and uvicorn binding. Unlikely in practice.
+            self.server_port = utils.find_free_port()
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
             config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
-            asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
+            asyncio.create_task(uvicorn.Server(config).serve())
 
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
@@ -863,6 +877,9 @@ class LLMRayActor:
 
     def ready(self) -> bool:
         return True
+
+    def set_model_step(self, model_step: int) -> None:
+        self.current_model_step = model_step
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():

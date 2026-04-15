@@ -25,7 +25,7 @@ from olmo_core.train.train_module.transformer import (
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -55,7 +55,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
     ):
@@ -67,7 +66,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.max_sequence_length = max_sequence_length
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self.data_prep_actor_name = data_prep_actor_name
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
@@ -126,7 +124,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
-            data_prep_actor_name=self.data_prep_actor_name,
             tokenizer=self.tokenizer,
             dp_rank=self.rank,
             fs_local_rank=self.rank,
@@ -200,7 +197,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         master_address = self.get_current_node_ip()
-        master_port = self.get_free_port()
+        master_port = utils.find_free_port()
 
         vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
         backend = self.vllm_config.vllm_sync_backend
@@ -332,7 +329,6 @@ class OLMoCoreModelGroup:
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
     ):
@@ -359,7 +355,6 @@ class OLMoCoreModelGroup:
             "max_sequence_length": max_sequence_length,
             "streaming_config": streaming_config,
             "vllm_config": vllm_config,
-            "data_prep_actor_name": data_prep_actor_name,
             "tokenizer": tokenizer,
             "attn_implementation": attn_implementation,
         }

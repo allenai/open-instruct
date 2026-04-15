@@ -60,6 +60,7 @@ from open_instruct.utils import (
     ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
+    get_optimizer_grouped_parameters,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
@@ -413,15 +414,8 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     )
 
     # Optimizer
-    # Split weights in two groups, one with weight decay and the other not.
-    no_decay = ["bias", "layer_norm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-        },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
-    ]
+    optimizer_grouped_parameters = get_optimizer_grouped_parameters(model, args.weight_decay)
+
     if args.use_qlora or args.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
@@ -589,7 +583,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                if accelerator.sync_gradients and args.max_grad_norm:
                     accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -679,7 +673,8 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
-                    logger.info(logger_str)
+                    if accelerator.is_main_process:
+                        logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
                     if accelerator.is_main_process:
