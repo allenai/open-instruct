@@ -377,7 +377,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
-        model_step=metadata.get("model_step"),
+        model_step=metadata["model_step"],
     )
     is_eval = metadata["is_eval"]
 
