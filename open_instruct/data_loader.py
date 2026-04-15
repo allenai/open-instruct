@@ -759,7 +759,7 @@ class Group:
     percent_solved: float
 
 
-def process_single_result(
+def process_group(
     result: data_types.GenerationResult,
     generation_config: vllm.SamplingParams,
     tokenizer: PreTrainedTokenizer,
@@ -1053,7 +1053,7 @@ def accumulate_inference_batches(
         if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
 
-        processed = process_single_result(
+        group = process_group(
             result=result,
             generation_config=generation_config,
             tokenizer=tokenizer,
@@ -1068,7 +1068,7 @@ def accumulate_inference_batches(
             ground_truth_overrides=ground_truth_overrides,
         )
 
-        if processed is None:
+        if group is None:
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
@@ -1084,16 +1084,16 @@ def accumulate_inference_batches(
             )
             continue
 
-        if no_resampling_pass_rate is not None and processed.percent_solved >= no_resampling_pass_rate:
+        if no_resampling_pass_rate is not None and group.percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
             logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {processed.percent_solved}, "
+                f"[Data Preparation Thread] Prompt solved at {group.percent_solved}, "
                 f"will be excluded from resampling, total no resampled: {total_no_resampled}"
             )
 
         num_prompts_sampled += 1
         progress_bar.update(1)
-        groups.append(processed)
+        groups.append(group)
 
     if len(groups) == 0:
         logging.warning(
