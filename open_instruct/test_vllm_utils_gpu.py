@@ -104,6 +104,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
             model=model,
             vllm_engines=engines,
             model_update_group=model_update_group,
+            model_step=0,
             name_mapper=None,
             gather_whole_model=True,
         )
