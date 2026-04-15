@@ -1315,28 +1315,25 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
-    if vllm_engines:
-        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-        expected_batch_size = (
+    kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+    ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+    expected_batch_size = (
+        streaming_config.num_unique_prompts_rollout
+        * streaming_config.num_samples_per_prompt_rollout
+        // vllm_config.vllm_num_engines
+    )
+    if kv_cache_max_concurrency < expected_batch_size:
+        nodes_needed = math.ceil(
             streaming_config.num_unique_prompts_rollout
             * streaming_config.num_samples_per_prompt_rollout
-            // vllm_config.vllm_num_engines
+            / kv_cache_max_concurrency
         )
-        if kv_cache_max_concurrency < expected_batch_size:
-            nodes_needed = math.ceil(
-                streaming_config.num_unique_prompts_rollout
-                * streaming_config.num_samples_per_prompt_rollout
-                / kv_cache_max_concurrency
-            )
-            logger.warning(
-                f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
-                f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
-                f"This means actors will have to run multiple sequential batches, hurting performance. "
-                f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
-            )
-    else:
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+        logger.warning(
+            f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
+            f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
+            f"This means actors will have to run multiple sequential batches, hurting performance. "
+            f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
+        )
 
     # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -1361,10 +1358,9 @@ def create_model_and_optimizer(
 
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
 
-    if vllm_engines:
-        logger.info(
-            "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
-        )
+    logger.info(
+        "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
+    )
 
     return (
         policy_group,
@@ -1971,7 +1967,7 @@ def run_training(
     def maybe_initialize_weight_sync(
         training_step: int, weight_sync_future: futures.Future | None
     ) -> tuple[futures.Future, WeightSyncTrigger] | None:
-        if not vllm_engines or weight_sync_future is not None:
+        if weight_sync_future is not None:
             return None
         if training_step < 2:
             return None
