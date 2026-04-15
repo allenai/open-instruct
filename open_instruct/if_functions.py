@@ -360,7 +360,7 @@ def validate_title(text: str) -> bool:
 
 # Choose: From Answer with one of the following options: {options}
 def validate_choice(text: str, options: list) -> bool:
-    return any(text in option for option in options)
+    return any(option in text for option in options)
 
 
 # Minimum Number Highlighted Section: Highlight at least {N} sections in your answer with markdown, i.e. *highlighted

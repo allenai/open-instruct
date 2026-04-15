@@ -369,7 +369,7 @@ def validate_title(text: str) -> bool:
 # Choose: From Answer with one of the following options: {options}
 def validate_choice(text: str, options: list) -> bool:
     for option in options:
-        if text in option:
+        if option in text:
             return True
     return False
 
