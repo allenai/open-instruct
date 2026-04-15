@@ -44,6 +44,7 @@ uv run python mason.py \
     --rope_scaling_factor 8 \
     --ac_mode selected_modules \
     --ac_modules "blocks.*.feed_forward" \
+    --attn_implementation flash_2 \
     --cp_degree 2 \
     --compile_model true \
     --checkpointing_steps 999999 \
