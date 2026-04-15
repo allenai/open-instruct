@@ -15,7 +15,6 @@ from typing import Any, cast
 import ray
 import ray.exceptions
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
@@ -74,7 +73,7 @@ class VLLMWeightSyncCallback(Callback):
     """
 
     vllm_engines: list[ray.actor.ActorHandle]
-    model_update_group: dist.ProcessGroup | None = None
+    model_update_group: Any | None = None
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
