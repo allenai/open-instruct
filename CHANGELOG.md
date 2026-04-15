@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Split `accumulate_inference_batches` into `process_single_result` and `combine_processed_results` for clarity (https://github.com/allenai/open-instruct/pull/1614).
 - Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/1613).
 - Set checkpoint_state_freq default in data_loader.py, not mason.py (https://github.com/allenai/open-instruct/pull/1600).
 - Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
