@@ -458,6 +458,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
+            # Warmup: force NCCL to establish GPU-to-GPU connections now rather
+            # than lazily on the first weight sync broadcast. Without this, the
+            # first broadcast can hang intermittently if NCCL lazy init fails.
+            logger.info("[setup_model_update_group] Running NCCL warmup broadcast")
+            warmup_refs = [engine.warmup_broadcast.remote() for engine in vllm_engines]
+            dummy = torch.zeros(1, device=f"cuda:{self.local_rank}")
+            torch.distributed.broadcast(dummy, 0, group=self.model_update_group)
+            ray_get_with_progress(warmup_refs, desc="NCCL warmup broadcast", timeout=120)
+            logger.info("[setup_model_update_group] NCCL warmup broadcast completed")
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):

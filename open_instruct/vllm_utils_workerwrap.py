@@ -46,6 +46,13 @@ class WorkerWrap:
             f"rank={rank}, world_size={world_size}, group_name={group_name}",
         )
 
+    def warmup_broadcast(self):
+        """Run a dummy broadcast to force NCCL to establish connections."""
+        import torch
+
+        dummy = torch.zeros(1, device="cuda")
+        torch.distributed.broadcast(dummy, 0, group=self._model_update_group)
+
     def update_weight(self, name, dtype, shape):
         import torch
 

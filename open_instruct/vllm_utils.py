@@ -856,6 +856,10 @@ class LLMRayActor:
         )
         return future.result(timeout=timeout_minutes * 60)
 
+    def warmup_broadcast(self) -> None:
+        """Run a dummy broadcast to force NCCL to establish connections."""
+        return self._run_async(self.llm_engine.collective_rpc("warmup_broadcast"))
+
     def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
