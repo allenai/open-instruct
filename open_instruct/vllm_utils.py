@@ -193,7 +193,13 @@ def process_tool_tokens(
     formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
     if not isinstance(formatted_output, str):
         formatted_output = str(formatted_output)
-    tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
+    # Strip null bytes and other characters that the fast tokenizer's Rust backend rejects.
+    formatted_output = formatted_output.replace("\x00", "")
+    try:
+        tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
+    except TypeError:
+        logger.warning("tokenizer.encode failed on tool output (len=%d), using empty tokens", len(formatted_output))
+        tokens = []
 
     tokens, excess = truncate_tool_output_tokens(
         tokens,
