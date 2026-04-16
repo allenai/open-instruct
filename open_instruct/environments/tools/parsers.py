@@ -39,14 +39,22 @@ class ToolParser(ABC):
         """Extract tool calls from model outputs."""
         pass
 
-    @abstractmethod
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def format_tool_outputs(self, tool_outputs: list[Any], role: str = "tool") -> str:
         """Format tool outputs with any necessary prefixes/postfixes.
 
+        Coerces non-string outputs to strings, then delegates to the subclass
+        implementation.
+
         Args:
-            tool_outputs: Raw output strings from tool/env calls.
+            tool_outputs: Raw outputs from tool/env calls (coerced to strings).
             role: The output role (e.g. "tool", "user" for text envs).
         """
+        coerced = [str(o) if o is not None else "" for o in tool_outputs]
+        return self._format_tool_outputs(coerced, role=role)
+
+    @abstractmethod
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        """Subclass implementation: format pre-coerced string outputs."""
         pass
 
 
@@ -109,7 +117,7 @@ class OpenInstructLegacyToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
 
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
@@ -178,7 +186,7 @@ class VllmToolParser(ToolParser):
         template = self._role_templates[role]
         return template.format(output=tool_output)
 
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return f"{self._output_prefix}{''.join(self._format_tool_output(output, role) for output in tool_outputs)}{self._output_postfix}"
 
 
@@ -324,7 +332,7 @@ class DRTuluToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<tool_output>\n{tool_output}\n</tool_output>\n"
 
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
