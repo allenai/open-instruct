@@ -1076,6 +1076,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         actor_cls = data_loader_lib.DataPreparationActor.__ray_actor_class__
         actor = actor_cls.__new__(actor_cls)
         actor.lock = threading.Lock()
+        actor.never_give_up_state_lock = threading.Lock()
         actor.current_prepared_step = 3
         actor.iter_dataloader = Mock()
         actor.iter_dataloader.state_dict.return_value = {"epoch": 7}

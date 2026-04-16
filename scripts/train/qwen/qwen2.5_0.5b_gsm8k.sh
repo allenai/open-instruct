@@ -34,6 +34,7 @@ uv run mason.py \
 uv run --active open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name ${RUN_NAME} \
+    --log_train_solve_rate_metrics \
     --beta 0.0 \
     --eval_pass_at_k 1 \
     --eval_top_p 1.0 \

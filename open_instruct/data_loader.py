@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import copy
 import json
 import logging
@@ -1220,6 +1221,7 @@ def accumulate_inference_batches(
     show_progress_bar: bool = True,
     progress_callback: Callable[[int, int], None] | None = None,
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
+    never_give_up_state_lock: Any = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1285,6 +1287,19 @@ def accumulate_inference_batches(
         never_give_up_state = NeverGiveUpAccumulationState()
     pending_never_give_up_results = never_give_up_state.pending_results
     pending_never_give_up_metrics = never_give_up_state.pending_metrics
+
+    def pop_pending_state(chain_id: str) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None]]:
+        lock = never_give_up_state_lock or contextlib.nullcontext()
+        with lock:
+            return pending_never_give_up_results.pop(chain_id, []), pending_never_give_up_metrics.pop(chain_id, [])
+
+    def store_pending_state(
+        chain_id: str, pending_results: list[data_types.GenerationResult], pending_metrics: list[dict[str, Any] | None]
+    ) -> None:
+        lock = never_give_up_state_lock or contextlib.nullcontext()
+        with lock:
+            pending_never_give_up_results[chain_id] = pending_results
+            pending_never_give_up_metrics[chain_id] = pending_metrics
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
@@ -1357,8 +1372,7 @@ def accumulate_inference_batches(
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
         chain_id = get_never_give_up_chain_id(result.prompt_id)
-        pending_results = pending_never_give_up_results.pop(chain_id, [])
-        pending_metrics = pending_never_give_up_metrics.pop(chain_id, [])
+        pending_results, pending_metrics = pop_pending_state(chain_id)
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         requeue_same_prompt = False
@@ -1387,8 +1401,7 @@ def accumulate_inference_batches(
             if requeue_same_prompt and chain_id is not None and active_sampling:
                 pending_results.append(result)
                 pending_metrics.append(result.reward_metrics)
-                pending_never_give_up_results[chain_id] = pending_results
-                pending_never_give_up_metrics[chain_id] = pending_metrics
+                store_pending_state(chain_id, pending_results, pending_metrics)
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
@@ -1816,6 +1829,7 @@ class DataPreparationActor:
         self.current_prepared_step = -1
         self._last_consumed_step = -1
         self.lock = threading.Lock()
+        self.never_give_up_state_lock = threading.Lock()
         self.shutdown_requested = False
         self.training_step = 0
         self.total_samples_written = 0
@@ -1828,7 +1842,8 @@ class DataPreparationActor:
             self.training_step = initial_state["training_step"]
             self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
             if self.never_give_up_state is not None and "never_give_up_state" in initial_state:
-                self.never_give_up_state = initial_state["never_give_up_state"]
+                with self.never_give_up_state_lock:
+                    self.never_give_up_state = copy.deepcopy(initial_state["never_give_up_state"])
             logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
 
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
@@ -1902,6 +1917,7 @@ class DataPreparationActor:
                 progress_bar_desc=f"Training accumulating responses step {step}",
                 show_progress_bar=True,
                 never_give_up_state=self.never_give_up_state,
+                never_give_up_state_lock=self.never_give_up_state_lock,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -2144,12 +2160,12 @@ class DataPreparationActor:
                 del self.metrics[s]
 
     def get_state(self) -> dict:
-        with self.lock:
-            state = {
-                "training_step": self.current_prepared_step + 1,
-                "iter_dataloader_state": self.iter_dataloader.state_dict(),
-            }
-            if self.never_give_up_state is not None:
+        state = {
+            "training_step": self.current_prepared_step + 1,
+            "iter_dataloader_state": self.iter_dataloader.state_dict(),
+        }
+        if self.never_give_up_state is not None:
+            with self.never_give_up_state_lock:
                 state["never_give_up_state"] = copy.deepcopy(self.never_give_up_state)
         return state
 
@@ -2157,4 +2173,5 @@ class DataPreparationActor:
         self.training_step = state["training_step"]
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
         if self.never_give_up_state is not None and "never_give_up_state" in state:
-            self.never_give_up_state = copy.deepcopy(state["never_give_up_state"])
+            with self.never_give_up_state_lock:
+                self.never_give_up_state = copy.deepcopy(state["never_give_up_state"])
