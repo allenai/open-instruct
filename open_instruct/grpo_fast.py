@@ -436,17 +436,6 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = self.vllm_config.vllm_sync_backend
-            # Use a short NCCL timeout for weight sync so stuck broadcasts
-            # fail fast and can be retried, rather than hanging for hours.
-            weight_sync_nccl_timeout_s = 120
-            self._weight_sync_init_info = {
-                "master_address": master_address,
-                "vllm_engines": vllm_engines,
-                "world_size": world_size,
-                "backend": backend,
-                "vllm_tensor_parallel_size": vllm_tensor_parallel_size,
-                "timeout_s": weight_sync_nccl_timeout_s,
-            }
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -455,7 +444,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size,
                     "openrlhf",
                     backend=backend,
-                    timeout_minutes=weight_sync_nccl_timeout_s / 60,
+                    timeout_minutes=self.args.backend_timeout,
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
@@ -466,76 +455,23 @@ class PolicyTrainerRayProcess(RayProcess):
                 world_size=world_size,
                 rank=0,
                 group_name="openrlhf",
-                timeout=timedelta(seconds=weight_sync_nccl_timeout_s),
+                timeout=timedelta(minutes=self.args.backend_timeout),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
-            # Warmup: force NCCL to establish GPU-to-GPU connections now rather
-            # than lazily on the first weight sync broadcast. Without this, the
-            # first broadcast can hang intermittently if NCCL lazy init fails.
-            logger.info("[setup_model_update_group] Running NCCL warmup broadcast")
-            warmup_refs = [engine.warmup_broadcast.remote() for engine in vllm_engines]
-            dummy = torch.zeros(1, device=f"cuda:{self.local_rank}")
-            torch.distributed.broadcast(dummy, 0, group=self.model_update_group)
-            ray_get_with_progress(warmup_refs, desc="NCCL warmup broadcast", timeout=120)
-            logger.info("[setup_model_update_group] NCCL warmup broadcast completed")
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        logger.info("[broadcast_to_vllm] rank=%d entering", self.rank)
         torch.cuda.empty_cache()
+        # Ensure CUDA device is set before broadcast operations.
+        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
-
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                logger.info("[broadcast_to_vllm] rank=%d attempt %d", self.rank, attempt + 1)
-                result = vllm_utils.broadcast_weights_to_vllm(
-                    model=self.model.module,
-                    vllm_engines=self.vllm_engines,
-                    model_update_group=self.model_update_group,
-                    gather_whole_model=self.args.gather_whole_model,
-                    name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
-                )
-                logger.info("[broadcast_to_vllm] rank=%d done", self.rank)
-                return result
-            except Exception as e:
-                logger.warning("[broadcast_to_vllm] rank=%d attempt %d failed: %s", self.rank, attempt + 1, e)
-                if attempt == max_retries - 1:
-                    raise
-                if self.rank == 0 and hasattr(self, "_weight_sync_init_info"):
-                    logger.info("[broadcast_to_vllm] rank=0 recreating model_update_group")
-                    self._recreate_model_update_group()
-
-    def _recreate_model_update_group(self):
-        """Destroy and recreate the model_update_group after an NCCL failure."""
-        info = self._weight_sync_init_info
-        try:
-            torch.distributed.destroy_process_group(self.model_update_group)
-        except Exception:
-            pass
-        new_port = utils.find_free_port()
-        refs = [
-            engine.init_process_group.remote(
-                info["master_address"],
-                new_port,
-                i * info["vllm_tensor_parallel_size"] + 1,
-                info["world_size"],
-                "openrlhf",
-                backend=info["backend"],
-                timeout_minutes=info["timeout_s"] / 60,
-            )
-            for i, engine in enumerate(info["vllm_engines"])
-        ]
-        self.model_update_group = vllm_utils.init_process_group(
-            backend=info["backend"],
-            init_method=f"tcp://{info['master_address']}:{new_port}",
-            world_size=info["world_size"],
-            rank=0,
-            group_name="openrlhf",
-            timeout=timedelta(seconds=info["timeout_s"]),
+        return vllm_utils.broadcast_weights_to_vllm(
+            model=self.model.module,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            gather_whole_model=self.args.gather_whole_model,
+            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
-        ray_get_with_progress(refs, desc="Reinitializing vLLM process groups", timeout=300)
-        logger.info("[broadcast_to_vllm] model_update_group recreated")
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -1520,20 +1456,17 @@ def weight_sync_thread(
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
             with Timer("[Weight Sync]") as timer:
-                # TODO(debug): remove verbose weight sync logging once hang is diagnosed
-                logger.info("[Weight Sync Thread] Starting weight sync")
+                logger.debug("[Weight Sync Thread] Starting weight sync")
 
                 # Set actors to stop
                 ray.get(actor_manager.set_should_stop.remote(True))
-                logger.info("[Weight Sync Thread] set_should_stop(True) done")
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
                 # Broadcast weights to vLLM engines
                 # First get the futures
-                logger.info("[Weight Sync Thread] Sending broadcast_to_vllm to %d models", len(policy_group.models))
                 weight_broadcast_futures: list[ray.ObjectRef] = [
                     m.broadcast_to_vllm.remote() for m in policy_group.models
                 ]
-                logger.info("[Weight Sync Thread] broadcast_to_vllm RPCs sent, waiting for results")
 
                 # Wait for all trainer-side broadcasts to finish and collect timing stats.
                 # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
@@ -1542,36 +1475,30 @@ def weight_sync_thread(
                     desc="[Weight Sync Thread] Waiting for weight updates to complete",
                     enable=args.verbose,
                 )
-                logger.info("[Weight Sync Thread] broadcast_to_vllm completed")
 
                 if not inflight_updates:
                     # Ensure all vLLM engine update RPCs have completed before unpausing actors.
                     # Without waiting here, should_stop may flip to False while updates are still queued.
                     engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
                     if engine_update_refs:
-                        logger.info("[Weight Sync Thread] Waiting for %d engine update RPCs", len(engine_update_refs))
                         ray_get_with_progress(
                             engine_update_refs,
                             desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
                             enable=False,
                         )
-                        logger.info("[Weight Sync Thread] Engine update RPCs completed")
         except Exception as e:
             logger.exception("[Weight Sync Thread] Weight Sync failed")
             raise RuntimeError from e
         finally:
-            logger.info("[Weight Sync Thread] Entering finally block")
             ray.get(actor_manager.set_should_stop.remote(False))
-            logger.info("[Weight Sync Thread] set_should_stop(False) done")
+            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
             if target_model_step is not None:
-                logger.info("[Weight Sync Thread] Setting model step to %s", target_model_step)
                 ray_get_with_progress(
                     [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
                     desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
                     enable=args.verbose,
                 )
-                logger.info("[Weight Sync Thread] Model step set")
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -2055,14 +1982,10 @@ def run_training(
     def health_check_fn():
         [f.result() for f in [weight_sync_thread_future] if f.done()]
         # Wait for weight sync to complete (should_stop becomes False)
-        # Timeout is generous: NCCL timeout (120s) + process group recreation + retry
         start = time.perf_counter()
         while ray.get(actor_manager.should_stop.remote()):
-            elapsed = time.perf_counter() - start
-            if elapsed > 600:
-                raise RuntimeError(f"Weight sync timed out after {elapsed:.0f}s - vLLM engines may be stuck")
-            if int(elapsed) % 60 == 0 and int(elapsed) > 0:
-                logger.warning("[health_check_fn] Weight sync still in progress after %.0fs", elapsed)
+            if time.perf_counter() - start > WEIGHT_SYNC_TIMEOUT_S:
+                raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
             time.sleep(0.1)
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
