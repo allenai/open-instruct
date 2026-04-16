@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).
 - Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/1613).
 - Set checkpoint_state_freq default in data_loader.py, not mason.py (https://github.com/allenai/open-instruct/pull/1600).
 - Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
