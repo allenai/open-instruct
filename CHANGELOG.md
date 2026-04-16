@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
 - Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking. (https://github.com/allenai/open-instruct/pull/1598)
 - Fix DeepSpeed gradient clipping in `grpo_fast.py` by passing `max_norm` to the DS config. (https://github.com/allenai/open-instruct/pull/1598)
