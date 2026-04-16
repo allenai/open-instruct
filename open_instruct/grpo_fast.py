@@ -592,10 +592,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
+                    # Pass attention_mask=None so HF constructs the correct 3D intra-document
+                    # mask from position_ids internally for packed sequences.
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
+                        None,
                         data_BT.position_ids[i],
                         self.pad_token_id,
                         self.streaming_config.temperature,
