@@ -784,6 +784,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     else:
         is_olmo = False
     if is_olmo:
+        assert tc.chat_template_name is not None
         if "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
         else:
