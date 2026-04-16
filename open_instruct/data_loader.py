@@ -1181,6 +1181,7 @@ class DataPreparationActor:
         self.current_prepared_step = -1
         self._last_consumed_step = -1
         self.lock = threading.Lock()
+        self.shutdown_requested = False
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
@@ -1225,8 +1226,13 @@ class DataPreparationActor:
             )
 
         for step in range(self.training_step, self.num_training_steps):
+            if self.shutdown_requested:
+                return
+
             generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
+                if self.shutdown_requested:
+                    return
                 logger.info(
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
