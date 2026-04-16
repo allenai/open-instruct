@@ -348,6 +348,17 @@ def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int)
     return per_test_pass
 
 
+def _per_test_pass_rates_from_row(row: dict[str, Any]) -> list[float]:
+    """Per-test pass rate in [0, 1] for each test; empty if missing counts or num_samples."""
+    ptc = row.get("Per-test pass count")
+    if not isinstance(ptc, list) or not ptc:
+        return []
+    num_samples = int(row.get("num_samples", 0) or 0)
+    if num_samples <= 0:
+        return []
+    return [float(c) / float(num_samples) for c in ptc]
+
+
 def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit: int = 8) -> None:
     """Log aggregate stats and a short sample of rows (for --dry-run)."""
     n = len(rows)
@@ -358,6 +369,8 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
     total_completions = 0
     total_full_pass_completions = 0
     difficulty_flat: list[int] = []
+    weighted_rate_sum = 0.0
+    weighted_rate_count = 0
 
     for row in rows:
         ns = int(row.get("num_samples", 0) or 0)
@@ -370,6 +383,9 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
                     difficulty_flat.append(int(x))
                 except (TypeError, ValueError):
                     continue
+        for r in _per_test_pass_rates_from_row(row):
+            weighted_rate_sum += r
+            weighted_rate_count += 1
 
     logger.info("dry-run summary: rows=%d", n)
     if total_completions > 0:
@@ -379,6 +395,12 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
             total_full_pass_completions,
             total_completions,
         )
+    if weighted_rate_count > 0:
+        logger.info(
+            "dry-run summary: mean_per_test_pass_rate_over_all_tests=%.6f (%d test slots)",
+            weighted_rate_sum / weighted_rate_count,
+            weighted_rate_count,
+        )
     if difficulty_flat:
         ctr = Counter(difficulty_flat)
         logger.info(
@@ -387,17 +409,22 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
         )
 
     shown = min(sample_row_limit, n)
-    logger.info("dry-run sample: first %d rows (index, num_samples, full_pass_count, n_per_test_entries)", shown)
+    logger.info(
+        "dry-run sample: first %d rows (per_test_pass_rates is one float per ground-truth test, order matches tests)",
+        shown,
+    )
     for i in range(shown):
         row = rows[i]
+        rates = _per_test_pass_rates_from_row(row)
         ptc = row.get("Per-test pass count")
         n_pt = len(ptc) if isinstance(ptc, list) else 0
         logger.info(
-            "  row %d: num_samples=%s full_pass_count=%s per_test_pass_count_len=%d",
+            "  row %d: num_samples=%s full_pass_count=%s per_test_pass_count_len=%d per_test_pass_rates=%s",
             i,
             row.get("num_samples"),
             row.get("Full pass count"),
             n_pt,
+            rates,
         )
 
 
