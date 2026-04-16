@@ -50,6 +50,7 @@ from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
 import open_instruct.vllm_utils as vllm_utils_module
+from open_instruct import grpo_utils
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
@@ -275,6 +276,83 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self.assertGreater(len(generated_text), 0)
 
         param_prompt_Q.put(None)
+
+
+def _has_flash_attn_2() -> bool:
+    try:
+        import flash_attn  # noqa: F401, PLC0415
+
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+@unittest.skipUnless(_has_flash_attn_2(), "flash_attention_2 + CUDA required")
+class TestPackedSequenceLogprobs(unittest.TestCase):
+    """Verify that attention_mask=None with packed position_ids produces
+    the same logprobs as running each sub-sequence independently.
+
+    This only holds with flash_attention_2, which constructs the intra-document
+    mask from position_ids. sdpa and eager attention ignore position resets and
+    will apply the full causal mask across the pack.
+    """
+
+    def _get_model_and_tokenizer(self):
+        from transformers import AutoModelForCausalLM  # noqa: PLC0415
+
+        model_name = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, attn_implementation="flash_attention_2", dtype=torch.bfloat16
+            ).cuda()
+        except Exception as e:
+            self.skipTest(f"Could not load model {model_name}: {e}")
+        model.eval()
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id or 0
+        return model, tokenizer
+
+    def test_packed_matches_individual(self):
+        model, tokenizer = self._get_model_and_tokenizer()
+
+        seq_a = torch.tensor([[5, 10, 15, 20]], dtype=torch.long, device="cuda")
+        seq_b = torch.tensor([[7, 14, 21]], dtype=torch.long, device="cuda")
+
+        with torch.no_grad():
+            logprob_a, _ = grpo_utils.forward_for_logprobs(
+                model,
+                seq_a,
+                None,
+                torch.arange(seq_a.shape[1], device="cuda").unsqueeze(0),
+                pad_token_id=tokenizer.pad_token_id,
+                temperature=1.0,
+            )
+            logprob_b, _ = grpo_utils.forward_for_logprobs(
+                model,
+                seq_b,
+                None,
+                torch.arange(seq_b.shape[1], device="cuda").unsqueeze(0),
+                pad_token_id=tokenizer.pad_token_id,
+                temperature=1.0,
+            )
+
+            packed = torch.cat([seq_a, seq_b], dim=1)
+            packed_position_ids = torch.cat(
+                [torch.arange(seq_a.shape[1], device="cuda"), torch.arange(seq_b.shape[1], device="cuda")], dim=0
+            ).unsqueeze(0)
+
+            logprob_packed, _ = grpo_utils.forward_for_logprobs(
+                model, packed, None, packed_position_ids, pad_token_id=tokenizer.pad_token_id, temperature=1.0
+            )
+
+        a_len = seq_a.shape[1] - 1
+        b_len = seq_b.shape[1] - 1
+
+        # seq_a portion should match logprob_a
+        torch.testing.assert_close(logprob_packed[:, :a_len], logprob_a, rtol=1e-2, atol=1e-2)
+        # seq_b portion should match logprob_b (would differ if mask wasn't applied per-document)
+        torch.testing.assert_close(logprob_packed[:, -b_len:], logprob_b, rtol=1e-2, atol=1e-2)
 
 
 if __name__ == "__main__":
