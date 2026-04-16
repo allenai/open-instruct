@@ -11,7 +11,7 @@ from datasets import Dataset
 from olmo_core import data as oc_data
 from olmo_core.data import utils as oc_data_utils
 
-from open_instruct import data_loader, dataset_transformation
+from open_instruct import data_loader, dataset_transformation, numpy_dataset_conversion, olmo_core_utils
 from open_instruct.padding_free_collator import OBFDCollator, PackedSFTCollator, TensorDataCollatorWithFlatteningDPO
 
 logger = logging.getLogger(__name__)
@@ -360,6 +360,126 @@ class TestHFNumpyEquivalence(unittest.TestCase):
 
             self.assertTrue(torch.equal(hf_ids, np_ids), "input_ids mismatch between HF and numpy paths")
             self.assertTrue(torch.equal(hf_mask, np_mask), "label_mask mismatch between HF and numpy paths")
+
+
+class TestConvertHfToNumpySft(unittest.TestCase):
+    def test_writes_expected_files(self):
+        max_seq_length = 1024
+        tc = dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="allenai/OLMo-2-1124-7B", chat_template_name="olmo"
+        )
+        with tempfile.TemporaryDirectory() as output_dir:
+            numpy_dataset_conversion.convert_hf_to_numpy_sft(
+                output_dir=output_dir,
+                dataset_mixer_list=["allenai/tulu-3-sft-olmo-2-mixture-0225", "10"],
+                dataset_mixer_list_splits=["train"],
+                tc=tc,
+                dataset_transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+                transform_fn_args=[{"max_seq_length": max_seq_length}, {}],
+                dataset_target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+                max_seq_length=max_seq_length,
+                dataset_skip_cache=True,
+                resume=False,
+                visualize=False,
+            )
+
+            for name in (
+                "token_ids_part_0000.npy",
+                "labels_mask_part_0000.npy",
+                "token_ids_part_0000.csv.gz",
+                "dataset_statistics.json",
+                "dataset_statistics.txt",
+                os.path.join("tokenizer", "tokenizer_config.json"),
+            ):
+                self.assertTrue(os.path.exists(os.path.join(output_dir, name)), f"missing expected file: {name}")
+
+            token_ids = np.memmap(os.path.join(output_dir, "token_ids_part_0000.npy"), dtype=np.uint32, mode="r")
+            labels_mask = np.memmap(os.path.join(output_dir, "labels_mask_part_0000.npy"), dtype=np.bool_, mode="r")
+            self.assertEqual(len(token_ids), len(labels_mask))
+            self.assertGreater(len(token_ids), 0)
+
+
+class TestHFNumpyEquivalenceDolci(unittest.TestCase):
+    """Full-scale smoke test: olmo-3 tokenizer, 32k seq_len, Dolci-Instruct-SFT subset.
+
+    Runs `convert_hf_to_numpy_sft` + `NumpyPackedFSLDataset` end-to-end at the
+    production sequence length to catch tokenizer/BOS-scan/dtype regressions.
+    Does NOT assert token-for-token parity with the HF OBFD path: olmo-core
+    fragments documents at every EOS (multi-turn chats get split per turn),
+    while `OBFDCollator` treats each HF row as one document, so the two
+    paths produce different packings by design.
+    """
+
+    def test_full_scale_pipeline_runs(self):
+        sequence_length = 32768
+        num_examples = 5000
+        seed = 42
+        dp_world_size = 1
+
+        tc = dataset_transformation.TokenizerConfig(tokenizer_name_or_path="allenai/olmo-3-tokenizer-instruct-dev")
+        oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc)
+
+        transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+        transform_fn_args = [{"max_seq_length": sequence_length}, {}]
+        mixer_list = ["allenai/Dolci-Instruct-SFT", str(num_examples)]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            numpy_dir = os.path.join(tmpdir, "numpy")
+            np_work_dir = os.path.join(tmpdir, "np_work")
+            os.makedirs(numpy_dir)
+            os.makedirs(np_work_dir)
+
+            numpy_dataset_conversion.convert_hf_to_numpy_sft(
+                output_dir=numpy_dir,
+                dataset_mixer_list=mixer_list,
+                dataset_mixer_list_splits=["train"],
+                tc=tc,
+                dataset_transform_fn=transform_fn,
+                transform_fn_args=transform_fn_args,
+                dataset_target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+                max_seq_length=sequence_length,
+                dataset_skip_cache=True,
+                resume=False,
+                visualize=False,
+            )
+
+            np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
+                tokenizer=oc_tokenizer_config,
+                work_dir=np_work_dir,
+                paths=[os.path.join(numpy_dir, "token_ids_part_*.npy")],
+                expand_glob=True,
+                label_mask_paths=[os.path.join(numpy_dir, "labels_mask_*.npy")],
+                generate_doc_lengths=True,
+                long_doc_strategy=oc_data.LongDocStrategy.truncate,
+                sequence_length=sequence_length,
+            )
+            np_dataset = np_dataset_config.build()
+            np_dataset.prepare()
+
+            logger.info(f"Packed dataset length: {len(np_dataset)} sequences of {sequence_length} tokens")
+            self.assertGreater(len(np_dataset), 1, "Expected multiple packed sequences at full scale")
+
+            np_loader = oc_data.NumpyFSLDataLoader(
+                dataset=np_dataset,
+                global_batch_size=len(np_dataset) * sequence_length,
+                collator=oc_data.DataCollator(
+                    pad_token_id=oc_tokenizer_config.pad_token_id, vocab_size=oc_tokenizer_config.padded_vocab_size()
+                ),
+                work_dir=np_work_dir,
+                dp_world_size=dp_world_size,
+                dp_rank=0,
+                fs_local_rank=0,
+                seed=seed,
+                shuffle=True,
+            )
+            np_loader.reshuffle(epoch=1)
+
+            np_batch = np_loader[0]
+            np_ids = np_batch["input_ids"]
+            np_mask = np_batch["label_mask"]
+            self.assertEqual(np_ids.shape, (len(np_dataset), sequence_length))
+            self.assertEqual(np_mask.shape, (len(np_dataset), sequence_length))
+            self.assertGreater(np_mask.sum().item(), 0, "Expected some trainable tokens")
 
 
 if __name__ == "__main__":

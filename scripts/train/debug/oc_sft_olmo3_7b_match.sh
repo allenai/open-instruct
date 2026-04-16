@@ -1,6 +1,17 @@
 #!/bin/bash
 # Match experiment 01KNMEJKEZNJKZH9QWQW8CS0JW (jacobm/olmo3-7b-instruct-SFT-rerun-04072026)
 # using open-instruct's olmo_core_finetune.py. Runs 3 steps only.
+#
+# Single-script flow: rank 0 tokenizes Dolci-Instruct-SFT into numpy mmap format
+# under /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/<hash>/
+# if the files aren't there yet, then all ranks train. Subsequent runs with the
+# same (mixer_list, max_seq_length, tokenizer, chat_template, transform_fn) reuse
+# the cached numpy files.
+#
+# To pre-tokenize on a cheap node before launching the full run, pass
+# `--cache_dataset_only` to this command. To point at a pre-tokenized directory
+# (e.g. one produced by scripts/data/convert_sft_data_for_olmocore.py), pass
+# `--dataset_path /weka/.../your_tokenized_dir`.
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
@@ -32,7 +43,6 @@ uv run python mason.py \
     --model_name_or_path $MODEL_PATH \
     --config_name olmo3_7B \
     --tokenizer_name_or_path allenai/olmo-3-tokenizer-instruct-dev \
-    --chat_template_name olmo \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \

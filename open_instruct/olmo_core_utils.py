@@ -170,6 +170,12 @@ class DatasetConfig:
     """The hash of the dataset configuration."""
     hf_entity: str | None = None
     """The user or org name for dataset caching on the Hugging Face Hub."""
+    dataset_path: str | None = None
+    """Path to a directory of pre-tokenized numpy SFT files (token_ids_part_*.npy, labels_mask_part_*.npy).
+
+    When set, tokenization is skipped entirely and the numpy loader reads this directory directly.
+    When unset, on-the-fly tokenization writes into `{local_cache_dir}/numpy_sft/{config_hash}/`.
+    """
 
 
 @dataclass
@@ -349,6 +355,34 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     if utils.is_beaker_job():
         dataset_config.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     return tokenizer
+
+
+def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
+    """Map open-instruct TokenizerConfig to olmo-core's TokenizerConfig for NumpyFSL loading.
+
+    Prefers the curated `dolma2()` preset for the dolma2/OLMo-2 family (its
+    `padded_vocab_size()` rounding matches the trainer expectations); otherwise
+    builds one directly from the HF tokenizer's special tokens.
+    """
+    identifier = tc.tokenizer_name_or_path or ""
+    dolma2_markers = ("dolma2", "OLMo-2-1124", "OLMo-2-0325", "OLMo-2-0425")
+    if any(marker in identifier for marker in dolma2_markers):
+        return OLMoCoreTokenizerConfig.dolma2()
+    eos_id = tc.tokenizer.eos_token_id
+    bos_id = tc.tokenizer.bos_token_id
+    # olmo-core's doc-boundary scanner requires an EOS *immediately followed by* BOS
+    # when both are set; when the tokenizer reuses the same id for both (e.g.
+    # olmo-3-tokenizer-instruct-dev has eos==bos==100257), that pattern never
+    # appears in practice, so fall back to the EOS-only scanner.
+    if bos_id == eos_id:
+        bos_id = None
+    return OLMoCoreTokenizerConfig(
+        vocab_size=tc.tokenizer.vocab_size,
+        eos_token_id=eos_id,
+        pad_token_id=tc.tokenizer.pad_token_id,
+        bos_token_id=bos_id,
+        identifier=identifier or None,
+    )
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):

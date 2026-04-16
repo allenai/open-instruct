@@ -27,11 +27,14 @@ Usage:
 
 import dataclasses
 import datetime
+import hashlib
+import json
 import os
 from typing import Any
 
 import torch
 import torch.distributed as dist
+from olmo_core import data as oc_data
 from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.distributed import parallel
@@ -49,13 +52,12 @@ from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import data_loader as data_loader_lib
 from open_instruct import (
     dataset_transformation,
     logger_utils,
+    numpy_dataset_conversion,
     olmo_core_callbacks,
     olmo_core_utils,
-    padding_free_collator,
     utils,
 )
 
@@ -63,6 +65,75 @@ logger = logger_utils.setup_logger(__name__)
 
 
 _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
+
+_TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
+
+
+def _numpy_cache_dir_hash(
+    mixer_list: list[str],
+    mixer_list_splits: list[str],
+    max_seq_length: int,
+    tokenizer_name: str | None,
+    chat_template_name: str | None,
+    transform_fn: list[str],
+) -> str:
+    payload = json.dumps(
+        {
+            "mixer_list": mixer_list,
+            "mixer_list_splits": mixer_list_splits,
+            "max_seq_length": max_seq_length,
+            "tokenizer": tokenizer_name,
+            "chat_template": chat_template_name,
+            "transform_fn": transform_fn,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:10]
+
+
+def _resolve_numpy_dir(args: "SFTArguments", tc: dataset_transformation.TokenizerConfig) -> str:
+    if args.dataset.dataset_path is not None:
+        return args.dataset.dataset_path
+    cache_hash = _numpy_cache_dir_hash(
+        mixer_list=args.dataset.mixer_list,
+        mixer_list_splits=args.dataset.mixer_list_splits,
+        max_seq_length=args.training.max_seq_length,
+        tokenizer_name=tc.tokenizer_name_or_path,
+        chat_template_name=tc.chat_template_name,
+        transform_fn=args.dataset.transform_fn,
+    )
+    return os.path.join(args.dataset.local_cache_dir, "numpy_sft", cache_hash)
+
+
+def _numpy_dir_is_populated(numpy_dir: str) -> bool:
+    return os.path.exists(os.path.join(numpy_dir, "token_ids_part_0000.npy"))
+
+
+def _tokenize_to_numpy_dir(
+    numpy_dir: str,
+    args: "SFTArguments",
+    tc: dataset_transformation.TokenizerConfig,
+    transform_fn_args: list[dict],
+    visualize: bool,
+) -> None:
+    logger.info(f"Tokenizing dataset into numpy format at {numpy_dir}")
+    numpy_dataset_conversion.convert_hf_to_numpy_sft(
+        output_dir=numpy_dir,
+        dataset_mixer_list=args.dataset.mixer_list,
+        dataset_mixer_list_splits=args.dataset.mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=args.dataset.transform_fn,
+        transform_fn_args=transform_fn_args,
+        dataset_target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+        max_seq_length=args.training.max_seq_length,
+        dataset_cache_mode=args.dataset.cache_mode,
+        dataset_local_cache_dir=args.dataset.local_cache_dir,
+        dataset_skip_cache=args.dataset.skip_cache,
+        dataset_config_hash=args.dataset.config_hash,
+        shuffle_seed=args.tracking.seed,
+        resume=True,
+        visualize=visualize,
+    )
 
 
 @dataclasses.dataclass
@@ -80,15 +151,24 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
-    tokenizer = olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
+    olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
     transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
 
+    numpy_dir = _resolve_numpy_dir(args, tc)
+
     if args.dataset.cache_dataset_only:
-        olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process=True)
-        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+        pre_init_rank = int(os.environ.get("RANK", 0))
+        if pre_init_rank == 0:
+            if _numpy_dir_is_populated(numpy_dir):
+                logger.info(f"Numpy SFT files already present at {numpy_dir}; nothing to do.")
+            else:
+                _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
+            logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
-    prepare_training_environment(seed=args.tracking.seed, timeout=datetime.timedelta(hours=1))
+    prepare_training_environment(
+        seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
+    )
 
     global_rank = get_rank() if is_distributed() else 0
     is_main_process = global_rank == 0
@@ -123,18 +203,30 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
     rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
 
-    dataset = olmo_core_utils.load_dataset_distributed(args.dataset, tc, transform_fn_args, is_main_process)
-    dataset.set_format(type="pt")
-    if is_main_process:
-        dataset_transformation.visualize_token(dataset[0]["input_ids"], tokenizer)
+    if is_main_process and not _numpy_dir_is_populated(numpy_dir):
+        _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
+    if is_distributed():
+        dist.barrier()
+    if not _numpy_dir_is_populated(numpy_dir):
+        raise RuntimeError(f"Expected tokenized numpy files at {numpy_dir} after tokenization barrier.")
+
+    oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc)
+    np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
+        tokenizer=oc_tokenizer_config,
+        work_dir=args.checkpoint.output_dir,
+        paths=[os.path.join(numpy_dir, "token_ids_part_*.npy")],
+        expand_glob=True,
+        label_mask_paths=[os.path.join(numpy_dir, "labels_mask_*.npy")],
+        generate_doc_lengths=True,
+        long_doc_strategy=oc_data.LongDocStrategy.truncate,
+        sequence_length=args.training.max_seq_length,
+    )
+    np_dataset = np_dataset_config.build()
+    np_dataset.prepare()
 
     global_batch_size_seqs = rank_batch_size_seqs * world_size
 
-    collator = padding_free_collator.OBFDCollator(
-        sequence_length=args.training.max_seq_length, pad_token_id=tokenizer.pad_token_id
-    )
-
-    num_training_steps = len(dataset) // global_batch_size_seqs * args.training.num_epochs
+    num_training_steps = len(np_dataset) // global_batch_size_seqs * args.training.num_epochs
     effective_steps = (
         args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
     )
@@ -158,35 +250,38 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     train_module = train_module_config.build(model)
 
-    data_loader = data_loader_lib.HFDataLoader(
-        dataset=dataset,
-        batch_size=global_batch_size_seqs,
-        seed=args.tracking.data_loader_seed if args.tracking.data_loader_seed is not None else args.tracking.seed,
-        dp_rank=global_rank,
-        dp_world_size=world_size,
-        work_dir=args.checkpoint.output_dir,
-        collator=collator,
-        device=device,
-        drop_last=True,
-        fs_local_rank=global_rank,
-        max_seq_length=args.training.max_seq_length,
-        dp_process_group=train_module.dp_process_group,
+    data_loader_seed = (
+        args.tracking.data_loader_seed if args.tracking.data_loader_seed is not None else args.tracking.seed
     )
+    global_batch_size_tokens = global_batch_size_seqs * args.training.max_seq_length
+    data_loader = oc_data.NumpyFSLDataLoader(
+        dataset=np_dataset,  # ty: ignore[invalid-argument-type]
+        global_batch_size=global_batch_size_tokens,
+        collator=oc_data.DataCollator(
+            pad_token_id=oc_tokenizer_config.pad_token_id, vocab_size=oc_tokenizer_config.padded_vocab_size()
+        ),
+        work_dir=args.checkpoint.output_dir,
+        dp_world_size=world_size,
+        dp_rank=global_rank,
+        fs_local_rank=global_rank,
+        seed=data_loader_seed,
+        shuffle=True,
+        target_device_type=device.type,
+    )
+    data_loader.reshuffle(epoch=1)
 
     first_batch = next(iter(data_loader))
     if is_main_process:
-        input_ids = first_batch.get("input_ids", first_batch.get("chosen_input_ids"))
+        input_ids = first_batch.get("input_ids")
         if input_ids is not None:
             logger.info(f"DEBUG first batch input_ids shape: {input_ids.shape}")
             logger.info(f"DEBUG first batch input_ids[:100]: {input_ids.flatten()[:100].tolist()}")
             logger.info(f"DEBUG first batch input_ids[-100:]: {input_ids.flatten()[-100:].tolist()}")
-        label_ids = first_batch.get("labels")
-        if label_ids is not None:
-            non_neg = label_ids[label_ids >= 0]
-            logger.info(f"DEBUG first batch labels non-negative count: {len(non_neg)}")
-            logger.info(f"DEBUG first batch labels[:100]: {label_ids.flatten()[:100].tolist()}")
-    data_loader.batches_processed = 0
-    data_loader._current_iter = None
+        label_mask = first_batch.get("label_mask")
+        if label_mask is not None:
+            logger.info(f"DEBUG first batch label_mask trainable count: {int(label_mask.sum().item())}")
+            logger.info(f"DEBUG first batch label_mask[:100]: {label_mask.flatten()[:100].tolist()}")
+    data_loader.reshuffle(epoch=1)
 
     if use_hf_ckpt:
         logger.info("Reloading HuggingFace weights after parallelization...")
