@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import json
 import logging
 import os
@@ -2143,16 +2144,17 @@ class DataPreparationActor:
                 del self.metrics[s]
 
     def get_state(self) -> dict:
-        state = {
-            "training_step": self.current_prepared_step + 1,
-            "iter_dataloader_state": self.iter_dataloader.state_dict(),
-        }
-        if self.never_give_up_state is not None:
-            state["never_give_up_state"] = self.never_give_up_state
+        with self.lock:
+            state = {
+                "training_step": self.current_prepared_step + 1,
+                "iter_dataloader_state": self.iter_dataloader.state_dict(),
+            }
+            if self.never_give_up_state is not None:
+                state["never_give_up_state"] = copy.deepcopy(self.never_give_up_state)
         return state
 
     def set_state(self, state: dict):
         self.training_step = state["training_step"]
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
         if self.never_give_up_state is not None and "never_give_up_state" in state:
-            self.never_give_up_state = state["never_give_up_state"]
+            self.never_give_up_state = copy.deepcopy(state["never_give_up_state"])

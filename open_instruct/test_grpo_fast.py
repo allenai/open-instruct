@@ -1072,6 +1072,35 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(restored_state.pending_results, {})
         self.assertEqual(restored_state.pending_metrics, {})
 
+    def test_data_preparation_actor_get_state_copies_never_give_up_state(self):
+        actor_cls = data_loader_lib.DataPreparationActor.__ray_actor_class__
+        actor = actor_cls.__new__(actor_cls)
+        actor.lock = threading.Lock()
+        actor.current_prepared_step = 3
+        actor.iter_dataloader = Mock()
+        actor.iter_dataloader.state_dict.return_value = {"epoch": 7}
+        actor.never_give_up_state = data_loader_lib.NeverGiveUpAccumulationState(
+            pending_results={
+                "0_0": [
+                    self.create_mock_result(0, "0_0", num_samples_per_prompt=4, reward_scores=[0.0, 0.0, 0.0, 0.0])
+                ]
+            },
+            pending_metrics={"0_0": [{"time/reward": 0.0}]},
+        )
+
+        state = actor.get_state()
+
+        self.assertEqual(state["training_step"], 4)
+        self.assertEqual(state["iter_dataloader_state"], {"epoch": 7})
+        self.assertIsNot(state["never_give_up_state"], actor.never_give_up_state)
+        self.assertIsNot(
+            state["never_give_up_state"].pending_results["0_0"], actor.never_give_up_state.pending_results["0_0"]
+        )
+        actor.never_give_up_state.pending_results["0_0"].append(
+            self.create_mock_result(0, "0_0_1", num_samples_per_prompt=4, reward_scores=[1.0, 1.0, 1.0, 1.0])
+        )
+        self.assertEqual(len(state["never_give_up_state"].pending_results["0_0"]), 1)
+
     def test_all_prompts_filtered_returns_none(self):
         """Test that accumulate_inference_batches returns None when all prompts are filtered."""
         num_prompts = 8
