@@ -596,7 +596,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
                         data_BT.position_ids[i],
                         self.pad_token_id,
                         self.streaming_config.temperature,
@@ -1876,11 +1875,7 @@ def cleanup_training_resources(
     if queues and len(queues) > 0:
         [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
-    executor.shutdown(wait=False)
-    for thread in executor._threads:
-        thread.join(timeout=300)
-        if thread.is_alive():
-            logger.warning(f"Thread {thread.name} did not exit within 300s, proceeding with cleanup")
+    executor.shutdown(wait=True)
 
     # Clean up judge clients
     cleanup_judge_clients()

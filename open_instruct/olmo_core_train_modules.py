@@ -419,7 +419,6 @@ class GRPOTrainModule(TransformerTrainModule):
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
                     data_BT.query_responses[sample_idx],
-                    data_BT.attention_masks[sample_idx],
                     data_BT.position_ids[sample_idx],
                     self.pad_token_id,
                     self.temperature,
