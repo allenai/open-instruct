@@ -45,7 +45,7 @@ uv run python mason.py \
     --tokenizer_name_or_path allenai/olmo-3-tokenizer-instruct-dev \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 2 \
     --learning_rate 8e-5 \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
@@ -55,13 +55,14 @@ uv run python mason.py \
     --ac_mode selected_modules \
     --ac_modules "blocks.*.feed_forward" \
     --cp_degree 2 \
-    --cp_strategy ulysses \
+    --cp_strategy llama3 \
     --compile_model true \
     --checkpointing_steps 999999 \
     --ephemeral_save_interval 999998 \
     --with_tracking \
     --logging_steps 1 \
     --mixer_list allenai/Dolci-Instruct-SFT 1.0 \
-    --seed 42 \
-    --data_loader_seed 34522 \
+    --dataset_path /weka/oe-adapt-default/nathanl/dataset/olmo3-32b-instruct-sft-1114 \
+    --seed 33333 \
+    --data_loader_seed 34521 \
     --output_dir \$CHECKPOINT_OUTPUT_DIR

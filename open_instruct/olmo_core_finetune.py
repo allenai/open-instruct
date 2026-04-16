@@ -201,7 +201,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     ac_config = olmo_core_utils.build_ac_config(args.training)
 
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
-    rank_microbatch_size = rank_batch_size_seqs * args.training.max_seq_length
+    rank_microbatch_size = args.training.per_device_train_batch_size * args.training.max_seq_length
+    dp_world_size = world_size // cp_degree
 
     if is_main_process and not _numpy_dir_is_populated(numpy_dir):
         _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
@@ -224,7 +225,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     np_dataset = np_dataset_config.build()
     np_dataset.prepare()
 
-    global_batch_size_seqs = rank_batch_size_seqs * world_size
+    global_batch_size_seqs = rank_batch_size_seqs * dp_world_size
 
     num_training_steps = len(np_dataset) // global_batch_size_seqs * args.training.num_epochs
     effective_steps = (
@@ -254,19 +255,19 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.tracking.data_loader_seed if args.tracking.data_loader_seed is not None else args.tracking.seed
     )
     global_batch_size_tokens = global_batch_size_seqs * args.training.max_seq_length
-    data_loader = oc_data.NumpyFSLDataLoader(
-        dataset=np_dataset,  # ty: ignore[invalid-argument-type]
+    data_loader_config = oc_data.NumpyDataLoaderConfig(
         global_batch_size=global_batch_size_tokens,
+        seed=data_loader_seed,
+        work_dir=args.checkpoint.output_dir,
+        num_workers=4,
+        target_device_type=device.type,
+    )
+    data_loader = data_loader_config.build(
+        np_dataset,
         collator=oc_data.DataCollator(
             pad_token_id=oc_tokenizer_config.pad_token_id, vocab_size=oc_tokenizer_config.padded_vocab_size()
         ),
-        work_dir=args.checkpoint.output_dir,
-        dp_world_size=world_size,
-        dp_rank=global_rank,
-        fs_local_rank=global_rank,
-        seed=data_loader_seed,
-        shuffle=True,
-        target_device_type=device.type,
+        dp_process_group=train_module.dp_process_group,
     )
     data_loader.reshuffle(epoch=1)
 
