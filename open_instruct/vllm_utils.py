@@ -183,8 +183,6 @@ def process_tool_tokens(
         Tuple of (tokens, logprobs, masks, excess).
     """
     formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
-    if not isinstance(formatted_output, str):
-        formatted_output = str(formatted_output)
     # Strip null bytes and other characters that the fast tokenizer's Rust backend rejects.
     formatted_output = formatted_output.replace("\x00", "")
     try:
@@ -763,11 +761,7 @@ class LLMRayActor:
     def process_from_queue(self) -> None:
         finalize_futures: list[futures.Future] = []
         while True:
-            try:
-                sub_request = self.completion_queue.get(timeout=1.0)
-            except queue.Empty:
-                continue
-            completion_future = accumulate_completions(self, sub_request)
+            completion_future = accumulate_completions(self, self.completion_queue.get())
             if completion_future is not None:
                 finalize_futures.append(completion_future)
 

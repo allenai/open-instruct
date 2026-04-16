@@ -42,15 +42,17 @@ class ToolParser(ABC):
     def format_tool_outputs(self, tool_outputs: list[Any], role: str = "tool") -> str:
         """Format tool outputs with any necessary prefixes/postfixes.
 
-        Coerces non-string outputs to strings, then delegates to the subclass
-        implementation.
+        Coerces non-string inputs and output to strings defensively.
 
         Args:
             tool_outputs: Raw outputs from tool/env calls (coerced to strings).
             role: The output role (e.g. "tool", "user" for text envs).
         """
         coerced = [str(o) if o is not None else "" for o in tool_outputs]
-        return self._format_tool_outputs(coerced, role=role)
+        formatted = self._format_tool_outputs(coerced, role=role)
+        if not isinstance(formatted, str):
+            formatted = str(formatted)
+        return formatted
 
     @abstractmethod
     def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
