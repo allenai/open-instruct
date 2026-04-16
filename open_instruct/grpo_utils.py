@@ -463,7 +463,6 @@ def compute_logprobs(
             batch_indices = list(range(start_idx, end_idx))
 
             query_responses = [data_BT.query_responses[i] for i in batch_indices]
-            attention_masks = [data_BT.attention_masks[i] for i in batch_indices]
             position_ids = [data_BT.position_ids[i] for i in batch_indices]
             shapes = [tuple(t.shape) for t in query_responses]
 
@@ -472,7 +471,7 @@ def compute_logprobs(
                     single_logprobs, _ = forward_for_logprobs(
                         model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
+                        None,
                         data_BT.position_ids[i],
                         pad_token_id,
                         temperature,
@@ -486,13 +485,12 @@ def compute_logprobs(
                 continue
 
             batch_query_responses = torch.cat(query_responses, dim=0)
-            batch_attention_masks = torch.cat(attention_masks, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
                 model,
                 batch_query_responses,
-                batch_attention_masks,
+                None,
                 batch_position_ids,
                 pad_token_id,
                 temperature,

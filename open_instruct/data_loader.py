@@ -46,6 +46,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
+from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
@@ -716,11 +717,14 @@ def add_prompt_to_generator(
     generation_config,
     is_eval: bool,
     base_env_config: EnvConfig,
+    ground_truth_overrides: dict[int, Any] | None = None,
 ) -> None:
     index = int(example["index"])
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
+
+    ground_truth = ground_truth_overrides.get(index) if ground_truth_overrides else None
 
     param_prompt_Q.put(
         data_types.PromptRequest(
@@ -731,6 +735,7 @@ def add_prompt_to_generator(
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
+            ground_truth=ground_truth,
         )
     )
 
@@ -755,6 +760,7 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    ground_truth_overrides: dict[int, Any] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -776,6 +782,7 @@ def accumulate_inference_batches(
     all_reward_metrics = []
     all_active_tools = []
     all_scores = []
+    all_indices = []
     all_percent_solved = []
     all_model_steps = []
     total_filtered_prompts = 0
@@ -840,6 +847,7 @@ def accumulate_inference_batches(
                 generation_config,
                 is_eval=False,
                 base_env_config=base_env_config,
+                ground_truth_overrides=ground_truth_overrides,
             )
 
         for i in range(len(result.finish_reasons)):
@@ -855,6 +863,7 @@ def accumulate_inference_batches(
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
+        k_indices = repeat_each([result.index], generation_config.n)
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -891,6 +900,7 @@ def accumulate_inference_batches(
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
+        all_indices.extend(k_indices)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
@@ -991,7 +1001,7 @@ def accumulate_inference_batches(
         datasets=all_datasets,
         raw_queries=all_raw_queries,
         decoded_responses=all_decoded_responses,
-        indices=None,
+        indices=all_indices,
         scores=all_scores,
         active_tools=all_active_tools if all_active_tools else None,
     )
@@ -1174,12 +1184,16 @@ class DataPreparationActor:
         self.current_prepared_step = -1
         self._last_consumed_step = -1
         self.lock = threading.Lock()
-        self.shutdown_requested = False
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
         self._executor: ThreadPoolExecutor | None = None
         self._prep_future = None
+
+        self.rubric_manager: RubricManager | None = None
+        self.ground_truth_overrides: dict[int, Any] = {}
+        if self.config.apply_evolving_rubric_reward:
+            self.rubric_manager = RubricManager(self.config, dataset[GROUND_TRUTHS_KEY])
 
         if initial_state is not None:
             logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
@@ -1210,16 +1224,12 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
                 base_env_config=self.base_env_config,
+                ground_truth_overrides=self.ground_truth_overrides,
             )
 
         for step in range(self.training_step, self.num_training_steps):
-            if self.shutdown_requested:
-                return
-
             generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
-                if self.shutdown_requested:
-                    return
                 logger.info(
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
@@ -1247,6 +1257,7 @@ class DataPreparationActor:
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
+                ground_truth_overrides=self.ground_truth_overrides,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1275,6 +1286,17 @@ class DataPreparationActor:
 
             assert batch is not None
             assert batch_stats is not None
+
+            if self.rubric_manager and batch.decoded_responses:
+                rubric_metrics, new_overrides = self.rubric_manager.run_step(
+                    decoded_responses=batch.decoded_responses,
+                    ground_truths=batch.ground_truths,
+                    indices=batch.indices,
+                    step=step,
+                )
+                reward_metrics.update(rubric_metrics)
+                self.ground_truth_overrides.update(new_overrides)
+
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)

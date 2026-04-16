@@ -1533,6 +1533,10 @@ def get_optimizer_grouped_parameters(
             "weight_decay": 0.0,
         },
     ]
+
+    # Filter empty groups to avoid issues with torch 2.10 and deepspeed
+    optimizer_grouped_parameters = [group for group in optimizer_grouped_parameters if group["params"]]
+
     return optimizer_grouped_parameters
 
 

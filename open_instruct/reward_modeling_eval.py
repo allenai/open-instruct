@@ -22,11 +22,11 @@ api = HfApi()
 
 def find_shared_text(chosen_text: str, rejected_text: str):
     """return shared (prompt) text between chosen and rejected text"""
-    for i in range(min(len(chosen_text), len(rejected_text))):
+    min_len = min(len(chosen_text), len(rejected_text))
+    for i in range(min_len):
         if chosen_text[i] != rejected_text[i]:
-            break
-
-    return chosen_text[:i]
+            return chosen_text[:i]
+    return chosen_text[:min_len]
 
 
 def evaluate(

@@ -29,9 +29,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: ban-type-checking
-        name: Ban TYPE_CHECKING blocks
-        entry: bash -c '! grep -rn "if TYPE_CHECKING" open_instruct/'
+      - id: ban-keywords
+        name: Ban prohibited keywords
+        entry: bash -c '! grep -rn -E "if TYPE_CHECKING|nonlocal " open_instruct/'
         language: system
         pass_filenames: false
         types: [python]
