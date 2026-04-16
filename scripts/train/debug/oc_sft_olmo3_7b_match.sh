@@ -56,6 +56,7 @@ uv run python mason.py \
     --ac_modules "blocks.*.feed_forward" \
     --cp_degree 2 \
     --cp_strategy llama3 \
+    --attn_implementation flash_2 \
     --compile_model true \
     --checkpointing_steps 999999 \
     --ephemeral_save_interval 999998 \
