@@ -1856,7 +1856,7 @@ def cleanup_training_resources(
 
     try:
         data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-        data_prep_actor.request_shutdown.remote()
+        ray.kill(data_prep_actor)
     except (ray.exceptions.RayError, ValueError) as e:
         logger.warning(f"Could not shut down DataPreparationActor: {e}")
 
