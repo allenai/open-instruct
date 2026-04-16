@@ -338,10 +338,8 @@ class DPOExperimentConfig(
 
         if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
-        if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.mixer_list is not None))
-            or (self.dataset_name is not None)
-            or (self.dataset_mixer is not None and self.mixer_list is not None)
+        if (self.dataset_name is not None and (self.dataset_mixer is not None or self.mixer_list is not None)) or (
+            self.dataset_mixer is not None and self.mixer_list is not None
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:

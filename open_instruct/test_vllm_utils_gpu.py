@@ -14,8 +14,10 @@ from olmo_core.nn.transformer import TransformerConfig
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import logger_utils, utils, vllm_utils
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
@@ -37,7 +39,7 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         AutoTokenizer.from_pretrained(tokenizer_name)
 
         master_address = ray._private.services.get_node_ip_address()
-        master_port = 29502
+        master_port = utils.find_free_port()
 
         os.environ["MASTER_ADDR"] = master_address
         os.environ["MASTER_PORT"] = str(master_port)
@@ -81,24 +83,25 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         )
         ray.get(engines[0].ready.remote())
 
-        engine_pg_ref = engines[0].init_process_group.remote(
-            master_address=master_address,
-            master_port=master_port + 1,
-            rank_offset=1,
-            world_size=2,
-            group_name="test_fsdp2_broadcast",
-            backend="gloo",
+        weight_transfer_port = utils.find_free_port()
+
+        world_size = 2
+        ray.get(
+            engines[0].init_weight_transfer_engine.remote(
+                WeightTransferInitRequest(
+                    init_info={
+                        "master_address": master_address,
+                        "master_port": weight_transfer_port,
+                        "rank_offset": 1,
+                        "world_size": world_size,
+                    }
+                )
+            )
         )
 
-        model_update_group = vllm_utils.init_process_group(
-            backend="gloo",
-            init_method=f"tcp://{master_address}:{master_port + 1}",
-            world_size=2,
-            rank=0,
-            group_name="test_fsdp2_broadcast",
+        model_update_group = NCCLWeightTransferEngine.trainer_init(
+            {"master_address": master_address, "master_port": weight_transfer_port, "world_size": world_size}
         )
-
-        ray.get(engine_pg_ref)
 
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=model,
@@ -111,7 +114,6 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         self.assertGreater(len(refs), 0)
         ray.get(refs)
 
-        torch.distributed.destroy_process_group(model_update_group)
         torch.distributed.destroy_process_group()
 
 

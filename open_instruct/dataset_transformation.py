@@ -948,6 +948,7 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
+EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
@@ -1814,7 +1815,7 @@ class DatasetTransformationCache:
 
     def load_or_transform_dataset(
         self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Dataset:
+    ) -> tuple[Dataset, dict[str, Any]]:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
@@ -1837,7 +1838,7 @@ class DatasetTransformationCache:
                 assert isinstance(loaded_dataset, Dataset)
                 if "index" not in loaded_dataset.column_names:
                     loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
-                return loaded_dataset
+                return loaded_dataset, EMPTY_DATASET_STATISTICS.copy()
 
         print("Cache not found, transforming datasets...")
 
@@ -1853,7 +1854,7 @@ class DatasetTransformationCache:
             combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
-            return combined_dataset
+            return combined_dataset, EMPTY_DATASET_STATISTICS.copy()
 
         # Push to hub with config hash as revision
         combined_dataset.push_to_hub(
@@ -1897,7 +1898,7 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
             repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
         )
         assert isinstance(final_dataset, Dataset)
-        return final_dataset
+        return final_dataset, EMPTY_DATASET_STATISTICS.copy()
 
 
 class LocalDatasetTransformationCache:
@@ -1945,7 +1946,7 @@ class LocalDatasetTransformationCache:
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached
-                return dataset, {"per_dataset_stats": [], "dataset_order": []}
+                return dataset, EMPTY_DATASET_STATISTICS.copy()
 
         print("Cache not found or invalid, transforming datasets...")
 
