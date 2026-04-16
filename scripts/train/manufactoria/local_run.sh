@@ -69,6 +69,6 @@ uv run --active open_instruct/grpo_fast.py \
 --save_freq 10 \
 --checkpoint_state_freq 10 \
 --gradient_checkpointing \
---with_tracking \
+--with_tracking false \
 --push_to_hub false \
 "$@"

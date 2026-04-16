@@ -334,18 +334,26 @@ def _format_pass_rate(pass_count: int, num_samples: int) -> str:
 
 
 def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int) -> list[float]:
-    test_results = result_metadata.get("manufactoria_test_results", []) or []
+    """Per-test pass vector from verifier metadata: ``per_test_passes`` or indexed ``manufactoria_test_results``."""
     if n_tests <= 0:
         return []
 
-    per_test_pass = [0.0] * n_tests
-    for test_result in test_results:
-        if not isinstance(test_result, dict):
-            continue
-        test_index = test_result.get("test_index")
-        if isinstance(test_index, int) and 0 <= test_index < n_tests:
-            per_test_pass[test_index] = float(bool(test_result.get("passed")))
-    return per_test_pass
+    test_results = result_metadata.get("manufactoria_test_results", []) or []
+    if test_results:
+        per_test_pass = [0.0] * n_tests
+        for test_result in test_results:
+            if not isinstance(test_result, dict):
+                continue
+            test_index = test_result.get("test_index")
+            if isinstance(test_index, int) and 0 <= test_index < n_tests:
+                per_test_pass[test_index] = float(bool(test_result.get("passed")))
+        return per_test_pass
+
+    per_test_passes = result_metadata.get("per_test_passes")
+    if isinstance(per_test_passes, list) and per_test_passes:
+        return _align_per_test_pass([float(x) for x in per_test_passes], n_tests)
+
+    return [0.0] * n_tests
 
 
 def _per_test_pass_rates_from_row(row: dict[str, Any]) -> list[float]:
