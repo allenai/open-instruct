@@ -8,7 +8,7 @@ existing dataset that already contains a `completions` column.
 
 Requires a running Manufactoria API (same as training). Set MANUFACTORIA_API_URL or pass --manufactoria-api-url.
 
-Example (local):
+Example (local generation):
   export MANUFACTORIA_API_URL=http://localhost:1235
   uv run python scripts/data/rlvr/manufactoria_pass_at_k_dataset.py \\
     --dataset manufactoria/has_test \\
@@ -20,6 +20,17 @@ Example (local):
     --response_length 8192 \\
     --tensor-parallel-size 1 \\
     --num-engines 8
+
+Recalculate pass metrics and difficulty from an existing HF dataset that already has a `completions`
+column (no vLLM), then either dry-run and print scores or push:
+  uv run python scripts/data/rlvr/manufactoria_pass_at_k_dataset.py \\
+    --dataset mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 \\
+    --split train --use-existing-completions --dry-run
+
+  uv run python scripts/data/rlvr/manufactoria_pass_at_k_dataset.py \\
+    --dataset mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 \\
+    --split train --use-existing-completions \\
+    --push-to-hub mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128-rescored
 """
 
 from __future__ import annotations
@@ -28,6 +39,7 @@ import argparse
 import json
 import math
 import os
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
@@ -85,7 +97,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-existing-completions",
         action="store_true",
-        help="Reuse the dataset's existing `completions` column and recompute pass metrics/difficulty without generation",
+        help=(
+            "Load an existing HF dataset that already has a `completions` column; call the Manufactoria "
+            "API to recompute Full pass / per-test pass metrics and (unless --no-difficulty) difficulty. "
+            "Skips vLLM generation."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "After scoring, print aggregate and per-row sample scores only; do not save to disk or push to hub. "
+            "Typical with --use-existing-completions to verify recomputed metrics before uploading."
+        ),
     )
     parser.add_argument(
         "--manufactoria-api-url",
@@ -324,6 +348,59 @@ def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int)
     return per_test_pass
 
 
+def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit: int = 8) -> None:
+    """Log aggregate stats and a short sample of rows (for --dry-run)."""
+    n = len(rows)
+    if n == 0:
+        logger.info("dry-run summary: empty dataset")
+        return
+
+    total_completions = 0
+    total_full_pass_completions = 0
+    difficulty_flat: list[int] = []
+
+    for row in rows:
+        ns = int(row.get("num_samples", 0) or 0)
+        total_completions += ns
+        total_full_pass_completions += int(row.get("Full pass count", 0) or 0)
+        diff = row.get(DIFFICULTY_KEY)
+        if isinstance(diff, list):
+            for x in diff:
+                try:
+                    difficulty_flat.append(int(x))
+                except (TypeError, ValueError):
+                    continue
+
+    logger.info("dry-run summary: rows=%d", n)
+    if total_completions > 0:
+        logger.info(
+            "dry-run summary: aggregate_full_pass_rate=%.6f (%d full passes / %d completions)",
+            total_full_pass_completions / total_completions,
+            total_full_pass_completions,
+            total_completions,
+        )
+    if difficulty_flat:
+        ctr = Counter(difficulty_flat)
+        logger.info(
+            "dry-run summary: difficulty_bucket_counts=%s (1=unsolved test … 4=easier bucket)",
+            dict(sorted(ctr.items())),
+        )
+
+    shown = min(sample_row_limit, n)
+    logger.info("dry-run sample: first %d rows (index, num_samples, full_pass_count, n_per_test_entries)", shown)
+    for i in range(shown):
+        row = rows[i]
+        ptc = row.get("Per-test pass count")
+        n_pt = len(ptc) if isinstance(ptc, list) else 0
+        logger.info(
+            "  row %d: num_samples=%s full_pass_count=%s per_test_pass_count_len=%d",
+            i,
+            row.get("num_samples"),
+            row.get("Full pass count"),
+            n_pt,
+        )
+
+
 def assign_global_difficulty_quartiles(rows: list[dict[str, Any]]) -> None:
     """Assign dataset-level difficulty buckets from per-test pass rates across all rows.
 
@@ -505,6 +582,11 @@ def main() -> None:
 
     if not args.no_difficulty:
         assign_global_difficulty_quartiles(rows)
+
+    if args.dry_run:
+        print_rescored_dataset_summary(rows)
+        logger.info("Dry run: skipping save_to_disk and push_to_hub")
+        return
 
     out_ds = Dataset.from_list(rows)
     logger.info("Built output dataset with %d rows and columns: %s", len(out_ds), out_ds.column_names)
