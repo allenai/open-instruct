@@ -1127,10 +1127,10 @@ class RubricVerifier(VerifierFunction):
 
         # Extract content from <answer> tags if present, otherwise use full response.
         # Use the last match in case the model outputs multiple answer blocks.
-        response_for_scoring = prediction
-        answer_matches = re.findall(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
-        if answer_matches:
+        if answer_matches := re.findall(r"<answer>(.*?)</answer>", prediction, re.DOTALL):
             response_for_scoring = answer_matches[-1].strip()
+        else:
+            response_for_scoring = prediction
 
         # Score each rubric in parallel
         async def score_rubric(rubric: dict) -> tuple[float, float]:
