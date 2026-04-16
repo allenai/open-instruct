@@ -615,7 +615,7 @@ class LLMRayActor:
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
         per_turn_max_tokens: int | None = None,
-        tool_call_timeout: float = 300.0,
+        tool_call_timeout: float = 1800.0,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,

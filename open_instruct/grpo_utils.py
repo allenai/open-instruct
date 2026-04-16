@@ -382,8 +382,7 @@ def forward_for_logprobs(
     return_entropy: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
-    # For packed sequences, pass attention_mask=None so HF flash attention uses position_ids
-    # to isolate sub-sequences instead of treating the whole pack as one sequence.
+    # We pack sequences, so pass in no attention mask to let HF work out the correct one internally.
     if (position_ids.diff(dim=-1) < 0).any():
         attention_mask = None
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
