@@ -607,6 +607,7 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        inference_batch_size: int | None = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -630,7 +631,11 @@ class LLMRayActor:
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
-        self.inference_batch_size = self.get_kv_cache_info()
+        if inference_batch_size is not None:
+            logger.info(f"Using manually configured inference_batch_size={inference_batch_size}")
+            self.inference_batch_size = inference_batch_size
+        else:
+            self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
@@ -1286,6 +1291,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    inference_batch_size: int | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1373,6 +1379,7 @@ def create_vllm_engines(
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
+                inference_batch_size=inference_batch_size,
             )
         )
 
