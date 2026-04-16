@@ -75,7 +75,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tool_parser_type vllm_qwen3_coder \
     --tools serper_search jina_browse s2_search \
     --tool_call_names google_search browse_webpage snippet_search \
-    --tool_configs '{}' '{}' '{"pool_size_override": 100}' \
+    --tool_configs '{}' '{}' '{"pool_size": 100}' \
     --pool_size 256 \
     --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
     --max_steps 10 \

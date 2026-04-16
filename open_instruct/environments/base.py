@@ -129,3 +129,7 @@ class BaseEnvConfig:
 
     tool_class: ClassVar[type[RLEnvironment]]
     """The RLEnvironment subclass this config creates."""
+
+    pool_size: int | None = field(default=None, kw_only=True)
+    """Per-tool pool size override. When set, this tool uses this pool size
+    instead of the global --pool_size value."""
