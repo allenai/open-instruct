@@ -2352,6 +2352,8 @@ def main(
     pool_size = tools_config.pool_size
     if pool_size is None:
         pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    if args.cache_dataset_only:
+        pool_size = 1
     logger.info(f"Pool size per tool: {pool_size}")
 
     pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(
