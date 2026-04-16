@@ -459,6 +459,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
+        # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
         # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
