@@ -54,6 +54,14 @@ logger = logging.getLogger(__name__)
 MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
 
 
+@dataclass
+class NeverGiveUpAccumulationState:
+    """State for carrying pending never_give_up retries across accumulation calls."""
+
+    pending_results: dict[str, list[data_types.GenerationResult]] = field(default_factory=dict)
+    pending_metrics: dict[str, list[dict[str, Any] | None]] = field(default_factory=dict)
+
+
 def _sanitize_metric_name(name: str) -> str:
     return re.sub(r"[^0-9A-Za-z_]+", "_", name).strip("_")
 
@@ -438,6 +446,7 @@ class StreamingDataLoaderConfig:
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
+    maintain_pending_never_give_up_between_calls: bool = True
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
@@ -1078,7 +1087,7 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
 
 
 def merge_generation_results(
-    results: list[data_types.GenerationResult], reward_metrics: list[dict[str, Any]]
+    results: list[data_types.GenerationResult], reward_metrics: list[dict[str, Any] | None]
 ) -> tuple[data_types.GenerationResult, dict[str, Any]]:
     """Merge buffered never_give_up attempts into a single logical prompt group."""
     if len(results) == 0:
@@ -1141,7 +1150,9 @@ def merge_generation_results(
             earliest_start_time=None if earliest_start_time == float("inf") else earliest_start_time,
         )
 
-    combined_reward_metrics = combine_reward_metrics(reward_metrics)
+    combined_reward_metrics = combine_reward_metrics(
+        [metrics if metrics is not None else {} for metrics in reward_metrics]
+    )
     merged_result = data_types.GenerationResult(
         responses=combined_responses,
         finish_reasons=combined_finish_reasons,
@@ -1207,6 +1218,7 @@ def accumulate_inference_batches(
     progress_bar_desc: str | None = None,
     show_progress_bar: bool = True,
     progress_callback: Callable[[int, int], None] | None = None,
+    never_give_up_state: NeverGiveUpAccumulationState | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1268,8 +1280,10 @@ def accumulate_inference_batches(
     num_prompts_sampled = 0
     prompts_consumed = 0
     collected_results = []  # Track results for potential requeue on timeout
-    pending_never_give_up_results: dict[str, list[data_types.GenerationResult]] = {}
-    pending_never_give_up_metrics: dict[str, list[dict[str, Any]]] = {}
+    if never_give_up_state is None:
+        never_give_up_state = NeverGiveUpAccumulationState()
+    pending_never_give_up_results = never_give_up_state.pending_results
+    pending_never_give_up_metrics = never_give_up_state.pending_metrics
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
@@ -1374,7 +1388,7 @@ def accumulate_inference_batches(
                 pending_metrics.append(result.reward_metrics)
                 pending_never_give_up_results[chain_id] = pending_results
                 pending_never_give_up_metrics[chain_id] = pending_metrics
-                logging.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
+                logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
             if not active_sampling:
@@ -1805,10 +1819,15 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
+        self.never_give_up_state = (
+            NeverGiveUpAccumulationState() if self.config.maintain_pending_never_give_up_between_calls else None
+        )
 
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
             self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
+            if self.never_give_up_state is not None and "never_give_up_state" in initial_state:
+                self.never_give_up_state = initial_state["never_give_up_state"]
             logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
 
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
@@ -1881,6 +1900,7 @@ class DataPreparationActor:
                 base_env_config=self.base_env_config,
                 progress_bar_desc=f"Training accumulating responses step {step}",
                 show_progress_bar=True,
+                never_give_up_state=self.never_give_up_state,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -2123,11 +2143,16 @@ class DataPreparationActor:
                 del self.metrics[s]
 
     def get_state(self) -> dict:
-        return {
+        state = {
             "training_step": self.current_prepared_step + 1,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
+        if self.never_give_up_state is not None:
+            state["never_give_up_state"] = self.never_give_up_state
+        return state
 
     def set_state(self, state: dict):
         self.training_step = state["training_step"]
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
+        if self.never_give_up_state is not None and "never_give_up_state" in state:
+            self.never_give_up_state = state["never_give_up_state"]

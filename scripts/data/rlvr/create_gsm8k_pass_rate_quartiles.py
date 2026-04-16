@@ -54,11 +54,35 @@ def with_dataset_name(ds: Dataset, dataset_name: str) -> Dataset:
     return ds.add_column("dataset", [dataset_name] * len(ds))
 
 
+def normalize_schema(ds: Dataset) -> Dataset:
+    def normalize_row(row: dict) -> dict:
+        ground_truth = row.get("ground_truth")
+        if isinstance(ground_truth, list):
+            if len(ground_truth) != 1:
+                raise ValueError(f"Expected exactly one ground_truth value, got {ground_truth}")
+            row["ground_truth"] = str(ground_truth[0])
+        elif ground_truth is not None:
+            row["ground_truth"] = str(ground_truth)
+
+        row.pop("completions", None)
+        return row
+
+    ds = ds.map(normalize_row, num_proc=max_num_processes())
+    if "completions" in ds.column_names:
+        ds = ds.remove_columns(["completions"])
+    return ds
+
+
+def split_to_dataset_name(quartile_id: int) -> str:
+    return f"gsm8k_quartile{quartile_id}"
+
+
 def main() -> None:
     args = parse_args()
 
     logger.info("Loading %s[%s]", args.input_dataset, args.split)
     ds = load_dataset(args.input_dataset, split=args.split, num_proc=max_num_processes())
+    ds = normalize_schema(ds)
 
     rows = ds.to_list()
     pass_counts = np.array([extract_pass_count(row) for row in rows], dtype=int)
@@ -69,24 +93,24 @@ def main() -> None:
 
     quartile_outputs: list[tuple[str, Dataset]] = []
     for quartile_id, quartile_idx in enumerate(quartile_indices):
-        quartile_ds = with_dataset_name(ds.select(quartile_idx.tolist()), f"gsm8k_quartile{quartile_id}")
-        split_name = f"test_{quartile_id}"
-        quartile_outputs.append((split_name, quartile_ds))
+        quartile_ds = with_dataset_name(ds.select(quartile_idx.tolist()), split_to_dataset_name(quartile_id))
+        quartile_split_name = f"{args.split}_{quartile_id}"
+        quartile_outputs.append((quartile_split_name, quartile_ds))
         logger.info(
             "Prepared %s: %d rows, pass_count range [%d, %d]",
-            split_name,
+            quartile_split_name,
             len(quartile_ds),
             int(np.min(pass_counts[quartile_idx])),
             int(np.max(pass_counts[quartile_idx])),
         )
 
-    for split_name, quartile_ds in quartile_outputs:
-        logger.info("Pushing split %s to %s", split_name, args.output_dataset)
-        quartile_ds.push_to_hub(args.output_dataset, split=split_name, private=args.private)
+    for quartile_split_name, quartile_ds in quartile_outputs:
+        logger.info("Pushing split %s to %s", quartile_split_name, args.output_dataset)
+        quartile_ds.push_to_hub(args.output_dataset, split=quartile_split_name, private=args.private)
 
     concatenated = concatenate_datasets([quartile_ds for _, quartile_ds in quartile_outputs])
-    logger.info("Pushing concatenated split test (%d rows) to %s", len(concatenated), args.output_dataset)
-    concatenated.push_to_hub(args.output_dataset, split="test", private=args.private)
+    logger.info("Pushing concatenated split %s (%d rows) to %s", args.split, len(concatenated), args.output_dataset)
+    concatenated.push_to_hub(args.output_dataset, split=args.split, private=args.private)
 
     logger.info("Done")
 
