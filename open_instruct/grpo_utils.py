@@ -375,13 +375,14 @@ def compute_grpo_loss(
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
+    attention_mask: torch.Tensor,
     position_ids: torch.Tensor,
     pad_token_id: int,
     temperature: float,
     return_entropy: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
-    output = model(input_ids=query_responses, attention_mask=None, position_ids=position_ids)
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
@@ -429,7 +430,13 @@ def compute_logprobs(
             if len(set(shapes)) != 1:
                 for i in batch_indices:
                     single_logprobs, _ = forward_for_logprobs(
-                        model, data_BT.query_responses[i], data_BT.position_ids[i], pad_token_id, temperature, False
+                        model,
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
+                        pad_token_id,
+                        temperature,
+                        False,
                     )
 
                     response_mask_BT = data_BT.response_masks[i]
@@ -442,7 +449,13 @@ def compute_logprobs(
             batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
-                model, batch_query_responses, batch_position_ids, pad_token_id, temperature, False
+                model,
+                batch_query_responses,
+                batch_attention_masks,
+                batch_position_ids,
+                pad_token_id,
+                temperature,
+                False,
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]

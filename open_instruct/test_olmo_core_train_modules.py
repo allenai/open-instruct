@@ -91,7 +91,7 @@ class TestForwardForLogprobs(unittest.TestCase):
         position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         logprob, entropy = grpo_utils.forward_for_logprobs(
-            model, query_responses, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
         )
 
         self.assertEqual(logprob.shape, (batch_size, seq_len - 1))
@@ -106,7 +106,7 @@ class TestForwardForLogprobs(unittest.TestCase):
         position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         logprob, entropy = grpo_utils.forward_for_logprobs(
-            model, query_responses, position_ids, pad_token_id=0, temperature=1.0, return_entropy=True
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=True
         )
 
         self.assertEqual(logprob.shape, (batch_size, seq_len - 1))
@@ -122,10 +122,10 @@ class TestForwardForLogprobs(unittest.TestCase):
         position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
         logprob_t1, _ = grpo_utils.forward_for_logprobs(
-            model, query_responses, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
         )
         logprob_t2, _ = grpo_utils.forward_for_logprobs(
-            model, query_responses, position_ids, pad_token_id=0, temperature=2.0, return_entropy=False
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=2.0, return_entropy=False
         )
 
         self.assertFalse(torch.allclose(logprob_t1, logprob_t2))
