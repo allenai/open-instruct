@@ -252,6 +252,7 @@ class PolicyTrainerRayProcess(RayProcess):
             adam_offload=args.deepspeed_offload_optimizer,
             stage=args.deepspeed_stage,
             bf16=True,
+            max_norm=args.max_grad_norm if args.max_grad_norm is not None else 0.0,
             zpg=args.deepspeed_zpg,
             sequence_parallel_size=args.sequence_parallel_size,
         )
