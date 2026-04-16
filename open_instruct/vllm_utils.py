@@ -183,8 +183,6 @@ def process_tool_tokens(
         Tuple of (tokens, logprobs, masks, excess).
     """
     formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
-    # Strip null bytes and other characters that the fast tokenizer's Rust backend rejects.
-    formatted_output = formatted_output.replace("\x00", "")
     try:
         tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
     except TypeError:

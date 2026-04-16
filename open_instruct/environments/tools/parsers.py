@@ -42,7 +42,8 @@ class ToolParser(ABC):
     def format_tool_outputs(self, tool_outputs: list[Any], role: str = "tool") -> str:
         """Format tool outputs with any necessary prefixes/postfixes.
 
-        Coerces non-string inputs and output to strings defensively.
+        Coerces non-string inputs/output to strings defensively and strips
+        null bytes that the fast tokenizer's Rust backend rejects.
 
         Args:
             tool_outputs: Raw outputs from tool/env calls (coerced to strings).
@@ -52,7 +53,7 @@ class ToolParser(ABC):
         formatted = self._format_tool_outputs(coerced, role=role)
         if not isinstance(formatted, str):
             formatted = str(formatted)
-        return formatted
+        return formatted.replace("\x00", "")
 
     @abstractmethod
     def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
