@@ -481,6 +481,11 @@ def forward_for_logprobs(
     if (position_ids.diff(dim=-1) < 0).any():
         attention_mask = None
         extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
+    elif cp_context is not None:
+        # Under SP, this rank's chunk may have no local position resets (e.g. a single
+        # long rollout spanning both ranks) but still needs cp_context for cross-rank
+        # SSM state passing in linear-attention layers.
+        extra_kwargs = {"cp_context": cp_context}
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
