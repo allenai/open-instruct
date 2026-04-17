@@ -135,6 +135,14 @@ def main():
         flat_pos.extend(range(len(piece)))
 
     total_len = len(flat_ids)
+    # Ensure total_len is divisible by sp_world_size so that UlyssesSP never
+    # adds a padding token with pos_id=0, which would create a spurious
+    # sub-sequence reset in causal_conv1d_fn and corrupt the SSM state.
+    if total_len % sp_world_size != 0:
+        trim = total_len % sp_world_size
+        flat_ids = flat_ids[:-trim]
+        flat_pos = flat_pos[:-trim]
+        total_len -= trim
 
     # ------------------------------------------------------------------ #
     # Shard sequence for this SP rank (mirrors UlyssesSPSplitter)         #

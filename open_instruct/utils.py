@@ -2655,8 +2655,19 @@ class UlyssesSPSplitter:
                 continue
             sharded = []
             for t in val:
+                pad_len = max_seqlen - t.shape[-1]
+                if pad_len > 0 and field.name == "position_ids":
+                    # Pad position_ids with a large non-zero value so that padding
+                    # tokens are not mistaken for sub-sequence starts (pos_id == 0)
+                    # by _compute_packing_kwargs / build_fla_cp_context_for_sample.
+                    # A spurious pos_id=0 at rank 1 would create a false causal_conv1d
+                    # reset that corrupts the SSM state for all preceding tokens.
+                    pos_pad_value = int(t[0, -1].item()) + 1
+                    padded = F.pad(t, (0, pad_len), value=pos_pad_value)
+                else:
+                    padded = F.pad(t, (0, pad_len), value=pad_value)
                 # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
-                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                padded_sliced = padded[:, start_idx:end_idx]
                 sharded.append(padded_sliced)
             kwargs[field.name] = sharded
 
