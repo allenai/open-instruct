@@ -1,18 +1,20 @@
 """Single-GPU Qwen3-0.6B SFT runner using olmo-core APIs directly.
 
-This mirrors the structure of olmo-core's src/scripts/train/sft/Olmo-3-7B-SFT.py but
-swaps in Qwen3-0.6B and fixes single-GPU / no-CP / 3-step defaults for a byte-level
-match test against open_instruct/olmo_core_finetune.py.
+Mirrors open_instruct/olmo_core_finetune.py's HF->olmo-core weight-loading path so
+both runs start from identical weights. Compare step-0/1/2 CE loss for byte-level parity.
 """
 
 import argparse
 import logging
+
+import transformers
 
 from olmo_core.config import DType
 from olmo_core.data import NumpyDataLoaderConfig, NumpyPackedFSLDatasetConfig, TokenizerConfig
 from olmo_core.data.types import LongDocStrategy
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, prepare_training_environment, teardown_training_environment
@@ -33,8 +35,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_path", required=True)
     parser.add_argument("--save_folder", required=True)
-    parser.add_argument("--pretrain_checkpoint", default=None,
-                        help="Optional olmo-core pretrain checkpoint to load.")
+    parser.add_argument("--model_name_or_path", default="Qwen/Qwen3-0.6B")
+    parser.add_argument("--config_name", default="qwen3_0_6B")
     parser.add_argument("--seq_len", type=int, default=1024)
     parser.add_argument("--rank_microbatch_size_tokens", type=int, default=1024)
     parser.add_argument("--global_batch_size_tokens", type=int, default=4096)
@@ -75,8 +77,12 @@ def main() -> None:
         reduce_dtype=DType.float32,
     )
 
-    model_config = TransformerConfig.qwen3_0_6B(
-        vocab_size=tokenizer_config.padded_vocab_size(),
+    hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+    vocab_size = hf_config.vocab_size
+    log.info(f"Building olmo-core model with vocab_size={vocab_size} from HF config")
+
+    model_config = getattr(TransformerConfig, args.config_name)(
+        vocab_size=vocab_size,
         attn_backend=AttentionBackendName.flash_2,
     )
 
@@ -118,15 +124,16 @@ def main() -> None:
         .with_callback("garbage_collector", GarbageCollectorCallback())
     )
 
-    model = model_config.build(init_device="meta")
+    model = model_config.build(init_device="cpu")
     train_module = train_module_config.build(model)
     dataset = dataset_config.build()
     data_loader = data_loader_config.build(dataset, dp_process_group=train_module.dp_process_group)
     trainer = trainer_config.build(train_module, data_loader)
 
-    if args.pretrain_checkpoint:
-        log.info(f"Loading pretrain checkpoint from {args.pretrain_checkpoint}")
-        trainer.load_checkpoint(args.pretrain_checkpoint, load_trainer_state=False)
+    log.info(f"Loading HF weights from {args.model_name_or_path} into olmo-core model")
+    sd = train_module.model.state_dict()
+    load_hf_model(args.model_name_or_path, sd, work_dir=args.save_folder)
+    train_module.model.load_state_dict(sd)
 
     try:
         trainer.fit()
