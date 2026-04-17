@@ -63,7 +63,7 @@ uv run python mason.py \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
     --backend_timeout 1200 \
-    --checkpoint_state_freq 50 \
+    --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
     --truncated_importance_sampling_ratio_cap 2.0 \
