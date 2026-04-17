@@ -12,6 +12,7 @@ from olmo_core.config import DType
 from olmo_core.data import NumpyDataLoaderConfig, NumpyPackedFSLDatasetConfig, TokenizerConfig
 from olmo_core.data.types import LongDocStrategy
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, prepare_training_environment, teardown_training_environment
@@ -74,7 +75,10 @@ def main() -> None:
         reduce_dtype=DType.float32,
     )
 
-    model_config = TransformerConfig.qwen3_0_6B(vocab_size=tokenizer_config.padded_vocab_size())
+    model_config = TransformerConfig.qwen3_0_6B(
+        vocab_size=tokenizer_config.padded_vocab_size(),
+        attn_backend=AttentionBackendName.flash_2,
+    )
 
     train_module_config = TransformerTrainModuleConfig(
         rank_microbatch_size=args.rank_microbatch_size_tokens,

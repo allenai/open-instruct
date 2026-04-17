@@ -35,7 +35,6 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --max_grad_norm 1.0 \
     --max_train_steps 3 \
-    --cp_degree 1 \
     --attn_implementation flash_2 \
     --ac_mode selected_modules \
     --ac_modules "blocks.*.feed_forward" \
