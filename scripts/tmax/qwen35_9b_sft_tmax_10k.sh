@@ -24,6 +24,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --mount_docker_socket \
        --gpus 8 \
+       --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train train \
@@ -50,7 +51,6 @@ uv run python mason.py \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --vllm_enforce_eager \
-    --no_auto_dataset_cache \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
