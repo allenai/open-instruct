@@ -23,6 +23,87 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
+class _ConvCrossRankStateFn(torch.autograd.Function):
+    """Exchange last (kernel_size - 1) raw input tokens across SP ranks.
+
+    Forward: each rank sends its last W-1 tokens; non-first ranks receive
+    the previous rank's tails as their initial conv state.
+
+    Backward: gradients w.r.t. the received initial states are sent back
+    to the rank that owns those tokens (via send_recv_bwd), so that the
+    last W-1 tokens of the previous rank receive their correct gradient
+    contribution from the next rank's convolution.
+    """
+
+    @staticmethod
+    def forward(ctx, x_tails, group, is_first_rank, pre_num_conv_tokens, W):
+        # x_tails: [W-1, D] — last W-1 input tokens of this rank
+        from fla.ops.cp.comm import conv_cp_send_recv_fwd
+        heads = conv_cp_send_recv_fwd(x_tails, group)
+        ctx.group = group
+        ctx.is_first_rank = is_first_rank
+        ctx.pre_num_conv_tokens = pre_num_conv_tokens
+        ctx.W = W
+        return heads  # [W-1, D], zeros for first rank
+
+    @staticmethod
+    def backward(ctx, d_heads):
+        from fla.ops.cp.comm import conv_cp_send_recv_bwd
+        d_tails = conv_cp_send_recv_bwd(d_heads, ctx.group)
+        return d_tails, None, None, None, None
+
+
+def _causal_conv1d_fn_cp(mixed_qkv, weight, bias, activation, cp_context):
+    """Call causal_conv1d_fn (numerically identical to vLLM) with cross-rank
+    initial conv state passing for the no-packing SP case.
+
+    ``mixed_qkv``: [B, D, T] — this rank's local chunk (B=1).
+    ``weight``:    [D, W]    — depthwise conv weight.
+    ``bias``:      [D] or None.
+    ``activation``: activation name string or None.
+    ``cp_context``: FLACPContext for this rank.
+
+    Returns the conv output with the same shape [B, D, T].
+    """
+    from causal_conv1d import causal_conv1d_fn
+
+    W = weight.shape[-1]   # kernel_size (4 for Qwen3.5)
+    D = mixed_qkv.shape[1]
+
+    # All ranks participate in the all-gather so both sides of the barrier are hit.
+    x_tails = mixed_qkv[0, :, -(W - 1):].permute(1, 0).contiguous()  # [W-1, D]
+    heads = _ConvCrossRankStateFn.apply(
+        x_tails,
+        cp_context.group,
+        cp_context.is_first_rank,
+        cp_context.pre_num_conv_tokens,
+        W,
+    )  # [W-1, D], zeros for first rank
+
+    if not cp_context.is_first_rank:
+        # Build initial_states: [1, D, W-1] using differentiable ops so
+        # gradients flow correctly back through the cross-rank all-gather.
+        valid_len = min(W - 1, cp_context.pre_num_conv_tokens)
+        if valid_len == W - 1:
+            initial_states = heads.permute(1, 0).unsqueeze(0)  # [1, D, W-1]
+        else:
+            # Left-pad with zeros when only part of the window came from rank 0.
+            pad = torch.zeros(W - 1 - valid_len, D, device=mixed_qkv.device, dtype=mixed_qkv.dtype)
+            initial_states = torch.cat([pad, heads[-valid_len:]], dim=0).permute(1, 0).unsqueeze(0)
+    else:
+        initial_states = None
+
+    return causal_conv1d_fn(
+        x=mixed_qkv,
+        weight=weight,
+        bias=bias,
+        activation=activation,
+        initial_states=initial_states,
+        # seq_idx intentionally omitted: causal_conv1d_fn asserts
+        # initial_states must be None when seq_idx is set.
+    )
+
+
 def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, attention_mask=None, **kwargs):
     """GatedDeltaNet forward with seq_idx and cu_seqlens support for packing."""
     seq_idx = kwargs.get("seq_idx")
@@ -57,20 +138,29 @@ def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, att
         if self.causal_conv1d_fn is not None:
             cp_context = kwargs.get("cp_context")
             if cp_context is not None:
-                # Use the CP-aware conv so that rank r+1 receives the last
-                # (kernel_size - 1) tokens from rank r as initial conv state.
-                # Without this, continuation chunks start from zero conv state,
-                # corrupting the first (kernel_size - 1) output tokens on each
-                # non-first rank.  causal_conv1d_cp expects [1, T, D] not [1, D, T].
-                # Lazy import: fla.modules.conv.cp is only needed under SP.
-                from fla.modules.conv.cp.ops import causal_conv1d_cp
-                mixed_qkv = causal_conv1d_cp(
-                    x=mixed_qkv.permute(0, 2, 1),
-                    weight=self.conv1d.weight.squeeze(1),
-                    bias=self.conv1d.bias,
-                    activation=self.activation,
-                    cp_context=cp_context,
-                ).permute(0, 2, 1)
+                if seq_idx is None:
+                    # No-packing SP case: causal_conv1d_fn doesn't support
+                    # initial_states + seq_idx simultaneously, but without
+                    # seq_idx we can pass initial_states directly.  This matches
+                    # vLLM's conv kernel exactly, reducing numerical divergence.
+                    mixed_qkv = _causal_conv1d_fn_cp(
+                        mixed_qkv,
+                        self.conv1d.weight.squeeze(1),
+                        self.conv1d.bias,
+                        self.activation,
+                        cp_context,
+                    )
+                else:
+                    # Packing case: causal_conv1d_fn can't handle both seq_idx
+                    # and initial_states; fall back to the FLA CP-aware kernel.
+                    from fla.modules.conv.cp.ops import causal_conv1d_cp
+                    mixed_qkv = causal_conv1d_cp(
+                        x=mixed_qkv.permute(0, 2, 1),
+                        weight=self.conv1d.weight.squeeze(1),
+                        bias=self.conv1d.bias,
+                        activation=self.activation,
+                        cp_context=cp_context,
+                    ).permute(0, 2, 1)
             else:
                 mixed_qkv = self.causal_conv1d_fn(
                     x=mixed_qkv,
