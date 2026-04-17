@@ -55,13 +55,30 @@ def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, att
             conv_state = F.pad(mixed_qkv, (self.conv_kernel_size - mixed_qkv.shape[-1], 0))
             cache_params.conv_states[self.layer_idx] = conv_state
         if self.causal_conv1d_fn is not None:
-            mixed_qkv = self.causal_conv1d_fn(
-                x=mixed_qkv,
-                weight=self.conv1d.weight.squeeze(1),
-                bias=self.conv1d.bias,
-                activation=self.activation,
-                seq_idx=seq_idx,
-            )
+            cp_context = kwargs.get("cp_context")
+            if cp_context is not None:
+                # Use the CP-aware conv so that rank r+1 receives the last
+                # (kernel_size - 1) tokens from rank r as initial conv state.
+                # Without this, continuation chunks start from zero conv state,
+                # corrupting the first (kernel_size - 1) output tokens on each
+                # non-first rank.  causal_conv1d_cp expects [1, T, D] not [1, D, T].
+                # Lazy import: fla.modules.conv.cp is only needed under SP.
+                from fla.modules.conv.cp.ops import causal_conv1d_cp
+                mixed_qkv = causal_conv1d_cp(
+                    x=mixed_qkv.permute(0, 2, 1),
+                    weight=self.conv1d.weight.squeeze(1),
+                    bias=self.conv1d.bias,
+                    activation=self.activation,
+                    cp_context=cp_context,
+                ).permute(0, 2, 1)
+            else:
+                mixed_qkv = self.causal_conv1d_fn(
+                    x=mixed_qkv,
+                    weight=self.conv1d.weight.squeeze(1),
+                    bias=self.conv1d.bias,
+                    activation=self.activation,
+                    seq_idx=seq_idx,
+                )
         else:
             mixed_qkv = F.silu(self.conv1d(mixed_qkv)[:, :, :seq_len])
 
