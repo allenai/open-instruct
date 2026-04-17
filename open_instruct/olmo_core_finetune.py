@@ -271,19 +271,6 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     data_loader.reshuffle(epoch=1)
 
-    first_batch = next(iter(data_loader))
-    if is_main_process:
-        input_ids = first_batch.get("input_ids")
-        if input_ids is not None:
-            logger.info(f"DEBUG first batch input_ids shape: {input_ids.shape}")
-            logger.info(f"DEBUG first batch input_ids[:100]: {input_ids.flatten()[:100].tolist()}")
-            logger.info(f"DEBUG first batch input_ids[-100:]: {input_ids.flatten()[-100:].tolist()}")
-        label_mask = first_batch.get("label_mask")
-        if label_mask is not None:
-            logger.info(f"DEBUG first batch label_mask trainable count: {int(label_mask.sum().item())}")
-            logger.info(f"DEBUG first batch label_mask[:100]: {label_mask.flatten()[:100].tolist()}")
-    data_loader.reshuffle(epoch=1)
-
     if use_hf_ckpt:
         logger.info("Reloading HuggingFace weights after parallelization...")
         sd = train_module.model.state_dict()
