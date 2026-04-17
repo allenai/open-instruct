@@ -471,6 +471,7 @@ class StreamingDataLoaderConfig:
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
     maintain_pending_ngu_completions: bool = False
+    maintain_pending_ngu_counts: bool = True
     no_resampling_pass_rate: float | None = None
     no_resampling_persist: bool = True
     advantage_normalization_type: str = "centered"
@@ -1290,6 +1291,7 @@ def accumulate_inference_batches(
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
     never_give_up_state_lock: Any = None,
     maintain_pending_ngu_completions: bool = False,
+    maintain_pending_ngu_counts: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1461,6 +1463,11 @@ def accumulate_inference_batches(
             filtered_prompt_nonzero += 1
             filtered_prompt_datasets_nonzero.append(dataset_key)
 
+    def count_pending_completion_samples(
+        pending_results: list[data_types.GenerationResult], pending_response_count: int
+    ) -> int:
+        return pending_response_count + sum(len(pending_result.responses) for pending_result in pending_results)
+
     while (num_tokens_sampled < target_total if target_is_tokens else num_prompts_sampled < target_total) and (
         max_prompts_to_sample is None or prompts_consumed < max_prompts_to_sample
     ):
@@ -1555,17 +1562,19 @@ def accumulate_inference_batches(
                 if maintain_pending_ngu_completions:
                     pending_results.append(result)
                     pending_metrics.append(result.reward_metrics)
-                pending_response_count += len(result.responses)
-                pending_reward_sum += float(reward_scores.sum())
-                store_pending_state(
-                    chain_id,
-                    pending_results,
-                    pending_metrics,
-                    best_reward,
-                    pending_response_count,
-                    pending_reward_sum,
-                    result.model_step,
-                )
+                elif maintain_pending_ngu_counts:
+                    pending_response_count += len(result.responses)
+                    pending_reward_sum += float(reward_scores.sum())
+                if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
+                    store_pending_state(
+                        chain_id,
+                        pending_results,
+                        pending_metrics,
+                        best_reward,
+                        pending_response_count,
+                        pending_reward_sum,
+                        result.model_step,
+                    )
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
@@ -1576,11 +1585,12 @@ def accumulate_inference_batches(
                     progress_callback(num_prompts_sampled, target_total)
             if chain_id is not None:
                 clear_pending_state(chain_id)
-            if pending_response_count + len(result.responses) > 0:
+            give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
+                result.responses
+            )
+            if give_up_count > 0:
                 given_up_prompts_by_dataset[prompt_dataset_key] = (
-                    given_up_prompts_by_dataset.get(prompt_dataset_key, 0)
-                    + pending_response_count
-                    + len(result.responses)
+                    given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
                 )
             for pending_result in pending_results:
                 record_filtered_prompt(pending_result, prompt_dataset_key)
@@ -2109,6 +2119,7 @@ class DataPreparationActor:
                 never_give_up_state=self.never_give_up_state,
                 never_give_up_state_lock=self.never_give_up_state_lock,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
+                maintain_pending_ngu_counts=self.config.maintain_pending_ngu_counts,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
