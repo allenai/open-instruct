@@ -1,0 +1,2077 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/algorithms/dpo/">
+      
+      
+        <link rel="prev" href="../finetune/">
+      
+      
+        <link rel="next" href="../grpo/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Direct Preference Optimization (DPO) - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#direct-preference-optimization-dpo" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Direct Preference Optimization (DPO)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implemented Variants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dpopy-olmo-core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dpo.py (OLMo-core)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="dpo.py (OLMo-core)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#olmo-3-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Olmo 3 Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dpo_tune_cachepy-legacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dpo_tune_cache.py (Legacy)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="dpo_tune_cache.py (Legacy)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-scripts_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaillama-31-tulu-3-8b-dpo-4-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/Llama-3.1-Tulu-3-8B-DPO (4 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaiolmo-2-1124-7b-dpo-4-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/OLMo-2-1124-7B-DPO (4 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaiolmo-2-1124-13b-dpo-4-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/OLMo-2-1124-13B-DPO (4 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acknowledgements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acknowledgements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implemented Variants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dpopy-olmo-core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dpo.py (OLMo-core)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="dpo.py (OLMo-core)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#olmo-3-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Olmo 3 Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dpo_tune_cachepy-legacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dpo_tune_cache.py (Legacy)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="dpo_tune_cache.py (Legacy)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-scripts_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug Scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaillama-31-tulu-3-8b-dpo-4-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/Llama-3.1-Tulu-3-8B-DPO (4 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaiolmo-2-1124-7b-dpo-4-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/OLMo-2-1124-7B-DPO (4 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaiolmo-2-1124-13b-dpo-4-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/OLMo-2-1124-13B-DPO (4 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acknowledgements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acknowledgements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="direct-preference-optimization-dpo">Direct Preference Optimization (DPO)</h1>
+<p>We support Direct Preference Optimization (DPO) training on a variety of datasets.</p>
+<h2 id="implemented-variants">Implemented Variants</h2>
+<ul>
+<li><code>dpo.py</code> (recommended) is the DPO implementation built on OLMo-core's native training infrastructure (FSDP). It supports tensor parallelism, sequence packing, and <code>torch.compile</code>.</li>
+<li><code>dpo_tune_cache.py</code> implements the same DPO algorithm as <code>dpo.py</code> but uses DeepSpeed instead of OLMo-core. <code>dpo.py</code> should be more efficient and easier to debug; prefer it for new work.</li>
+</ul>
+<h2 id="dpopy-olmo-core"><code>dpo.py</code> (OLMo-core)</h2>
+<h3 id="debug-scripts">Debug Scripts</h3>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th>Scale</th>
+<th>Description</th>
+<th>Launch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/train/debug/dpo/local.sh</code></td>
+<td>1 GPU, local</td>
+<td>Quick local test with OLMo-2-0425-1B. No Beaker required.</td>
+<td><code>bash scripts/train/debug/dpo/local.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/dpo/single_gpu.sh</code></td>
+<td>1 GPU, Beaker</td>
+<td>Single-GPU smoke test on Beaker with OLMo-2-0425-1B.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/dpo/multi_node.sh</code></td>
+<td>2 nodes (16 GPUs), Beaker</td>
+<td>Multi-node test with OLMo-2-1124-7B. Exercises FSDP sharding, tensor parallelism, packing, and profiling.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="olmo-3-scripts">Olmo 3 Scripts</h3>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th>Scale</th>
+<th>Description</th>
+<th>Launch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/train/debug/dpo/7b_instruct_dpo_olmo_core.sh</code></td>
+<td>2 nodes (16 GPUs), Beaker</td>
+<td>Debug script for Olmo 3 7B DPO with a multi-dataset mixer.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/7b_instruct_dpo_olmo_core.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/olmo3/7b_instruct_dpo_olmocore.sh</code></td>
+<td>4 nodes (32 GPUs), Beaker</td>
+<td>Production Olmo 3 7B Instruct DPO (OLMo-core).</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_dpo_olmocore.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/olmo3/7b_instruct_dpo.sh</code></td>
+<td>4 nodes (32 GPUs), Beaker</td>
+<td>Production Olmo 3 7B Instruct DPO (DeepSpeed/legacy).</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_dpo.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/olmo3/7b_think_dpo.sh</code></td>
+<td>4 nodes (32 GPUs), Beaker</td>
+<td>Olmo 3 7B Think DPO.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_think_dpo.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/olmo3/32b_instruct_dpo.sh</code></td>
+<td>8 nodes (64 GPUs), Beaker</td>
+<td>Olmo 3 32B Instruct DPO.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_instruct_dpo.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/olmo3/32b_think_dpo.sh</code></td>
+<td>16 nodes (128 GPUs), Beaker</td>
+<td>Olmo 3 32B Think DPO.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_think_dpo.sh</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="key-flags">Key Flags</h3>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Flag</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Experiment</strong></td>
+<td><code>--exp_name</code></td>
+<td>Name of this experiment</td>
+<td><code>"dpo_experiment"</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--run_name</code></td>
+<td>Unique run name (for W&amp;B)</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--seed</code></td>
+<td>Random seed for initialization and dataset shuffling</td>
+<td><code>42</code></td>
+</tr>
+<tr>
+<td><strong>Model</strong></td>
+<td><code>--model_name_or_path</code></td>
+<td>Model checkpoint for weight initialization</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--model_revision</code></td>
+<td>Specific model version (branch, tag, or commit)</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--config_name</code></td>
+<td>Pretrained config name or path if different from model</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td><strong>DPO Algorithm</strong></td>
+<td><code>--beta</code></td>
+<td>Beta parameter for DPO loss</td>
+<td><code>0.1</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--loss_type</code></td>
+<td>Loss type: <code>dpo</code>, <code>dpo_norm</code>, <code>simpo</code>, <code>wpo</code></td>
+<td><code>dpo</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--gamma_beta_ratio</code></td>
+<td>Gamma to beta ratio for SimPO loss (unused for DPO)</td>
+<td><code>0.3</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--label_smoothing</code></td>
+<td>Label smoothing for DPO/SimPO loss</td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--packing</code></td>
+<td>Use packing/padding-free collation</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--concatenated_forward</code></td>
+<td>Concatenate chosen and rejected in one forward pass</td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--load_balancing_loss</code></td>
+<td>Include load balancing loss (for OLMoE)</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--load_balancing_weight</code></td>
+<td>Weight for load balancing loss</td>
+<td><code>0.001</code></td>
+</tr>
+<tr>
+<td><strong>Training</strong></td>
+<td><code>--learning_rate</code></td>
+<td>Initial learning rate</td>
+<td><code>2e-5</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--num_epochs</code></td>
+<td>Total number of training epochs</td>
+<td><code>2</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--max_train_steps</code></td>
+<td>If set, overrides <code>num_epochs</code></td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--per_device_train_batch_size</code></td>
+<td>Batch size per GPU</td>
+<td><code>8</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--gradient_accumulation_steps</code></td>
+<td>Gradient accumulation steps</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--max_seq_length</code></td>
+<td>Maximum sequence length after tokenization</td>
+<td><code>2048</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--warmup_ratio</code></td>
+<td>Linear warmup fraction of total steps</td>
+<td><code>0.03</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--weight_decay</code></td>
+<td>Weight decay for AdamW</td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--max_grad_norm</code></td>
+<td>Maximum gradient norm for clipping (None = no clipping)</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--lr_scheduler_type</code></td>
+<td>LR scheduler: <code>linear</code>, <code>cosine</code>, <code>constant</code></td>
+<td><code>linear</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--compile_model</code></td>
+<td>Apply <code>torch.compile</code> to model blocks</td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--activation_memory_budget</code></td>
+<td>Activation checkpointing budget (0.0–1.0)</td>
+<td><code>1.0</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--optimizer_type</code></td>
+<td>Optimizer type: <code>adamw</code> or <code>muon</code></td>
+<td><code>adamw</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--optimizer_kwargs</code></td>
+<td>Extra kwargs for optimizer (e.g., <code>'{"mu": 0.95}'</code> for Muon)</td>
+<td><code>{}</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--fused_optimizer</code></td>
+<td>Use fused AdamW</td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--use_8bit_optimizer</code></td>
+<td>Use 8-bit optimizer from bitsandbytes</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--sync_each_batch</code></td>
+<td>Sync grads every batch during grad accumulation (reduces memory)</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--cache_logprobs_only</code></td>
+<td>Exit after building reference logprobs cache</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--timeout</code></td>
+<td>Timeout for training process in seconds</td>
+<td><code>1800</code></td>
+</tr>
+<tr>
+<td><strong>Parallelism</strong></td>
+<td><code>--tensor_parallel_degree</code></td>
+<td>Tensor parallelism degree</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--context_parallel_degree</code></td>
+<td>Context parallelism degree</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--fsdp_shard_degree</code></td>
+<td>FSDP shard degree (<code>None</code> = auto)</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--fsdp_num_replicas</code></td>
+<td>Number of FSDP replicas (<code>None</code> = auto)</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td><strong>Data</strong></td>
+<td><code>--mixer_list</code></td>
+<td>List of datasets (local or HF) to sample from</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--mixer_list_splits</code></td>
+<td>Dataset splits for training</td>
+<td><code>["train"]</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--chat_template_name</code></td>
+<td>Chat template to use</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--transform_fn</code></td>
+<td>List of transform functions to apply to the dataset</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--cache_dataset_only</code></td>
+<td>Exit after caching the dataset</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--skip_cache</code></td>
+<td>Skip dataset caching</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td><strong>LoRA</strong></td>
+<td><code>--use_lora</code></td>
+<td>Use LoRA for parameter-efficient training</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--lora_rank</code></td>
+<td>Rank of LoRA</td>
+<td><code>64</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--lora_alpha</code></td>
+<td>Alpha parameter of LoRA</td>
+<td><code>16</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--lora_dropout</code></td>
+<td>Dropout rate of LoRA</td>
+<td><code>0.1</code></td>
+</tr>
+<tr>
+<td><strong>Checkpointing</strong></td>
+<td><code>--output_dir</code></td>
+<td>Output directory for checkpoints</td>
+<td><code>output/</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--checkpointing_steps</code></td>
+<td>Save every N steps or <code>epoch</code></td>
+<td><code>500</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--keep_last_n_checkpoints</code></td>
+<td>How many checkpoints to keep (-1 for all)</td>
+<td><code>3</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--resume_from_checkpoint</code></td>
+<td>Resume from checkpoint folder</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td><strong>Logging</strong></td>
+<td><code>--with_tracking</code></td>
+<td>Track experiment with Weights and Biases</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--logging_steps</code></td>
+<td>Log training loss every N steps</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--wandb_project</code></td>
+<td>W&amp;B project name</td>
+<td><code>"open_instruct_internal"</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--wandb_entity</code></td>
+<td>W&amp;B entity (team) name</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td><strong>Hub</strong></td>
+<td><code>--push_to_hub</code></td>
+<td>Upload saved model to HuggingFace</td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--hf_entity</code></td>
+<td>User or org name of the model repository</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--hf_repo_id</code></td>
+<td>ID of the saved model in HF Hub</td>
+<td><code>None</code></td>
+</tr>
+<tr>
+<td><strong>Eval</strong></td>
+<td><code>--try_launch_beaker_eval_jobs</code></td>
+<td>Launch Beaker evaluation jobs after training</td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--oe_eval_tasks</code></td>
+<td>Beaker evaluation tasks to launch</td>
+<td><code>None</code></td>
+</tr>
+</tbody>
+</table>
+<p>For details on how the parallelism flags interact, see <a href="../olmo_core_sharding/">OLMo-core Sharding and Parallelism</a>.</p>
+<hr />
+<h2 id="dpo_tune_cachepy-legacy"><code>dpo_tune_cache.py</code> (Legacy)</h2>
+<p><code>dpo_tune_cache.py</code> uses DeepSpeed instead of OLMo-core FSDP. It accepts all the same flags as <code>dpo.py</code> above, with the following differences:</p>
+<p><strong>Additional flags</strong> (not in <code>dpo.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Flag</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>DeepSpeed</strong></td>
+<td><code>--zero_stage</code></td>
+<td>DeepSpeed ZeRO stage (0, 1, 2, or 3)</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--offload_optimizer</code></td>
+<td>Offload optimizer states to CPU</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--offload_param</code></td>
+<td>Offload parameters to CPU (only with ZeRO stage 3)</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--zero_hpz_partition_size</code></td>
+<td>Hierarchical partition size for ZeRO stage 3</td>
+<td><code>8</code></td>
+</tr>
+<tr>
+<td><strong>Optimization</strong></td>
+<td><code>--use_liger_kernel</code></td>
+<td>Use LigerKernel for optimized training</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--use_qlora</code></td>
+<td>Use qLoRA (initializes model in quantized form)</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>--dpo_use_paged_optimizer</code></td>
+<td>Use paged optimizer from bitsandbytes</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Flags not applicable</strong> (ignored by <code>dpo_tune_cache.py</code>): <code>--tensor_parallel_degree</code>, <code>--context_parallel_degree</code>, <code>--fsdp_shard_degree</code>, <code>--fsdp_num_replicas</code>, <code>--compile_model</code>.</p>
+<p>Implementation details:</p>
+<ol>
+<li>To save memory, <code>dpo_tune_cache.py</code> caches the logprobs of the reference model on the dataset, then removes the reference model from memory. The initial training losses won't appear until the logprobs are computed.</li>
+<li>It uses the <code>dpo_norm</code> loss type by default, which is a length-normalized loss. See the <a href="https://arxiv.org/abs/2405.14734">SimPO</a> paper for more details.</li>
+</ol>
+<h3 id="debug-scripts_1">Debug Scripts</h3>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th>Scale</th>
+<th>Description</th>
+<th>Launch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/train/debug/dpo_integration_test.sh</code></td>
+<td>1 GPU, Beaker</td>
+<td>Single-GPU integration test with Qwen3-0.6B.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo_integration_test.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/dpo/multi_node_cache.sh</code></td>
+<td>2 nodes (16 GPUs), Beaker</td>
+<td>Multi-node test with Qwen3-0.6B and DeepSpeed Stage 3. Tests checkpointing.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node_cache.sh</code></td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/dpo/checkpoint_integration_test.sh</code></td>
+<td>2 nodes, Beaker</td>
+<td>Two-run checkpoint resume test: trains 1 epoch, then resumes and trains 2 more.</td>
+<td><code>./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/checkpoint_integration_test.sh</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="reproduce-allenaillama-31-tulu-3-8b-dpo-4-nodes">Reproduce <code>allenai/Llama-3.1-Tulu-3-8B-DPO</code> (4 Nodes)</h3>
+<p>You can reproduce our <code>allenai/Llama-3.1-Tulu-3-8B-DPO</code> model by running the following command:</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>scripts/train/tulu3/dpo_8b.sh
+</code></pre></div>
+<p><img alt="dpo_plot" src="tulu3_8b_dpo.png" />
+<img alt="dpo_plot" src="tulu3_8b_dpo-time.png" /></p>
+<details class="note">
+<summary>👉 Tracked WandB Experiments (Click to expand)</summary>
+<p><iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-DPO--VmlldzoxMTg3NjY4Nw" style="width:100%; height:500px" title="Tulu3-8B-DPO"></iframe></p>
+</details>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>Based on our internal evaluation, the DPO model is roughly on par with the original <code>allenai/Llama-3.1-Tulu-3-8B-DPO</code> model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.</p>
+<p><img alt="dpo_plot" src="tulu3_8b_dpo_eval.png" /></p>
+<p>For example, DROP is lower than the reference, but DROP can be quite brittle due to parsing issues (see below).</p>
+<p><img alt="dpo_plot" src="tulu3_8b_dpo_eval_drop.png" /></p>
+</details>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!</p>
+</details>
+<h3 id="reproduce-allenaiolmo-2-1124-7b-dpo-4-nodes">Reproduce <code>allenai/OLMo-2-1124-7B-DPO</code> (4 Nodes)</h3>
+<p>You can reproduce our <code>allenai/OLMo-2-1124-7B-DPO</code> model by running the following command:</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>scripts/train/olmo2/dpo_7b.sh
+</code></pre></div>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>If you are an external user, <code>mason.py</code> will print out the actual command being executed on our internal server, so you can modify the command as needed.</p>
+</details>
+<p><img alt="dpo_plot" src="olmo2_7b_dpo.png" />
+<img alt="dpo_plot" src="olmo2_7b_dpo-time.png" /></p>
+<details class="note">
+<summary>👉 Tracked WandB Experiments (Click to expand)</summary>
+<p><iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-DPO--VmlldzoxMTkyNzUyOA" style="width:100%; height:500px" title="OLMo2-7B-DPO"></iframe></p>
+</details>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>Based on our internal evaluation, the DPO model is roughly on par with the original <code>allenai/OLMo-2-1124-7B-DPO</code> model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.</p>
+<p><img alt="dpo_plot" src="olmo2_7b_dpo_eval.png" /></p>
+</details>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!</p>
+</details>
+<h3 id="reproduce-allenaiolmo-2-1124-13b-dpo-4-nodes">Reproduce <code>allenai/OLMo-2-1124-13B-DPO</code> (4 Nodes)</h3>
+<p>You can reproduce our <code>allenai/OLMo-2-1124-13B-DPO</code> model by running the following command:</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>scripts/train/olmo2/dpo_13b.sh
+</code></pre></div>
+<p><img alt="dpo_plot" src="olmo2_13b_dpo.png" />
+<img alt="dpo_plot" src="olmo2_13b_dpo-time.png" /></p>
+<details class="note">
+<summary>👉 Tracked WandB Experiments (Click to expand)</summary>
+<p><iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-13B-DPO--VmlldzoxMTg3NjcyMQ" style="width:100%; height:500px" title="OLMo2-13B-DPO"></iframe></p>
+</details>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>Based on our internal evaluation, the DPO model is roughly on par with the original <code>allenai/OLMo-2-1124-13B-DPO</code> model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.</p>
+<p><img alt="dpo_plot" src="olmo2_13b_dpo_eval.png" /></p>
+</details>
+<details class="info" open="open">
+<summary>Info</summary>
+<p>We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!</p>
+</details>
+<h3 id="training-metrics">Training Metrics</h3>
+<p>During training, the following metrics are logged:</p>
+<ul>
+<li><code>training_step</code>: Current training step</li>
+<li><code>learning_rate</code>: The current learning rate from the learning rate scheduler</li>
+<li><code>epoch</code>: Current epoch (as a fraction of total dataset)</li>
+<li><code>train_loss</code>: The average training loss over the logged steps</li>
+<li><code>logps/chosen</code>: Average log probabilities for chosen responses</li>
+<li><code>logps/rejected</code>: Average log probabilities for rejected responses</li>
+</ul>
+<p>For DPO and DPO-norm loss types, additional metrics are logged:</p>
+<ul>
+<li><code>rewards/chosen</code>: Average rewards for chosen responses</li>
+<li><code>rewards/rejected</code>: Average rewards for rejected responses</li>
+<li><code>rewards/average</code>: Average of chosen and rejected rewards</li>
+<li><code>rewards/accuracy</code>: Accuracy of preference prediction</li>
+<li><code>rewards/margin</code>: Margin between chosen and rejected rewards</li>
+</ul>
+<p>When using load balancing loss (for OLMoE), the following metric is also logged:</p>
+<ul>
+<li><code>aux_loss</code>: Auxiliary loss for load balancing</li>
+</ul>
+<p>The metrics are logged every <code>logging_steps</code> steps (if specified) and provide insights into:</p>
+<ul>
+<li>Training progress (loss, learning rate, epoch)</li>
+<li>Model behavior (log probabilities, rewards)</li>
+<li>Preference learning (accuracy, margin)</li>
+<li>Resource utilization (auxiliary losses)</li>
+</ul>
+<h2 id="acknowledgements">Acknowledgements</h2>
+<p>We would like to thank the following projects for general infrastructure:</p>
+<ul>
+<li><a href="https://github.com/deepspeedai/DeepSpeed">DeepSpeedAI/DeepSpeed</a></li>
+<li><a href="https://github.com/huggingface/transformers">HuggingFace/Transformers</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

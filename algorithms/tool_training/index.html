@@ -1,0 +1,1693 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/algorithms/tool_training/">
+      
+      
+        <link rel="prev" href="../olmo_core_sharding/">
+      
+      
+        <link rel="next" href="../reward_modeling/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Training Tool-Using Models and RL Environments - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#training-tool-using-models-and-rl-environments" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Training Tool-Using Models and RL Environments
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#example-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Scripts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-parameter-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Parameter Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-rollout-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the Rollout Works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adding-your-own-tools-or-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding Your Own Tools or Environments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adding Your Own Tools or Environments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#config-classes-and-how-config-wiring-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config classes and how config wiring works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool_name-vs-tool_call_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tool_name vs tool_call_name
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-tool-definitions-are-exposed-to-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How tool definitions are exposed to the model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subclass-implementation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subclass implementation details
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#text-environment-implementation-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text environment implementation note
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimal-implementation-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal implementation sketch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parsers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parsers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parsers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-script-wordle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Script: Wordle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-script-dr-tulu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Script: DR Tulu
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#example-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Scripts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-parameter-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Parameter Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-rollout-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the Rollout Works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adding-your-own-tools-or-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding Your Own Tools or Environments
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adding Your Own Tools or Environments">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#config-classes-and-how-config-wiring-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config classes and how config wiring works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool_name-vs-tool_call_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tool_name vs tool_call_name
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-tool-definitions-are-exposed-to-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How tool definitions are exposed to the model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subclass-implementation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subclass implementation details
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#text-environment-implementation-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text environment implementation note
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimal-implementation-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal implementation sketch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parsers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parsers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parsers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-script-wordle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Script: Wordle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-script-dr-tulu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Script: DR Tulu
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="training-tool-using-models-and-rl-environments">Training Tool-Using Models and RL Environments</h1>
+<p>This page is for people who want to train models in Open-Instruct that do more than produce a single final answer. You can use it to:</p>
+<ul>
+<li>train a model to call tools such as Python, web search, browsing, or MCP servers</li>
+<li>train against stateful RL environments such as guessing games or Wordle</li>
+<li>combine intermediate environment rewards with a final verifier-based reward</li>
+</ul>
+<p>The recommended workflow is user-facing and script-first: start from an existing debug or training script, choose the tool or environment setup you want, then adjust the configuration for your dataset and infrastructure. You should not need to build a new training loop just to add tool use.</p>
+<p>Right now, Open-Instruct supports a simple interaction model where environment outputs are appended back into the conversation during multi-turn GRPO rollouts.</p>
+<h2 id="example-scripts">Example Scripts</h2>
+<p>Start from one of these scripts. They are the fastest way to see the expected config shape and get a working run before customizing anything.</p>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/train/debug/tools/qwen3_vllm_hermes_parser_debug.sh</code></td>
+<td>Train a model to call common tools with a standard chat-style parser</td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/tools/mcp_weather_debug.sh</code></td>
+<td>Train a model against tools exposed by an MCP server</td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/tools/dr_tulu_parser_debug.sh</code></td>
+<td>Reproduce a DR-Tulu-style tool-calling setup</td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/envs/guess_number_1gpu.sh</code></td>
+<td>Train against a built-in tool-style environment</td>
+</tr>
+<tr>
+<td><code>scripts/train/debug/envs/wordle_8gpu.sh</code></td>
+<td>Train against a built-in text environment. This uses <code>mason</code> to launch, so non-AI2 users will likely need to adapt the launcher.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="quick-parameter-overview">Quick Parameter Overview</h2>
+<p>These are the main parameters you will usually touch when enabling tools or environments:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>What it controls</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--tools</code></td>
+<td>Which tools or environments are active for the run</td>
+<td><code>--tools python serper_search</code>. Look at <code>TOOL_REGISTRY</code> for the full list.</td>
+</tr>
+<tr>
+<td><code>--tool_call_names</code></td>
+<td>The names the model sees and emits when calling those tools, in the order matching <code>--tools</code>.</td>
+<td><code>--tool_call_names code search</code></td>
+</tr>
+<tr>
+<td><code>--tool_configs</code></td>
+<td>Per-tool or per-environment settings, set globally for the run. e.g.API endpoints, MCP server info, timeouts, environment defaults. Again, order must match <code>--tools</code>.</td>
+<td><code>--tool_configs {'api_key': '1234567890'} {}</code></td>
+</tr>
+<tr>
+<td><code>--tool_parser_type</code></td>
+<td>How model output is parsed into tool calls. See <a href="#parsers">Parsers</a> for more details. Use <code>vllm_*</code> unless you know what you are doing.</td>
+<td><code>--tool_parser_type vllm_hermes</code></td>
+</tr>
+<tr>
+<td><code>--max_steps</code></td>
+<td>Maximum number of tool/environment interaction steps per rollout.</td>
+<td><code>--max_steps 200</code></td>
+</tr>
+<tr>
+<td><code>--per_turn_max_tokens</code></td>
+<td>Optional per-turn token limit for each tool/environment interaction step. Useful if you want to allow many interactions (large overall response length) but limit amount of tokens per step.</td>
+<td><code>--per_turn_max_tokens 1024</code></td>
+</tr>
+<tr>
+<td><code>--pass_tools_to_chat_template</code></td>
+<td>By default true, but you can turn it off if you have a custom system prompt or parser that already provides information about the tools.</td>
+<td><code>--pass_tools_to_chat_template True</code></td>
+</tr>
+<tr>
+<td><code>--pool_size</code></td>
+<td>Number of worker actors per tool or environment. Increase if tool calls are becoming a bottleneck. Controls how many concurrent tool/environment interactions can run at once (e.g. useful for rate limits). By default, this is set to the number of rollouts per batch (<code>num_rollouts_per_batch * num_unique_prompts_rollout</code>).</td>
+<td><code>--pool_size 16</code></td>
+</tr>
+<tr>
+<td><code>--reward_aggregator</code></td>
+<td>How per-step rewards are combined across the rollout. Can be <code>last</code> (just take the last step's reward) or <code>sum</code> (add up all step rewards).</td>
+<td><code>--reward_aggregator sum</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="how-the-rollout-works">How the Rollout Works</h2>
+<p>At a high level, a tool- or environment-enabled rollout looks like this:</p>
+<ol>
+<li>Open-Instruct builds the prompt from your dataset example.</li>
+<li>The model generates one turn of text.</li>
+<li>The parser either extracts a structured tool call or forwards the full text to a text environment.</li>
+<li>The selected tool or environment returns a <code>StepResult</code>.</li>
+<li>The <code>StepResult.result</code> text is formatted and appended back into the conversation.</li>
+<li>Training continues until the rollout hits <code>max_steps</code> or a step returns <code>done=True</code>.</li>
+<li>Per-step rewards are aggregated with <code>--reward_aggregator</code>, then combined with any final verifier reward.</li>
+</ol>
+<p>The key implementation idea is that you configure the rollout from the script layer, while Open-Instruct handles the multi-turn dispatch loop underneath.</p>
+<h2 id="adding-your-own-tools-or-environments">Adding Your Own Tools or Environments</h2>
+<p>When adding your own tool or environment, there are three potential options:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Tool</code></td>
+<td>A stateless tool that can be called by the model. You only need to implement the <code>step</code> method.</td>
+</tr>
+<tr>
+<td><code>RLEnvironment</code></td>
+<td>A stateful environment that can be used to train a model. You need to implement the <code>reset</code> and <code>step</code> methods. Interfaces with the model via tool/function calling.</td>
+</tr>
+<tr>
+<td><code>TextRLEnvironment</code></td>
+<td>A stateful environment that receives the model's full generation at each step. Use this when you want custom parsing or reward logic without relying on structured tool calls. In practice, subclasses implement <code>_reset</code> and <code>text_step</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>As a rule of thumb:</p>
+<ul>
+<li>use <code>Tool</code> for stateless request/response integrations like Python execution or web search.</li>
+<li>use <code>RLEnvironment</code> for stateful tasks where the model acts through tool/function calls, e.g. a docker sandbox.</li>
+<li>use <code>TextRLEnvironment</code> when the environment should inspect the model's raw text directly, e.g. proper multi-turn training with a simulated user.</li>
+</ul>
+<p><code>reset</code> is primarily for environment setup and returns the initial <code>StepResult</code> plus tool definitions. For stateless tools, the default <code>reset</code> implementation mainly exposes the tool schema.</p>
+<p>Note that behind the scenes, Open-Instruct creates a worker pool for each tool or environment, and passes the config fields into the constructor. As such, each rollout gets a fresh instance of the tool or environment, and so <strong>you can store state inside the tool or environment object if you want!</strong></p>
+<p>After this, you need to add a config class for your tool or environment for any runtime parameters that are not part of the <code>EnvCall</code> interface!</p>
+<h3 id="config-classes-and-how-config-wiring-works">Config classes and how config wiring works</h3>
+<p>Each tool or environment is paired with a config dataclass that subclasses <code>BaseEnvConfig</code>. In practice, this is the object that holds the fixed settings for that tool or environment, such as API endpoints, timeouts, or game parameters.</p>
+<p>These config elements can have defaults, be set globally for a run, and/or be overridden per-sample in the dataset. This can be useful if you want to use the same tool or environment with different settings for different samples.</p>
+<h3 id="tool_name-vs-tool_call_name"><code>tool_name</code> vs <code>tool_call_name</code></h3>
+<p>By default, the name you pass in <code>--tools</code> is also the name the model uses when calling that tool. You can override the model-facing name with <code>--tool_call_names</code>.</p>
+<p>For example:</p>
+<div class="highlight"><pre><span></span><code>--tools<span class="w"> </span>python<span class="w"> </span>serper_search<span class="w"> </span><span class="se">\</span>
+--tool_call_names<span class="w"> </span>code<span class="w"> </span>search
+</code></pre></div>
+<p>In that case:</p>
+<ul>
+<li>Open-Instruct looks up <code>python</code> and <code>serper_search</code> in the registry, and creates environments using the corresponding classes.</li>
+<li>the model sees and calls <code>code</code> and <code>search</code> in its function calling interface.</li>
+</ul>
+<p>This can be useful if you want to swap tool backends without changing the name the model uses, or if you want the tool names in training to better match some external setup you are reproducing.</p>
+<h3 id="how-tool-definitions-are-exposed-to-the-model">How tool definitions are exposed to the model</h3>
+<p>Tool definitions are the OpenAI-style function schemas returned by <code>get_tool_definitions()</code>. Open-Instruct collects these definitions from the active tool or environment pools and uses them in two places:</p>
+<ul>
+<li>to tell the parser which function names and argument schemas are valid</li>
+<li>to pass tool schemas into the chat template when <code>--pass_tools_to_chat_template</code> is enabled</li>
+</ul>
+<p>This is the main connection between tools and environments: both ultimately expose tool definitions to the model, even if the underlying implementation is stateful.</p>
+<p>For a plain <code>Tool</code>, <code>get_tool_definitions()</code> usually exposes a single function schema. For a stateful <code>RLEnvironment</code>, <code>get_tool_definitions()</code> can expose one or more actions the model may take. For <code>TextRLEnvironment</code>, <code>reset()</code> returns no tool definitions, because the model interacts through raw text instead of function calls.</p>
+<p>For example, if you configure:</p>
+<div class="highlight"><pre><span></span><code>--tools<span class="w"> </span>python<span class="w"> </span><span class="se">\</span>
+--tool_call_names<span class="w"> </span>code
+</code></pre></div>
+<p>then the model is shown a function definition named <code>code</code>, not <code>python</code>. If your dataset uses per-sample <code>tools</code> filtering, those entries should also use <code>code</code>, because that is the function name exposed to the model.</p>
+<h3 id="subclass-implementation-details">Subclass implementation details</h3>
+<p>The <code>step</code> interface takes an <code>EnvCall</code> object, which contains:</p>
+<ul>
+<li><code>name</code>: the tool or action name</li>
+<li><code>args</code>: a keyword dict containing parsed arguments</li>
+</ul>
+<p>These arguments should follow the <a href="https://developers.openai.com/api/docs/guides/function-calling">OpenAI function calling spec</a>, so in practice you should stick to JSON-serializable types.</p>
+<p>The <code>step</code> method returns a <code>StepResult</code>, which contains the fields that matter during training:</p>
+<ul>
+<li><code>result</code>: the observation text appended back into the conversation</li>
+<li><code>reward</code>: the per-step reward</li>
+<li><code>done</code>: whether the rollout should terminate early</li>
+<li><code>metadata</code>: optional debugging or runtime information</li>
+</ul>
+<p>The <code>reward</code> is stored per turn and then aggregated at the end of the rollout depending on <code>--reward_aggregator</code>. If <code>done=True</code>, generation stops immediately.</p>
+<h3 id="text-environment-implementation-note">Text environment implementation note</h3>
+<p><code>TextRLEnvironment</code> has a slightly different contract than <code>Tool</code> or <code>RLEnvironment</code>. Instead of receiving a parsed tool call from the model, it receives the model's full text output. Internally, Open-Instruct wraps that text into a synthetic <code>EnvCall</code> under <code>args["text"]</code> and forwards it to <code>text_step</code>.</p>
+<p>This is why text environments are the right fit when:</p>
+<ul>
+<li>the model should emit plain text rather than strict tool calls</li>
+<li>the environment needs to do its own parsing</li>
+<li>reward depends on text format or multi-turn text behavior</li>
+</ul>
+<h3 id="minimal-implementation-sketch">Minimal implementation sketch</h3>
+<p>For most custom integrations, the required surface is intentionally small:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MyEnv</span><span class="p">(</span><span class="n">RLEnvironment</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">StepResult</span><span class="p">(</span><span class="n">result</span><span class="o">=</span><span class="s2">&quot;initial observation&quot;</span><span class="p">),</span> <span class="n">tool_definitions</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">call</span><span class="p">:</span> <span class="n">EnvCall</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">StepResult</span><span class="p">(</span><span class="n">result</span><span class="o">=</span><span class="s2">&quot;next observation&quot;</span><span class="p">,</span> <span class="n">reward</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">done</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+<p>For a text environment:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MyTextEnv</span><span class="p">(</span><span class="n">TextRLEnvironment</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">StepResult</span><span class="p">(</span><span class="n">result</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">text_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">StepResult</span><span class="p">(</span><span class="n">result</span><span class="o">=</span><span class="s2">&quot;feedback&quot;</span><span class="p">,</span> <span class="n">reward</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">done</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="parsers">Parsers</h2>
+<p>Parsers are responsible for handling text formatting: both <strong>extracting tool calls</strong> from the model generation (either to call tools or to interact with environments) and <strong>formatting environment observations</strong> back into the conversation. We support three types of parsers right now:</p>
+<table>
+<thead>
+<tr>
+<th>Parser</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>legacy</code></td>
+<td>XML-tag prompts within the assistant turn. Expects <code>&lt;tool_name&gt;...&lt;/tool_name&gt;</code>; only passes the string inside to the tool.</td>
+</tr>
+<tr>
+<td><code>vllm_*</code></td>
+<td>Wrapper around vLLM's native parsers. Uses native vLLM parsing to extract tool calls, and then wraps to add observation formatting. We support <code>vllm_hermes</code>, <code>vllm_llama3_json</code>, <code>vllm_olmo3</code>, and <code>vllm_qwen3xml</code>, and it should be easy to add more.</td>
+</tr>
+<tr>
+<td><code>dr_tulu</code></td>
+<td>Wrapper around the <code>dr_agent_mcp</code> tool for DR-Tulu-style tool calling.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>We recommend using <code>vllm_*</code> parsers unless you have a strong reason for using another parser.</strong></p>
+<h3 id="example-script-wordle">Example Script: Wordle</h3>
+<p>The <code>scripts/train/debug/envs/wordle_8gpu.sh</code> script is a good example of how to train against a built-in text environment. It uses the <code>vllm_hermes</code> parser together with the <code>WordleTextEnv</code> class. The environment handles parsing guesses, generating feedback, and assigning rewards. Over 200 steps, the training curves should look something like this:</p>
+<p><img alt="Wordle Training Curves" src="../grpo/wordle_curves.png" /></p>
+<p>You can see the wandb for this run <a href="https://wandb.ai/ai2-llm/open_instruct_internal/runs/1od05m9m?nw=nwuserhamishivi">here</a> and the beaker link <a href="https://beaker.org/orgs/ai2/workspaces/open-instruct-dev/work/01KM66926V1PT6CBGR6ANDYS7J?taskId=01KM669270NVQF02Y1FXWHESVG&amp;jobId=01KM6692AEMN8BZNPK1ZQQT90W">here</a>.</p>
+<h3 id="example-script-dr-tulu">Example Script: DR Tulu</h3>
+<p><code>./scripts/train/dr-tulu/dr_tulu_qwen35.sh</code> provides a script to replicate DR Tulu training with some differences: using <code>Qwen3.5-9B</code> as the starting model and using the model's existing tool calling parameters instead of a custom parser.</p>
+<p>For rubric-based training, you can enable evolving rubrics with:
+<div class="highlight"><pre><span></span><code>--apply_evolving_rubric_reward<span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+--max_active_rubrics<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+</code></pre></div>
+<code>--max_active_rubrics</code> controls how many rubrics are active for a given prompt at once. You can save the generated evolving rubrics by setting <code>--cache_evolving_rubric_data_dir</code> to a folder path. Note that the verifer should be set to <code>rubric</code> for use with evolving rubrics.</p>
+<p>For the evolving rubrics, you can set the judge and generation model with <code>RUBRIC_JUDGE_MODEL</code>, <code>RUBRIC_GENERATION_MODEL</code> respectively. Both use litellm to interface with providers, so you can use openai, vllm, etc.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
