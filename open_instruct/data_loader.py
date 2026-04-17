@@ -1289,7 +1289,7 @@ def accumulate_inference_batches(
     progress_callback: Callable[[int, int], None] | None = None,
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
     never_give_up_state_lock: Any = None,
-    maintain_pending_ngu_completions: bool = True,
+    maintain_pending_ngu_completions: bool = False,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
