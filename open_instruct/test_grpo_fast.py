@@ -1200,6 +1200,43 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(batch_stats.filtered_prompt_datasets_solved, ["dataset_b"])
         self.assertEqual(batch_stats.filtered_prompt_datasets_nonzero, ["dataset_a"])
 
+    def test_no_resampling_persist_flag_is_forwarded_to_loader(self):
+        num_prompts = 1
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(num_prompts)
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+        self._ray_queues.append(inference_results_Q)
+        inference_results_Q.put(
+            self.create_mock_result(
+                0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[1.0] * num_samples_per_prompt
+            )
+        )
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        iter_dataloader = Mock()
+
+        data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            no_resampling_pass_rate=1.0,
+            no_resampling_persist=False,
+            iter_dataloader=iter_dataloader,
+            show_progress_bar=False,
+        )
+
+        iter_dataloader.exclude_index.assert_called_once_with(0, persist=False)
+
 
 class TestDataPreparation(TestGrpoFastBase):
     """Test prepare_collated_data_for_workers function."""

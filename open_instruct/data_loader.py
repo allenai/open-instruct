@@ -177,6 +177,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._automatic_reshuffle = automatic_reshuffle
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
+        self._epoch_excluded_indices: set[int] = set()
         self._overflow: list[dict[str, Any]] = []
         self._precomputed_batch_sizes: list[int] | None = None
         self._num_padding_batches: int = 0
@@ -219,7 +220,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 examples = []
                 for i in range(offset, offset + batch_size):
                     example = self.dataset[i]
+                    if example["index"] in self._excluded_indices or example["index"] in self._epoch_excluded_indices:
+                        continue
                     examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                if not examples:
+                    offset += batch_size
+                    continue
                 batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
                 offset += batch_size
                 yield batch
@@ -229,6 +235,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
             example = self.dataset[i]
+            if example["index"] in self._excluded_indices or example["index"] in self._epoch_excluded_indices:
+                continue
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
                 all_examples = self._overflow + batch_examples
@@ -257,25 +265,29 @@ class HFDataLoader(data_loader.DataLoaderBase):
             "epoch": self._epoch,
             "batches_processed": self.batches_processed,
             "excluded_indices": list(self._excluded_indices),
+            "epoch_excluded_indices": list(self._epoch_excluded_indices),
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load a state dictionary to restore the data loader's state."""
         self._excluded_indices = set(state_dict.get("excluded_indices", []))
-        # Set epoch to one less than target since reshuffle() increments it
-        self._epoch = state_dict["epoch"] - 1
-        self.reshuffle()
-        assert self._epoch == state_dict["epoch"]
+        self._epoch_excluded_indices = set(state_dict.get("epoch_excluded_indices", []))
+        self._epoch = state_dict["epoch"]
+        self._reshard(self._epoch, include_epoch_excluded_indices=True)
         self.batches_processed = state_dict["batches_processed"]
         self._current_iter = None
 
-    def exclude_index(self, index: int) -> None:
+    def exclude_index(self, index: int, persist: bool = False) -> None:
         """Exclude a dataset index from future iterations.
 
         Args:
             index: The index to exclude.
+            persist: If True, exclude the index across future epochs. Otherwise,
+                only exclude it for the current epoch.
         """
-        self._excluded_indices.add(index)
+        self._epoch_excluded_indices.add(index)
+        if persist:
+            self._excluded_indices.add(index)
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle and reshard the dataset for a new epoch.
@@ -286,9 +298,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
+        self._epoch_excluded_indices = set()
         self._reshard(self._epoch)
 
-    def _reshard(self, epoch: int) -> None:
+    def _reshard(self, epoch: int, include_epoch_excluded_indices: bool = False) -> None:
         """Reshard the dataset for a given epoch.
 
         Uses index-based shuffling to avoid copying the dataset.
@@ -297,8 +310,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         generator.manual_seed(self.seed + epoch)
         dataset_len = len(self._full_dataset)
         all_indices = torch.randperm(dataset_len, generator=generator).numpy()
-        if self._excluded_indices:
-            mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
+        active_excluded_indices = set(self._excluded_indices)
+        if include_epoch_excluded_indices:
+            active_excluded_indices |= self._epoch_excluded_indices
+        if active_excluded_indices:
+            mask = np.isin(all_indices, list(active_excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
         packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
@@ -450,6 +466,7 @@ class StreamingDataLoaderConfig:
     never_give_up: float = 0.0
     maintain_pending_never_give_up_between_calls: bool = True
     no_resampling_pass_rate: float | None = None
+    no_resampling_persist: bool = True
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
@@ -1211,6 +1228,7 @@ def accumulate_inference_batches(
     never_give_up: float = 0.0,
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
+    no_resampling_persist: bool = True,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
@@ -1496,7 +1514,7 @@ def accumulate_inference_batches(
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
             assert result.index is not None
-            iter_dataloader.exclude_index(result.index)
+            iter_dataloader.exclude_index(result.index, persist=no_resampling_persist)
             total_no_resampled += 1
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
@@ -1908,6 +1926,7 @@ class DataPreparationActor:
                 never_give_up=self.config.never_give_up,
                 replenish_prompts=True,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
+                no_resampling_persist=self.config.no_resampling_persist,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
                 training_step=step,

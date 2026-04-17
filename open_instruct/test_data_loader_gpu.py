@@ -304,12 +304,74 @@ class TestHFDataLoader(unittest.TestCase):
         )
 
         for batch in loader:
-            loader.exclude_index(batch["index"].item())
+            loader.exclude_index(batch["index"].item(), persist=True)
 
         with self.assertRaises(RuntimeError) as context:
             next(loader)
 
         self.assertIn("All dataset examples have been excluded", str(context.exception))
+
+    def test_epoch_local_exclusion_only_applies_to_current_epoch(self):
+        dataset = make_test_dataset(10)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
+        )
+
+        first_batch = next(iter(loader))
+        excluded_index = first_batch["index"].item()
+        loader.exclude_index(excluded_index)
+
+        remaining_epoch_indices = [batch["index"].item() for batch in loader]
+        self.assertNotIn(excluded_index, remaining_epoch_indices)
+
+        loader.reshuffle()
+        next_epoch_indices = [batch["index"].item() for batch in loader]
+        self.assertIn(excluded_index, next_epoch_indices)
+
+    def test_checkpoint_restores_epoch_local_exclusion_without_persisting_across_epochs(self):
+        dataset = make_test_dataset(20)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
+        )
+
+        loader.reshuffle(epoch=1)
+        first_batch = next(iter(loader))
+        excluded_index = first_batch["index"].item()
+        loader.exclude_index(excluded_index)
+
+        state = loader.state_dict()
+
+        new_loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
+        )
+        new_loader.load_state_dict(state)
+
+        remaining_epoch_indices = [batch["index"].item() for batch in new_loader]
+        self.assertNotIn(excluded_index, remaining_epoch_indices)
+
+        new_loader.reshuffle()
+        next_epoch_indices = [batch["index"].item() for batch in new_loader]
+        self.assertIn(excluded_index, next_epoch_indices)
 
     def test_unique_prompt_ids_across_iterations(self):
         dataset = make_test_dataset(10)
