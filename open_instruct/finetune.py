@@ -38,7 +38,7 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKwargs, ParallelismConfig, set_seed
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, snapshot_download
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -60,6 +60,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
+    get_optimizer_grouped_parameters,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
@@ -327,10 +328,8 @@ class FlatArguments:
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
         if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
-            or (self.dataset_name is not None)
-            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
-        ):
+            self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None)
+        ) or (self.dataset_mixer is not None and self.dataset_mixer_list is not None):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
@@ -390,7 +389,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation="flash_attention_3"
+                sp_seq_length_is_variable=True, sp_attn_implementation=model_utils.detect_hf_attn_implementation()
             ),
         )
 
@@ -519,6 +518,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     if args.cache_dataset_only:
         return
+
+    # Pre-download model files on main process to avoid race conditions
+    # when multiple ranks on a shared filesystem all try to access the
+    # HF hub cache concurrently.
+    model_path = args.config_name or args.model_name_or_path
+    if model_path and accelerator.is_main_process:
+        snapshot_download(model_path, revision=args.model_revision)
+    accelerator.wait_for_everyone()
 
     # Load pretrained model and tokenizer
     if args.config_name:
@@ -658,15 +665,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     )
 
     # Optimizer
-    # Split weights in two groups, one with weight decay and the other not.
-    no_decay = ["bias", "layer_norm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-        },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
-    ]
+    optimizer_grouped_parameters = get_optimizer_grouped_parameters(model, args.weight_decay)
+
     if args.use_qlora:
         from bitsandbytes.optim import AdamW  # noqa: PLC0415
 

@@ -23,9 +23,11 @@ from olmo_core.train.train_module.transformer import (
     TransformerDataParallelWrappingStrategy,
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -55,7 +57,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
     ):
@@ -67,7 +68,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.max_sequence_length = max_sequence_length
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self.data_prep_actor_name = data_prep_actor_name
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
@@ -123,7 +123,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
-            data_prep_actor_name=self.data_prep_actor_name,
             tokenizer=self.tokenizer,
             dp_rank=self.rank,
             fs_local_rank=self.rank,
@@ -195,33 +194,28 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         master_address = self.get_current_node_ip()
-        master_port = self.get_free_port()
+        master_port = utils.find_free_port()
 
         vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
-        backend = self.vllm_config.vllm_sync_backend
 
         refs = [
-            engine.init_process_group.remote(
-                master_address,
-                master_port,
-                i * self.vllm_config.vllm_tensor_parallel_size + 1,
-                vllm_world_size,
-                "openrlhf",
-                backend=backend,
-                timeout_minutes=self.grpo_config.backend_timeout,
+            engine.init_weight_transfer_engine.remote(
+                WeightTransferInitRequest(
+                    init_info={
+                        "master_address": master_address,
+                        "master_port": master_port,
+                        "rank_offset": i * self.vllm_config.vllm_tensor_parallel_size + 1,
+                        "world_size": vllm_world_size,
+                    }
+                )
             )
             for i, engine in enumerate(vllm_engines)
         ]
 
         # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
         torch.cuda.set_device(0)
-        self.model_update_group = vllm_utils.init_process_group(
-            backend=backend,
-            init_method=f"tcp://{master_address}:{master_port}",
-            world_size=vllm_world_size,
-            rank=0,
-            group_name="openrlhf",
-            timeout=timedelta(minutes=self.grpo_config.backend_timeout),
+        self.model_update_group = NCCLWeightTransferEngine.trainer_init(
+            {"master_address": master_address, "master_port": master_port, "world_size": vllm_world_size}
         )
 
         ray.get(refs)
@@ -327,7 +321,6 @@ class OLMoCoreModelGroup:
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
     ):
@@ -354,7 +347,6 @@ class OLMoCoreModelGroup:
             "max_sequence_length": max_sequence_length,
             "streaming_config": streaming_config,
             "vllm_config": vllm_config,
-            "data_prep_actor_name": data_prep_actor_name,
             "tokenizer": tokenizer,
             "attn_implementation": attn_implementation,
         }

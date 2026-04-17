@@ -1,8 +1,10 @@
 import enum
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -12,11 +14,47 @@ from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
     download_latest_checkpoint_from_gs,
+    ensure_universal_checkpoint_exists,
     get_beaker_whoami,
 )
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+
+def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
+    """Average pass@1 plus unbiased pass@k (Chen et al.) for k in 1, 2, 4, ... <= n.
+
+    ``correct_per_prompt`` is shape ``(num_prompts, num_completions)``; truthy entries mark correct
+    completions.
+
+    ``eval/pass_at_1`` is the average over prompts of ``c/n``, where ``c`` is the number of correct
+    completions for that prompt and ``n`` is the number of samples (same as ``eval/pass_at_1_unbiased``).
+    When ``n > 1``, ``eval/pass_at_{n}`` is the fraction with at least one correct completion.
+    ``eval/pass_at_{k}_unbiased`` uses ``1 - C(n-c, k) / C(n, k)`` per prompt (averaged), when there
+    are at least k incorrect completions; otherwise 1.0.
+    """
+    arr = np.asarray(correct_per_prompt, dtype=bool)
+    if arr.ndim != 2 or arr.shape[1] < 1:
+        return {}
+    num_samples = int(arr.shape[1])
+    c_arr = arr.sum(axis=1).astype(np.int64).reshape(-1)
+    metrics: dict[str, float] = {"eval/pass_at_1": float((c_arr.astype(np.float64) / num_samples).mean())}
+    if num_samples > 1:
+        metrics[f"eval/pass_at_{num_samples}"] = float((c_arr > 0).mean())
+    k_pow = 1
+    while k_pow <= num_samples:
+        estimates: list[float] = []
+        for c in c_arr:
+            c_int = int(c)
+            wrong = num_samples - c_int
+            if wrong >= k_pow:
+                estimates.append(1.0 - math.comb(wrong, k_pow) / math.comb(num_samples, k_pow))
+            else:
+                estimates.append(1.0)
+        metrics[f"eval/pass_at_{k_pow}_unbiased"] = float(np.mean(estimates))
+        k_pow *= 2
+    return metrics
 
 
 class GRPOLossType(enum.StrEnum):
@@ -104,6 +142,8 @@ class GRPOExperimentConfig(
     """whether to offload parameters to CPU (reduces GPU memory usage)"""
     deepspeed_offload_optimizer: bool = False
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
+    deepspeed_checkpoint_load_universal: bool = False
+    """DeepSpeed checkpoint.load_universal: load checkpoints across different parallel configs"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     fsdp_shard_degree: int | None = None
@@ -130,7 +170,7 @@ class GRPOExperimentConfig(
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    checkpoint_state_freq: int = -1
+    checkpoint_state_freq: int = 200
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
@@ -162,6 +202,8 @@ class GRPOExperimentConfig(
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for local pass@k metrics."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
@@ -177,8 +219,6 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
-        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
-            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
@@ -232,6 +272,8 @@ class GRPOExperimentConfig(
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(self.checkpoint_state_dir)
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
@@ -333,7 +375,7 @@ def compute_grpo_loss(
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
-    attention_mask: torch.Tensor,
+    attention_mask: torch.Tensor | None,
     position_ids: torch.Tensor,
     pad_token_id: int,
     temperature: float,
@@ -381,7 +423,6 @@ def compute_logprobs(
             batch_indices = list(range(start_idx, end_idx))
 
             query_responses = [data_BT.query_responses[i] for i in batch_indices]
-            attention_masks = [data_BT.attention_masks[i] for i in batch_indices]
             position_ids = [data_BT.position_ids[i] for i in batch_indices]
             shapes = [tuple(t.shape) for t in query_responses]
 
@@ -390,7 +431,7 @@ def compute_logprobs(
                     single_logprobs, _ = forward_for_logprobs(
                         model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
+                        None,
                         data_BT.position_ids[i],
                         pad_token_id,
                         temperature,
@@ -403,17 +444,10 @@ def compute_logprobs(
                 continue
 
             batch_query_responses = torch.cat(query_responses, dim=0)
-            batch_attention_masks = torch.cat(attention_masks, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
-                model,
-                batch_query_responses,
-                batch_attention_masks,
-                batch_position_ids,
-                pad_token_id,
-                temperature,
-                False,
+                model, batch_query_responses, None, batch_position_ids, pad_token_id, temperature, False
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]

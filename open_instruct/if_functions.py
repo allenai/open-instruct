@@ -231,7 +231,7 @@ def verify_sentence_constraint(text: str, N: int, quantifier: str) -> bool:
         bool: True if the text contains the expected number of sentences, False otherwise
     """
     # Split the text into sentences
-    sentences = re.split(r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s", text)
+    sentences = re.split(r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|!)\s", text)
 
     # Count the number of sentences
     actual_count = len(sentences)

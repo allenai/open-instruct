@@ -42,8 +42,9 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
-from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
+from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
 
 # isort: on
 import asyncio
@@ -52,7 +53,6 @@ import logging
 import math
 import random
 import shutil
-import socket
 import threading
 import time
 from dataclasses import asdict
@@ -78,6 +78,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -130,9 +132,43 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
+
+def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
+    if checkpoint_state is None:
+        return None
+
+    data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
+    if data_prep_actor_state is None:
+        return None
+
+    resume_state = dict(data_prep_actor_state)
+    last_consumed_step = resume_state.get("last_consumed_step")
+    if last_consumed_step is None:
+        trainer_training_step = checkpoint_state.get("training_step")
+        if trainer_training_step is None:
+            raise ValueError("Checkpoint is missing both data prep actor progress and training_step")
+        last_consumed_step = trainer_training_step - 1
+        logger.warning(
+            "Checkpoint is missing data_prep_actor_state.last_consumed_step; "
+            "falling back to training_step-derived resume state"
+        )
+
+    resume_state["last_consumed_step"] = last_consumed_step
+    resume_state["training_step"] = last_consumed_step + 1
+    return resume_state
+
+
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+
+
+def _build_vlm_name_mapper(model_name: str):
+    """Sometimes we have different weight names btw vLLM and HF, so we build
+    a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in vLLM but not HF."""
+    if "qwen3.5" in model_name.lower():
+        return lambda name: f"language_model.{name}"
+    return None
 
 
 @ray.remote(num_gpus=1)
@@ -147,7 +183,6 @@ class PolicyTrainerRayProcess(RayProcess):
         args: grpo_utils.GRPOExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
@@ -160,7 +195,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self.world_size = world_size
         self.local_rank = local_rank
         self.dp_world_size = world_size // args.sequence_parallel_size
-        self._data_prep_actor_name = data_prep_actor_name
 
     def get_dataloader_state(self) -> dict[str, Any]:
         return self._streaming_dataloader.state_dict()
@@ -175,7 +209,7 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-    ) -> int:
+    ) -> dict[str, Any]:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -220,11 +254,13 @@ class PolicyTrainerRayProcess(RayProcess):
             adam_offload=args.deepspeed_offload_optimizer,
             stage=args.deepspeed_stage,
             bf16=True,
+            max_norm=args.max_grad_norm if args.max_grad_norm is not None else 0.0,
             zpg=args.deepspeed_zpg,
             sequence_parallel_size=args.sequence_parallel_size,
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
+        ds_config["checkpoint"] = {"load_universal": args.deepspeed_checkpoint_load_universal}
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
@@ -235,23 +271,22 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
-        # set sequence parallel
-        # note this returns None if sequence_parallel_size == 1
-        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-            model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            sequence_parallel_size=args.sequence_parallel_size,
-            micro_batch_size=args.per_device_train_batch_size,
-            seq_length_is_variable=True,
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=self.policy,
+            core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            sequence_parallel_size=args.sequence_parallel_size,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
+        )
+        self._model_name_or_path = model_config.model_name_or_path
+        self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -276,6 +311,7 @@ class PolicyTrainerRayProcess(RayProcess):
             mpu=self.mpu,
         )
         optimization_steps_done = 0
+        checkpoint_state = None
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
@@ -296,6 +332,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
                 rng_states = states["rng_states"]
@@ -379,7 +416,6 @@ class PolicyTrainerRayProcess(RayProcess):
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
         self._streaming_dataloader = streaming_config.build_dataloader(
-            data_prep_actor_name=self._data_prep_actor_name,
             tokenizer=tokenizer,
             dp_rank=dp_rank,
             fs_local_rank=self.local_rank,
@@ -389,44 +425,37 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.dataloader = iter(self._streaming_dataloader)
 
-        return optimization_steps_done
+        return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
         self.model_update_group = None
         if self.rank == 0:
-            master_address = ray._private.services.get_node_ip_address()
-            with socket.socket() as sock:
-                sock.bind(("", 0))
-                master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
-                self.vllm_config.vllm_num_engines,
-                self.vllm_config.vllm_tensor_parallel_size,
-            )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            backend = self.vllm_config.vllm_sync_backend
-            refs = [
-                engine.init_process_group.remote(
-                    master_address,
-                    master_port,
-                    i * vllm_tensor_parallel_size + 1,
-                    world_size,
-                    "openrlhf",
-                    backend=backend,
-                    timeout_minutes=self.args.backend_timeout,
+            if self.args.single_gpu_mode:
+                refs = [
+                    engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info={}))
+                    for engine in vllm_engines
+                ]
+            else:
+                master_address = self.get_current_node_ip()
+                master_port = utils.find_free_port()
+                vllm_num_engines, vllm_tensor_parallel_size = (
+                    self.vllm_config.vllm_num_engines,
+                    self.vllm_config.vllm_tensor_parallel_size,
                 )
-                for i, engine in enumerate(vllm_engines)
-            ]
-            torch.cuda.set_device(self.local_rank)
-            self.model_update_group = vllm_utils.init_process_group(
-                backend=backend,
-                init_method=f"tcp://{master_address}:{master_port}",
-                world_size=world_size,
-                rank=0,
-                group_name="openrlhf",
-                timeout=timedelta(minutes=self.args.backend_timeout),
-            )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
+                world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+                init_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
+                refs = [
+                    engine.init_weight_transfer_engine.remote(
+                        WeightTransferInitRequest(
+                            init_info=init_info | {"rank_offset": i * vllm_tensor_parallel_size + 1}
+                        )
+                    )
+                    for i, engine in enumerate(vllm_engines)
+                ]
+                torch.cuda.set_device(self.local_rank)
+                self.model_update_group = NCCLWeightTransferEngine.trainer_init(init_info)
+            ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
@@ -440,6 +469,7 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
+            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
 
     def update_ref_policy(self):
@@ -562,10 +592,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
+                    # Pass attention_mask=None so HF constructs the correct 3D intra-document
+                    # mask from position_ids internally for packed sequences.
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
+                        None,
                         data_BT.position_ids[i],
                         self.pad_token_id,
                         self.streaming_config.temperature,
@@ -832,7 +864,6 @@ class ModelGroup:
         args: grpo_utils.GRPOExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
         self.pg = pg
@@ -848,7 +879,7 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, data_prep_actor_name, tokenizer)
+        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, tokenizer)
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -881,18 +912,7 @@ class ModelGroup:
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(
-                world_size,
-                rank,
-                0,
-                master_addr,
-                master_port,
-                args,
-                streaming_config,
-                vllm_config,
-                data_prep_actor_name,
-                tokenizer,
-            )
+            ).remote(world_size, rank, 0, master_addr, master_port, args, streaming_config, vllm_config, tokenizer)
             self.models.append(worker_policy)
 
 
@@ -943,6 +963,8 @@ def setup_runtime_variables(
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
+    if args.eval_pass_at_k < 1:
+        raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1133,8 +1155,8 @@ def create_tool_pools(
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
-            kwargs = asdict(cfg) | {"call_name": call_name}
-            pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
+            kwargs = asdict(cfg) | {"call_name": call_name, "pool_size": cfg.pool_size or pool_size}
+            pools[call_name] = EnvironmentPool.remote(actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
     # Wait for all pools to initialize
@@ -1181,13 +1203,19 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     base_env_config: EnvConfig,
-    data_prep_actor_state: dict | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
 ) -> tuple[
-    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
+    ModelGroup,
+    list[vllm_utils.LLMRayActor],
+    int,
+    int,
+    ray.actor.ActorHandle,
+    utils.ModelDims,
+    ray.actor.ActorHandle,
+    dict[str, Any] | None,
 ]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -1206,8 +1234,9 @@ def create_model_and_optimizer(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     # Create DataPreparationActor FIRST so StreamingDataLoader can find it
-    data_prep_actor_name = "data_prep_singleton"
-    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+    _data_prep_actor = data_loader_lib.DataPreparationActor.options(
+        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
+    ).remote(  # type: ignore[unresolved-attribute]
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
         param_prompt_Q=prompt_Q,
@@ -1227,7 +1256,7 @@ def create_model_and_optimizer(
         tool_names=tools_config.tool_call_names if tools_config else [],
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
-        initial_state=data_prep_actor_state,
+        initial_state=None,
         base_env_config=base_env_config,
     )
 
@@ -1243,13 +1272,17 @@ def create_model_and_optimizer(
         args=args,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
-        data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
     )
     inits = [
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     ]
+
+    # vLLM context must cover prompt + max(train rollout length, local eval length).
+    vllm_max_model_len = streaming_config.max_prompt_token_length + max(
+        streaming_config.response_length, streaming_config.eval_response_length
+    )
 
     # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
     vllm_engines = vllm_utils.create_vllm_engines(
@@ -1261,7 +1294,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
-        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
+        vllm_max_model_len,
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
@@ -1284,32 +1317,30 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
-    if vllm_engines:
-        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-        expected_batch_size = (
+    kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+    ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+    expected_batch_size = (
+        streaming_config.num_unique_prompts_rollout
+        * streaming_config.num_samples_per_prompt_rollout
+        // vllm_config.vllm_num_engines
+    )
+    if kv_cache_max_concurrency < expected_batch_size:
+        nodes_needed = math.ceil(
             streaming_config.num_unique_prompts_rollout
             * streaming_config.num_samples_per_prompt_rollout
-            // vllm_config.vllm_num_engines
+            / kv_cache_max_concurrency
         )
-        if kv_cache_max_concurrency < expected_batch_size:
-            nodes_needed = math.ceil(
-                streaming_config.num_unique_prompts_rollout
-                * streaming_config.num_samples_per_prompt_rollout
-                / kv_cache_max_concurrency
-            )
-            logger.warning(
-                f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
-                f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
-                f"This means actors will have to run multiple sequential batches, hurting performance. "
-                f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
-            )
-    else:
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+        logger.warning(
+            f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
+            f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
+            f"This means actors will have to run multiple sequential batches, hurting performance. "
+            f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
+        )
 
     # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0] + 1
+    resume_training_step = results[0]["optimization_steps_done"] + 1
+    checkpoint_state = results[0]["checkpoint_state"]
     episode = (
         (resume_training_step - 1)
         * streaming_config.num_unique_prompts_rollout
@@ -1317,13 +1348,32 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
-    ray_get_with_progress(
-        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
-        desc="Setting up model update group",
-    )
-    logger.info("======== ✅ model update group setup successfully =========")
+    data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
+    if data_prep_actor_state is not None:
+        ray_get_with_progress(
+            [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
+        )
+        logger.info(
+            "Restored data prep actor state from checkpoint "
+            f"with training_step={data_prep_actor_state['training_step']}"
+        )
 
-    return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
+    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
+
+    logger.info(
+        "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
+    )
+
+    return (
+        policy_group,
+        vllm_engines,
+        resume_training_step,
+        episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+        checkpoint_state,
+    )
 
 
 def create_generation_configs(
@@ -1341,15 +1391,43 @@ def create_generation_configs(
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, n=1)
+    eval_generation_config = dataclasses.replace(
+        generation_config, n=args.eval_pass_at_k, max_tokens=streaming_config.eval_response_length
+    )
     return {"train": generation_config, "eval": eval_generation_config}
+
+
+class WeightSyncTrigger:
+    """Event-like trigger that also carries the latest target model step."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._step: int | None = None
+
+    def notify(self, step: int | None = None) -> None:
+        with self._lock:
+            if step is not None:
+                self._step = step
+        self._event.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout=timeout)
+
+    def get_step_and_clear(self) -> int | None:
+        """Atomically gets the step and clears the event."""
+        with self._lock:
+            step = self._step
+            self._event.clear()
+            return step
 
 
 def weight_sync_thread(
     args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger_event: threading.Event,
+    weight_sync_trigger: WeightSyncTrigger,
     policy_group: ModelGroup,
+    vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
     resume_training_step: int = 1,
@@ -1358,49 +1436,66 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+        weight_sync_trigger.notify(step=resume_training_step - 1)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
+        if not weight_sync_trigger.wait(timeout=1.0):
             continue
 
         # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
+        target_model_step = weight_sync_trigger.get_step_and_clear()
+        try:
+            with Timer("[Weight Sync]") as timer:
+                logger.debug("[Weight Sync Thread] Starting weight sync")
 
-        with Timer("[Weight Sync]") as timer:
-            logger.debug("[Weight Sync Thread] Starting weight sync")
+                # Set actors to stop
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+                # Broadcast weights to vLLM engines
+                # First get the futures
+                weight_broadcast_futures: list[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Wait for all trainer-side broadcasts to finish and collect timing stats.
+                # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
+                weight_broadcast_results, actor_sync_times = ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Wait for all trainer-side broadcasts to finish and collect timing stats.
-            # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
-            weight_broadcast_results, actor_sync_times = ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
+                if not inflight_updates:
+                    # Ensure all vLLM engine update RPCs have completed before unpausing actors.
+                    # Without waiting here, should_stop may flip to False while updates are still queued.
+                    engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+                    if engine_update_refs:
+                        ray_get_with_progress(
+                            engine_update_refs,
+                            desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
+                            enable=False,
+                        )
 
-            if not inflight_updates:
-                # Ensure all vLLM engine update RPCs have completed before unpausing actors.
-                # Without waiting here, should_stop may flip to False while updates are still queued.
-                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-                if engine_update_refs:
-                    ray_get_with_progress(
-                        engine_update_refs,
-                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
-                        enable=False,
-                    )
-
-            # Allow actors to resume
+                ray_get_with_progress(
+                    [engine.wake_up.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Waking up vLLM engines",
+                    enable=False,
+                )
+        except Exception as e:
+            logger.exception("[Weight Sync Thread] Weight Sync failed")
+            raise RuntimeError from e
+        finally:
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+
+            if target_model_step is not None:
+                ray_get_with_progress(
+                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
+                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
+                    enable=args.verbose,
+                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1535,11 +1630,18 @@ def one_training_step(
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging
+        # Convert evolving rubric table data to wandb.Table
+        if RUBRIC_TABLE_KEY in metrics and isinstance(metrics[RUBRIC_TABLE_KEY], list):
+            metrics[RUBRIC_TABLE_KEY] = wandb.Table(columns=RUBRIC_TABLE_COLUMNS, data=metrics[RUBRIC_TABLE_KEY])
+
+        # Convert array/list metrics to wandb histograms for logging.
+        metrics_to_log = {}
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=training_step)
+                metrics_to_log[key] = wandb.Histogram(value)
+            else:
+                metrics_to_log[key] = value
+        wandb.log(metrics_to_log, step=training_step)
 
     return num_step_tokens
 
@@ -1589,6 +1691,7 @@ def maybe_evaluate(
     eval_generation_config,
     model_dims: utils.ModelDims,
     base_env_config: EnvConfig,
+    max_possible_score: float,
     actor_manager=None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -1600,15 +1703,28 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
-        # timeout 0.01 if this is not the last training step
-        # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if training_step < args.num_training_steps else 100
+        is_final_step = training_step >= args.num_training_steps
+        num_eval_prompts = len(eval_dataset)
+        # On non-final steps, only evaluate when we have a full batch ready.
+        # This avoids partially draining the queue and losing results.
+        if not is_final_step:
+            queued_results = evaluation_inference_results_Q.qsize()
+            if queued_results < num_eval_prompts:
+                logger.info(
+                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
+                    queued_results,
+                    num_eval_prompts,
+                )
+                return False
+
+        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
+        timeout = 100 if is_final_step else 0.01
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=len(eval_dataset),
+            num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1618,6 +1734,7 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            max_possible_score=max_possible_score,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1627,13 +1744,26 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_pass_at_k_metrics: dict[str, float] = {}
+        scores = np.array(eval_batch.scores)
+        eval_k = eval_generation_config.n
+
+        if scores.size and scores.size % eval_k == 0:
+            scores_per_prompt = scores.reshape(-1, eval_k)
+            correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8
+            eval_pass_at_k_metrics.update(grpo_utils.compute_pass_at_k_metrics(correct_per_prompt))
+        else:
+            logger.warning(
+                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
+            )
         eval_metrics = {
-            "eval/scores": np.array(eval_batch.scores).mean(),
+            "eval/scores": scores.mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
+            **eval_pass_at_k_metrics,
         }
 
         total_tokens = (
@@ -1725,6 +1855,12 @@ def cleanup_training_resources(
     """Clean up all training resources including threads and Ray queues."""
     stop_event.set()
 
+    try:
+        data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+        ray.kill(data_prep_actor)
+    except (ray.exceptions.RayError, ValueError) as e:
+        logger.warning(f"Could not shut down DataPreparationActor: {e}")
+
     logger.info("Signaling all actors to stop...")
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.info("✅ Signaled all actors to stop")
@@ -1806,19 +1942,8 @@ def run_training(
         )
         logger.info("Restored dataloader state from checkpoint")
 
-    logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
-    weight_sync_thread_future = executor.submit(
-        weight_sync_thread,
-        args,
-        stop_event,
-        weight_sync_trigger_event,
-        policy_group,
-        actor_manager,
-        weight_sync_metrics_Q,
-        resume_training_step,
-        streaming_config.inflight_updates,
-    )
+    weight_sync_trigger: WeightSyncTrigger | None = None
+    weight_sync_thread_future: futures.Future | None = None
 
     """Run the main training loop with worker threads."""
     ray_get_with_progress(
@@ -1827,11 +1952,17 @@ def run_training(
 
     logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
-    def health_check_fn():
-        [f.result() for f in [weight_sync_thread_future] if f.done()]
-        # Wait for weight sync to complete (should_stop becomes False)
+    def health_check_fn(weight_sync_future: futures.Future | None, expect_new_weight_sync: bool = False):
+        seen_actors_paused = False
         start = time.perf_counter()
-        while ray.get(actor_manager.should_stop.remote()):
+        while True:
+            if weight_sync_future is not None and weight_sync_future.done():
+                weight_sync_future.result()
+            should_stop = ray.get(actor_manager.should_stop.remote())
+            if should_stop:
+                seen_actors_paused = True
+            if not should_stop and (not expect_new_weight_sync or seen_actors_paused):
+                break
             if time.perf_counter() - start > WEIGHT_SYNC_TIMEOUT_S:
                 raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
             time.sleep(0.1)
@@ -1840,6 +1971,38 @@ def run_training(
             desc="Checking vLLM engine health",
             enable=False,
         )
+
+    def initialize_weight_sync() -> tuple[futures.Future, WeightSyncTrigger]:
+        logger.info("[Main Thread] Initializing native vLLM weight sync.")
+
+        ray_get_with_progress(
+            [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+            desc="Setting up model update group",
+        )
+        logger.info("======== ✅ model update group setup successfully =========")
+
+        logger.info("======== ✅ weight sync thread starts =========")
+        trigger = WeightSyncTrigger()
+        ray_get_with_progress(
+            [engine.set_model_step.remote(0) for engine in vllm_engines], desc="Initializing vLLM model step to 0"
+        )
+        future = executor.submit(
+            weight_sync_thread,
+            args,
+            stop_event,
+            trigger,
+            policy_group,
+            vllm_engines,
+            actor_manager,
+            weight_sync_metrics_Q,
+            1,
+            streaming_config.inflight_updates,
+        )
+
+        logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
+        trigger.notify(step=1)
+        health_check_fn(future, expect_new_weight_sync=True)
+        return future, trigger
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -1873,7 +2036,7 @@ def run_training(
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
-        health_check_fn()
+        health_check_fn(weight_sync_thread_future)
         health_check_time = time.perf_counter() - health_check_start
 
         if (
@@ -1949,7 +2112,7 @@ def run_training(
                 client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
 
                 # Save DataPreparationActor state
-                data_prep_actor = ray.get_actor("data_prep_singleton")
+                data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
                 client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
 
                 ray_get_with_progress(
@@ -1961,8 +2124,11 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        if training_step == 1:
+            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
+        elif weight_sync_trigger is not None:
+            logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+            weight_sync_trigger.notify(step=training_step)
 
         last_eval_collected = maybe_evaluate(
             args,
@@ -1974,6 +2140,7 @@ def run_training(
             generation_configs["eval"],
             model_dims,
             base_env_config,
+            streaming_config.max_possible_score,
             actor_manager,
         )
 
@@ -2225,44 +2392,37 @@ def main(
     # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config, vllm_config)
 
-    checkpoint_state = None
-    data_prep_actor_state = None
-    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
-            data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
-            if data_prep_actor_state:
-                # Use trainer's authoritative training_step for DataPreparationActor.
-                # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
-                data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
-
     base_env_config = build_base_env_config(tools_config, pools)
-    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            prompt_Q,
-            evaluation_inference_results_Q,
-            streaming_config,
-            vllm_config,
-            train_dataset,
-            eval_dataset,
-            reward_config,
-            generation_configs["train"],
-            base_env_config,
-            data_prep_actor_state,
-            tool_definitions,
-            tools_config,
-            pools,
-            tool_stop_sequences,
-        )
+    (
+        policy_group,
+        vllm_engines,
+        resume_training_step,
+        episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+        checkpoint_state,
+    ) = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        prompt_Q,
+        evaluation_inference_results_Q,
+        streaming_config,
+        vllm_config,
+        train_dataset,
+        eval_dataset,
+        reward_config,
+        generation_configs["train"],
+        base_env_config,
+        tool_definitions,
+        tools_config,
+        pools,
+        tool_stop_sequences,
     )
 
     if checkpoint_state:

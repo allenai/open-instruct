@@ -29,7 +29,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
     "transformers>=5.4.0",
-    "vllm>=0.18.0; platform_system != 'Darwin'",
+    "vllm>=0.19.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -38,12 +38,13 @@ dependencies = [
     # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
-    "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
+    "flash-linear-attention>=0.4.2",
 ]
 
 [build-system]
@@ -169,10 +170,6 @@ ignore = [
     "E501", # Line too long (handled by line-length setting)
 ]
 
-[tool.ruff.lint.per-file-ignores]
-# This class runs in vLLM worker processes; imports are inside methods.
-"open_instruct/vllm_utils_workerwrap.py" = ["PLC0415"]
-
 [tool.ruff.lint.isort]
 known-first-party = ["open_instruct", "mason"]
 # case insensitive to match isort --profile black
@@ -188,6 +185,7 @@ possibly-missing-attribute = "ignore"
 
 [tool.ty.src]
 include = [
+    "mason.py",
     "open_instruct/actor_manager.py",
     "open_instruct/benchmark_generators.py",
     "open_instruct/code_utils/api.py",
@@ -203,6 +201,7 @@ include = [
     "open_instruct/olmo_core_finetune.py",
     "open_instruct/grpo_olmo_core_actor.py",
     "open_instruct/grpo_utils.py",
+    "open_instruct/launch_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
@@ -215,6 +214,7 @@ include = [
     "open_instruct/distillkit/compression/config.py",
     "open_instruct/distillkit/compression/monotonic_logprobs.py",
     "open_instruct/distillkit/sample_common.py",
+    "open_instruct/rubrics/evolving_rubric_step.py",
     "open_instruct/rubrics/metrics.py",
     "open_instruct/rubrics/prompts.py",
     "open_instruct/rubrics/rubric_utils.py",
