@@ -161,4 +161,3 @@ cache/
 local_dataset_cache/
 scratch/
 .claude/worktrees/
-.claude/scheduled_tasks.lock
