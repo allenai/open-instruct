@@ -26,10 +26,9 @@ from typing import Any, Literal
 import numpy as np
 import ray
 import torch
-import torch.distributed as dist
+import vllm
 from datasets import Dataset
 from olmo_core.data import data_loader
-from olmo_core.distributed import utils as distributed_utils
 from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
@@ -92,7 +91,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         drop_last: bool = True,
         fs_local_rank: int | None = None,
         max_seq_length: int = 1,
-        dp_process_group: dist.ProcessGroup | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -112,17 +110,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
             max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
                 to the trainer for batch-size validation.
-            dp_process_group: Optional distributed process group. When provided, dp_rank and
-                dp_world_size are derived from it, overriding the explicit integer parameters.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
-        if dp_process_group is not None:
-            dp_rank = distributed_utils.get_rank(dp_process_group)
-            dp_world_size = distributed_utils.get_world_size(dp_process_group)
         # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
@@ -271,19 +264,18 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
         Uses index-based shuffling to avoid copying the dataset.
         """
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + epoch)
         dataset_len = len(self._full_dataset)
-        all_indices = np.arange(dataset_len, dtype=np.uint32)
+        all_indices = torch.randperm(dataset_len, generator=generator).numpy()
         if self._excluded_indices:
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
         packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
         if packing_enabled:
-            self._reshard_with_packing(all_indices, epoch)
+            self._reshard_with_packing(all_indices)
             return
-
-        rng = np.random.Generator(np.random.PCG64(seed=self.seed + epoch))
-        rng.shuffle(all_indices)
 
         self._precomputed_batch_sizes = None
         self._num_padding_batches = 0
@@ -308,58 +300,42 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
 
-    def _reshard_with_packing(self, all_indices: np.ndarray, epoch: int) -> None:
+    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
         """Reshard with world-aware packing so all ranks get the same batch count.
 
         Instead of distributing examples to ranks and letting each rank pack
         independently (which can produce different batch counts due to variable
         overflow), this packs globally first and then distributes packed batches
         round-robin to ranks.
-
-        When using OBFDCollator, documents are packed globally using InstancePacker
-        (matching the numpy NumpyPackedFSLDataset path), then the packed instances
-        are shuffled. Otherwise, documents are shuffled first then grouped by length.
         """
+        max_seq_length = self._collator.max_seq_length
         column_names = self._full_dataset.column_names
         subset = self._full_dataset.select(all_indices.tolist())
-
-        if isinstance(self._collator, padding_free_collator.OBFDCollator):
-            lengths = np.array([len(x) for x in subset["input_ids"]])
-            batches = self._collator.compute_packing_plan(lengths)
-            rng = np.random.Generator(np.random.PCG64(seed=self.seed + epoch))
-            instance_order = np.arange(len(batches), dtype=np.uint32)
-            rng.shuffle(instance_order)
-            batches = [batches[int(i)] for i in instance_order]
+        if "chosen_input_ids" in column_names:
+            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
         else:
-            rng = np.random.Generator(np.random.PCG64(seed=self.seed + epoch))
-            rng.shuffle(all_indices)
-            subset = self._full_dataset.select(all_indices.tolist())
-            max_seq_length = self._collator.max_seq_length
-            if "chosen_input_ids" in column_names:
-                lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
-            else:
-                lengths = [[len(x)] for x in subset["input_ids"]]
+            lengths = [[len(x)] for x in subset["input_ids"]]
 
-            num_streams = len(lengths[0])
-            batches: list[list[int]] = []
-            current_batch: list[int] = []
-            running_totals = [0] * num_streams
+        num_streams = len(lengths[0])
+        batches: list[list[int]] = []
+        current_batch: list[int] = []
+        running_totals = [0] * num_streams
 
-            for i in range(len(all_indices)):
-                new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
-                would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
-                at_max_samples = len(current_batch) >= self._per_rank_batch_size
+        for i in range(len(all_indices)):
+            new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
+            would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
+            at_max_samples = len(current_batch) >= self._per_rank_batch_size
 
-                if would_exceed or at_max_samples:
-                    batches.append(current_batch)
-                    current_batch = [i]
-                    running_totals = list(lengths[i])
-                else:
-                    current_batch.append(i)
-                    running_totals = new_totals
-
-            if current_batch:
+            if would_exceed or at_max_samples:
                 batches.append(current_batch)
+                current_batch = [i]
+                running_totals = list(lengths[i])
+            else:
+                current_batch.append(i)
+                running_totals = new_totals
+
+        if current_batch:
+            batches.append(current_batch)
 
         num_batches = len(batches)
         padding_start = num_batches
@@ -763,7 +739,7 @@ def add_prompt_to_generator(
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
-    generation_config: Any,  # vllm.SamplingParams
+    generation_config: vllm.SamplingParams,
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
