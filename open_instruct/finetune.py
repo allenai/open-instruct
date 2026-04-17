@@ -54,8 +54,10 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
+from open_instruct.grpo_utils import build_fla_cp_context_for_sample
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
+from open_instruct.qwen3_5_packing_patch import patch_qwen3_5_packing
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -636,7 +638,24 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
+    # For hybrid models (e.g. Qwen3.5) with linear-attention (GatedDeltaNet) layers, the
+    # packing patch is always needed so that the causal conv and SSM respect sequence
+    # boundaries in packed batches.  Under SP it also passes recurrent state across ranks.
+    _conv_kernel_size = getattr(model.config, "linear_conv_kernel_dim", None) or getattr(
+        getattr(model.config, "text_config", None), "linear_conv_kernel_dim", None
+    )
+    _is_hybrid = _conv_kernel_size is not None
+    _is_hybrid_sp = _is_hybrid and args.sequence_parallel_size > 1
+    if _is_hybrid:
+        patch_qwen3_5_packing()
+
     # DataLoaders creation:
+    if args.packing and args.sequence_parallel_size > 1:
+        raise ValueError(
+            "packing=True is not compatible with sequence_parallel_size > 1: the Ulysses SP "
+            "adapter cannot split variable-length packing tensors (cu_seq_lens_q, max_length, "
+            "etc.) across ranks. Use packing=False with SP."
+        )
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
     else:
@@ -814,12 +833,52 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens += pred_tokens_in_batch
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
+            # Build packing/SP kwargs for hybrid models (e.g. Qwen3.5) so that the
+            # GatedDeltaNet causal conv and SSM respect sequence boundaries in packed
+            # batches and correctly pass recurrent state across SP rank boundaries.
+            fwd_extra: dict = {}
+            if _is_hybrid_sp:
+                # SP: all-gather local position_ids to reconstruct global layout, then
+                # build an FLACPContext that communicates SSM state across ranks.
+                sp_group = accelerator.torch_device_mesh["sp"].get_group()
+                if "position_ids" in batch:
+                    local_pos = batch["position_ids"]
+                else:
+                    local_len = batch["input_ids"].shape[1]
+                    local_pos = (
+                        torch.arange(local_len, device=batch["input_ids"].device)
+                        .unsqueeze(0)
+                        .expand(batch["input_ids"].shape[0], -1)
+                    )
+                local_pos_row = local_pos[0:1].contiguous()
+                gathered = [torch.zeros_like(local_pos_row) for _ in range(args.sequence_parallel_size)]
+                torch.distributed.all_gather(gathered, local_pos_row, group=sp_group)
+                global_pos = torch.cat(gathered, dim=1)
+                fwd_extra["cp_context"] = build_fla_cp_context_for_sample(
+                    global_position_ids=global_pos,
+                    sp_world_size=args.sequence_parallel_size,
+                    sp_group=sp_group,
+                    conv_kernel_size=_conv_kernel_size,
+                    local_seq_len=local_pos.shape[1],
+                )
+            elif _is_hybrid and "position_ids" in batch:
+                # Non-SP packing: pass cu_seqlens so the SSM chunk kernel resets state
+                # at each packed sub-sequence boundary (conv already uses seq_idx from
+                # the collator; cp_context handles both under SP above).
+                local_pos = batch["position_ids"]
+                if (local_pos.diff(dim=-1) < 0).any():
+                    seq_len = local_pos.shape[1]
+                    starts = torch.where(local_pos[0] == 0)[0].to(torch.int32)
+                    fwd_extra["cu_seqlens"] = torch.cat(
+                        [starts, torch.tensor([seq_len], dtype=torch.int32, device=local_pos.device)]
+                    )
+
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
-                    outputs = model(**batch, use_cache=False, output_router_logits=True)
+                    outputs = model(**batch, use_cache=False, output_router_logits=True, **fwd_extra)
                     total_aux_loss += outputs.aux_loss.detach().float()
                 else:
-                    outputs = model(**batch, use_cache=False)
+                    outputs = model(**batch, use_cache=False, **fwd_extra)
 
                 loss = outputs.loss
                 del outputs

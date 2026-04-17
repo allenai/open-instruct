@@ -154,7 +154,8 @@ def main():
     full_ids_t = torch.tensor([flat_ids], dtype=torch.long, device=device)
     pad_amount = padded_len - total_len
     full_ids_padded = F.pad(full_ids_t, (0, pad_amount), value=pad_token_id)
-    full_pos_padded = F.pad(global_position_ids, (0, pad_amount), value=0)
+    pos_pad_val = int(global_position_ids[0, -1].item()) + 1 if global_position_ids.shape[-1] > 0 else 1
+    full_pos_padded = F.pad(global_position_ids, (0, pad_amount), value=pos_pad_val)
 
     start_idx = chunk_len * sp_rank
     end_idx = chunk_len * (sp_rank + 1)

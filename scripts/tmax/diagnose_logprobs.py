@@ -37,6 +37,7 @@ def parse_args():
     p.add_argument("--phase", choices=["vllm", "hf", "both"], default="both")
     p.add_argument("--prompt", default="Explain in detail how a transformer model is trained.")
     p.add_argument("--max_new_tokens", type=int, default=512)
+    p.add_argument("--max_model_len", type=int, default=4096, help="vLLM max_model_len")
     p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--prefix_caching", type=int, default=0, help="0 or 1")
@@ -74,8 +75,8 @@ def run_vllm(args):
         dtype="bfloat16",
         enforce_eager=True,
         enable_prefix_caching=bool(args.prefix_caching),
-        max_model_len=4096,
-        gpu_memory_utilization=0.75,
+        max_model_len=getattr(args, "max_model_len", 4096),
+        gpu_memory_utilization=0.85,
         logprobs_mode="raw_logprobs",
         seed=args.seed,
     )
@@ -90,6 +91,7 @@ def run_vllm(args):
         top_p=1.0,
         seed=args.seed,
         max_tokens=args.max_new_tokens,
+        min_tokens=args.max_new_tokens,
         logprobs=1,
     )
     out = llm.generate(prompts=[prompt_text], sampling_params=sp)[0]

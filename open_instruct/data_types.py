@@ -134,7 +134,4 @@ class CollatedBatchData:
                 return None
             return [t.to(device, non_blocking=non_blocking) for t in val]
 
-        return dataclasses.replace(
-            self,
-            **{f.name: move(getattr(self, f.name)) for f in dataclasses.fields(self)},
-        )
+        return dataclasses.replace(self, **{f.name: move(getattr(self, f.name)) for f in dataclasses.fields(self)})

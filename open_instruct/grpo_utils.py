@@ -404,11 +404,7 @@ def _compute_packing_kwargs(position_ids: torch.Tensor, cp_context: object | Non
 
 
 def build_fla_cp_context_for_sample(
-    global_position_ids: torch.Tensor,
-    sp_world_size: int,
-    sp_group,
-    conv_kernel_size: int | None,
-    local_seq_len: int,
+    global_position_ids: torch.Tensor, sp_world_size: int, sp_group, conv_kernel_size: int | None, local_seq_len: int
 ):
     """Build an ``FLACPContext`` correctly for one packed sample under Ulysses SP.
 
@@ -549,10 +545,7 @@ def compute_logprobs(
             # If samples can carry different cp_contexts, we cannot safely
             # concatenate them into a single forward — fall back to one
             # forward per sample (same pattern used when shapes differ).
-            different_ctx = (
-                cp_contexts is not None
-                and len({id(cp_contexts[i]) for i in batch_indices}) > 1
-            )
+            different_ctx = cp_contexts is not None and len({id(cp_contexts[i]) for i in batch_indices}) > 1
 
             if len(set(shapes)) != 1 or different_ctx:
                 for i in batch_indices:

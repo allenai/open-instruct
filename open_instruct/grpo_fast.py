@@ -417,12 +417,8 @@ class PolicyTrainerRayProcess(RayProcess):
             self._sp_rank = sp_rank
             self._sp_group = sp_group
             self._sp_world_size = sp_world_size
-            self._conv_kernel_size = getattr(
-                self.policy.config, "linear_conv_kernel_dim", None
-            ) or getattr(
-                getattr(self.policy.config, "text_config", None),
-                "linear_conv_kernel_dim",
-                None,
+            self._conv_kernel_size = getattr(self.policy.config, "linear_conv_kernel_dim", None) or getattr(
+                getattr(self.policy.config, "text_config", None), "linear_conv_kernel_dim", None
             )
             self.cp_context = None  # per-sample; built in the training loop
         else:

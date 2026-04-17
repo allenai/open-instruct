@@ -63,7 +63,8 @@ def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, att
                 # corrupting the first (kernel_size - 1) output tokens on each
                 # non-first rank.  causal_conv1d_cp expects [1, T, D] not [1, D, T].
                 # Lazy import: fla.modules.conv.cp is only needed under SP.
-                from fla.modules.conv.cp.ops import causal_conv1d_cp
+                from fla.modules.conv.cp.ops import causal_conv1d_cp  # noqa: PLC0415
+
                 mixed_qkv = causal_conv1d_cp(
                     x=mixed_qkv.permute(0, 2, 1),
                     weight=self.conv1d.weight.squeeze(1),
