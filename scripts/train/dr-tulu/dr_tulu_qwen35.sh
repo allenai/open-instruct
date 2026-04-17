@@ -72,7 +72,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --apply_evolving_rubric_reward true \
     --max_active_rubrics 5 \
     --remap_verifier general_rubric=rubric \
-    --tool_parser_type vllm_qwen3_coder \
+    --tool_parser_type vllm_qwen3_xml \
     --tools serper_search jina_browse s2_search \
     --tool_call_names google_search browse_webpage snippet_search \
     --tool_configs '{}' '{}' '{"pool_size": 100}' \

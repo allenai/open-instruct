@@ -1155,10 +1155,8 @@ def create_tool_pools(
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
         for cfg, call_name, tool_class in configs_to_create:
-            effective_pool_size = cfg.pool_size if cfg.pool_size is not None else pool_size
-            kwargs = asdict(cfg) | {"call_name": call_name}
-            kwargs.pop("pool_size", None)
-            pools[call_name] = EnvironmentPool.remote(pool_size=effective_pool_size, actor_class=tool_class, **kwargs)
+            kwargs = asdict(cfg) | {"call_name": call_name, "pool_size": cfg.pool_size or pool_size}
+            pools[call_name] = EnvironmentPool.remote(actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
     # Wait for all pools to initialize

@@ -250,23 +250,16 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
         },
         output_postfix="<|im_start|>assistant\n",
     ),
-    # Qwen3 Coder-style tool calling (sentinel tokens: <tool_call>, <function=>, <parameter=>)
-    "vllm_qwen3_coder": VllmParserConfig(
-        import_path="vllm.tool_parsers.qwen3coder_tool_parser:Qwen3CoderToolParser",
-        role_templates={
-            "tool": "<|im_start|>tool\n{output}<|im_end|>\n",
-            "user": "<|im_start|>user\n{output}<|im_end|>\n",
-        },
-        output_postfix="<|im_start|>assistant\n",
-    ),
-    # Qwen3.5 XML-style tool calling
+    # Qwen3.5 XML-style tool calling. Tool responses use the user role and
+    # are wrapped in <tool_response> per the Qwen3.5 chat template.
+    # The generation prompt starts a <think> block as the Qwen3.5 default is thinking mode.
     "vllm_qwen3_xml": VllmParserConfig(
         import_path="vllm.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
         role_templates={
-            "tool": "<|im_start|>tool\n{output}<|im_end|>\n",
+            "tool": "<|im_start|>user\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
             "user": "<|im_start|>user\n{output}<|im_end|>\n",
         },
-        output_postfix="<|im_start|>assistant\n",
+        output_postfix="<|im_start|>assistant\n<think>\n",
     ),
 }
 
