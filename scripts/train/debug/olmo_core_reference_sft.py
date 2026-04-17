@@ -135,6 +135,8 @@ def main() -> None:
     load_hf_model(args.model_name_or_path, sd, work_dir=args.save_folder)
     train_module.model.load_state_dict(sd)
 
+    data_loader.reshuffle(epoch=1)
+
     try:
         trainer.fit()
     finally:
