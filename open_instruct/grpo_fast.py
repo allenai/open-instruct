@@ -408,26 +408,30 @@ class PolicyTrainerRayProcess(RayProcess):
                 device=self.device,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
-            # FLA context-parallel context so GatedDeltaNet layers can
-            # communicate recurrent state across SP ranks.  cu_seqlens is
-            # filled per-batch in _compute_packing_kwargs.
-            conv_kernel_size = getattr(self.policy.config, "linear_conv_kernel_dim", None) or getattr(
-                getattr(self.policy.config, "text_config", None), "linear_conv_kernel_dim", None
+            # Retain SP metadata so we can build a fresh FLA CP context per
+            # sample (via ``build_fla_cp_context_for_sample``).  We no longer
+            # use a static FLACPContext because the manual construction
+            # incorrectly assumes every rank is in the middle of one global
+            # sub-sequence, which is false for packed RL batches with
+            # multiple rollouts per row.
+            self._sp_rank = sp_rank
+            self._sp_group = sp_group
+            self._sp_world_size = sp_world_size
+            self._conv_kernel_size = getattr(
+                self.policy.config, "linear_conv_kernel_dim", None
+            ) or getattr(
+                getattr(self.policy.config, "text_config", None),
+                "linear_conv_kernel_dim",
+                None,
             )
-            if "FLACPContext" in dir():
-                self.cp_context = FLACPContext(
-                    group=sp_group,
-                    is_first_rank=(sp_rank == 0),
-                    is_last_rank=(sp_rank == sp_world_size - 1),
-                    pre_num_ranks=sp_rank,
-                    post_num_ranks=sp_world_size - sp_rank - 1,
-                    conv1d_kernel_size=conv_kernel_size,
-                )
-            else:
-                self.cp_context = None
+            self.cp_context = None  # per-sample; built in the training loop
         else:
             self.splitter = None
             self.cp_context = None
+            self._sp_rank = 0
+            self._sp_group = None
+            self._sp_world_size = 1
+            self._conv_kernel_size = None
 
         # dp_rank = which data-parallel group this worker belongs to
         # With SP, workers in the same SP group share the same dp_rank
@@ -484,6 +488,41 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model_update_group = NCCLWeightTransferEngine.trainer_init(init_info)
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
+
+    def _build_cp_contexts_for_batch(self, data_BT) -> list:
+        """Build one FLA CP context per sample, correctly reflecting which
+        sub-sequences cross rank boundaries.
+
+        Returns a list of length ``len(data_BT)`` where each entry is either an
+        :class:`fla.ops.cp.context.FLACPContext` (under SP>1 with global
+        position_ids attached) or ``None`` (SP==1, non-hybrid model, or
+        global position_ids unavailable).
+        """
+        num_samples = len(data_BT.query_responses)
+        if self._sp_world_size <= 1 or getattr(data_BT, "global_position_ids", None) is None:
+            return [None] * num_samples
+        # Only build CP context for models with linear-attention layers. We
+        # detect this the same way the patch does — presence of the config
+        # attribute ``linear_conv_kernel_dim`` (on text_config for VLM shells).
+        if self._conv_kernel_size is None:
+            return [None] * num_samples
+
+        local_seq_len = data_BT.position_ids[0].shape[-1]
+        # Lazy import so non-hybrid runs don't depend on fla's cp module.
+        from open_instruct.grpo_utils import build_fla_cp_context_for_sample
+
+        contexts: list = []
+        for gpi in data_BT.global_position_ids:
+            contexts.append(
+                build_fla_cp_context_for_sample(
+                    global_position_ids=gpi,
+                    sp_world_size=self._sp_world_size,
+                    sp_group=self._sp_group,
+                    conv_kernel_size=self._conv_kernel_size,
+                    local_seq_len=local_seq_len,
+                )
+            )
+        return contexts
 
     def broadcast_to_vllm(self):
         # avoid OOM
@@ -563,6 +602,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
+        # Build a per-sample FLA CP context for Qwen3.5 hybrid linear attention
+        # under Ulysses SP.  Under SP=1 or on non-linear-attention models we
+        # fall through to a list of ``None``.
+        cp_contexts_BT = self._build_cp_contexts_for_batch(data_BT)
+
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
@@ -572,7 +616,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.pad_token_id,
                     self.streaming_config.temperature,
                     use_grad=False,
-                    cp_context=self.cp_context,
+                    cp_contexts=cp_contexts_BT,
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -589,7 +633,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.pad_token_id,
                         self.streaming_config.temperature,
                         use_grad=False,
-                        cp_context=self.cp_context,
+                        cp_contexts=cp_contexts_BT,
                     )
 
                 with torch.no_grad():
@@ -639,7 +683,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.pad_token_id,
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
-                        cp_context=self.cp_context,
+                        cp_context=cp_contexts_BT[i],
                     )
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)

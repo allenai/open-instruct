@@ -111,18 +111,30 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    # Pre-Ulysses-split ``position_ids`` for each sample. Only populated when
+    # ``sequence_parallel_size > 1``; lets downstream code (the Qwen3.5 packing
+    # patch + FLA CP context) reconstruct the global ``cu_seqlens`` so that
+    # sub-sequences that don't cross rank boundaries are correctly started
+    # from zero recurrent state.
+    global_position_ids: list[torch.Tensor] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+        result: dict[str, Any] = {}
+        for f in dataclasses.fields(self):
+            val = getattr(self, f.name)
+            result[f.name] = None if val is None else val[idx]
+        return CollatedBatchData(**result)
 
     def __len__(self) -> int:
         return len(self.query_responses)
 
     def to(self, device: torch.device, non_blocking: bool = True) -> "CollatedBatchData":
+        def move(val: Any) -> Any:
+            if val is None:
+                return None
+            return [t.to(device, non_blocking=non_blocking) for t in val]
+
         return dataclasses.replace(
             self,
-            **{
-                f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
-                for f in dataclasses.fields(self)
-            },
+            **{f.name: move(getattr(self, f.name)) for f in dataclasses.fields(self)},
         )

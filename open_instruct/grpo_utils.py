@@ -383,9 +383,10 @@ def _compute_packing_kwargs(position_ids: torch.Tensor, cp_context: object | Non
     cu_seq_lens_q/k would also break Ulysses sequence parallelism, which
     slices position_ids per rank.
 
-    When *cp_context* (a :class:`fla.ops.cp.context.FLACPContext`) is provided
-    it is forwarded so that FLA's ``chunk_gated_delta_rule`` can communicate
-    recurrent state across sequence-parallel ranks.
+    When *cp_context* is provided it must already be a fully-constructed
+    :class:`fla.ops.cp.context.FLACPContext` (e.g. from
+    :func:`build_fla_cp_context_for_sample`). Its rank-local ``cu_seqlens``
+    take precedence inside the FLA chunk kernel.
     """
     batch_size, seq_len = position_ids.shape
     is_start = position_ids == 0
@@ -395,13 +396,72 @@ def _compute_packing_kwargs(position_ids: torch.Tensor, cp_context: object | Non
     cu_seqlens = torch.cat([starts, torch.tensor([seq_len], dtype=torch.int32, device=position_ids.device)])
     kwargs: dict = {"seq_idx": seq_idx, "cu_seqlens": cu_seqlens}
     if cp_context is not None:
-        # Fill per-batch cu_seqlens on the context so FLA can communicate
-        # recurrent state across SP ranks.
-        ctx = cp_context
-        ctx.cu_seqlens = cu_seqlens  # type: ignore[assignment]
-        ctx.cu_seqlens_cpu = cu_seqlens.cpu()  # type: ignore[assignment]
-        kwargs["cp_context"] = ctx
+        # The context already carries rank-local cu_seqlens as set by
+        # ``build_cp_context``; do NOT overwrite.  FLA's chunk kernel takes
+        # cu_seqlens from the context when cp_context is present.
+        kwargs["cp_context"] = cp_context
     return kwargs
+
+
+def build_fla_cp_context_for_sample(
+    global_position_ids: torch.Tensor,
+    sp_world_size: int,
+    sp_group,
+    conv_kernel_size: int | None,
+    local_seq_len: int,
+):
+    """Build an ``FLACPContext`` correctly for one packed sample under Ulysses SP.
+
+    ``global_position_ids`` is the un-sharded ``position_ids`` for the sample
+    (shape ``[1, L_real]``). Ulysses pads each row to
+    ``L_pad = local_seq_len * sp_world_size`` and slices by ``local_seq_len``
+    per rank. We reconstruct global cu_seqlens covering all ``L_pad`` tokens
+    (padding is treated as a single trailing synthetic sub-sequence that
+    doesn't cross any sub-sequence boundary) and hand it to
+    :func:`fla.ops.cp.build_cp_context`, which computes:
+
+    - ``cu_seqlens`` (rank-local varlen boundaries)
+    - ``pre_num_ranks`` / ``post_num_ranks`` (how many neighbor ranks the
+      first/last sub-sequence on this rank extends into)
+    - ``is_first_rank`` / ``is_last_rank`` (whether this rank owns the
+      start/end of the sub-sequence that spans its boundary)
+    - ``pre_num_conv_tokens`` (used by ``causal_conv1d`` CP to right-overlap
+      kernel receptive fields)
+
+    The key property we get from this vs. the old static construction is:
+    **sub-sequences that don't cross a rank boundary are correctly started
+    from zero state**, instead of being incorrectly chained across ranks.
+    """
+    # Lazy import so non-Qwen3.5 paths don't require fla's cp module.
+    from fla.ops.cp import build_cp_context
+
+    assert global_position_ids.dim() == 2 and global_position_ids.shape[0] == 1, (
+        f"expected [1, L] position_ids, got {tuple(global_position_ids.shape)}"
+    )
+
+    real_len = int(global_position_ids.shape[-1])
+    padded_len = local_seq_len * sp_world_size
+    is_start = (global_position_ids == 0)[0]
+    starts = torch.where(is_start)[0].to(torch.int32)
+    # cu_seqlens = [start_of_seq_0, start_of_seq_1, ..., real_len, padded_len]
+    # The final [real_len, padded_len] pair lets FLA partition tokens even on
+    # ranks whose chunk lies entirely in the right-padding region.
+    boundaries = [starts]
+    if real_len > 0:
+        boundaries.append(torch.tensor([real_len], dtype=torch.int32, device=global_position_ids.device))
+    if padded_len > real_len:
+        boundaries.append(torch.tensor([padded_len], dtype=torch.int32, device=global_position_ids.device))
+    global_cu = torch.cat(boundaries)
+    # Drop duplicate boundaries introduced when sub-sequences end exactly at
+    # real_len or when real_len == padded_len.
+    global_cu = torch.unique_consecutive(global_cu)
+
+    return build_cp_context(
+        cu_seqlens=global_cu.to(torch.long),
+        group=sp_group,
+        conv1d_kernel_size=conv_kernel_size,
+        cu_seqlens_cpu=global_cu.to(torch.long).cpu(),
+    )
 
 
 def forward_for_logprobs(
@@ -448,13 +508,28 @@ def compute_logprobs(
     use_grad: bool = False,
     batch_size: int | None = None,
     cp_context: Any = None,
+    cp_contexts: list[Any] | None = None,
 ) -> list[torch.Tensor]:
-    """Compute log probabilities for all samples in batch."""
+    """Compute log probabilities for all samples in batch.
+
+    ``cp_contexts`` (if provided) is a per-sample list of FLA CP contexts
+    — one entry per sample, aligned with ``data_BT.query_responses``. This is
+    the correct path under Ulysses sequence parallelism for Qwen3.5 hybrid
+    models: each sample's context is built by ``build_fla_cp_context_for_sample``
+    from that sample's *global* (pre-split) cu_seqlens. The older
+    ``cp_context`` scalar is kept for backward compatibility and is used as a
+    fallback for every sample when ``cp_contexts`` is None.
+    """
     logprobs_BT: list[torch.Tensor] = []
     num_samples = len(data_BT.query_responses)
 
     if batch_size is None:
         batch_size = 1
+
+    def ctx_for(i: int) -> Any:
+        if cp_contexts is not None:
+            return cp_contexts[i]
+        return cp_context
 
     context = torch.enable_grad() if use_grad else torch.no_grad()
     with context:
@@ -466,7 +541,15 @@ def compute_logprobs(
             position_ids = [data_BT.position_ids[i] for i in batch_indices]
             shapes = [tuple(t.shape) for t in query_responses]
 
-            if len(set(shapes)) != 1:
+            # If samples can carry different cp_contexts, we cannot safely
+            # concatenate them into a single forward — fall back to one
+            # forward per sample (same pattern used when shapes differ).
+            different_ctx = (
+                cp_contexts is not None
+                and len({id(cp_contexts[i]) for i in batch_indices}) > 1
+            )
+
+            if len(set(shapes)) != 1 or different_ctx:
                 for i in batch_indices:
                     single_logprobs, _ = forward_for_logprobs(
                         model,
@@ -476,7 +559,7 @@ def compute_logprobs(
                         pad_token_id,
                         temperature,
                         False,
-                        cp_context=cp_context,
+                        cp_context=ctx_for(i),
                     )
 
                     response_mask_BT = data_BT.response_masks[i]
@@ -495,7 +578,7 @@ def compute_logprobs(
                 pad_token_id,
                 temperature,
                 False,
-                cp_context=cp_context,
+                cp_context=ctx_for(batch_indices[0]),
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]

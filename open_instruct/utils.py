@@ -2640,17 +2640,31 @@ class UlyssesSPSplitter:
         # slice and pad tensors for this sp rank
         kwargs = {}
         for field in dataclasses.fields(data):
+            # global_position_ids is preserved pre-slicing below; skip regular processing.
+            if field.name == "global_position_ids":
+                continue
             if field.name == "query_responses":
                 pad_value = self.pad_token_id
             elif field.name == "vllm_logprobs":
                 pad_value = INVALID_LOGPROB
             else:
                 pad_value = 0
+            val = getattr(data, field.name)
+            if val is None:
+                kwargs[field.name] = None
+                continue
             sharded = []
-            for t in getattr(data, field.name):
+            for t in val:
                 # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
                 padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
                 sharded.append(padded_sliced)
             kwargs[field.name] = sharded
+
+        # Stash UN-sharded (and UN-padded) position_ids per sample so the
+        # Qwen3.5 linear-attention packing patch can build an FLA CP context
+        # from the *global* cu_seqlens (pre-Ulysses partition).  Combined with
+        # the rank's (sp_rank, sp_world_size, chunk_len = max_seqlen // sp_world_size),
+        # this is enough to call ``fla.ops.cp.build_cp_context`` correctly.
+        kwargs["global_position_ids"] = [t.clone() for t in data.position_ids]
 
         return data_types.CollatedBatchData(**kwargs)
