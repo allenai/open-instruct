@@ -1,9 +1,12 @@
 #!/bin/bash
 # Full 2-epoch run matching reference experiment 01KNMEJKEZNJKZH9QWQW8CS0JW
 # (jacobm/olmo3-7b-instruct-SFT-rerun-04072026) using open-instruct's
-# olmo_core_finetune.py. Mirrors scripts/train/debug/oc_sft_olmo3_7b_match.sh
-# but runs the full 2 epochs instead of capping at 3 steps, and uses real
-# checkpoint cadence.
+# olmo_core_finetune.py. Matches the reference's auto-derived parallel layout:
+# cp_degree=2 (32768 seq_len > 16384 tokens/rank on H100), grad_accum=2,
+# rank_microbatch_size=32768 tokens (1 seq).
+#
+# global_batch_size = per_device_batch(1) * seq(32768) * dp_world(16)
+#                     * grad_accum(2) = 1048576 tokens, matching reference.
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
