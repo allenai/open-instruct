@@ -62,6 +62,7 @@ class NeverGiveUpAccumulationState:
 
     pending_results: dict[str, list[data_types.GenerationResult]] = field(default_factory=dict)
     pending_metrics: dict[str, list[dict[str, Any] | None]] = field(default_factory=dict)
+    pending_best_reward: dict[str, float] = field(default_factory=dict)
 
 
 def _sanitize_metric_name(name: str) -> str:
@@ -1305,19 +1306,30 @@ def accumulate_inference_batches(
         never_give_up_state = NeverGiveUpAccumulationState()
     pending_never_give_up_results = never_give_up_state.pending_results
     pending_never_give_up_metrics = never_give_up_state.pending_metrics
+    pending_never_give_up_best_reward = never_give_up_state.pending_best_reward
 
-    def pop_pending_state(chain_id: str) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None]]:
+    def pop_pending_state(
+        chain_id: str,
+    ) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None], float | None]:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
-            return pending_never_give_up_results.pop(chain_id, []), pending_never_give_up_metrics.pop(chain_id, [])
+            return (
+                pending_never_give_up_results.pop(chain_id, []),
+                pending_never_give_up_metrics.pop(chain_id, []),
+                pending_never_give_up_best_reward.pop(chain_id, None),
+            )
 
     def store_pending_state(
-        chain_id: str, pending_results: list[data_types.GenerationResult], pending_metrics: list[dict[str, Any] | None]
+        chain_id: str,
+        pending_results: list[data_types.GenerationResult],
+        pending_metrics: list[dict[str, Any] | None],
+        best_reward: float,
     ) -> None:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
             pending_never_give_up_results[chain_id] = pending_results
             pending_never_give_up_metrics[chain_id] = pending_metrics
+            pending_never_give_up_best_reward[chain_id] = best_reward
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
@@ -1390,12 +1402,19 @@ def accumulate_inference_batches(
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
         chain_id = get_never_give_up_chain_id(result.prompt_id)
-        pending_results, pending_metrics = pop_pending_state(chain_id)
+        pending_results, pending_metrics, pending_best_reward = pop_pending_state(chain_id)
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
+        current_reward = float(reward_scores.max())
+        best_reward = current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
         requeue_same_prompt = False
-        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
-            requeue_same_prompt = result.reward_scores[0] < max_possible_score and np.random.random() < never_give_up
+        filter_zero_std_prompt = filter_zero_std_samples and np.std(result.reward_scores) == 0
+        if filter_zero_std_prompt and pending_best_reward is not None and current_reward > pending_best_reward:
+            filter_zero_std_prompt = False
+        elif filter_zero_std_prompt:
+            requeue_same_prompt = best_reward < max_possible_score and np.random.random() < never_give_up
+
+        if filter_zero_std_prompt:
             if replenish_prompts:
                 assert param_prompt_Q is not None
                 replacement_example = example
@@ -1419,7 +1438,7 @@ def accumulate_inference_batches(
             if requeue_same_prompt and chain_id is not None and active_sampling:
                 pending_results.append(result)
                 pending_metrics.append(result.reward_metrics)
-                store_pending_state(chain_id, pending_results, pending_metrics)
+                store_pending_state(chain_id, pending_results, pending_metrics, best_reward)
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
