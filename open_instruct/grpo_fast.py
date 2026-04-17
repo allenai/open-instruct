@@ -459,7 +459,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
-    def broadcast_to_vllm(self):
+    def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
@@ -469,6 +469,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            model_step=model_step,
             gather_whole_model=self.args.gather_whole_model,
         )
 
@@ -1446,7 +1447,7 @@ def create_generation_configs(
 def weight_sync_thread(
     args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger_event: threading.Event,
+    weight_sync_steps_Q: Queue,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
@@ -1456,15 +1457,13 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+        weight_sync_steps_Q.put(resume_training_step - 1)
 
     while not stop_event.is_set():
-        # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
+        try:
+            target_model_step = weight_sync_steps_Q.get(timeout=1.0)
+        except Empty:
             continue
-
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1475,7 +1474,9 @@ def weight_sync_thread(
 
             # Broadcast weights to vLLM engines
             # First get the futures
-            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            weight_broadcast_futures: list[ray.ObjectRef] = [
+                m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models
+            ]
 
             # Wait for all trainer-side broadcasts to finish and collect timing stats.
             # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
@@ -2247,12 +2248,12 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
+    weight_sync_steps_Q: Queue[int] = Queue()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger_event,
+        weight_sync_steps_Q,
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
@@ -2402,7 +2403,7 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        weight_sync_steps_Q.put(training_step)
 
         last_eval_collected = maybe_evaluate(
             args,

@@ -105,6 +105,7 @@ class VLLMWeightSyncCallback(Callback):
             model=model,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            model_step=self.trainer.global_step,
             name_mapper=self.name_mapper,
         )
         if refs:
