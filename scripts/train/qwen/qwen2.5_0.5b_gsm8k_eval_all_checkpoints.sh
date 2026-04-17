@@ -17,13 +17,14 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
 
 for step in $(seq "${STEP_START}" "${STEP_INCREMENT}" "${STEP_END}"); do
     checkpoint_path="${CHECKPOINT_ROOT}/step_${step}"
-    if [[ ! -d "${checkpoint_path}" ]]; then
-        echo "Skipping missing checkpoint: ${checkpoint_path}"
-        continue
-    fi
+    # if [[ ! -d "${checkpoint_path}" ]]; then
+    #     echo "Skipping missing checkpoint: ${checkpoint_path}"
+    #     continue
+    # fi
 
     echo "Launching eval for ${checkpoint_path}"
-    NUM_GPUS=2 \
+    NUM_GPUS=1 \
+    CLUSTER="${CLUSTER:-ai2/neptune ai2/rhea ai2/saturn}" \
     bash scripts/train/qwen/qwen2.5_0.5b_gsm8k_buckets.sh \
         --model_name_or_path "${checkpoint_path}" \
         --exp_name "${EXP_NAME}" \
