@@ -15,7 +15,6 @@ from typing import Any, cast
 import ray
 import ray.exceptions
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
@@ -23,7 +22,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -74,7 +73,7 @@ class VLLMWeightSyncCallback(Callback):
     """
 
     vllm_engines: list[ray.actor.ActorHandle]
-    model_update_group: dist.ProcessGroup | None = None
+    model_update_group: Any | None = None
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
@@ -89,27 +88,24 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        if self.actor_manager is not None:
-            ray.get(self.actor_manager.set_should_stop.remote(True))
+        ray.get(self.actor_manager.set_should_stop.remote(True))
 
         model = self.train_module.model
 
-        try:
-            self._broadcast_weights(model)
-        finally:
-            if self.actor_manager is not None:
-                ray.get(self.actor_manager.set_should_stop.remote(False))
-
-    def _broadcast_weights(self, model: nn.Module) -> None:
-        """Broadcast weights from training model to vLLM engines."""
-        refs = vllm_utils.broadcast_weights_to_vllm(
-            model=model,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            name_mapper=self.name_mapper,
+        utils.ray_get_with_progress(
+            vllm_utils.broadcast_weights_to_vllm(
+                model=model,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                name_mapper=self.name_mapper,
+            ),
+            desc="Broadcasting weights to vLLM engines",
+            enable=False,
         )
-        if refs:
-            ray.get(refs)
+        utils.ray_get_with_progress(
+            [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
+        )
+        ray.get(self.actor_manager.set_should_stop.remote(False))
 
 
 @dataclass

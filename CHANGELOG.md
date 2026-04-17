@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
+- Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).
+- Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/1613).
 - Set checkpoint_state_freq default in data_loader.py, not mason.py (https://github.com/allenai/open-instruct/pull/1600).
 - Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
 - Use local fixture for AceCode test instead of downloading from HuggingFace (https://github.com/allenai/open-instruct/pull/1593).
@@ -18,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
+- Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
 - Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking. (https://github.com/allenai/open-instruct/pull/1598)
 - Fix DeepSpeed gradient clipping in `grpo_fast.py` by passing `max_norm` to the DS config. (https://github.com/allenai/open-instruct/pull/1598)
@@ -35,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add DR-TULU replication script for Qwen 3.5 4B with evolving rubrics, per-tool pool size overrides, `vllm_qwen3_xml` parser, and `<answer>` tag extraction in rubric scoring (https://github.com/allenai/open-instruct/pull/1609).
 - Add MiniMax provider support: register `minimax-m2.7` and `minimax-m2.7-highspeed` models in `PRICE_PER_TOKEN` for cost tracking and add cl100k_base encoding support in `context_window_checker` (https://github.com/allenai/open-instruct/pull/1602).
 - Wire evolving rubric config flags into the GRPO training loop so `apply_evolving_rubric_reward` actually triggers rubric generation, buffer management, and ground-truth overrides during training (https://github.com/allenai/open-instruct/pull/1581).
 - Add model step logging for GRPO/vLLM by propagating `model_step` through generation metadata/results, syncing vLLM engines to the latest training step after weight sync, and reporting `model_step_min/max/mean` reward metrics (https://github.com/allenai/open-instruct/pull/1508).

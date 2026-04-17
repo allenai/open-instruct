@@ -189,3 +189,16 @@ The `scripts/train/debug/envs/wordle_8gpu.sh` script is a good example of how to
 ![Wordle Training Curves](grpo/wordle_curves.png)
 
 You can see the wandb for this run [here](https://wandb.ai/ai2-llm/open_instruct_internal/runs/1od05m9m?nw=nwuserhamishivi) and the beaker link [here](https://beaker.org/orgs/ai2/workspaces/open-instruct-dev/work/01KM66926V1PT6CBGR6ANDYS7J?taskId=01KM669270NVQF02Y1FXWHESVG&jobId=01KM6692AEMN8BZNPK1ZQQT90W).
+
+### Example Script: DR Tulu
+
+`./scripts/train/dr-tulu/dr_tulu_qwen35.sh` provides a script to replicate DR Tulu training with some differences: using `Qwen3.5-9B` as the starting model and using the model's existing tool calling parameters instead of a custom parser.
+
+For rubric-based training, you can enable evolving rubrics with:
+```bash
+--apply_evolving_rubric_reward true \
+--max_active_rubrics 5 \
+```
+`--max_active_rubrics` controls how many rubrics are active for a given prompt at once. You can save the generated evolving rubrics by setting `--cache_evolving_rubric_data_dir` to a folder path. Note that the verifer should be set to `rubric` for use with evolving rubrics.
+
+For the evolving rubrics, you can set the judge and generation model with `RUBRIC_JUDGE_MODEL`, `RUBRIC_GENERATION_MODEL` respectively. Both use litellm to interface with providers, so you can use openai, vllm, etc.
