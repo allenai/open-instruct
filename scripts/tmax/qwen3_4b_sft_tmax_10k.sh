@@ -49,12 +49,14 @@ uv run python mason.py \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
+    --vllm_enforce_eager \
+    --no_auto_dataset_cache \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-combined-10k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 256 \
+    --pool_size 512 \
     --max_steps 100 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_hermes \
