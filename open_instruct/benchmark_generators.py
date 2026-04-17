@@ -140,9 +140,10 @@ def save_benchmark_results_to_csv(
     csv_dir = csv_path.parent
     csv_dir.mkdir(parents=True, exist_ok=True)
 
+    write_header = not csv_path.exists()
     with csv_path.open("a", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
-        if not csv_path.exists():
+        if write_header:
             writer.writeheader()
         writer.writerow(row_data)
     logger.info(f"Saved benchmark results to {csv_path}")
