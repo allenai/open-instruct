@@ -10,11 +10,14 @@ olmo-core only uses the top-level ring kernels, not the HF adapter, so we wrap
 the adapters import in try/except.
 """
 
+import importlib.util
 import pathlib
 
-import ring_flash_attn
+spec = importlib.util.find_spec("ring_flash_attn")
+if spec is None or spec.origin is None:
+    raise SystemExit("ring_flash_attn not installed")
 
-init_path = pathlib.Path(ring_flash_attn.__file__)
+init_path = pathlib.Path(spec.origin)
 src = init_path.read_text()
 
 needle = "from .adapters import (\n    substitute_hf_flash_attn,\n    update_ring_flash_attn_params,\n)\n"
