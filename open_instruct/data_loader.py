@@ -570,11 +570,11 @@ class StreamingDataLoaderConfig:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
 
         if self.active_sampling:
-            assert self.async_steps > 1, (
-                "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
-                "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
-                "prompt will cause the trainer to stall waiting for more data  . "
-            )
+            # assert self.async_steps > 1, (
+            #     "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
+            #     "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
+            #     "prompt will cause the trainer to stall waiting for more data  . "
+            # )
             assert self.filter_zero_std_samples, (
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
