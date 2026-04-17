@@ -34,6 +34,6 @@ uv run python mason.py \
     --warmup_fraction 0.03 \
     --weight_decay 0.0 \
     --max_grad_norm 1.0 \
-    --max_steps 4 \
+    --max_steps 3 \
     --init_seed 33333 \
     --data_loader_seed 34521
