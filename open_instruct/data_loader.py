@@ -54,6 +54,7 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
+MAX_PENDING_NEVER_GIVE_UP_STEP_AGE = 8
 
 
 @dataclass
@@ -1309,15 +1310,37 @@ def accumulate_inference_batches(
     pending_never_give_up_best_reward = never_give_up_state.pending_best_reward
 
     def pop_pending_state(
-        chain_id: str,
+        chain_id: str, current_model_step: int | None
     ) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None], float | None]:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
-            return (
-                pending_never_give_up_results.pop(chain_id, []),
-                pending_never_give_up_metrics.pop(chain_id, []),
-                pending_never_give_up_best_reward.pop(chain_id, None),
-            )
+            pending_results = pending_never_give_up_results.pop(chain_id, [])
+            pending_metrics = pending_never_give_up_metrics.pop(chain_id, [])
+            pending_best_reward = pending_never_give_up_best_reward.pop(chain_id, None)
+
+        if current_model_step is None:
+            return pending_results, pending_metrics, pending_best_reward
+
+        filtered_pending: list[tuple[data_types.GenerationResult, dict[str, Any] | None]] = []
+        for pending_result, pending_metric in zip(pending_results, pending_metrics, strict=False):
+            pending_model_step = pending_result.model_step
+            if (
+                pending_model_step is None
+                or current_model_step - pending_model_step <= MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
+            ):
+                filtered_pending.append((pending_result, pending_metric))
+
+        if not filtered_pending:
+            return [], [], None
+
+        filtered_results = [pending_result for pending_result, _ in filtered_pending]
+        filtered_metrics = [pending_metric for _, pending_metric in filtered_pending]
+        filtered_best_reward = max(
+            max(pending_result.reward_scores)
+            for pending_result in filtered_results
+            if pending_result.reward_scores is not None
+        )
+        return filtered_results, filtered_metrics, filtered_best_reward
 
     def store_pending_state(
         chain_id: str,
@@ -1402,7 +1425,7 @@ def accumulate_inference_batches(
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
         chain_id = get_never_give_up_chain_id(result.prompt_id)
-        pending_results, pending_metrics, pending_best_reward = pop_pending_state(chain_id)
+        pending_results, pending_metrics, pending_best_reward = pop_pending_state(chain_id, result.model_step)
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         current_reward = float(reward_scores.max())
