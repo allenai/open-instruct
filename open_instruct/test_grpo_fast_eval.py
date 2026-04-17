@@ -506,6 +506,8 @@ class TestMaybeEvaluate(unittest.TestCase):
             percent_solved_hist=np.array([]),
             prompt_indices=[10, 11],
             prompt_sample_counts=[2, 2],
+            prompt_baseline_sample_counts=[2, 2],
+            prompt_baseline_reward_sums=[0.0, 0.0],
             prompt_datasets=["manufactoria", "manufactoria"],
             filtered_prompt_datasets=[],
             filtered_prompt_datasets_zero=[],
