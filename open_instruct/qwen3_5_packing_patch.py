@@ -81,10 +81,15 @@ def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, att
     if not use_precomputed_states:
         chunk_kwargs = {}
         if getattr(self.chunk_gated_delta_rule, "__module__", "").startswith("fla."):
-            chunk_kwargs["cu_seqlens"] = cu_seqlens
             cp_context = kwargs.get("cp_context")
             if cp_context is not None:
                 chunk_kwargs["cp_context"] = cp_context
+                # cp_context.cu_seqlens carries rank-local boundaries derived from the
+                # global sequence layout; the locally-computed cu_seqlens (from position
+                # resets on this rank's slice) omits continuation ranges on non-first ranks.
+                chunk_kwargs["cu_seqlens"] = cp_context.cu_seqlens
+            else:
+                chunk_kwargs["cu_seqlens"] = cu_seqlens
 
         core_attn_out, last_recurrent_state = self.chunk_gated_delta_rule(
             query,
