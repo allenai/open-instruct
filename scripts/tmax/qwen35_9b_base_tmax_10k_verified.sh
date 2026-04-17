@@ -49,7 +49,6 @@ uv run python mason.py \
     --beta 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --vllm_enable_prefix_caching \
     --vllm_enforce_eager \
     --push_to_hub false \
     --with_tracking \
