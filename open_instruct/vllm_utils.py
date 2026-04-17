@@ -182,7 +182,11 @@ def process_tool_tokens(
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
+    # Ensure all outputs are strings (guard against None from Ray serialization)
+    tool_outputs = [str(o) if o is not None else "" for o in tool_outputs]
     formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
+    if not isinstance(formatted_output, str):
+        formatted_output = str(formatted_output)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
     tokens, excess = truncate_tool_output_tokens(
@@ -546,6 +550,7 @@ class LLMRayActor:
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
         per_turn_max_tokens: int | None = None,
+        tool_call_timeout: float = 1800.0,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
@@ -557,6 +562,7 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        inference_batch_size: int | None = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -565,6 +571,7 @@ class LLMRayActor:
         self._init_config(
             max_steps,
             per_turn_max_tokens,
+            tool_call_timeout,
             mask_tool_use,
             pools,
             inflight_updates,
@@ -579,7 +586,11 @@ class LLMRayActor:
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
-        self.inference_batch_size = self.get_kv_cache_info()
+        if inference_batch_size is not None:
+            logger.info(f"Using manually configured inference_batch_size={inference_batch_size}")
+            self.inference_batch_size = inference_batch_size
+        else:
+            self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
@@ -588,6 +599,7 @@ class LLMRayActor:
         self,
         max_steps: int,
         per_turn_max_tokens: int | None,
+        tool_call_timeout: float,
         mask_tool_use: bool,
         pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
@@ -597,6 +609,7 @@ class LLMRayActor:
     ) -> None:
         self.max_steps = max_steps
         self.per_turn_max_tokens = per_turn_max_tokens
+        self.tool_call_timeout = tool_call_timeout
         self.mask_tool_use = mask_tool_use
         self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
@@ -668,6 +681,9 @@ class LLMRayActor:
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
+        # Use float32 for the SSM recurrent state cache to avoid bf16 rounding
+        # that compounds at every decode step and inflates vLLM-vs-HF KL.
+        engine_args.mamba_ssm_cache_dtype = "float32"
 
         init_complete = threading.Event()
         self.loop = None
@@ -1036,8 +1052,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 rollout.step_count += 1
 
                 try:
-                    step_result: StepResult = await target.step.remote(
-                        EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)
+                    step_result: StepResult = await asyncio.wait_for(
+                        target.step.remote(EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)),
+                        timeout=actor.tool_call_timeout,
                     )
                     observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
                     rollout.tool_output += step_result.result
@@ -1054,6 +1071,16 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                             success=not meta.get("error") and not meta.get("timeout", False),
                             runtime=meta.get("runtime", 0.0),
                         )
+                    )
+                except asyncio.TimeoutError:
+                    error_msg = f"Step '{tc.name}' timed out after {actor.tool_call_timeout}s. Args: {tc.args}"
+                    logger.warning(error_msg)
+                    observations.append((error_msg, "tool"))
+                    rollout.tool_error += error_msg
+                    rollout.timeout = True
+                    rollout.rewards.append(0.0)
+                    rollout.tool_call_stats.append(
+                        ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout)
                     )
                 except Exception as e:
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
@@ -1186,6 +1213,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    inference_batch_size: int | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1273,6 +1301,7 @@ def create_vllm_engines(
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
+                inference_batch_size=inference_batch_size,
             )
         )
 

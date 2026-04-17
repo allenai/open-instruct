@@ -400,6 +400,9 @@ class VLLMConfig:
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0
+    # Manually override the per-engine concurrency (number of in-flight requests).
+    # If None (default), it's auto-computed from KV cache capacity via `get_kv_cache_info()`.
+    vllm_inference_batch_size: int | None = None
 
 
 @dataclass

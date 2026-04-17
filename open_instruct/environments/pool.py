@@ -9,7 +9,7 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
-DEFAULT_ACQUIRE_TIMEOUT_S = 300
+DEFAULT_ACQUIRE_TIMEOUT_S = 7200
 
 
 @ray.remote

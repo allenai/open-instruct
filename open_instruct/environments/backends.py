@@ -72,7 +72,7 @@ class DockerBackend(SandboxBackend):
     def start(self) -> None:
         logger.info(f"Starting Docker container (image={self._image})")
         if self._client is None:
-            self._client = docker_sdk.from_env()
+            self._client = docker_sdk.from_env(timeout=300)
         self._container = self._client.containers.run(
             self._image,
             command="sleep infinity",
@@ -142,13 +142,12 @@ class DockerBackend(SandboxBackend):
             cid = self._container.short_id
             logger.info(f"Closing Docker container: {cid}")
             try:
-                self._container.stop(timeout=5)
-            except Exception as e:
-                logger.warning(f"Error stopping container {cid}, attempting kill: {e}")
+                self._container.kill()
+            except Exception:
                 try:
-                    self._container.kill()
-                except Exception as kill_err:
-                    logger.warning(f"Error killing container {cid}: {kill_err}")
+                    self._container.stop(timeout=3)
+                except Exception as e:
+                    logger.warning(f"Error stopping container {cid}: {e}")
             self._container = None
 
 

@@ -143,7 +143,7 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore[arg-type]
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.
@@ -163,11 +163,11 @@ class VllmToolParser(ToolParser):
         tool_calls = []
         for call in result.tool_calls:
             try:
-                tool_calls.append(
-                    EnvCall(id=call.id or "", name=call.function.name, args=json.loads(call.function.arguments))
-                )
-            except json.JSONDecodeError as e:
-                # the model may have mungled the tool call somehow, catch the error here.
+                args = json.loads(call.function.arguments)
+                if not isinstance(args, dict):
+                    raise ValueError(f"Expected dict, got {type(args).__name__}: {args!r}")
+                tool_calls.append(EnvCall(id=call.id or "", name=call.function.name, args=args))
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(
                     f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
                 )
@@ -239,14 +239,14 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
         },
         output_postfix="<|im_start|>assistant\n",
     ),
-    # Qwen3 XML tool-calling templates (<tool_call><function=...><parameter=...>)
-    "vllm_qwen3xml": VllmParserConfig(
+    # Qwen 3.5
+    "vllm_qwen3_xml": VllmParserConfig(
         import_path="vllm.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
         role_templates={
             "tool": "<|im_start|>user\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
             "user": "<|im_start|>user\n{output}<|im_end|>\n",
         },
-        output_postfix="<|im_start|>assistant\n",
+        output_postfix="<|im_start|>assistant\n<think>\n",
     ),
 }
 

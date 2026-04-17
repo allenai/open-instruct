@@ -40,6 +40,9 @@ with contextlib.suppress(Exception):
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
+with contextlib.suppress(Exception):
+    from fla.ops.cp.context import FLACPContext
+
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
@@ -53,6 +56,7 @@ import logging
 import math
 import random
 import shutil
+import socket
 import threading
 import time
 from dataclasses import asdict
@@ -70,7 +74,7 @@ import torch.utils
 import torch.utils.data
 import wandb
 from datasets import Dataset
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, snapshot_download
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -108,6 +112,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
+from open_instruct.qwen3_5_packing_patch import patch_qwen3_5_packing
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -159,7 +164,7 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-WEIGHT_SYNC_TIMEOUT_S = 120.0
+WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
@@ -276,6 +281,7 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            local_files_only=True,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
@@ -392,15 +398,36 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
+            sp_rank = groups._get_sequence_parallel_rank()
+            sp_group = groups._get_sequence_parallel_group()
+            sp_world_size = groups._get_sequence_parallel_world_size()
             self.splitter = UlyssesSPSplitter(
-                sp_rank=groups._get_sequence_parallel_rank(),
-                sp_group=groups._get_sequence_parallel_group(),
-                sp_world_size=groups._get_sequence_parallel_world_size(),
+                sp_rank=sp_rank,
+                sp_group=sp_group,
+                sp_world_size=sp_world_size,
                 device=self.device,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
+            # FLA context-parallel context so GatedDeltaNet layers can
+            # communicate recurrent state across SP ranks.  cu_seqlens is
+            # filled per-batch in _compute_packing_kwargs.
+            conv_kernel_size = getattr(self.policy.config, "linear_conv_kernel_dim", None) or getattr(
+                getattr(self.policy.config, "text_config", None), "linear_conv_kernel_dim", None
+            )
+            if "FLACPContext" in dir():
+                self.cp_context = FLACPContext(
+                    group=sp_group,
+                    is_first_rank=(sp_rank == 0),
+                    is_last_rank=(sp_rank == sp_world_size - 1),
+                    pre_num_ranks=sp_rank,
+                    post_num_ranks=sp_world_size - sp_rank - 1,
+                    conv1d_kernel_size=conv_kernel_size,
+                )
+            else:
+                self.cp_context = None
         else:
             self.splitter = None
+            self.cp_context = None
 
         # dp_rank = which data-parallel group this worker belongs to
         # With SP, workers in the same SP group share the same dp_rank
@@ -540,7 +567,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    self.ref_policy,
+                    data_BT,
+                    self.pad_token_id,
+                    self.streaming_config.temperature,
+                    use_grad=False,
+                    cp_context=self.cp_context,
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -552,7 +584,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                        self.model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        use_grad=False,
+                        cp_context=self.cp_context,
                     )
 
                 with torch.no_grad():
@@ -602,6 +639,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.pad_token_id,
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
+                        cp_context=self.cp_context,
                     )
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
@@ -1156,6 +1194,10 @@ def create_tool_pools(
 
         for cfg, call_name, tool_class in configs_to_create:
             kwargs = asdict(cfg) | {"call_name": call_name}
+            # Pre-resolve HF dataset so each actor skips the redundant download.
+            hf_repo = kwargs.get("task_data_hf_repo")
+            if hf_repo and not kwargs.get("task_data_dir") and hasattr(tool_class, "resolve_task_data_dir"):
+                kwargs["task_data_dir"] = tool_class.resolve_task_data_dir(hf_repo)
             pools[call_name] = EnvironmentPool.remote(pool_size=pool_size, actor_class=tool_class, **kwargs)
             tool_call_names.append(call_name)
 
@@ -1445,6 +1487,7 @@ def weight_sync_thread(
 
         # Clear the event for next iteration
         target_model_step = weight_sync_trigger.get_step_and_clear()
+
         try:
             with Timer("[Weight Sync]") as timer:
                 logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1879,7 +1922,11 @@ def cleanup_training_resources(
     if queues and len(queues) > 0:
         [queue.shutdown() for queue in queues]
     logger.info("Shutting down thread pool executor...")
-    executor.shutdown(wait=True)
+    executor.shutdown(wait=False)
+    for thread in executor._threads:
+        thread.join(timeout=300)
+        if thread.is_alive():
+            logger.warning(f"Thread {thread.name} did not exit within 300s, proceeding with cleanup")
 
     # Clean up judge clients
     cleanup_judge_clients()
@@ -2304,9 +2351,27 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
+    # Pre-download model on rank 0 to avoid HF cache race conditions
+    # when multiple ranks try to download concurrently on shared filesystem.
+    # Barrier file goes next to the HF cache so all nodes can see it.
+    rank = int(os.environ.get("RANK", "0"))
+    hf_cache = os.environ.get("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub"))
+    barrier_file = os.path.join(hf_cache, f".model_download_done_{os.environ.get('BEAKER_JOB_ID', 'local')}")
+    if rank == 0:
+        logger.info(f"Pre-downloading model {model_config.model_name_or_path}...")
+        snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+        open(barrier_file, "w").close()
+        logger.info("Model pre-download complete.")
+    else:
+        while not os.path.exists(barrier_file):
+            time.sleep(1)
+
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+
+    # Patch Qwen3.5 GatedDeltaNet to support packing (seq_idx/cu_seqlens).
+    patch_qwen3_5_packing()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -2326,6 +2391,8 @@ def main(
     pool_size = tools_config.pool_size
     if pool_size is None:
         pool_size = streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    if args.cache_dataset_only:
+        pool_size = 1
     logger.info(f"Pool size per tool: {pool_size}")
 
     pools, tool_definitions, tool_stop_sequences = initialize_tools_and_envs(

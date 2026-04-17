@@ -2,7 +2,7 @@ import enum
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -372,6 +372,38 @@ def compute_grpo_loss(
     return pg_losses, pg_losses2, pg_loss_max, kl
 
 
+def _compute_packing_kwargs(position_ids: torch.Tensor, cp_context: object | None = None) -> dict:
+    """Compute packing kwargs from position_ids for packed sequences.
+
+    These are consumed by the Qwen3.5 GatedDeltaNet packing patch so that the
+    causal conv1d and recurrent state respect sequence boundaries.
+
+    Full-attention layers do NOT need explicit cu_seq_lens here — HF flash
+    attention already detects packing from position_ids resets.  Passing
+    cu_seq_lens_q/k would also break Ulysses sequence parallelism, which
+    slices position_ids per rank.
+
+    When *cp_context* (a :class:`fla.ops.cp.context.FLACPContext`) is provided
+    it is forwarded so that FLA's ``chunk_gated_delta_rule`` can communicate
+    recurrent state across sequence-parallel ranks.
+    """
+    batch_size, seq_len = position_ids.shape
+    is_start = position_ids == 0
+    seq_idx = (is_start.cumsum(dim=-1) - 1).to(torch.int32)
+    assert batch_size == 1, f"cu_seqlens computation assumes batch_size=1, got {batch_size}"
+    starts = torch.where(is_start[0])[0].to(torch.int32)
+    cu_seqlens = torch.cat([starts, torch.tensor([seq_len], dtype=torch.int32, device=position_ids.device)])
+    kwargs: dict = {"seq_idx": seq_idx, "cu_seqlens": cu_seqlens}
+    if cp_context is not None:
+        # Fill per-batch cu_seqlens on the context so FLA can communicate
+        # recurrent state across SP ranks.
+        ctx = cp_context
+        ctx.cu_seqlens = cu_seqlens  # type: ignore[assignment]
+        ctx.cu_seqlens_cpu = cu_seqlens.cpu()  # type: ignore[assignment]
+        kwargs["cp_context"] = ctx
+    return kwargs
+
+
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
@@ -380,9 +412,16 @@ def forward_for_logprobs(
     pad_token_id: int,
     temperature: float,
     return_entropy: bool = False,
+    cp_context: Any = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
-    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
+    # For packed sequences, pass attention_mask=None so HF flash attention uses position_ids
+    # to isolate sub-sequences instead of treating the whole pack as one sequence.
+    extra_kwargs: dict = {}
+    if (position_ids.diff(dim=-1) < 0).any():
+        attention_mask = None
+        extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
@@ -408,6 +447,7 @@ def compute_logprobs(
     temperature: float,
     use_grad: bool = False,
     batch_size: int | None = None,
+    cp_context: Any = None,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch."""
     logprobs_BT: list[torch.Tensor] = []
@@ -436,6 +476,7 @@ def compute_logprobs(
                         pad_token_id,
                         temperature,
                         False,
+                        cp_context=cp_context,
                     )
 
                     response_mask_BT = data_BT.response_masks[i]
@@ -447,7 +488,14 @@ def compute_logprobs(
             batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
-                model, batch_query_responses, None, batch_position_ids, pad_token_id, temperature, False
+                model,
+                batch_query_responses,
+                None,
+                batch_position_ids,
+                pad_token_id,
+                temperature,
+                False,
+                cp_context=cp_context,
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
