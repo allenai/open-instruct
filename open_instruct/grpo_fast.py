@@ -1695,6 +1695,9 @@ def one_training_step(
     trained_episode_increment = int(average_metrics.get("batch/trained_completions", len(response_lengths)))
     train_episode += trained_episode_increment
     generation_episode += generated_episode_increment
+    legacy_episode = (
+        training_step * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    )
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
@@ -1710,7 +1713,7 @@ def one_training_step(
     )
 
     metrics = {
-        "episode": train_episode,
+        "episode": legacy_episode,
         "global_step": train_episode,
         "train_episode": train_episode,
         "generation_episode": generation_episode,
@@ -1807,6 +1810,7 @@ def maybe_evaluate(
     base_env_config: EnvConfig | None = None,
     actor_manager=None,
     generation_episode: int | None = None,
+    legacy_episode: int | None = None,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1820,6 +1824,8 @@ def maybe_evaluate(
     train_episode = episode
     if generation_episode is None:
         generation_episode = train_episode
+    if legacy_episode is None:
+        legacy_episode = train_episode
 
     try:
         num_eval_prompts = len(eval_dataset)
@@ -1966,7 +1972,7 @@ def maybe_evaluate(
                 )
 
         eval_metrics = {
-            "episode": train_episode,
+            "episode": legacy_episode if legacy_episode is not None else train_episode,
             "global_step": train_episode,
             "train_episode": train_episode,
             "generation_episode": generation_episode,
@@ -2220,6 +2226,7 @@ def run_eval_only_round(
         base_env_config=base_env_config,
         actor_manager=actor_manager,
         generation_episode=generation_episode,
+        legacy_episode=train_episode,
     )
     if not eval_collected:
         raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
@@ -2447,6 +2454,11 @@ def run_training(
             base_env_config,
             actor_manager,
             generation_episode=generation_episode,
+            legacy_episode=(
+                training_step
+                * streaming_config.num_unique_prompts_rollout
+                * streaming_config.num_samples_per_prompt_rollout
+            ),
         )
 
         maybe_update_beaker_description(
