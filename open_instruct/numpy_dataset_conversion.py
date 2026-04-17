@@ -123,7 +123,6 @@ def convert_hf_to_numpy_sft(
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     dataset_config_hash: str | None = None,
-    shuffle: bool = True,
     shuffle_seed: int = 42,
     checkpoint_interval: int = 100_000,
     resume: bool = True,
@@ -164,8 +163,7 @@ def convert_hf_to_numpy_sft(
         drop_dataset_source=False,
     )
 
-    if shuffle:
-        train_dataset = train_dataset.shuffle(seed=shuffle_seed)
+    train_dataset = train_dataset.shuffle(seed=shuffle_seed)
 
     if visualize:
         logger.info("Visualizing first example...")
@@ -177,40 +175,35 @@ def convert_hf_to_numpy_sft(
         logger.info(f"Selecting {num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(num_examples))
 
-    state: dict[str, Any] = {
-        "samples_processed": 0,
-        "token_ids": [],
-        "labels_mask": [],
-        "document_boundaries": [],
-        "current_position": 0,
-        "num_samples_skipped": 0,
-        "per_dataset_counts": {},
-        "per_dataset_tokens": {},
-        "per_dataset_trainable_tokens": {},
-        "per_dataset_filtered": {},
-    }
-
     checkpoint = load_checkpoint(output_dir) if resume else None
     if checkpoint:
-        state.update(checkpoint)
-        state["document_boundaries"] = [tuple(b) for b in state["document_boundaries"]]
+        start_idx = checkpoint["samples_processed"]
+        token_ids = checkpoint["token_ids"]
+        labels_mask = checkpoint["labels_mask"]
+        document_boundaries = [tuple(b) for b in checkpoint["document_boundaries"]]
+        current_position = checkpoint["current_position"]
+        num_samples_skipped = checkpoint["num_samples_skipped"]
+        per_dataset_counts = checkpoint["per_dataset_counts"]
+        per_dataset_tokens = checkpoint["per_dataset_tokens"]
+        per_dataset_trainable_tokens = checkpoint["per_dataset_trainable_tokens"]
+        per_dataset_filtered = checkpoint["per_dataset_filtered"]
         logger.info("=== RESUMING from checkpoint ===")
-        logger.info(f"  Samples already processed: {state['samples_processed']:,}")
-        logger.info(f"  Tokens collected: {len(state['token_ids']):,}")
-        logger.info(f"  Remaining samples: {len(train_dataset) - state['samples_processed']:,}")
-    elif resume:
-        logger.info("No checkpoint found, starting from beginning...")
-
-    start_idx = state["samples_processed"]
-    token_ids = state["token_ids"]
-    labels_mask = state["labels_mask"]
-    document_boundaries = state["document_boundaries"]
-    current_position = state["current_position"]
-    num_samples_skipped = state["num_samples_skipped"]
-    per_dataset_counts = state["per_dataset_counts"]
-    per_dataset_tokens = state["per_dataset_tokens"]
-    per_dataset_trainable_tokens = state["per_dataset_trainable_tokens"]
-    per_dataset_filtered = state["per_dataset_filtered"]
+        logger.info(f"  Samples already processed: {start_idx:,}")
+        logger.info(f"  Tokens collected: {len(token_ids):,}")
+        logger.info(f"  Remaining samples: {len(train_dataset) - start_idx:,}")
+    else:
+        if resume:
+            logger.info("No checkpoint found, starting from beginning...")
+        start_idx = 0
+        token_ids = []
+        labels_mask = []
+        document_boundaries = []
+        current_position = 0
+        num_samples_skipped = 0
+        per_dataset_counts = {}
+        per_dataset_tokens = {}
+        per_dataset_trainable_tokens = {}
+        per_dataset_filtered = {}
 
     logger.info("Collecting tokens from dataset...")
     sample: Mapping[str, Any]
