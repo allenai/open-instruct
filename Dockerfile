@@ -72,14 +72,6 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
-# ring-flash-attn 0.1.8 imports a symbol that was removed in transformers>=5.x
-# via its `adapters` subpackage, breaking `import ring_flash_attn` at package
-# init. olmo-core only uses the top-level ring_flash_attn kernels, not the HF
-# adapter, so wrap the adapters import in try/except to keep the package
-# importable.
-COPY scripts/docker/patch_ring_flash_attn.py /tmp/patch_ring_flash_attn.py
-RUN /stage/.venv/bin/python /tmp/patch_ring_flash_attn.py
-
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts

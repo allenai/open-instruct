@@ -50,7 +50,7 @@ uv run python mason.py \
     --ac_mode selected_modules \
     --ac_modules "blocks.*.feed_forward" \
     --cp_degree 2 \
-    --cp_strategy llama3 \
+    --cp_strategy ulysses \
     --attn_implementation flash_2 \
     --compile_model true \
     --checkpointing_steps 1000 \
