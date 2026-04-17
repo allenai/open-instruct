@@ -638,9 +638,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # For hybrid models (e.g. Qwen3.5) with linear-attention (GatedDeltaNet) layers, the
-    # packing patch is always needed so that the causal conv and SSM respect sequence
-    # boundaries in packed batches.  Under SP it also passes recurrent state across ranks.
     _conv_kernel_size = getattr(model.config, "linear_conv_kernel_dim", None) or getattr(
         getattr(model.config, "text_config", None), "linear_conv_kernel_dim", None
     )
@@ -648,6 +645,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     _is_hybrid_sp = _is_hybrid and args.sequence_parallel_size > 1
     if _is_hybrid:
         patch_qwen3_5_packing()
+    _sp_group = accelerator.torch_device_mesh["sp"].get_group() if args.sequence_parallel_size > 1 else None
 
     # DataLoaders creation:
     if args.packing and args.sequence_parallel_size > 1:
@@ -833,45 +831,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens += pred_tokens_in_batch
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
-            # Build packing/SP kwargs for hybrid models (e.g. Qwen3.5) so that the
-            # GatedDeltaNet causal conv and SSM respect sequence boundaries in packed
-            # batches and correctly pass recurrent state across SP rank boundaries.
             fwd_extra: dict = {}
             if _is_hybrid_sp:
-                # SP: all-gather local position_ids to reconstruct global layout, then
-                # build an FLACPContext that communicates SSM state across ranks.
-                sp_group = accelerator.torch_device_mesh["sp"].get_group()
-                if "position_ids" in batch:
-                    local_pos = batch["position_ids"]
-                else:
-                    local_len = batch["input_ids"].shape[1]
-                    local_pos = (
-                        torch.arange(local_len, device=batch["input_ids"].device)
-                        .unsqueeze(0)
-                        .expand(batch["input_ids"].shape[0], -1)
-                    )
+                local_pos = batch.get("position_ids") or (
+                    torch.arange(batch["input_ids"].shape[1], device=batch["input_ids"].device)
+                    .unsqueeze(0)
+                    .expand(batch["input_ids"].shape[0], -1)
+                )
                 local_pos_row = local_pos[0:1].contiguous()
                 gathered = [torch.zeros_like(local_pos_row) for _ in range(args.sequence_parallel_size)]
-                torch.distributed.all_gather(gathered, local_pos_row, group=sp_group)
+                torch.distributed.all_gather(gathered, local_pos_row, group=_sp_group)
                 global_pos = torch.cat(gathered, dim=1)
                 fwd_extra["cp_context"] = build_fla_cp_context_for_sample(
                     global_position_ids=global_pos,
                     sp_world_size=args.sequence_parallel_size,
-                    sp_group=sp_group,
+                    sp_group=_sp_group,
                     conv_kernel_size=_conv_kernel_size,
                     local_seq_len=local_pos.shape[1],
                 )
-            elif _is_hybrid and "position_ids" in batch:
-                # Non-SP packing: pass cu_seqlens so the SSM chunk kernel resets state
-                # at each packed sub-sequence boundary (conv already uses seq_idx from
-                # the collator; cp_context handles both under SP above).
-                local_pos = batch["position_ids"]
-                if (local_pos.diff(dim=-1) < 0).any():
-                    seq_len = local_pos.shape[1]
-                    starts = torch.where(local_pos[0] == 0)[0].to(torch.int32)
-                    fwd_extra["cu_seqlens"] = torch.cat(
-                        [starts, torch.tensor([seq_len], dtype=torch.int32, device=local_pos.device)]
-                    )
+            elif _is_hybrid and args.packing:
+                fwd_extra["cu_seqlens"] = batch["cu_seqlens"]
 
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
@@ -884,12 +863,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 del outputs
 
                 if args.sequence_parallel_size > 1:
-                    sp_group = accelerator.torch_device_mesh["sp"].get_group()
-                    losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
+                    losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=_sp_group)
                     labels_for_counting = batch["shift_labels"]
                     good_tokens = (labels_for_counting != -100).view(-1).sum().float()
                     good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
-                        good_tokens.unsqueeze(0), group=sp_group
+                        good_tokens.unsqueeze(0), group=_sp_group
                     )
                     total_loss_sp = sum(
                         losses_per_rank[rank] * good_tokens_per_rank[rank]
