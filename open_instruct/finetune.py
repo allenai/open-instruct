@@ -849,8 +849,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     conv_kernel_size=_conv_kernel_size,
                     local_seq_len=local_pos.shape[1],
                 )
-            elif _is_hybrid and args.packing:
-                fwd_extra["cu_seqlens"] = batch["cu_seqlens"]
 
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
