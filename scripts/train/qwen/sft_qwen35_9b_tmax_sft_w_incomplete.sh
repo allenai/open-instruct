@@ -27,7 +27,6 @@ uv run python mason.py \
     --exp_name qwen35_9b_tmax_sft_w_incomplete \
     --model_name_or_path $MODEL \
     --tokenizer_name $MODEL \
-    --use_flash_attn \
     --use_liger_kernel \
     --max_seq_length 32768 \
     --sequence_parallel_size 2 \
