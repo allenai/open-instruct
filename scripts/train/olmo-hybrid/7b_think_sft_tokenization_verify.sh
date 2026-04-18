@@ -37,7 +37,7 @@ uv run python mason.py \
   --priority urgent \
   --description "7B hybrid SFT tokenization byte-for-byte verify" \
   --no_auto_dataset_cache \
-  -- uv run huggingface-cli download $TOKENIZER --local-dir $tokenizer_path \&\& uv run python scripts/data/convert_sft_data_for_olmocore.py \
+  -- uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('$TOKENIZER', local_dir='$tokenizer_path')" \&\& uv run python scripts/data/convert_sft_data_for_olmocore.py \
       --dataset_mixer_list \
          allenai/Dolci-Think-SFT-32B 1.0 \
          allenai/olmo-toolu-sft-mix-T2-S2-f2-bfclv3-decontaminated-200K-thinking-id-fixed 3.0 \
