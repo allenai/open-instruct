@@ -3,6 +3,9 @@
 set -euo pipefail
 
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+PRIORITY="${PRIORITY:-high}"
+WORKSPACE="${WORKSPACE:-ai2/oe-adapt-code}"
+CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres ai2/saturn}"
 
 EXP="${EXP:-}"
 EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${EXP}}"
@@ -11,9 +14,9 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 NUM_GPUS="${NUM_GPUS:-8}"
 
 uv run python mason.py \
-    --cluster ai2/jupiter ai2/ceres ai2/saturn \
-    --workspace ai2/oe-adapt-code \
-    --priority high \
+    --cluster $CLUSTER \
+    --workspace ${WORKSPACE} \
+    --priority ${PRIORITY} \
     --preemptible \
     --pure_docker_mode \
     --budget ai2/oe-adapt \
@@ -41,9 +44,9 @@ uv run python mason.py \
     --learning_rate 5e-7 \
     --lr_scheduler_type constant \
     --per_device_train_batch_size 1 \
-    --dataset_mixer_list mnoukhov/manufactoria-qwen3-4b-instruct-pass128 1.0 \
+    --dataset_mixer_list mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list mnoukhov/manufactoria-qwen3-4b-instruct-pass128 50 \
+    --dataset_mixer_eval_list mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 50 \
     --dataset_mixer_eval_list_splits test \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
@@ -55,8 +58,8 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 6 \
+    --vllm_num_engines 2 \
     --clip_higher 0.28 \
     --seed 1 \
     --local_eval_every 25 \

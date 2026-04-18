@@ -54,6 +54,7 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
+MAX_PENDING_NEVER_GIVE_UP_STEP_AGE = 8
 
 
 @dataclass
@@ -62,6 +63,10 @@ class NeverGiveUpAccumulationState:
 
     pending_results: dict[str, list[data_types.GenerationResult]] = field(default_factory=dict)
     pending_metrics: dict[str, list[dict[str, Any] | None]] = field(default_factory=dict)
+    pending_best_reward: dict[str, float] = field(default_factory=dict)
+    pending_response_counts: dict[str, int] = field(default_factory=dict)
+    pending_reward_sums: dict[str, float] = field(default_factory=dict)
+    pending_last_model_step: dict[str, int | None] = field(default_factory=dict)
 
 
 def _sanitize_metric_name(name: str) -> str:
@@ -177,6 +182,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._automatic_reshuffle = automatic_reshuffle
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
+        self._epoch_excluded_indices: set[int] = set()
         self._overflow: list[dict[str, Any]] = []
         self._precomputed_batch_sizes: list[int] | None = None
         self._num_padding_batches: int = 0
@@ -219,7 +225,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 examples = []
                 for i in range(offset, offset + batch_size):
                     example = self.dataset[i]
+                    if example["index"] in self._excluded_indices or example["index"] in self._epoch_excluded_indices:
+                        continue
                     examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                if not examples:
+                    offset += batch_size
+                    continue
                 batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
                 offset += batch_size
                 yield batch
@@ -229,6 +240,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
             example = self.dataset[i]
+            if example["index"] in self._excluded_indices or example["index"] in self._epoch_excluded_indices:
+                continue
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
                 all_examples = self._overflow + batch_examples
@@ -257,25 +270,29 @@ class HFDataLoader(data_loader.DataLoaderBase):
             "epoch": self._epoch,
             "batches_processed": self.batches_processed,
             "excluded_indices": list(self._excluded_indices),
+            "epoch_excluded_indices": list(self._epoch_excluded_indices),
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load a state dictionary to restore the data loader's state."""
         self._excluded_indices = set(state_dict.get("excluded_indices", []))
-        # Set epoch to one less than target since reshuffle() increments it
-        self._epoch = state_dict["epoch"] - 1
-        self.reshuffle()
-        assert self._epoch == state_dict["epoch"]
+        self._epoch_excluded_indices = set(state_dict.get("epoch_excluded_indices", []))
+        self._epoch = state_dict["epoch"]
+        self._reshard(self._epoch, include_epoch_excluded_indices=True)
         self.batches_processed = state_dict["batches_processed"]
         self._current_iter = None
 
-    def exclude_index(self, index: int) -> None:
+    def exclude_index(self, index: int, persist: bool = False) -> None:
         """Exclude a dataset index from future iterations.
 
         Args:
             index: The index to exclude.
+            persist: If True, exclude the index across future epochs. Otherwise,
+                only exclude it for the current epoch.
         """
-        self._excluded_indices.add(index)
+        self._epoch_excluded_indices.add(index)
+        if persist:
+            self._excluded_indices.add(index)
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle and reshard the dataset for a new epoch.
@@ -286,9 +303,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
+        self._epoch_excluded_indices = set()
         self._reshard(self._epoch)
 
-    def _reshard(self, epoch: int) -> None:
+    def _reshard(self, epoch: int, include_epoch_excluded_indices: bool = False) -> None:
         """Reshard the dataset for a given epoch.
 
         Uses index-based shuffling to avoid copying the dataset.
@@ -297,8 +315,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         generator.manual_seed(self.seed + epoch)
         dataset_len = len(self._full_dataset)
         all_indices = torch.randperm(dataset_len, generator=generator).numpy()
-        if self._excluded_indices:
-            mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
+        active_excluded_indices = set(self._excluded_indices)
+        if include_epoch_excluded_indices:
+            active_excluded_indices |= self._epoch_excluded_indices
+        if active_excluded_indices:
+            mask = np.isin(all_indices, list(active_excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
         packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
@@ -442,14 +463,17 @@ class StreamingDataLoaderConfig:
     async_steps: int = 8
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
+    num_response_tokens_rollout: int | None = None
 
     # GRPO sampling/filtering
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
-    maintain_pending_never_give_up_between_calls: bool = True
+    maintain_pending_ngu_completions: bool = False
+    maintain_pending_ngu_counts: bool = True
     no_resampling_pass_rate: float | None = None
+    no_resampling_persist: bool = True
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
@@ -550,11 +574,11 @@ class StreamingDataLoaderConfig:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
 
         if self.active_sampling:
-            assert self.async_steps > 1, (
-                "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
-                "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
-                "prompt will cause the trainer to stall waiting for more data  . "
-            )
+            # assert self.async_steps > 1, (
+            #     "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
+            #     "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
+            #     "prompt will cause the trainer to stall waiting for more data  . "
+            # )
             assert self.filter_zero_std_samples, (
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
@@ -569,6 +593,11 @@ class StreamingDataLoaderConfig:
             raise ValueError(
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
+        if self.num_response_tokens_rollout is not None and self.num_response_tokens_rollout <= 0:
+            raise ValueError(
+                "`num_response_tokens_rollout` must be greater than 0 when provided, "
+                f"got {self.num_response_tokens_rollout}."
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
@@ -709,6 +738,7 @@ class BatchStatistics:
 
     prompt_lengths: list[int]
     response_lengths: list[int]
+    generated_completions: int
     filtered_prompts: int
     filtered_prompts_zero: int
     filtered_prompts_solved: int
@@ -717,6 +747,8 @@ class BatchStatistics:
     percent_solved_hist: np.ndarray
     prompt_indices: list[int]
     prompt_sample_counts: list[int]
+    prompt_baseline_sample_counts: list[int]
+    prompt_baseline_reward_sums: list[float]
     prompt_datasets: list[str]
     filtered_prompt_datasets: list[str]
     filtered_prompt_datasets_zero: list[str]
@@ -1172,21 +1204,55 @@ def merge_generation_results(
     return merged_result, combined_reward_metrics
 
 
-def expand_grouped_scores(scores: np.ndarray, prompt_sample_counts: list[int]) -> tuple[np.ndarray, np.ndarray]:
+def expand_grouped_scores(
+    scores: np.ndarray,
+    prompt_sample_counts: list[int],
+    prompt_baseline_sample_counts: list[int] | None = None,
+    prompt_baseline_reward_sums: list[float] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Expand per-group means/stds back to per-sample arrays for advantage normalization."""
     if sum(prompt_sample_counts) != len(scores):
         raise ValueError(
             "Mismatch between prompt_sample_counts and scores: "
             f"{sum(prompt_sample_counts)} grouped samples vs {len(scores)} scores."
         )
+    if prompt_baseline_sample_counts is None:
+        prompt_baseline_sample_counts = prompt_sample_counts
+    if prompt_baseline_reward_sums is None:
+        prompt_baseline_reward_sums = []
+        start = 0
+        for sample_count in prompt_sample_counts:
+            group_scores = scores[start : start + sample_count]
+            prompt_baseline_reward_sums.append(float(group_scores.sum()))
+            start += sample_count
+    if len(prompt_sample_counts) != len(prompt_baseline_sample_counts):
+        raise ValueError(
+            "Mismatch between prompt_sample_counts and prompt_baseline_sample_counts: "
+            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_sample_counts)}."
+        )
+    if len(prompt_sample_counts) != len(prompt_baseline_reward_sums):
+        raise ValueError(
+            "Mismatch between prompt_sample_counts and prompt_baseline_reward_sums: "
+            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_reward_sums)}."
+        )
 
     mean_grouped_rewards = []
     std_grouped_rewards = []
     start = 0
-    for sample_count in prompt_sample_counts:
+    for sample_count, baseline_sample_count, baseline_reward_sum in zip(
+        prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums, strict=True
+    ):
         group_scores = scores[start : start + sample_count]
-        mean_grouped_rewards.append(np.full(sample_count, group_scores.mean(), dtype=scores.dtype))
-        std_grouped_rewards.append(np.full(sample_count, group_scores.std(), dtype=scores.dtype))
+        if baseline_sample_count < sample_count:
+            raise ValueError(
+                "Each prompt_baseline_sample_count must be >= its prompt_sample_count, got "
+                f"{baseline_sample_count} < {sample_count}."
+            )
+        group_mean = baseline_reward_sum / baseline_sample_count
+        centered_sum_squares = float(np.square(group_scores - group_mean).sum())
+        group_std = np.sqrt(centered_sum_squares / baseline_sample_count)
+        mean_grouped_rewards.append(np.full(sample_count, group_mean, dtype=scores.dtype))
+        std_grouped_rewards.append(np.full(sample_count, group_std, dtype=scores.dtype))
         start += sample_count
 
     return np.concatenate(mean_grouped_rewards), np.concatenate(std_grouped_rewards)
@@ -1199,6 +1265,7 @@ def accumulate_inference_batches(
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
+    num_tokens: int | None = None,
     dataset_index_map: dict[int, int] | None = None,
     prompt_test_index_map: dict[int, list[int]] | None = None,
     prompt_test_difficulty_map: dict[int, list[int]] | None = None,
@@ -1211,6 +1278,7 @@ def accumulate_inference_batches(
     never_give_up: float = 0.0,
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
+    no_resampling_persist: bool = True,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
@@ -1222,6 +1290,8 @@ def accumulate_inference_batches(
     progress_callback: Callable[[int, int], None] | None = None,
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
     never_give_up_state_lock: Any = None,
+    maintain_pending_ngu_completions: bool = False,
+    maintain_pending_ngu_counts: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1253,6 +1323,8 @@ def accumulate_inference_batches(
     all_percent_solved = []
     all_prompt_indices = []
     all_prompt_sample_counts = []
+    all_prompt_baseline_sample_counts = []
+    all_prompt_baseline_reward_sums = []
     all_prompt_datasets = []
     all_test_prompt_indices = []
     all_test_indices = []
@@ -1271,9 +1343,13 @@ def accumulate_inference_batches(
     filtered_prompt_datasets_nonzero = []
     completions_used_by_dataset: dict[str, int] = {}
     given_up_prompts_by_dataset: dict[str, int] = {}
-    progress_bar = tqdm(total=num_prompts, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
+    target_is_tokens = num_tokens is not None
+    target_total = num_tokens if num_tokens is not None else num_prompts
+    target_label = "response tokens" if target_is_tokens else "prompts"
+    progress_bar = tqdm(total=target_total, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
     logger.info(
-        f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
+        f"[accumulate_inference_batches] Starting to accumulate {target_total} {target_label}, "
+        f"training_step={training_step}"
     )
     max_prompts_to_sample = (
         None
@@ -1281,25 +1357,93 @@ def accumulate_inference_batches(
         else active_sampling_max_samples_multiplier * num_prompts
     )
     num_prompts_sampled = 0
+    num_tokens_sampled = 0
     prompts_consumed = 0
+    total_generated_completions = 0
     collected_results = []  # Track results for potential requeue on timeout
     if never_give_up_state is None:
         never_give_up_state = NeverGiveUpAccumulationState()
     pending_never_give_up_results = never_give_up_state.pending_results
     pending_never_give_up_metrics = never_give_up_state.pending_metrics
+    pending_never_give_up_best_reward = never_give_up_state.pending_best_reward
+    pending_never_give_up_response_counts = never_give_up_state.pending_response_counts
+    pending_never_give_up_reward_sums = never_give_up_state.pending_reward_sums
+    pending_never_give_up_last_model_step = never_give_up_state.pending_last_model_step
 
-    def pop_pending_state(chain_id: str) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None]]:
+    def pop_pending_state(
+        chain_id: str, current_model_step: int | None
+    ) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None], float | None, int, float]:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
-            return pending_never_give_up_results.pop(chain_id, []), pending_never_give_up_metrics.pop(chain_id, [])
+            pending_results = pending_never_give_up_results.pop(chain_id, [])
+            pending_metrics = pending_never_give_up_metrics.pop(chain_id, [])
+            pending_best_reward = pending_never_give_up_best_reward.pop(chain_id, None)
+            pending_response_count = pending_never_give_up_response_counts.pop(chain_id, 0)
+            pending_reward_sum = pending_never_give_up_reward_sums.pop(chain_id, 0.0)
+            pending_last_model_step = pending_never_give_up_last_model_step.pop(chain_id, None)
+
+        if current_model_step is None:
+            return pending_results, pending_metrics, pending_best_reward, pending_response_count, pending_reward_sum
+
+        if (
+            pending_last_model_step is not None
+            and current_model_step - pending_last_model_step > MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
+        ):
+            return [], [], None, 0, 0.0
+
+        filtered_pending: list[tuple[data_types.GenerationResult, dict[str, Any] | None]] = []
+        for pending_result, pending_metric in zip(pending_results, pending_metrics, strict=False):
+            pending_model_step = pending_result.model_step
+            if (
+                pending_model_step is None
+                or current_model_step - pending_model_step <= MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
+            ):
+                filtered_pending.append((pending_result, pending_metric))
+
+        if not filtered_pending:
+            return [], [], None, pending_response_count, pending_reward_sum
+
+        filtered_results = [pending_result for pending_result, _ in filtered_pending]
+        filtered_metrics = [pending_metric for _, pending_metric in filtered_pending]
+        filtered_best_reward = max(
+            max(pending_result.reward_scores)
+            for pending_result in filtered_results
+            if pending_result.reward_scores is not None
+        )
+        return filtered_results, filtered_metrics, filtered_best_reward, pending_response_count, pending_reward_sum
 
     def store_pending_state(
-        chain_id: str, pending_results: list[data_types.GenerationResult], pending_metrics: list[dict[str, Any] | None]
+        chain_id: str,
+        pending_results: list[data_types.GenerationResult],
+        pending_metrics: list[dict[str, Any] | None],
+        best_reward: float,
+        pending_response_count: int,
+        pending_reward_sum: float,
+        model_step: int | None,
     ) -> None:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
-            pending_never_give_up_results[chain_id] = pending_results
-            pending_never_give_up_metrics[chain_id] = pending_metrics
+            if pending_results:
+                pending_never_give_up_results[chain_id] = pending_results
+                pending_never_give_up_metrics[chain_id] = pending_metrics
+            else:
+                pending_never_give_up_results.pop(chain_id, None)
+                pending_never_give_up_metrics.pop(chain_id, None)
+
+            pending_never_give_up_best_reward[chain_id] = best_reward
+            pending_never_give_up_response_counts[chain_id] = pending_response_count
+            pending_never_give_up_reward_sums[chain_id] = pending_reward_sum
+            pending_never_give_up_last_model_step[chain_id] = model_step
+
+    def clear_pending_state(chain_id: str) -> None:
+        lock = never_give_up_state_lock or contextlib.nullcontext()
+        with lock:
+            pending_never_give_up_results.pop(chain_id, None)
+            pending_never_give_up_metrics.pop(chain_id, None)
+            pending_never_give_up_best_reward.pop(chain_id, None)
+            pending_never_give_up_response_counts.pop(chain_id, None)
+            pending_never_give_up_reward_sums.pop(chain_id, None)
+            pending_never_give_up_last_model_step.pop(chain_id, None)
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
@@ -1319,7 +1463,12 @@ def accumulate_inference_batches(
             filtered_prompt_nonzero += 1
             filtered_prompt_datasets_nonzero.append(dataset_key)
 
-    while num_prompts_sampled < num_prompts and (
+    def count_pending_completion_samples(
+        pending_results: list[data_types.GenerationResult], pending_response_count: int
+    ) -> int:
+        return pending_response_count + sum(len(pending_result.responses) for pending_result in pending_results)
+
+    while (num_tokens_sampled < target_total if target_is_tokens else num_prompts_sampled < target_total) and (
         max_prompts_to_sample is None or prompts_consumed < max_prompts_to_sample
     ):
         try:
@@ -1327,7 +1476,8 @@ def accumulate_inference_batches(
         except Empty:
             if requeue_on_timeout and collected_results:
                 logger.info(
-                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                    f"[accumulate_inference_batches] Timeout with {len(collected_results)} collected results "
+                    f"while targeting {target_total} {target_label}, requeuing"
                 )
                 for r in collected_results:
                     inference_results_Q.put(r)
@@ -1347,6 +1497,7 @@ def accumulate_inference_batches(
         assert result.index is not None
         assert result.prompt_id is not None
         prompts_consumed += 1
+        total_generated_completions += len(result.responses)
 
         dataset_position = dataset_index_map[result.index]
         example = dataset[dataset_position]
@@ -1372,12 +1523,21 @@ def accumulate_inference_batches(
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
         chain_id = get_never_give_up_chain_id(result.prompt_id)
-        pending_results, pending_metrics = pop_pending_state(chain_id)
+        (pending_results, pending_metrics, pending_best_reward, pending_response_count, pending_reward_sum) = (
+            pop_pending_state(chain_id, result.model_step)
+        )
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
+        current_reward = float(reward_scores.max())
+        best_reward = current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
         requeue_same_prompt = False
-        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
-            requeue_same_prompt = result.reward_scores[0] < max_possible_score and np.random.random() < never_give_up
+        filter_zero_std_prompt = filter_zero_std_samples and np.std(result.reward_scores) == 0
+        if filter_zero_std_prompt and pending_best_reward is not None and current_reward > pending_best_reward:
+            filter_zero_std_prompt = False
+        elif filter_zero_std_prompt:
+            requeue_same_prompt = best_reward < max_possible_score and np.random.random() < never_give_up
+
+        if filter_zero_std_prompt:
             if replenish_prompts:
                 assert param_prompt_Q is not None
                 replacement_example = example
@@ -1399,20 +1559,38 @@ def accumulate_inference_batches(
                     prompt_id_suffix=prompt_id_suffix,
                 )
             if requeue_same_prompt and chain_id is not None and active_sampling:
-                pending_results.append(result)
-                pending_metrics.append(result.reward_metrics)
-                store_pending_state(chain_id, pending_results, pending_metrics)
+                if maintain_pending_ngu_completions:
+                    pending_results.append(result)
+                    pending_metrics.append(result.reward_metrics)
+                elif maintain_pending_ngu_counts:
+                    pending_response_count += len(result.responses)
+                    pending_reward_sum += float(reward_scores.sum())
+                if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
+                    store_pending_state(
+                        chain_id,
+                        pending_results,
+                        pending_metrics,
+                        best_reward,
+                        pending_response_count,
+                        pending_reward_sum,
+                        result.model_step,
+                    )
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
-            if not active_sampling:
+            if not active_sampling and not target_is_tokens:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
                 if progress_callback is not None:
-                    progress_callback(num_prompts_sampled, num_prompts)
-            if result.reward_scores[0] == 0:
+                    progress_callback(num_prompts_sampled, target_total)
+            if chain_id is not None:
+                clear_pending_state(chain_id)
+            give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
+                result.responses
+            )
+            if give_up_count > 0:
                 given_up_prompts_by_dataset[prompt_dataset_key] = (
-                    given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + len(pending_results) + 1
+                    given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
                 )
             for pending_result in pending_results:
                 record_filtered_prompt(pending_result, prompt_dataset_key)
@@ -1434,10 +1612,6 @@ def accumulate_inference_batches(
                     is_eval=False,
                     base_env_config=base_env_config,
                 )
-            num_prompts_sampled += 1
-            progress_bar.update(1)
-            if progress_callback is not None:
-                progress_callback(num_prompts_sampled, num_prompts)
 
         if pending_results:
             pending_results.append(result)
@@ -1454,6 +1628,21 @@ def accumulate_inference_batches(
         else:
             merged_reward_metrics = result.reward_metrics
             sample_count = generation_config.n
+
+        baseline_sample_count = pending_response_count + sample_count
+        baseline_reward_sum = pending_reward_sum + float(reward_scores.sum())
+
+        accepted_response_tokens = sum(len(response) for response in result.responses)
+        if target_is_tokens:
+            num_tokens_sampled += accepted_response_tokens
+            progress_bar.update(accepted_response_tokens)
+            if progress_callback is not None:
+                progress_callback(num_tokens_sampled, target_total)
+        else:
+            num_prompts_sampled += 1
+            progress_bar.update(1)
+            if progress_callback is not None:
+                progress_callback(num_prompts_sampled, target_total)
 
         completions_used_by_dataset[prompt_dataset_key] = (
             completions_used_by_dataset.get(prompt_dataset_key, 0) + sample_count
@@ -1496,7 +1685,7 @@ def accumulate_inference_batches(
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
             assert result.index is not None
-            iter_dataloader.exclude_index(result.index)
+            iter_dataloader.exclude_index(result.index, persist=no_resampling_persist)
             total_no_resampled += 1
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
@@ -1514,19 +1703,22 @@ def accumulate_inference_batches(
         all_percent_solved.append(percent_solved)
         all_prompt_indices.append(result.index)
         all_prompt_sample_counts.append(sample_count)
+        all_prompt_baseline_sample_counts.append(baseline_sample_count)
+        all_prompt_baseline_reward_sums.append(baseline_reward_sum)
         all_prompt_datasets.append(prompt_dataset_key)
         accepted_prompt_lengths.append(len(query))
         if result.model_step is not None:
             all_model_steps.append(result.model_step)
 
-    if num_prompts_sampled < num_prompts:
+    if num_tokens_sampled < target_total if target_is_tokens else num_prompts_sampled < target_total:
         cap = max_prompts_to_sample if max_prompts_to_sample is not None else "no cap"
         logger.warning(
-            "[accumulate_inference_batches] Incomplete batch: accepted %s/%s prompts after consuming %s "
+            "[accumulate_inference_batches] Incomplete batch: accepted %s/%s %s after consuming %s "
             "generation(s) (max consumable before stop: %s). With active sampling, each filtered prompt still "
             "counts toward that cap — increase `active_sampling_max_samples_multiplier` if you need a full batch.",
-            num_prompts_sampled,
-            num_prompts,
+            num_tokens_sampled if target_is_tokens else num_prompts_sampled,
+            target_total,
+            target_label,
             prompts_consumed,
             cap,
         )
@@ -1643,6 +1835,7 @@ def accumulate_inference_batches(
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
+        generated_completions=total_generated_completions,
         filtered_prompts=total_filtered_prompts,
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
@@ -1651,6 +1844,8 @@ def accumulate_inference_batches(
         percent_solved_hist=np.array(all_percent_solved),
         prompt_indices=all_prompt_indices,
         prompt_sample_counts=all_prompt_sample_counts,
+        prompt_baseline_sample_counts=all_prompt_baseline_sample_counts,
+        prompt_baseline_reward_sums=all_prompt_baseline_reward_sums,
         prompt_datasets=all_prompt_datasets,
         filtered_prompt_datasets=filtered_prompt_datasets,
         filtered_prompt_datasets_zero=filtered_prompt_datasets_zero,
@@ -1834,14 +2029,12 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
-        self.never_give_up_state = (
-            NeverGiveUpAccumulationState() if self.config.maintain_pending_never_give_up_between_calls else None
-        )
+        self.never_give_up_state = NeverGiveUpAccumulationState()
 
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
             self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
-            if self.never_give_up_state is not None and "never_give_up_state" in initial_state:
+            if "never_give_up_state" in initial_state:
                 with self.never_give_up_state_lock:
                     self.never_give_up_state = copy.deepcopy(initial_state["never_give_up_state"])
             logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
@@ -1888,8 +2081,13 @@ class DataPreparationActor:
                 else time.perf_counter() - generation_idle_wait_start_time
             )
 
+            rollout_target = (
+                f"{self.config.num_response_tokens_rollout} response tokens"
+                if self.config.num_response_tokens_rollout is not None
+                else f"{self.global_batch_size} prompts"
+            )
             logger.info(
-                f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
+                f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {rollout_target}"
             )
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
@@ -1898,6 +2096,7 @@ class DataPreparationActor:
                 model_dims=self.model_dims,
                 tokenizer=self.tokenizer,
                 dataset=self.dataset,
+                num_tokens=self.config.num_response_tokens_rollout,
                 dataset_index_map=self.dataset_index_map,
                 prompt_test_index_map=self.prompt_test_index_map,
                 prompt_test_difficulty_map=self.prompt_test_difficulty_map,
@@ -1908,6 +2107,7 @@ class DataPreparationActor:
                 never_give_up=self.config.never_give_up,
                 replenish_prompts=True,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
+                no_resampling_persist=self.config.no_resampling_persist,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
                 training_step=step,
@@ -1918,6 +2118,8 @@ class DataPreparationActor:
                 show_progress_bar=True,
                 never_give_up_state=self.never_give_up_state,
                 never_give_up_state_lock=self.never_give_up_state_lock,
+                maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
+                maintain_pending_ngu_counts=self.config.maintain_pending_ngu_counts,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1940,14 +2142,24 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                    self.metrics[step] = {
+                        "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                        "batch/prompt_lengths": np.array([], dtype=np.int32),
+                        "batch/response_lengths": np.array([], dtype=np.int32),
+                        "batch/prompt_sample_counts": np.array([], dtype=np.int32),
+                    }
                     self.current_prepared_step = step
                 continue
 
             assert batch is not None
             assert batch_stats is not None
             scores = np.array(batch.scores)
-            mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(scores, batch_stats.prompt_sample_counts)
+            mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
+                scores,
+                batch_stats.prompt_sample_counts,
+                batch_stats.prompt_baseline_sample_counts,
+                batch_stats.prompt_baseline_reward_sums,
+            )
 
             if self.config.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
@@ -2012,12 +2224,23 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
+                    "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
+                    "batch/prompt_sample_counts": np.array(batch_stats.prompt_sample_counts, dtype=np.int32),
+                }
             else:
                 real_num_responses = len(result.responses)
-                expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
+                expected_num_responses = (
+                    self.config.num_samples_per_prompt_rollout * self.global_batch_size
+                    if self.config.num_response_tokens_rollout is None
+                    else None
+                )
+                expected_num_response_tokens = self.config.num_response_tokens_rollout
                 unsolved_num_responses = (scores < self.config.max_possible_score).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
+                real_num_response_tokens = int(sequence_lengths.sum())
                 sequence_length_solved = (
                     np.array([])
                     if np.all(scores == 0)
@@ -2058,8 +2281,10 @@ class DataPreparationActor:
 
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
+                    "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
+                    "batch/prompt_sample_counts": prompt_sample_counts,
                     "scores": scores.mean(),
-                    "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                     "val/solve_rate_hist": batch_stats.percent_solved_hist,
@@ -2085,6 +2310,10 @@ class DataPreparationActor:
                     **reward_metrics,
                     **batch_metrics,
                 }
+                if expected_num_responses is not None:
+                    step_metrics["real_batch_size_ratio"] = real_num_responses / expected_num_responses
+                if expected_num_response_tokens is not None:
+                    step_metrics["real_token_size_ratio"] = real_num_response_tokens / expected_num_response_tokens
                 step_metrics.update(
                     compute_prompt_solve_rate_metrics(
                         batch_stats=batch_stats,
@@ -2164,14 +2393,13 @@ class DataPreparationActor:
             "training_step": self.current_prepared_step + 1,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
-        if self.never_give_up_state is not None:
-            with self.never_give_up_state_lock:
-                state["never_give_up_state"] = copy.deepcopy(self.never_give_up_state)
+        with self.never_give_up_state_lock:
+            state["never_give_up_state"] = copy.deepcopy(self.never_give_up_state)
         return state
 
     def set_state(self, state: dict):
         self.training_step = state["training_step"]
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
-        if self.never_give_up_state is not None and "never_give_up_state" in state:
+        if "never_give_up_state" in state:
             with self.never_give_up_state_lock:
                 self.never_give_up_state = copy.deepcopy(state["never_give_up_state"])

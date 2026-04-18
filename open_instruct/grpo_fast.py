@@ -459,7 +459,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
-    def broadcast_to_vllm(self):
+    def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
@@ -469,6 +469,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            model_step=model_step,
             gather_whole_model=self.args.gather_whole_model,
         )
 
@@ -537,7 +538,16 @@ class PolicyTrainerRayProcess(RayProcess):
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
-            return [], {}
+            empty_metrics = {"batch/trained_completions": 0, "_token_count": 0.0}
+            array_metrics = {}
+            for key, value in batch_data["metrics"].items():
+                if value is None:
+                    continue
+                if isinstance(value, (int, float, np.floating, np.integer)):
+                    empty_metrics[key] = value
+                else:
+                    array_metrics[key] = value
+            return empty_metrics, array_metrics
 
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
@@ -552,6 +562,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if leftover > 0:
             data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
+        self.local_metrics["batch/trained_completions"] = len(data_BT.query_responses)
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
@@ -1446,7 +1457,7 @@ def create_generation_configs(
 def weight_sync_thread(
     args: grpo_utils.GRPOExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger_event: threading.Event,
+    weight_sync_steps_Q: Queue,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
@@ -1456,15 +1467,13 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+        weight_sync_steps_Q.put(resume_training_step - 1)
 
     while not stop_event.is_set():
-        # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
+        try:
+            target_model_step = weight_sync_steps_Q.get(timeout=1.0)
+        except Empty:
             continue
-
-        # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1475,7 +1484,9 @@ def weight_sync_thread(
 
             # Broadcast weights to vLLM engines
             # First get the futures
-            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            weight_broadcast_futures: list[ray.ObjectRef] = [
+                m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models
+            ]
 
             # Wait for all trainer-side broadcasts to finish and collect timing stats.
             # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
@@ -1601,7 +1612,8 @@ def one_training_step(
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
-    episode: int,
+    train_episode: int,
+    generation_episode: int,
     training_step: int,
     num_total_tokens: int,
     start_time: float,
@@ -1611,7 +1623,7 @@ def one_training_step(
     chat_template_name: str,
     model_dims: utils.ModelDims,
     actor_manager: ActorManager | None = None,
-) -> int:
+) -> tuple[int, int, int]:
     """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
@@ -1622,7 +1634,7 @@ def one_training_step(
         metrics, array_metrics = zip(*results)
         if all(len(m) == 0 for m in metrics):
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return 0
+            return 0, train_episode, generation_episode
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
@@ -1673,33 +1685,49 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = average_metrics["time/getting_response"]
+    total_generation_time = average_metrics.get("time/getting_response")
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     prompt_sample_counts = array_metrics[0].get(
         "batch/prompt_sample_counts", streaming_config.num_samples_per_prompt_rollout
     )
+    generated_episode_increment = int(average_metrics.get("batch/generated_completions", len(response_lengths)))
+    trained_episode_increment = int(average_metrics.get("batch/trained_completions", len(response_lengths)))
+    train_episode += trained_episode_increment
+    generation_episode += generated_episode_increment
+    legacy_episode = (
+        training_step * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    )
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
-    utilization_metrics = utils.calculate_utilization_metrics(
-        model_dims=model_dims,
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        total_generation_time=total_generation_time,
-        samples_per_prompt=prompt_sample_counts,
-        num_engines=vllm_config.vllm_num_engines,
-        num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
-        training_time=train_timer.duration,
-        num_training_gpus=args.world_size,
-    )
+    utilization_metrics = {}
+    if total_generation_time is None:
+        logger.warning(
+            "Missing `time/getting_response` metric at training step %s; skipping actor utilization metrics.",
+            training_step,
+        )
+    else:
+        utilization_metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=total_generation_time,
+            samples_per_prompt=prompt_sample_counts,
+            num_engines=vllm_config.vllm_num_engines,
+            num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
+            training_time=train_timer.duration,
+            num_training_gpus=args.world_size,
+        )
 
     metrics = {
-        "episode": episode,
-        "global_step": episode,
+        "episode": legacy_episode,
+        "global_step": train_episode,
+        "train_episode": train_episode,
+        "generation_episode": generation_episode,
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "val/num_step_tokens": num_step_tokens,
-        "epoch": episode / streaming_config.num_samples_per_prompt_rollout / len(train_dataset),
+        "epoch": train_episode / streaming_config.num_samples_per_prompt_rollout / len(train_dataset),
         "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
         "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
@@ -1738,7 +1766,7 @@ def one_training_step(
                 metrics_to_log[key] = wandb.Histogram(np.asanyarray(value, dtype=np.float64).ravel())
         wandb.log({**metrics_to_log, **table_metrics}, step=training_step)
 
-    return num_step_tokens
+    return num_step_tokens, train_episode, generation_episode
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -1781,13 +1809,15 @@ def maybe_evaluate(
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
-    episode,
+    episode: int,
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
     max_possible_score: float = 1.0,
     base_env_config: EnvConfig | None = None,
     actor_manager=None,
+    generation_episode: int | None = None,
+    legacy_episode: int | None = None,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1798,6 +1828,11 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
     if base_env_config is None:
         base_env_config = EnvConfig()
+    train_episode = episode
+    if generation_episode is None:
+        generation_episode = train_episode
+    if legacy_episode is None:
+        legacy_episode = train_episode
 
     try:
         num_eval_prompts = len(eval_dataset)
@@ -1944,6 +1979,10 @@ def maybe_evaluate(
                 )
 
         eval_metrics = {
+            "episode": legacy_episode if legacy_episode is not None else train_episode,
+            "global_step": train_episode,
+            "train_episode": train_episode,
+            "generation_episode": generation_episode,
             "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
@@ -2140,7 +2179,8 @@ def cleanup_training_resources(
 def run_eval_only_round(
     args: grpo_utils.GRPOExperimentConfig,
     resume_training_step: int,
-    episode: int,
+    train_episode: int,
+    generation_episode: int,
     eval_dataset: Dataset | None,
     eval_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
@@ -2153,7 +2193,7 @@ def run_eval_only_round(
     wandb_url: str,
     actor_manager: ActorManager,
     health_check_fn,
-) -> int:
+) -> tuple[int, int]:
     if eval_dataset is None:
         raise ValueError("`--eval_only` requires a non-empty eval dataset.")
 
@@ -2185,13 +2225,15 @@ def run_eval_only_round(
         eval_step,
         evaluation_inference_results_Q,
         tokenizer,
-        episode,
+        train_episode,
         eval_dataset,
         generation_configs["eval"],
         model_dims,
         max_possible_score,
         base_env_config=base_env_config,
         actor_manager=actor_manager,
+        generation_episode=generation_episode,
+        legacy_episode=train_episode,
     )
     if not eval_collected:
         raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
@@ -2203,7 +2245,7 @@ def run_eval_only_round(
         wandb_url=wandb_url,
         progress_label="eval",
     )
-    return episode
+    return train_episode, generation_episode
 
 
 def run_training(
@@ -2216,7 +2258,8 @@ def run_training(
     vllm_engines,
     generation_configs,
     resume_training_step,
-    episode,
+    train_episode,
+    generation_episode,
     wandb_url,
     tc,
     stop_event,
@@ -2247,12 +2290,12 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
+    weight_sync_steps_Q: Queue[int] = Queue()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger_event,
+        weight_sync_steps_Q,
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
@@ -2340,8 +2383,6 @@ def run_training(
                 )
             eval_data_loader.reset()
 
-        episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-
         data_thread_metrics = {}
         try:
             data_thread_metrics |= weight_sync_metrics_Q.get_nowait()
@@ -2350,13 +2391,14 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
-        num_step_tokens = one_training_step(
+        num_step_tokens, train_episode, generation_episode = one_training_step(
             args,
             streaming_config,
             policy_group,
             tokenizer,
             data_thread_metrics,
-            episode,
+            train_episode,
+            generation_episode,
             training_step,
             num_total_tokens,
             start_time,
@@ -2381,7 +2423,9 @@ def run_training(
                 # Save comprehensive client state including dataloader state
                 client_state = {
                     "training_step": training_step,
-                    "episode": episode,
+                    "episode": train_episode,
+                    "train_episode": train_episode,
+                    "generation_episode": generation_episode,
                     "num_total_tokens": num_total_tokens,
                 }
 
@@ -2402,20 +2446,26 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
+        weight_sync_steps_Q.put(training_step)
 
         last_eval_collected = maybe_evaluate(
             args,
             training_step,
             evaluation_inference_results_Q,
             tokenizer,
-            episode,
+            train_episode,
             eval_dataset,
             generation_configs["eval"],
             model_dims,
             streaming_config.max_possible_score,
             base_env_config,
             actor_manager,
+            generation_episode=generation_episode,
+            legacy_episode=(
+                training_step
+                * streaming_config.num_unique_prompts_rollout
+                * streaming_config.num_samples_per_prompt_rollout
+            ),
         )
 
         maybe_update_beaker_description(
@@ -2429,6 +2479,7 @@ def run_training(
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+    return train_episode, generation_episode
 
 
 def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
@@ -2681,33 +2732,41 @@ def main(
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
     base_env_config = build_base_env_config(tools_config, pools)
-    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            prompt_Q,
-            eval_prompt_Q,
-            evaluation_inference_results_Q,
-            streaming_config,
-            vllm_config,
-            train_dataset,
-            eval_dataset,
-            reward_config,
-            generation_configs["train"],
-            base_env_config,
-            data_prep_actor_state,
-            tool_definitions,
-            tools_config,
-            pools,
-            tool_stop_sequences,
-            eval_only=args.eval_only,
-        )
+    (
+        policy_group,
+        vllm_engines,
+        resume_training_step,
+        initial_episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+    ) = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        prompt_Q,
+        eval_prompt_Q,
+        evaluation_inference_results_Q,
+        streaming_config,
+        vllm_config,
+        train_dataset,
+        eval_dataset,
+        reward_config,
+        generation_configs["train"],
+        base_env_config,
+        data_prep_actor_state,
+        tool_definitions,
+        tools_config,
+        pools,
+        tool_stop_sequences,
+        eval_only=args.eval_only,
     )
+    train_episode = initial_episode
+    generation_episode = initial_episode
 
     if args.eval_only:
         resume_training_step = (
@@ -2721,13 +2780,20 @@ def main(
             logger.info(
                 f"Eval-only mode using explicit checkpoint step {args.eval_only_set_checkpoint} for eval logging."
             )
-        episode = (
-            int(checkpoint_state["episode"])
-            if checkpoint_state and "episode" in checkpoint_state
-            else (resume_training_step - 1)
-            * streaming_config.num_unique_prompts_rollout
-            * streaming_config.num_samples_per_prompt_rollout
-        )
+        if checkpoint_state:
+            train_episode = int(
+                checkpoint_state.get("train_episode", checkpoint_state.get("episode", initial_episode))
+            )
+            generation_episode = int(
+                checkpoint_state.get("generation_episode", checkpoint_state.get("episode", initial_episode))
+            )
+        else:
+            train_episode = (
+                (resume_training_step - 1)
+                * streaming_config.num_unique_prompts_rollout
+                * (streaming_config.num_samples_per_prompt_rollout)
+            )
+            generation_episode = train_episode
         stop_event = threading.Event()
         executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
         try:
@@ -2746,7 +2812,8 @@ def main(
             run_eval_only_round(
                 args,
                 resume_training_step,
-                episode,
+                train_episode,
+                generation_episode,
                 eval_dataset,
                 eval_prompt_Q,
                 evaluation_inference_results_Q,
@@ -2775,15 +2842,22 @@ def main(
             )
     else:
         if checkpoint_state:
-            episode = checkpoint_state["episode"]
-            logger.info(f"Restored episode count: {episode}")
+            train_episode = int(
+                checkpoint_state.get("train_episode", checkpoint_state.get("episode", initial_episode))
+            )
+            generation_episode = int(
+                checkpoint_state.get("generation_episode", checkpoint_state.get("episode", initial_episode))
+            )
+            logger.info(
+                "Restored episode counts: train_episode=%s generation_episode=%s", train_episode, generation_episode
+            )
 
         weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
         stop_event = threading.Event()
         executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
 
         try:
-            episode = run_training(
+            train_episode, generation_episode = run_training(
                 args,
                 streaming_config,
                 tokenizer,
@@ -2793,7 +2867,8 @@ def main(
                 vllm_engines,
                 generation_configs,
                 resume_training_step,
-                episode,
+                train_episode,
+                generation_episode,
                 wandb_url,
                 tc,
                 stop_event,
