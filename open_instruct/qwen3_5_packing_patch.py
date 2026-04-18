@@ -27,7 +27,6 @@ def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, att
     """GatedDeltaNet forward with seq_idx and cu_seqlens support for packing."""
     seq_idx = kwargs.get("seq_idx")
     cu_seqlens = kwargs.get("cu_seqlens")
-
     hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
 
     batch_size, seq_len, _ = hidden_states.shape

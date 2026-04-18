@@ -789,14 +789,27 @@ class LLMRayActor:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
     def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], packed: bool = True
+        self,
+        names_or_update_dict,
+        dtype_names: list[str] | None = None,
+        shapes: list[list[int]] | None = None,
+        packed: bool = True,
     ) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        request = WeightTransferUpdateRequest(
-            update_info={"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        )
+        if isinstance(names_or_update_dict, dict):
+            # IPC path (single_gpu_mode): called as update_weights({"update_info": {...}})
+            update_info = names_or_update_dict["update_info"]
+        else:
+            # NCCL path: called as update_weights(names, dtype_names, shapes, packed=packed)
+            update_info = {
+                "names": names_or_update_dict,
+                "dtype_names": dtype_names,
+                "shapes": shapes,
+                "packed": packed,
+            }
+        request = WeightTransferUpdateRequest(update_info=update_info)
         return self._run_async(self.llm_engine.update_weights(request))
 
     def reset_prefix_cache(self) -> None:

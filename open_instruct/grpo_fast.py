@@ -41,7 +41,7 @@ with contextlib.suppress(Exception):
     from deepspeed.utils import groups
 
 with contextlib.suppress(Exception):
-    from fla.ops.cp.context import FLACPContext
+    pass
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
@@ -56,7 +56,6 @@ import logging
 import math
 import random
 import shutil
-import socket
 import threading
 import time
 from dataclasses import asdict
@@ -230,6 +229,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         torch_checkpoint_engine.TorchCheckpointEngine.load = load
 
+        # ------------------------------------------------------------
+        # Patch Qwen3.5 GatedDeltaNet to support packing in THIS worker process.
+        # The call in main() only patches the main process; Ray workers are
+        # separate processes and need the patch applied here before the model loads.
+        patch_qwen3_5_packing()
         # ------------------------------------------------------------
         self.args = args
         self.tokenizer = tokenizer
