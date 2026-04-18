@@ -24,7 +24,7 @@ set -euo pipefail
 # Configuration - adjust paths as needed
 PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/data/dolci_instruct_sft_tokenized}"
-TOKENIZER="${TOKENIZER:-allenai/Olmo-3-7B-Instruct-SFT}"
+TOKENIZER="${TOKENIZER:-allenai/olmo-3-tokenizer-instruct-dev}"
 
 # HuggingFace cache directories (optional, but recommended to set)
 export HF_HOME="${HF_HOME:-${PROJECT_ROOT}/models/huggingface}"

@@ -106,17 +106,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
-        vocab_size = hf_config.vocab_size
-
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        self.model_config = olmo_core_utils.get_transformer_config(
-            self.model_name_or_path, vocab_size, attn_backend=self.attn_implementation
+        model_config_args = olmo_core_utils.ModelConfig(
+            model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
-        self.model = self.model_config.build(init_device="cpu")
+        self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
@@ -157,9 +154,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
 
-        ac_config = olmo_core_utils.build_ac_config(
-            self.grpo_config.activation_memory_budget, self.grpo_config.compile_model
-        )
+        ac_config = olmo_core_utils.build_ac_config(self.grpo_config)
 
         self.train_module = GRPOTrainModule(
             model=self.model,

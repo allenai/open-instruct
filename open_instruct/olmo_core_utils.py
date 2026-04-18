@@ -9,15 +9,18 @@ from typing import Literal
 import torch
 import torch.distributed as dist
 import transformers
+from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import is_distributed
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import save_hf_model
+from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingConfig,
     TransformerActivationCheckpointingMode,
 )
+from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 
 from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -35,6 +38,8 @@ class ExperimentConfig:
     """A unique name of this run"""
     seed: int = 42
     """Random seed for initialization and dataset shuffling."""
+    data_loader_seed: int | None = None
+    """Separate seed for data loader instance ordering. If None, uses seed."""
 
 
 @dataclass
@@ -51,6 +56,14 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+    rope_scaling_factor: float | None = None
+    """YaRN RoPE scaling factor. When set, applies YaRN RoPE scaling to the model."""
+    rope_scaling_beta_fast: float = 32
+    """YaRN RoPE beta_fast parameter."""
+    rope_scaling_beta_slow: float = 1
+    """YaRN RoPE beta_slow parameter."""
+    rope_scaling_old_context_len: int = 8192
+    """YaRN RoPE old_context_len parameter."""
 
     def __post_init__(self):
         if self.attn_implementation is None:
@@ -93,16 +106,44 @@ class TrainingConfig:
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW."""
+    cp_degree: int | None = None
+    """Context parallelism degree. When set, enables context parallelism."""
+    cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
+    """Context parallelism strategy."""
+    ac_mode: TransformerActivationCheckpointingMode = TransformerActivationCheckpointingMode.budget
+    """Activation checkpointing mode."""
+    ac_modules: list[str] | None = None
+    """Modules to checkpoint when ac_mode='selected_modules'. E.g., ['blocks.*.feed_forward']."""
 
 
-def build_ac_config(
-    activation_memory_budget: float, compile_model: bool
-) -> TransformerActivationCheckpointingConfig | None:
-    if activation_memory_budget < 1.0 and compile_model:
+def build_ac_config(training: TrainingConfig) -> TransformerActivationCheckpointingConfig | None:
+    if training.ac_mode == TransformerActivationCheckpointingMode.selected_modules:
+        if not training.ac_modules:
+            raise ValueError("ac_modules must be set when ac_mode='selected_modules'")
         return TransformerActivationCheckpointingConfig(
-            mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget
+            mode=TransformerActivationCheckpointingMode.selected_modules, modules=training.ac_modules
         )
-    return None
+    if training.ac_mode == TransformerActivationCheckpointingMode.budget:
+        if training.activation_memory_budget < 1.0 and training.compile_model:
+            return TransformerActivationCheckpointingConfig(
+                mode=TransformerActivationCheckpointingMode.budget,
+                activation_memory_budget=training.activation_memory_budget,
+            )
+        return None
+    raise ValueError(f"Unknown ac_mode: {training.ac_mode!r}")
+
+
+def build_cp_config(training: TrainingConfig) -> TransformerContextParallelConfig | None:
+    if training.cp_degree is None:
+        return None
+    if training.cp_strategy == "llama3":
+        return TransformerContextParallelConfig.llama3(degree=training.cp_degree)
+    elif training.cp_strategy == "zig_zag":
+        return TransformerContextParallelConfig.zig_zag(degree=training.cp_degree)
+    elif training.cp_strategy == "ulysses":
+        return TransformerContextParallelConfig.ulysses(degree=training.cp_degree)
+    else:
+        raise ValueError(f"Unknown cp_strategy: {training.cp_strategy}")
 
 
 @dataclass
@@ -129,6 +170,12 @@ class DatasetConfig:
     """The hash of the dataset configuration."""
     hf_entity: str | None = None
     """The user or org name for dataset caching on the Hugging Face Hub."""
+    dataset_path: str | None = None
+    """Path to a directory of pre-tokenized numpy SFT files (token_ids_part_*.npy, labels_mask_part_*.npy).
+
+    When set, tokenization is skipped entirely and the numpy loader reads this directory directly.
+    When unset, on-the-fly tokenization writes into `{local_cache_dir}/numpy_sft/{config_hash}/`.
+    """
 
 
 @dataclass
@@ -172,6 +219,21 @@ def build_checkpointer_callback(
     return CheckpointerCallback(
         save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
     )
+
+
+def is_hf_checkpoint(path: str) -> bool:
+    """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
+
+    Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
+    containing config.json, and paths with a '-hf' component. Returns False for
+    olmo-core distributed checkpoints.
+    """
+    if not os.path.isabs(path):
+        return True
+    if os.path.isfile(os.path.join(path, "config.json")):
+        return True
+    parts = path.replace("\\", "/").split("/")
+    return any("-hf" in part for part in parts)
 
 
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
@@ -224,16 +286,32 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
-def setup_model(
-    model_name_or_path: str, config_name: str | None, attn_implementation: AttentionBackendName
-) -> tuple[Transformer, TransformerConfig]:
-    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-    vocab_size = hf_config.vocab_size
+def setup_model(model_config_args: ModelConfig, init_device: str = "cpu") -> tuple[Transformer, TransformerConfig]:
+    model_name_or_path = model_config_args.model_name_or_path
+    if is_hf_checkpoint(model_name_or_path):
+        hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        vocab_size = hf_config.vocab_size
+    else:
+        assert model_config_args.config_name is not None, (
+            "--config_name is required when model_name_or_path is an olmo-core checkpoint"
+        )
+        vocab_size = OLMoCoreTokenizerConfig.dolma2().padded_vocab_size()
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     model_config = get_transformer_config(
-        config_name or model_name_or_path, vocab_size, attn_backend=attn_implementation
+        model_config_args.config_name or model_name_or_path,
+        vocab_size,
+        attn_backend=model_config_args.attn_implementation,
     )
-    model = model_config.build(init_device="cpu")
+    if model_config_args.rope_scaling_factor is not None:
+        model_config = model_config.with_rope_scaling(
+            YaRNRoPEScalingConfig(
+                factor=model_config_args.rope_scaling_factor,
+                beta_fast=model_config_args.rope_scaling_beta_fast,
+                beta_slow=model_config_args.rope_scaling_beta_slow,
+                old_context_len=model_config_args.rope_scaling_old_context_len,
+            )
+        )
+    model = model_config.build(init_device=init_device)
     return model, model_config
 
 
@@ -277,6 +355,34 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     if utils.is_beaker_job():
         dataset_config.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     return tokenizer
+
+
+def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
+    """Map open-instruct TokenizerConfig to olmo-core's TokenizerConfig for NumpyFSL loading.
+
+    Prefers the curated `dolma2()` preset for the dolma2/OLMo-2 family (its
+    `padded_vocab_size()` rounding matches the trainer expectations); otherwise
+    builds one directly from the HF tokenizer's special tokens.
+    """
+    identifier = tc.tokenizer_name_or_path or ""
+    dolma2_markers = ("dolma2", "OLMo-2-1124", "OLMo-2-0325", "OLMo-2-0425")
+    if any(marker in identifier for marker in dolma2_markers):
+        return OLMoCoreTokenizerConfig.dolma2()
+    eos_id = tc.tokenizer.eos_token_id
+    bos_id = tc.tokenizer.bos_token_id
+    # olmo-core's doc-boundary scanner requires an EOS *immediately followed by* BOS
+    # when both are set; when the tokenizer reuses the same id for both (e.g.
+    # olmo-3-tokenizer-instruct-dev has eos==bos==100257), that pattern never
+    # appears in practice, so fall back to the EOS-only scanner.
+    if bos_id == eos_id:
+        bos_id = None
+    return OLMoCoreTokenizerConfig(
+        vocab_size=tc.tokenizer.vocab_size,
+        eos_token_id=eos_id,
+        pad_token_id=tc.tokenizer.pad_token_id,
+        bos_token_id=bos_id,
+        identifier=identifier or None,
+    )
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):

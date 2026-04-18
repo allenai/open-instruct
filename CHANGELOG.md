@@ -39,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1579).
 - Add DR-TULU replication script for Qwen 3.5 4B with evolving rubrics, per-tool pool size overrides, `vllm_qwen3_xml` parser, and `<answer>` tag extraction in rubric scoring (https://github.com/allenai/open-instruct/pull/1609).
 - Add MiniMax provider support: register `minimax-m2.7` and `minimax-m2.7-highspeed` models in `PRICE_PER_TOKEN` for cost tracking and add cl100k_base encoding support in `context_window_checker` (https://github.com/allenai/open-instruct/pull/1602).
 - Wire evolving rubric config flags into the GRPO training loop so `apply_evolving_rubric_reward` actually triggers rubric generation, buffer management, and ground-truth overrides during training (https://github.com/allenai/open-instruct/pull/1581).
