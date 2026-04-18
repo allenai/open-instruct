@@ -2219,7 +2219,12 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
+                    "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
+                    "batch/prompt_sample_counts": np.array(batch_stats.prompt_sample_counts, dtype=np.int32),
+                }
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = (
@@ -2271,6 +2276,9 @@ class DataPreparationActor:
 
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
+                    "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
+                    "batch/prompt_sample_counts": prompt_sample_counts,
                     "scores": scores.mean(),
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
