@@ -1,9 +1,10 @@
 #!/bin/bash
-# SFT for Qwen3.5-9B on hamishivi/tmax-sft-full-20260403 (sft_w_incomplete).
+# SFT for Qwen3.5-9B on hamishivi/tmax-sft-full-20260403 (sft_w_incomplete), all splits.
 # 4 nodes x 8 GPUs = 32 GPUs, SP=2, 32k seq len.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL="Qwen/Qwen3.5-9B"
+DATASET="hamishivi/tmax-sft-full-20260403"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -37,7 +38,18 @@ uv run python mason.py \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --dataset_mixer_list hamishivi/tmax-sft-full-20260403 1.0 \
+    --dataset_mixer_list \
+        $DATASET 1.0 \
+        $DATASET 1.0 \
+        $DATASET 1.0 \
+        $DATASET 1.0 \
+        $DATASET 1.0 \
+    --dataset_mixer_list_splits \
+        nvidia__Nemotron_Terminal_Corpus__dataset_adapters \
+        nvidia__Nemotron_Terminal_Corpus__skill_based_easy \
+        nvidia__Nemotron_Terminal_Corpus__skill_based_medium \
+        nvidia__Nemotron_Terminal_Corpus__skill_based_mixed \
+        open_thoughts__OpenThoughts_Agent_v1_SFT \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
