@@ -31,7 +31,8 @@ uv run python mason.py \
     --tokenizer_name $MODEL \
     --use_flash_attn \
     --use_liger_kernel \
-    --max_seq_length 20480 \
+    --max_seq_length 32768 \
+    --sequence_parallel_size 2 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 2e-5 \
