@@ -30,6 +30,7 @@ uv run python mason.py \
     --model_name_or_path $MODEL \
     --tokenizer_name $MODEL \
     --use_flash_attn \
+    --use_liger_kernel \
     --max_seq_length 20480 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -41,7 +42,6 @@ uv run python mason.py \
     --dataset_mixer_list \
         hamishivi/tmax-sft-full-20260403 1.0 \
         hamishivi/tmax-sft-full-20260317 1.0 \
-    --add_bos \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
