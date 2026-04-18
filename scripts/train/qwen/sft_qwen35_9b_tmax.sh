@@ -1,14 +1,11 @@
 #!/bin/bash
-# SFT for Qwen3.5-7B on tmax datasets (2 x 4 nodes x 8 GPUs = 32 GPUs).
+# SFT for Qwen3.5-9B on tmax datasets (4 nodes x 8 GPUs = 32 GPUs).
 # Datasets:
 #   hamishivi/tmax-sft-full-20260403  (sft_w_incomplete)
 #   hamishivi/tmax-sft-full-20260317  (sft)
-#
-# NOTE: verify MODEL below — Qwen3.5 public sizes are 0.6B/1.7B/4B/7B/14B/32B/72B;
-# update to the correct HF repo name if a 9B variant exists.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-MODEL="Qwen/Qwen3.5-7B"
+MODEL="Qwen/Qwen3.5-9B"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
