@@ -7,8 +7,8 @@ MODEL="Qwen/Qwen3.5-9B"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/tulu-3-dev \
-    --priority high \
+    --workspace ai2/dr-tulu-ablations \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
