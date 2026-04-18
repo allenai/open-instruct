@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
@@ -77,6 +78,40 @@ class TestWorldAwarePacking(unittest.TestCase):
             if not drop_last:
                 expected_indices = set(range(num_samples))
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
+
+
+class TestGroupedAdvantageScales(unittest.TestCase):
+    def test_expand_grouped_advantage_scales_uses_effective_baseline_counts(self):
+        advantage_scales = data_loader.expand_grouped_advantage_scales(
+            prompt_sample_counts=[4], prompt_baseline_sample_counts=[8]
+        )
+
+        self.assertTrue(np.allclose(advantage_scales, np.full(4, 0.5)))
+
+
+class TestGroupedAdvantages(unittest.TestCase):
+    def test_compute_grouped_advantages_rescales_by_baseline_counts(self):
+        advantages = data_loader.compute_grouped_advantages(
+            np.array([0.0, 1.0, 0.0, 1.0], dtype=float),
+            prompt_sample_counts=[4],
+            prompt_baseline_sample_counts=[8],
+            prompt_baseline_reward_sums=[2.0],
+            advantage_normalization_type="centered",
+            rescale_by_baseline_counts=True,
+        )
+
+        self.assertTrue(np.allclose(advantages, np.array([-0.125, 0.375, -0.125, 0.375], dtype=float)))
+
+    def test_compute_grouped_advantages_max_rl_divides_by_mean(self):
+        advantages = data_loader.compute_grouped_advantages(
+            np.array([0.0, 1.0, 0.0, 1.0], dtype=float),
+            prompt_sample_counts=[4],
+            prompt_baseline_sample_counts=[8],
+            prompt_baseline_reward_sums=[2.0],
+            advantage_normalization_type="max_rl",
+        )
+
+        self.assertTrue(np.allclose(advantages, np.array([-1.0, 3.0, -1.0, 3.0], dtype=float), atol=1e-6))
 
 
 if __name__ == "__main__":

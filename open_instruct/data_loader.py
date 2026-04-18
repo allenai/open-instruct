@@ -1258,6 +1258,57 @@ def expand_grouped_scores(
     return np.concatenate(mean_grouped_rewards), np.concatenate(std_grouped_rewards)
 
 
+def expand_grouped_advantage_scales(
+    prompt_sample_counts: list[int], prompt_baseline_sample_counts: list[int] | None = None
+) -> np.ndarray:
+    """Expand per-group advantage scales for max-RL retry-chain normalization."""
+    if prompt_baseline_sample_counts is None:
+        prompt_baseline_sample_counts = prompt_sample_counts
+    if len(prompt_sample_counts) != len(prompt_baseline_sample_counts):
+        raise ValueError(
+            "Mismatch between prompt_sample_counts and prompt_baseline_sample_counts: "
+            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_sample_counts)}."
+        )
+
+    advantage_scales = []
+    for sample_count, baseline_sample_count in zip(prompt_sample_counts, prompt_baseline_sample_counts, strict=True):
+        if baseline_sample_count < sample_count:
+            raise ValueError(
+                "Each prompt_baseline_sample_count must be >= its prompt_sample_count, got "
+                f"{baseline_sample_count} < {sample_count}."
+            )
+        advantage_scales.append(np.full(sample_count, sample_count / baseline_sample_count, dtype=np.float32))
+
+    return np.concatenate(advantage_scales)
+
+
+def compute_grouped_advantages(
+    scores: np.ndarray,
+    prompt_sample_counts: list[int],
+    prompt_baseline_sample_counts: list[int] | None = None,
+    prompt_baseline_reward_sums: list[float] | None = None,
+    advantage_normalization_type: str = "centered",
+    rescale_by_baseline_counts: bool = False,
+) -> np.ndarray:
+    mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
+        scores, prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums
+    )
+
+    if advantage_normalization_type == "standard":
+        advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+    elif advantage_normalization_type == "centered":
+        advantages = scores - mean_grouped_rewards
+    elif advantage_normalization_type == "max_rl":
+        advantages = (scores - mean_grouped_rewards) / (mean_grouped_rewards + 1e-8)
+    else:
+        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
+
+    if rescale_by_baseline_counts:
+        advantages = advantages * expand_grouped_advantage_scales(prompt_sample_counts, prompt_baseline_sample_counts)
+
+    return advantages
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     generation_config: vllm.SamplingParams,
@@ -2154,19 +2205,14 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
             scores = np.array(batch.scores)
-            mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
+            advantages = compute_grouped_advantages(
                 scores,
                 batch_stats.prompt_sample_counts,
                 batch_stats.prompt_baseline_sample_counts,
                 batch_stats.prompt_baseline_reward_sums,
+                advantage_normalization_type=self.config.advantage_normalization_type,
+                rescale_by_baseline_counts=self.config.maintain_pending_ngu_counts,
             )
-
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
 
             if self.config.save_traces and self.config.rollouts_save_path:
                 save_rollouts_to_disk(
