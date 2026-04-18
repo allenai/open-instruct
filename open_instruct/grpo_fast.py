@@ -164,6 +164,41 @@ def get_unique_final_output_dir(output_dir: str) -> str:
     return str(candidate)
 
 
+def update_dataset_solve_rate(
+    solved_prompt_mask: np.ndarray,
+    prompt_indices: np.ndarray | list[int] | None,
+    prompt_solve_rates: np.ndarray | list[float] | None,
+) -> float:
+    if prompt_indices is None or prompt_solve_rates is None:
+        return float(np.mean(solved_prompt_mask))
+
+    prompt_indices_array = np.asarray(prompt_indices, dtype=np.int64).ravel()
+    prompt_solve_rates_array = np.asarray(prompt_solve_rates, dtype=np.float64).ravel()
+    if prompt_indices_array.size == 0 or prompt_solve_rates_array.size == 0:
+        return float(np.mean(solved_prompt_mask))
+    if prompt_indices_array.size != prompt_solve_rates_array.size:
+        logger.warning(
+            "Skipping dataset solve rate update because prompt_indices size %s != prompt_solve_rates size %s.",
+            prompt_indices_array.size,
+            prompt_solve_rates_array.size,
+        )
+        return float(np.mean(solved_prompt_mask))
+
+    solved_indices = prompt_indices_array[prompt_solve_rates_array > 0]
+    if solved_indices.size == 0:
+        return float(np.mean(solved_prompt_mask))
+
+    valid_solved_indices = solved_indices[(solved_indices >= 0) & (solved_indices < solved_prompt_mask.size)]
+    if valid_solved_indices.size != solved_indices.size:
+        logger.warning(
+            "Ignoring %s out-of-range solved prompt indices when computing dataset solve rate.",
+            solved_indices.size - valid_solved_indices.size,
+        )
+    if valid_solved_indices.size > 0:
+        solved_prompt_mask[np.unique(valid_solved_indices)] = True
+    return float(np.mean(solved_prompt_mask))
+
+
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
@@ -1623,6 +1658,7 @@ def one_training_step(
     chat_template_name: str,
     model_dims: utils.ModelDims,
     actor_manager: ActorManager | None = None,
+    solved_prompt_mask: np.ndarray | None = None,
 ) -> tuple[int, int, int]:
     """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
@@ -1682,6 +1718,7 @@ def one_training_step(
     # Pass through array metrics from the first worker (these are the same across workers)
     for k, v in array_metrics[0].items():
         average_metrics[k] = v
+    prompt_indices = average_metrics.pop("batch/prompt_indices", None)
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
@@ -1737,6 +1774,13 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
+    if solved_prompt_mask is not None:
+        metrics["val/dataset_solve_rate"] = update_dataset_solve_rate(
+            solved_prompt_mask,
+            prompt_indices=prompt_indices,
+            prompt_solve_rates=average_metrics.get("val/solve_rate_hist"),
+        )
+
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
@@ -2330,6 +2374,20 @@ def run_training(
     else:
         num_total_tokens = 0
 
+    if checkpoint_state and "solved_prompt_mask" in checkpoint_state:
+        solved_prompt_mask = np.asarray(checkpoint_state["solved_prompt_mask"], dtype=bool)
+        if solved_prompt_mask.size != len(train_dataset):
+            logger.warning(
+                "Ignoring checkpoint solved_prompt_mask of size %s because train dataset size is %s.",
+                solved_prompt_mask.size,
+                len(train_dataset),
+            )
+            solved_prompt_mask = np.zeros(len(train_dataset), dtype=bool)
+        else:
+            logger.info("Restored solved_prompt_mask with dataset solve rate %.6f", float(np.mean(solved_prompt_mask)))
+    else:
+        solved_prompt_mask = np.zeros(len(train_dataset), dtype=bool)
+
     if eval_dataset is not None:
         eval_data_loader = data_loader_lib.HFDataLoader(
             dataset=eval_dataset,
@@ -2408,6 +2466,7 @@ def run_training(
             tc.chat_template_name,
             model_dims,
             actor_manager,
+            solved_prompt_mask,
         )
         num_total_tokens += num_step_tokens
 
@@ -2427,6 +2486,7 @@ def run_training(
                     "train_episode": train_episode,
                     "generation_episode": generation_episode,
                     "num_total_tokens": num_total_tokens,
+                    "solved_prompt_mask": solved_prompt_mask,
                 }
 
                 # Save dataloader state from Ray actor

@@ -2282,6 +2282,7 @@ class DataPreparationActor:
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
+                    "batch/prompt_indices": np.array(batch_stats.prompt_indices, dtype=np.int32),
                     "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
                     "batch/prompt_sample_counts": prompt_sample_counts,
                     "scores": scores.mean(),
