@@ -1685,7 +1685,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = average_metrics["time/getting_response"]
+    total_generation_time = average_metrics.get("time/getting_response")
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     prompt_sample_counts = array_metrics[0].get(
@@ -1700,17 +1700,24 @@ def one_training_step(
     )
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
-    utilization_metrics = utils.calculate_utilization_metrics(
-        model_dims=model_dims,
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        total_generation_time=total_generation_time,
-        samples_per_prompt=prompt_sample_counts,
-        num_engines=vllm_config.vllm_num_engines,
-        num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
-        training_time=train_timer.duration,
-        num_training_gpus=args.world_size,
-    )
+    utilization_metrics = {}
+    if total_generation_time is None:
+        logger.warning(
+            "Missing `time/getting_response` metric at training step %s; skipping actor utilization metrics.",
+            training_step,
+        )
+    else:
+        utilization_metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=total_generation_time,
+            samples_per_prompt=prompt_sample_counts,
+            num_engines=vllm_config.vllm_num_engines,
+            num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
+            training_time=train_timer.duration,
+            num_training_gpus=args.world_size,
+        )
 
     metrics = {
         "episode": legacy_episode,

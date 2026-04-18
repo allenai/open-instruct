@@ -58,8 +58,8 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 6 \
+    --vllm_num_engines 2 \
     --clip_higher 0.28 \
     --seed 1 \
     --local_eval_every 25 \
