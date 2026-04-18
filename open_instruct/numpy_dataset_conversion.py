@@ -57,9 +57,10 @@ def _select_token_dtype(vocab_size: int):
     raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
 
-def _write_memmap_chunked(base_filename: str, data: list[int], dtype, max_size_gb: int = 1) -> list[tuple[int, int]]:
+def _write_memmap_chunked(
+    base_filename: str, data: list[int], dtype, max_size_bytes: int = 1024**3
+) -> list[tuple[int, int]]:
     item_size = np.dtype(dtype).itemsize
-    max_size_bytes = max_size_gb * 1024**3
     chunk_size = max_size_bytes // item_size
     chunk_boundaries: list[tuple[int, int]] = []
 
@@ -125,7 +126,7 @@ def convert_hf_to_numpy_sft(
     dataset_config_hash: str | None = None,
     shuffle_seed: int = 42,
     checkpoint_interval: int = 100_000,
-    resume: bool = True,
+    resume: bool = False,
     visualize: bool = False,
     tokenizer_config_only: bool = False,
     num_examples: int = 0,
@@ -209,7 +210,7 @@ def convert_hf_to_numpy_sft(
     sample: Mapping[str, Any]
     total_samples = len(train_dataset)
 
-    train_dataset_iter = train_dataset.select(range(start_idx, total_samples)) if start_idx > 0 else train_dataset
+    train_dataset_iter = train_dataset.select(range(start_idx, total_samples))
 
     for idx, sample in enumerate(
         tqdm(
@@ -269,8 +270,6 @@ def convert_hf_to_numpy_sft(
                 },
             )
             logger.info(f"Checkpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens)")
-
-    train_dataset = dataset_transformation.remove_dataset_source_field(train_dataset)
 
     total_instances = len(train_dataset)
     total_tokens = len(token_ids)
