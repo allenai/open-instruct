@@ -223,14 +223,14 @@ def run_hf(args):
     )
 
     # Bucketed drift — does disagreement grow with position?
-    buckets = [64, 128, 256, 512, 1024, 2048]
+    buckets = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
     buckets = [b for b in buckets if b <= n]
     for b in buckets:
-        window = diff[max(0, b - 64) : b]
+        window = diff[max(0, b - 256) : b]
         head = diff[:b]
         print(
-            f"[hf]   positions 1..{b:>4}: mean|diff|={head.mean():.5f}  "
-            f"  window[{max(0,b-64)}:{b}] mean|diff|={window.mean():.5f}"
+            f"[hf]   positions 1..{b:>5}: mean|diff|={head.mean():.5f}  "
+            f"  window[{max(0,b-256)}:{b}] mean|diff|={window.mean():.5f}"
         )
     # Save combined result
     out_npz = args.npz.replace(".npz", f"_hf_{args.label}.npz")

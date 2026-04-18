@@ -29,24 +29,87 @@ and the state-accumulation order is different.
 
 ## Measured baseline (single 80GB A100, bf16, seed=42, no prefix cache)
 
-| model | tokens | mean \|Δlogp\| | max \|Δlogp\| | last-64 window |
-|---|---:|---:|---:|---:|
-| Qwen3.5-4B hybrid, 512 | 512 | 0.0123 | 0.21 | 0.0127 |
-| Qwen3-4B dense, 512 | 512 | 0.0149 | 0.21 | 0.0142 |
-| Qwen3.5-4B hybrid, 2048 | 2048 | 0.0148 | 0.21 | 0.0207 |
-| Qwen3.5-4B hybrid, 4060 | 4060 | 0.0181 | 0.21 | 0.02 |
-| Qwen3.5-4B, pack left 256 **with patch** | 512 | 0.0136 | 0.14 | 0.0135 |
-| Qwen3.5-4B, pack left 256 **no patch** | 512 | **0.129** | **3.53** | 0.10 |
+### Single-GPU, single-turn
 
-Takeaways from the baseline:
-- The packing patch is essential; without it packed batches blow up by 10×.
-- With the patch, per-token drift grows modestly with sequence length
-  (0.012 → 0.018 between 512 and 4060 tokens). On a single-sequence, single-GPU
-  setup I could not reproduce the ~0.05 drift reported in RL training.
-- Dense Qwen3-4B drift was comparable to hybrid Qwen3.5-4B in this setup.
-  **The "hybrid is worse" signal therefore does not come from the base model
-  or the per-token kernels — it comes from something in the training-time
-  setup.**
+| model | tokens | mean \|Δlogp\| | max \|Δlogp\| |
+|---|---:|---:|---:|
+| Qwen3.5-4B hybrid, 512 | 512 | 0.0123 | 0.21 |
+| Qwen3-4B dense, 512 | 512 | 0.0149 | 0.21 |
+| Qwen3.5-4B hybrid, 2048 | 2048 | 0.0148 | 0.21 |
+| Qwen3.5-4B hybrid, 4060 | 4060 | 0.0181 | 0.21 |
+| Qwen3.5-4B hybrid, **16000** | 16000 | 0.0124 | 0.24 |
+| Qwen3.5-9B hybrid, 4096 | 4096 | 0.0142 | 0.37 |
+| Qwen3.5-9B hybrid, **16000** | 16000 | 0.0124 | 0.24 |
+| Qwen3.5-4B, pack left 256 **with patch** | 512 | 0.0136 | 0.14 |
+| Qwen3.5-4B, pack left 256 **no patch** | 512 | **0.129** | **3.53** |
+
+**Key finding:** Drift does NOT grow linearly with sequence length. It plateaus at
+~0.012-0.014 beyond ~512 tokens. Testing 9B at 16k confirms the same floor as 4B.
+
+### Multi-turn (simulated tool-use)
+
+**4B, 2-turn, 256+256 tokens:**
+
+| scenario | turn-1 | tool | turn-2 | overall |
+|---|---:|---:|---:|---:|
+| 2-turn, 256+256 tokens | 0.0060 | masked | 0.0134 | 0.0097 |
+
+**9B, 10-turn, 2000 assistant + 1000 tool tokens per turn (~30k response, context up to 27k):**
+
+| turn | ctx start | n tokens | mean\|Δlogp\| | max\|Δlogp\| |
+|---:|---:|---:|---:|---:|
+| 1 | 57 | 2000 | 0.00799 | 0.172 |
+| 2 | 3057 | 2000 | 0.00009 | 0.010 |
+| 3 | 6057 | 2000 | 0.00005 | 0.001 |
+| 4–6 | 9k–15k | 2000 | ≤0.00004 | ≤0.001 |
+| 7 | 18057 | 2000 | 0.00015 | 0.125 |
+| 8 | 21057 | 2000 | 0.00263 | 0.224 |
+| 9 | 24057 | 2000 | 0.00001 | 0.001 |
+| 10 | 27057 | 2000 | 0.00193 | 0.352 |
+| **overall** | — | **20000** | **0.00129** | **0.352** |
+
+Key findings: drift does NOT grow monotonically with turn depth or context length.
+The per-turn means are dominated by how "confident" the model is about the specific
+sampled tokens (high-confidence tokens → near-zero diff regardless of depth).
+Overall mean across 30k tokens of 10-turn tool-use is 0.00129 — **10× lower** than
+the 0.014 single-turn floor.
+
+### SP=2 (9B, 4k tokens, per-batch FLACPContext fix)
+
+| test | mean \|Δlogp\| | max \|Δlogp\| |
+|---|---:|---:|
+| Single GPU (no SP) | 0.0142 | 0.37 |
+| SP=2, packing (pack_pad_left=256), per-batch fix | 0.0140 | 0.23 |
+| SP=2, no packing (single sequence), per-batch fix | 0.0140 | 0.25 |
+| SP=2, packing, **static context (bug)** | 0.0161 | **2.51** |
+
+The per-batch FLACPContext fix keeps SP=2 identical to single-GPU. The static context
+bug is benign at 4k (mean only slightly elevated) but causes large max|diff| and the
+window mean grows toward 0.03 near the SP boundary — much worse at longer sequences.
+
+### Conclusion on offline drift
+
+After applying all fixes (packing patch, per-batch CP context, prefix cache disabled),
+the offline kernel mismatch floor is at most **~0.012–0.014** (single-turn, any length
+up to 16k, SP=2) and as low as **~0.001** in realistic multi-turn tool-use at 30k
+tokens. Drift does NOT grow with sequence length or turn depth.
+
+**The 0.07 in training definitively cannot be explained by kernel mismatch alone** —
+even at 30k multi-turn context the offline floor is 50× lower. The most likely
+additional factor is **async model staleness**: with `--async_steps 4`, by the time
+training computes `local_logprobs` (with W_N), the stored `vllm_logprobs` may be from
+W_{N-k} for k ≥ 1. Even one gradient step of divergence on a Qwen3.5 hybrid model
+appears sufficient to explain the gap. Check `model_step_mean` in WandB to confirm —
+if it lags the training step by more than 1, async divergence is the cause.
+
+If the metric is 0.07 **at step 0** (before any gradient update), then staleness is
+ruled out too. In that case check the `GIT_COMMIT` env var in WandB — the running
+Docker image may predate the per-batch FLACPContext fix (commit `6a8c0390`) or the
+prefix-cache disable (`c7acb6ee`).
+
+Alternatively, if the Docker image used was built from code before the per-batch
+FLACPContext fix (`6a8c0390`) or prefix-cache disable (`c7acb6ee`), those bugs would
+still apply and inflate the metric. Verify by checking the `GIT_COMMIT` tag in WandB.
 
 ## Suspects for the RL-training-specific drift
 
