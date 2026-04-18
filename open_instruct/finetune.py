@@ -535,6 +535,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.config_name,
             revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
+            local_files_only=True,
             **args.additional_model_arguments,
         )
     elif args.model_name_or_path:
@@ -542,6 +543,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.model_name_or_path,
             revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
+            local_files_only=True,
             **args.additional_model_arguments,
         )
     else:
@@ -569,6 +571,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 device_map=device_map,
                 dtype=torch.bfloat16,
                 attn_implementation=model_utils.detect_hf_attn_implementation(),
+                local_files_only=True,
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -584,6 +587,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 attn_implementation=model_utils.detect_hf_attn_implementation(),
+                local_files_only=True,
                 # liger-kernel specific args
                 fused_linear_cross_entropy=True,
             )
@@ -597,6 +601,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 dtype=torch.bfloat16,
                 attn_implementation=model_utils.detect_hf_attn_implementation(),
+                local_files_only=True,
             )
     else:
         logger.info("Training new model from scratch")
