@@ -1,12 +1,19 @@
 import tempfile
 import unittest
+from queue import Queue
 
 import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
-from open_instruct import data_loader
+from open_instruct import data_loader, data_types, utils
+from open_instruct.dataset_transformation import (
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
+    RAW_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
+)
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
@@ -29,6 +36,54 @@ def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
     ds = Dataset.from_dict(data)
     ds.set_format(type="pt")
     return ds
+
+
+def _make_rlvr_dataset() -> Dataset:
+    return Dataset.from_dict(
+        {
+            INPUT_IDS_PROMPT_KEY: [[1, 2, 3]],
+            GROUND_TRUTHS_KEY: ["answer"],
+            VERIFIER_SOURCE_KEY: ["dataset_0"],
+            RAW_PROMPT_KEY: ["prompt"],
+            "index": [0],
+        }
+    )
+
+
+def _make_generation_result(
+    prompt_id: str, reward_scores: list[float], model_step: int
+) -> data_types.GenerationResult:
+    total_responses = len(reward_scores)
+    return data_types.GenerationResult(
+        responses=[[1, 2, 3] for _ in range(total_responses)],
+        finish_reasons=["stop"] * total_responses,
+        masks=[[1, 1, 1] for _ in range(total_responses)],
+        request_info=data_types.RequestInfo(
+            num_calls=[0] * total_responses,
+            timeouts=[0] * total_responses,
+            tool_errors=[""] * total_responses,
+            tool_outputs=[""] * total_responses,
+            tool_runtimes=[0.0] * total_responses,
+            tool_calleds=[False] * total_responses,
+        ),
+        index=0,
+        prompt_id=prompt_id,
+        token_statistics=data_types.TokenStatistics(
+            num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
+        ),
+        start_time=0.0,
+        logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
+        reward_scores=reward_scores,
+        reward_metrics={"time/reward": 0.0},
+        model_step=model_step,
+    )
+
+
+class _FakeTokenizer:
+    eos_token_id = 0
+
+    def batch_decode(self, responses, skip_special_tokens=False):
+        return [" ".join(map(str, response)) for response in responses]
 
 
 class TestWorldAwarePacking(unittest.TestCase):
@@ -112,6 +167,49 @@ class TestGroupedAdvantages(unittest.TestCase):
         )
 
         self.assertTrue(np.allclose(advantages, np.array([-1.0, 3.0, -1.0, 3.0], dtype=float), atol=1e-6))
+
+
+class TestNeverGiveUpPendingAge(unittest.TestCase):
+    def test_streaming_config_defaults_pending_age_to_two(self):
+        config = data_loader.StreamingDataLoaderConfig()
+        self.assertEqual(config.maintain_pending_ngu_age, 2)
+
+    def test_accumulate_inference_batches_drops_stale_pending_counts(self):
+        inference_results_Q = Queue(maxsize=1)
+        inference_results_Q.put(_make_generation_result("0_0_1", [0.0, 1.0, 0.0, 1.0], model_step=3))
+
+        never_give_up_state = data_loader.NeverGiveUpAccumulationState(
+            pending_response_counts={"0_0": 4},
+            pending_reward_sums={"0_0": 0.0},
+            pending_best_reward={"0_0": 0.0},
+            pending_last_model_step={"0_0": 0},
+        )
+
+        _, batch, _, batch_stats = data_loader.accumulate_inference_batches(
+            inference_results_Q=inference_results_Q,
+            generation_config=type("GenerationConfig", (), {"n": 4})(),
+            num_prompts=1,
+            model_dims=utils.ModelDims(
+                num_layers=1, hidden_size=1, intermediate_size=1, vocab_size=1, num_attn_heads=1, head_dim=1
+            ),
+            tokenizer=_FakeTokenizer(),
+            dataset=_make_rlvr_dataset(),
+            base_env_config=data_types.EnvConfig(),
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            never_give_up=1.0,
+            show_progress_bar=False,
+            never_give_up_state=never_give_up_state,
+            maintain_pending_ngu_age=2,
+            maintain_pending_ngu_counts=True,
+        )
+
+        self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
+        self.assertEqual(batch_stats.prompt_sample_counts, [4])
+        self.assertEqual(batch_stats.prompt_baseline_sample_counts, [4])
+        self.assertEqual(batch_stats.prompt_baseline_reward_sums, [2.0])
+        self.assertEqual(never_give_up_state.pending_response_counts, {})
+        self.assertEqual(never_give_up_state.pending_reward_sums, {})
 
 
 if __name__ == "__main__":

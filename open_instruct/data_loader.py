@@ -54,7 +54,6 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
-MAX_PENDING_NEVER_GIVE_UP_STEP_AGE = 8
 
 
 @dataclass
@@ -470,6 +469,7 @@ class StreamingDataLoaderConfig:
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
+    maintain_pending_ngu_age: int = 2
     maintain_pending_ngu_completions: bool = False
     maintain_pending_ngu_counts: bool = True
     no_resampling_pass_rate: float | None = None
@@ -585,6 +585,8 @@ class StreamingDataLoaderConfig:
             )
         if not 0.0 <= self.never_give_up <= 1.0:
             raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
+        if self.maintain_pending_ngu_age < 0:
+            raise ValueError(f"`maintain_pending_ngu_age` must be non-negative, got {self.maintain_pending_ngu_age}.")
         if self.max_samples_multiplier is not None and self.max_samples_multiplier < 0:
             raise ValueError(
                 f"`active_sampling_max_samples_multiplier` must be non-negative, got {self.max_samples_multiplier}."
@@ -1341,6 +1343,7 @@ def accumulate_inference_batches(
     progress_callback: Callable[[int, int], None] | None = None,
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
     never_give_up_state_lock: Any = None,
+    maintain_pending_ngu_age: int = 2,
     maintain_pending_ngu_completions: bool = False,
     maintain_pending_ngu_counts: bool = True,
 ) -> (
@@ -1438,17 +1441,14 @@ def accumulate_inference_batches(
 
         if (
             pending_last_model_step is not None
-            and current_model_step - pending_last_model_step > MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
+            and current_model_step - pending_last_model_step > maintain_pending_ngu_age
         ):
             return [], [], None, 0, 0.0
 
         filtered_pending: list[tuple[data_types.GenerationResult, dict[str, Any] | None]] = []
         for pending_result, pending_metric in zip(pending_results, pending_metrics, strict=False):
             pending_model_step = pending_result.model_step
-            if (
-                pending_model_step is None
-                or current_model_step - pending_model_step <= MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
-            ):
+            if pending_model_step is None or current_model_step - pending_model_step <= maintain_pending_ngu_age:
                 filtered_pending.append((pending_result, pending_metric))
 
         if not filtered_pending:
@@ -2169,6 +2169,7 @@ class DataPreparationActor:
                 show_progress_bar=True,
                 never_give_up_state=self.never_give_up_state,
                 never_give_up_state_lock=self.never_give_up_state_lock,
+                maintain_pending_ngu_age=self.config.maintain_pending_ngu_age,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
                 maintain_pending_ngu_counts=self.config.maintain_pending_ngu_counts,
             )
