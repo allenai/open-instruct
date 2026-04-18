@@ -60,14 +60,7 @@ from datasets import Dataset, concatenate_datasets, load_dataset
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
-from transformers import (
-    AutoConfig,
-    AutoTokenizer,
-    GPTNeoXTokenizerFast,
-    LlamaTokenizer,
-    LlamaTokenizerFast,
-    PreTrainedTokenizer,
-)
+from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import launch_utils, logger_utils
@@ -788,9 +781,8 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
-    config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
-    if "olmo" in config.model_type:
+    if "olmo" in str(tc.tokenizer_name_or_path).lower():
         if tc.chat_template_name is None:
             pass  # just assume the user knows what they're doing
         elif "olmo" in tc.chat_template_name:
