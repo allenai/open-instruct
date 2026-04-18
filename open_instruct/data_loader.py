@@ -2142,7 +2142,12 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                    self.metrics[step] = {
+                        "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                        "batch/prompt_lengths": np.array([], dtype=np.int32),
+                        "batch/response_lengths": np.array([], dtype=np.int32),
+                        "batch/prompt_sample_counts": np.array([], dtype=np.int32),
+                    }
                     self.current_prepared_step = step
                 continue
 
