@@ -27,6 +27,7 @@ uv run python mason.py \
   --no-host-networking \
   --gpus 8 \
   --priority urgent \
+  --preemptible \
   --description "7B hybrid SFT tokenization" \
   --no_auto_dataset_cache \
   -- huggingface-cli download $TOKENIZER --local-dir $tokenizer_path \&\& python scripts/data/convert_sft_data_for_olmocore.py \
