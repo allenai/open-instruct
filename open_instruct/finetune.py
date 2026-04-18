@@ -833,11 +833,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
             fwd_extra: dict = {}
             if _is_hybrid_sp:
-                local_pos = batch.get("position_ids") or (
-                    torch.arange(batch["input_ids"].shape[1], device=batch["input_ids"].device)
-                    .unsqueeze(0)
-                    .expand(batch["input_ids"].shape[0], -1)
-                )
+                if "position_ids" in batch:
+                    local_pos = batch["position_ids"]
+                else:
+                    local_len = batch["input_ids"].shape[1]
+                    local_pos = (
+                        torch.arange(local_len, device=batch["input_ids"].device)
+                        .unsqueeze(0)
+                        .expand(batch["input_ids"].shape[0], -1)
+                    )
                 local_pos_row = local_pos[0:1].contiguous()
                 gathered = [torch.zeros_like(local_pos_row) for _ in range(args.sequence_parallel_size)]
                 torch.distributed.all_gather(gathered, local_pos_row, group=_sp_group)
