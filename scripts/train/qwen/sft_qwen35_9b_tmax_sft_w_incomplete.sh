@@ -1,8 +1,6 @@
 #!/bin/bash
-# SFT for Qwen3.5-9B on tmax datasets (4 nodes x 8 GPUs = 32 GPUs).
-# Datasets:
-#   hamishivi/tmax-sft-full-20260403  (sft_w_incomplete)
-#   hamishivi/tmax-sft-full-20260317  (sft)
+# SFT for Qwen3.5-9B on hamishivi/tmax-sft-full-20260403 (sft_w_incomplete).
+# 4 nodes x 8 GPUs = 32 GPUs, SP=2, 32k seq len.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL="Qwen/Qwen3.5-9B"
@@ -26,7 +24,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name qwen35_9b_tmax_sft \
+    --exp_name qwen35_9b_tmax_sft_w_incomplete \
     --model_name_or_path $MODEL \
     --tokenizer_name $MODEL \
     --use_flash_attn \
@@ -40,9 +38,7 @@ uv run python mason.py \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --dataset_mixer_list \
-        hamishivi/tmax-sft-full-20260403 1.0 \
-        hamishivi/tmax-sft-full-20260317 1.0 \
+    --dataset_mixer_list hamishivi/tmax-sft-full-20260403 1.0 \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
