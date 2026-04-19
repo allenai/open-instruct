@@ -291,12 +291,15 @@ class SFTDatasetProcessor(DatasetProcessor):
             row[LABELS_KEY] = labels
             return row
 
-        return dataset.map(
+        dataset = dataset.map(
             tokenize_fn,
             num_proc=get_num_proc(len(dataset), self.config.num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
             desc="Tokenizing and reformatting SFT data",
         )
+        if "tools" in dataset.column_names:
+            dataset = dataset.remove_columns(["tools"])
+        return dataset
 
     def filter(self, dataset: Dataset, need_contain_labels: bool = True):  # type: ignore[override]
         def filter_fn(row):
@@ -342,12 +345,15 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
             row[VERIFIER_SOURCE_KEY] = row[self.config.dataset_source_key]
             return row
 
-        return dataset.map(
+        dataset = dataset.map(
             tokenize_fn,
             num_proc=get_num_proc(len(dataset), self.config.num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
             desc="Tokenizing and reformatting SFT data",
         )
+        if "tools" in dataset.column_names:
+            dataset = dataset.remove_columns(["tools"])
+        return dataset
 
     def filter(self, dataset: Dataset, need_contain_labels: bool = True):  # type: ignore[override]
         def filter_fn(row):
