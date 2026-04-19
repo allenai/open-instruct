@@ -342,6 +342,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+
+                # DeepSpeed ZeRO-3 with BF16 does not automatically refresh BF16 p.data from
+                # FP32 master parameters after load_checkpoint (update_lp_params is gated out for
+                # ZeRO-3 universal checkpoints in engine.py).  Without this, p.data is NaN and
+                # any weight sync before the first optimizer step would broadcast NaN to vLLM.
+                if hasattr(self.model.optimizer, "update_lp_params"):
+                    self.model.optimizer.update_lp_params()
+                    logger.info("Refreshed BF16 parameters from FP32 masters after ZeRO-3 checkpoint load.")
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
@@ -2097,10 +2105,11 @@ def run_training(
         num_total_tokens = 0
 
     # On resume, sync checkpoint weights to vLLM before the DataPreparationActor starts
-    # generating rollouts, so the first rollout batch uses the correct checkpoint weights.
+    # generating rollouts so the first rollout batch uses the correct checkpoint weights.
+    # ZeRO-3 BF16 p.data is populated from FP32 masters via update_lp_params() right after
+    # load_checkpoint, so the eager sync is safe for all DeepSpeed stages.
     # On a fresh run (resume_training_step == 1), vLLM and the trainer start with the same
-    # base model weights, so no pre-loop sync is needed; we use lazy init after step 1 instead
-    # (for ZeRO-3 compatibility — weights are fully available after the first forward/backward).
+    # base model weights, so no pre-loop sync is needed; we use lazy init after step 1 instead.
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
     if resume_training_step > 1:
         logger.info(
@@ -2229,8 +2238,9 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif training_step == 1:
-            # Fresh run: lazy init after step 1 to ensure ZeRO-3 weights are fully
-            # available (ZeRO-3 gathers params during the first forward/backward).
+            # Fresh run only: lazy init after step 1 ensures ZeRO-3 p.data has gone through
+            # at least one forward/backward before being broadcast (belt-and-suspenders; the
+            # update_lp_params call at checkpoint load covers the resume case).
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
