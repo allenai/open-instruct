@@ -66,6 +66,7 @@ uv run --active open_instruct/grpo_fast.py \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 100 \
+    --checkpoint_state_freq 100 \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
     --vllm_num_engines 1 \

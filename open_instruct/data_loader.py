@@ -54,7 +54,6 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
 MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
-MAX_PENDING_NEVER_GIVE_UP_STEP_AGE = 8
 
 
 @dataclass
@@ -470,6 +469,7 @@ class StreamingDataLoaderConfig:
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
+    maintain_pending_ngu_age: int = 2
     maintain_pending_ngu_completions: bool = False
     maintain_pending_ngu_counts: bool = True
     no_resampling_pass_rate: float | None = None
@@ -585,6 +585,8 @@ class StreamingDataLoaderConfig:
             )
         if not 0.0 <= self.never_give_up <= 1.0:
             raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
+        if self.maintain_pending_ngu_age < 0:
+            raise ValueError(f"`maintain_pending_ngu_age` must be non-negative, got {self.maintain_pending_ngu_age}.")
         if self.max_samples_multiplier is not None and self.max_samples_multiplier < 0:
             raise ValueError(
                 f"`active_sampling_max_samples_multiplier` must be non-negative, got {self.max_samples_multiplier}."
@@ -1258,6 +1260,57 @@ def expand_grouped_scores(
     return np.concatenate(mean_grouped_rewards), np.concatenate(std_grouped_rewards)
 
 
+def expand_grouped_advantage_scales(
+    prompt_sample_counts: list[int], prompt_baseline_sample_counts: list[int] | None = None
+) -> np.ndarray:
+    """Expand per-group advantage scales for max-RL retry-chain normalization."""
+    if prompt_baseline_sample_counts is None:
+        prompt_baseline_sample_counts = prompt_sample_counts
+    if len(prompt_sample_counts) != len(prompt_baseline_sample_counts):
+        raise ValueError(
+            "Mismatch between prompt_sample_counts and prompt_baseline_sample_counts: "
+            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_sample_counts)}."
+        )
+
+    advantage_scales = []
+    for sample_count, baseline_sample_count in zip(prompt_sample_counts, prompt_baseline_sample_counts, strict=True):
+        if baseline_sample_count < sample_count:
+            raise ValueError(
+                "Each prompt_baseline_sample_count must be >= its prompt_sample_count, got "
+                f"{baseline_sample_count} < {sample_count}."
+            )
+        advantage_scales.append(np.full(sample_count, sample_count / baseline_sample_count, dtype=np.float32))
+
+    return np.concatenate(advantage_scales)
+
+
+def compute_grouped_advantages(
+    scores: np.ndarray,
+    prompt_sample_counts: list[int],
+    prompt_baseline_sample_counts: list[int] | None = None,
+    prompt_baseline_reward_sums: list[float] | None = None,
+    advantage_normalization_type: str = "centered",
+    rescale_by_baseline_counts: bool = False,
+) -> np.ndarray:
+    mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
+        scores, prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums
+    )
+
+    if advantage_normalization_type == "standard":
+        advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+    elif advantage_normalization_type == "centered":
+        advantages = scores - mean_grouped_rewards
+    elif advantage_normalization_type == "max_rl":
+        advantages = (scores - mean_grouped_rewards) / (mean_grouped_rewards + 1e-8)
+    else:
+        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
+
+    if rescale_by_baseline_counts:
+        advantages = advantages * expand_grouped_advantage_scales(prompt_sample_counts, prompt_baseline_sample_counts)
+
+    return advantages
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     generation_config: vllm.SamplingParams,
@@ -1290,6 +1343,7 @@ def accumulate_inference_batches(
     progress_callback: Callable[[int, int], None] | None = None,
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
     never_give_up_state_lock: Any = None,
+    maintain_pending_ngu_age: int = 2,
     maintain_pending_ngu_completions: bool = False,
     maintain_pending_ngu_counts: bool = True,
 ) -> (
@@ -1387,17 +1441,14 @@ def accumulate_inference_batches(
 
         if (
             pending_last_model_step is not None
-            and current_model_step - pending_last_model_step > MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
+            and current_model_step - pending_last_model_step > maintain_pending_ngu_age
         ):
             return [], [], None, 0, 0.0
 
         filtered_pending: list[tuple[data_types.GenerationResult, dict[str, Any] | None]] = []
         for pending_result, pending_metric in zip(pending_results, pending_metrics, strict=False):
             pending_model_step = pending_result.model_step
-            if (
-                pending_model_step is None
-                or current_model_step - pending_model_step <= MAX_PENDING_NEVER_GIVE_UP_STEP_AGE
-            ):
+            if pending_model_step is None or current_model_step - pending_model_step <= maintain_pending_ngu_age:
                 filtered_pending.append((pending_result, pending_metric))
 
         if not filtered_pending:
@@ -2118,6 +2169,7 @@ class DataPreparationActor:
                 show_progress_bar=True,
                 never_give_up_state=self.never_give_up_state,
                 never_give_up_state_lock=self.never_give_up_state_lock,
+                maintain_pending_ngu_age=self.config.maintain_pending_ngu_age,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
                 maintain_pending_ngu_counts=self.config.maintain_pending_ngu_counts,
             )
@@ -2154,19 +2206,14 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
             scores = np.array(batch.scores)
-            mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
+            advantages = compute_grouped_advantages(
                 scores,
                 batch_stats.prompt_sample_counts,
                 batch_stats.prompt_baseline_sample_counts,
                 batch_stats.prompt_baseline_reward_sums,
+                advantage_normalization_type=self.config.advantage_normalization_type,
+                rescale_by_baseline_counts=self.config.maintain_pending_ngu_counts,
             )
-
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
 
             if self.config.save_traces and self.config.rollouts_save_path:
                 save_rollouts_to_disk(
@@ -2282,6 +2329,7 @@ class DataPreparationActor:
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
+                    "batch/prompt_indices": np.array(batch_stats.prompt_indices, dtype=np.int32),
                     "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
                     "batch/prompt_sample_counts": prompt_sample_counts,
                     "scores": scores.mean(),

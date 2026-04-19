@@ -115,6 +115,36 @@ APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU = 400
 FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 
+def _log_prompt_filter_statistics(statistics: dict[str, Any]) -> None:
+    per_dataset_stats = statistics.get("per_dataset_stats", [])
+    total_initial = sum(stat.get("initial_instances", 0) for stat in per_dataset_stats)
+    total_filtered = sum(stat.get("instances_filtered", 0) for stat in per_dataset_stats)
+    if total_initial == 0:
+        logger.info("Prompt length filtering: no input prompts to summarize.")
+        return
+
+    logger.info(
+        "Prompt length filtering: filtered %s/%s prompts (%.2f%%).",
+        total_filtered,
+        total_initial,
+        100 * total_filtered / total_initial,
+    )
+    for stat in per_dataset_stats:
+        filtered = stat.get("instances_filtered", 0)
+        if filtered == 0:
+            continue
+        initial = stat.get("initial_instances", 0)
+        split = stat.get("dataset_split", "unknown")
+        logger.info(
+            "Prompt length filtering detail: %s[%s] filtered %s/%s prompts (%.2f%%).",
+            stat.get("dataset_name", "unknown"),
+            split,
+            filtered,
+            initial,
+            100 * filtered / initial if initial else 0.0,
+        )
+
+
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
     return min(num_required_cpus, num_available_cpus, dataset_len)
@@ -2150,6 +2180,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    log_statistics: bool = False,
 ) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
@@ -2172,6 +2203,9 @@ def get_cached_dataset_tulu_with_statistics(
 
     dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
+    if log_statistics:
+        _log_prompt_filter_statistics(statistics)
+
     if drop_dataset_source:
         dataset = remove_dataset_source_field(dataset)
 
@@ -2192,6 +2226,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    log_statistics: bool = False,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2208,4 +2243,5 @@ def get_cached_dataset_tulu(
         drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
+        log_statistics=log_statistics,
     )[0]
