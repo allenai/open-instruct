@@ -2231,8 +2231,9 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif training_step == 1:
-            # Fresh run only: lazy init after step 1 ensures ZeRO-3 BF16 p.data has gone
-            # through at least one forward/backward before being broadcast to vLLM.
+            # Fresh run only: vLLM already has the same base model weights as the trainer,
+            # so no pre-loop sync is needed.  Lazy init here just establishes the sync
+            # channel after the first training step so subsequent steps can broadcast.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
