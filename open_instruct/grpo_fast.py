@@ -343,20 +343,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
 
-                # DeepSpeed ZeRO-3 with BF16 does not automatically refresh BF16 p.data from
-                # FP32 master parameters after load_checkpoint (update_lp_params is gated out for
-                # ZeRO-3 universal checkpoints in engine.py).  Without this, p.data is NaN and
-                # any weight sync before the first optimizer step would broadcast NaN to vLLM.
-                if hasattr(self.model.optimizer, "update_lp_params"):
-                    self.model.optimizer.update_lp_params()
-                    logger.info("Refreshed BF16 parameters from FP32 masters after ZeRO-3 checkpoint load.")
-                elif args.deepspeed_stage == 3:
-                    logger.warning(
-                        "ZeRO-3 checkpoint loaded but optimizer.update_lp_params() not found — "
-                        "BF16 p.data may be NaN before the first optimizer step. "
-                        "Weight sync on resume may broadcast NaN weights to vLLM. "
-                        "Check DeepSpeed version for API changes."
-                    )
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
