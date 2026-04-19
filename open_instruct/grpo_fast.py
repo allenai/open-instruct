@@ -794,12 +794,22 @@ class PolicyTrainerRayProcess(RayProcess):
         communicators and parameter-partition pointers before setup_model_update_group
         is called on resume.  Loss is multiplied by 0 so autograd gradients are zero;
         the optimizer still fires (advancing momentum/variance slightly) but weight
-        changes are negligible compared to the N-step resume drift we're avoiding."""
+        changes are negligible compared to the N-step resume drift we're avoiding.
+
+        After the step we invalidate ZeRO-3's parameter-fetch trace so that the
+        first real training step (which may use different code paths, e.g. the
+        Qwen3.5 hybrid packing patch) re-records a fresh trace rather than
+        replaying the one built from the dummy 2-token input."""
         device = next(self.model.parameters()).device
         dummy_ids = torch.ones(1, 2, dtype=torch.long, device=device)
         output = self.model(input_ids=dummy_ids, labels=dummy_ids)
         self.model.backward(output.loss * 0.0)
         self.model.step()
+        # Invalidate the ZeRO-3 parameter prefetch trace recorded by the dummy
+        # forward so the first real training step builds its own correct trace.
+        if hasattr(self.model, "optimizer") and hasattr(self.model.optimizer, "parameter_offload"):
+            coord = self.model.optimizer.parameter_offload.get_param_coordinator()
+            coord._invalidate_trace()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
