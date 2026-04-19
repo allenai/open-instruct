@@ -176,14 +176,14 @@ def _build_vlm_name_mapper(model_name: str):
 
 def _startup_debug_context(
     args: grpo_utils.GRPOExperimentConfig,
-    plan: grpo_fast_resource_plan.GrpoFastResourcePlan,
+    requirements: dict[str, Any],
     cluster_resources: dict[str, float] | None = None,
     available_resources: dict[str, float] | None = None,
 ) -> str:
     ray_address = os.environ.get("RAY_ADDRESS", "<unset>")
     return "\n".join(
         [
-            grpo_fast_resource_plan.format_grpo_fast_resource_plan(plan),
+            grpo_fast_resource_plan.format_grpo_fast_startup_requirements(requirements),
             f"Ray cluster resources: {grpo_fast_resource_plan.format_resource_snapshot(cluster_resources)}",
             f"Ray available resources: {grpo_fast_resource_plan.format_resource_snapshot(available_resources)}",
             (
@@ -196,7 +196,7 @@ def _startup_debug_context(
 
 def wait_for_grpo_fast_minimum_cluster_resources(
     args: grpo_utils.GRPOExperimentConfig,
-    plan: grpo_fast_resource_plan.GrpoFastResourcePlan,
+    requirements: dict[str, Any],
     timeout_s: float = CLUSTER_STARTUP_TIMEOUT_S,
     poll_interval_s: float = 5.0,
 ) -> dict[str, float]:
@@ -206,10 +206,10 @@ def wait_for_grpo_fast_minimum_cluster_resources(
 
     while True:
         last_cluster_resources = ray.cluster_resources()
-        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(plan, last_cluster_resources)
+        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(requirements, last_cluster_resources)
         if not shortfalls:
             logger.info("Ray cluster resources satisfy GRPO startup requirements.")
-            logger.info(_startup_debug_context(args, plan, last_cluster_resources, ray.available_resources()))
+            logger.info(_startup_debug_context(args, requirements, last_cluster_resources, ray.available_resources()))
             return last_cluster_resources
 
         if time.perf_counter() >= deadline:
@@ -223,16 +223,18 @@ def wait_for_grpo_fast_minimum_cluster_resources(
         "Timed out waiting for Ray to report the minimum resources required for GRPO startup.\n"
         + "\n".join(
             f"- {shortfall}"
-            for shortfall in grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(plan, last_cluster_resources)
+            for shortfall in grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(
+                requirements, last_cluster_resources
+            )
         )
         + "\n"
-        + _startup_debug_context(args, plan, last_cluster_resources, available_resources)
+        + _startup_debug_context(args, requirements, last_cluster_resources, available_resources)
     )
 
 
 def wait_for_grpo_fast_placement_group(
     args: grpo_utils.GRPOExperimentConfig,
-    plan: grpo_fast_resource_plan.GrpoFastResourcePlan,
+    requirements: dict[str, Any],
     pg: PlacementGroup,
     timeout_s: float = PLACEMENT_GROUP_READY_TIMEOUT_S,
 ) -> None:
@@ -246,7 +248,7 @@ def wait_for_grpo_fast_placement_group(
             "Timed out waiting for the learner placement group to be scheduled.\n"
             "Ray reported enough total resources earlier, so this usually means the requested bundles cannot be placed "
             "on the currently available nodes or CPUs/GPUs are fragmented.\n"
-            + _startup_debug_context(args, plan, cluster_resources, available_resources)
+            + _startup_debug_context(args, requirements, cluster_resources, available_resources)
         ) from exc
 
 
@@ -1297,11 +1299,16 @@ def create_model_and_optimizer(
     dict[str, Any] | None,
 ]:
     """Create the model, optimizer, and vLLM engines."""
-    resource_plan = grpo_fast_resource_plan.build_grpo_fast_resource_plan(args, vllm_config)
-    wait_for_grpo_fast_minimum_cluster_resources(args, resource_plan)
+    resource_requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+        num_learners_per_node=args.num_learners_per_node,
+        single_gpu_mode=args.single_gpu_mode,
+        vllm_num_engines=vllm_config.vllm_num_engines,
+        vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+    )
+    wait_for_grpo_fast_minimum_cluster_resources(args, resource_requirements)
 
-    pg = placement_group(resource_plan.learner_pg_bundles, strategy=resource_plan.learner_pg_strategy)
-    wait_for_grpo_fast_placement_group(args, resource_plan, pg)
+    pg = placement_group(resource_requirements["learner_pg_bundles"], strategy="STRICT_SPREAD")
+    wait_for_grpo_fast_placement_group(args, resource_requirements, pg)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,

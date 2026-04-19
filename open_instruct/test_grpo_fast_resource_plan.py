@@ -17,34 +17,48 @@ class TestGrpoFastResourcePlanning(unittest.TestCase):
         args = self._make_args(num_learners_per_node=[6])
         vllm_config = self._make_vllm_config(vllm_num_engines=2, vllm_tensor_parallel_size=1)
 
-        plan = grpo_fast_resource_plan.build_grpo_fast_resource_plan(args, vllm_config)
+        requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+            num_learners_per_node=args.num_learners_per_node,
+            single_gpu_mode=args.single_gpu_mode,
+            vllm_num_engines=vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        )
 
-        self.assertEqual(plan.learner_pg_strategy, "STRICT_SPREAD")
-        self.assertEqual(plan.learner_pg_bundles, [{"GPU": 6, "CPU": 60}])
-        self.assertEqual(plan.learner_pg_total_gpus, 6.0)
-        self.assertEqual(plan.learner_pg_total_cpus, 60.0)
-        self.assertEqual(plan.separate_vllm_total_gpus, 2.0)
-        self.assertEqual(plan.separate_vllm_total_cpus, 2.0)
-        self.assertEqual(plan.min_total_cluster_gpus, 8.0)
-        self.assertEqual(plan.min_total_cluster_cpus, 65.0)
+        self.assertEqual(requirements["learner_pg_bundles"], [{"GPU": 6, "CPU": 60}])
+        self.assertEqual(requirements["learner_pg_total_gpus"], 6.0)
+        self.assertEqual(requirements["learner_pg_total_cpus"], 60.0)
+        self.assertEqual(requirements["separate_vllm_total_gpus"], 2.0)
+        self.assertEqual(requirements["separate_vllm_total_cpus"], 2.0)
+        self.assertEqual(requirements["min_total_cluster_gpus"], 8.0)
+        self.assertEqual(requirements["min_total_cluster_cpus"], 65.0)
 
     def test_build_resource_plan_omits_separate_vllm_totals_in_single_gpu_mode(self):
         args = self._make_args(num_learners_per_node=[1], single_gpu_mode=True)
         vllm_config = self._make_vllm_config(vllm_num_engines=1, vllm_tensor_parallel_size=1)
 
-        plan = grpo_fast_resource_plan.build_grpo_fast_resource_plan(args, vllm_config)
+        requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+            num_learners_per_node=args.num_learners_per_node,
+            single_gpu_mode=args.single_gpu_mode,
+            vllm_num_engines=vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        )
 
-        self.assertEqual(plan.separate_vllm_total_gpus, 0.0)
-        self.assertEqual(plan.separate_vllm_total_cpus, 0.0)
-        self.assertEqual(plan.min_total_cluster_gpus, 1.0)
-        self.assertEqual(plan.min_total_cluster_cpus, 13.0)
+        self.assertEqual(requirements["separate_vllm_total_gpus"], 0.0)
+        self.assertEqual(requirements["separate_vllm_total_cpus"], 0.0)
+        self.assertEqual(requirements["min_total_cluster_gpus"], 1.0)
+        self.assertEqual(requirements["min_total_cluster_cpus"], 13.0)
 
     def test_resource_shortfalls_report_learner_pg_cpu_gap_first(self):
         args = self._make_args(num_learners_per_node=[6])
         vllm_config = self._make_vllm_config(vllm_num_engines=2, vllm_tensor_parallel_size=1)
-        plan = grpo_fast_resource_plan.build_grpo_fast_resource_plan(args, vllm_config)
+        requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+            num_learners_per_node=args.num_learners_per_node,
+            single_gpu_mode=args.single_gpu_mode,
+            vllm_num_engines=vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        )
 
-        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(plan, {"GPU": 8, "CPU": 32})
+        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(requirements, {"GPU": 8, "CPU": 32})
 
         self.assertEqual(len(shortfalls), 1)
         self.assertIn("learner placement group requires CPU=60", shortfalls[0])
@@ -52,9 +66,14 @@ class TestGrpoFastResourcePlanning(unittest.TestCase):
     def test_resource_shortfalls_report_full_topology_gap_after_pg_fits(self):
         args = self._make_args(num_learners_per_node=[6])
         vllm_config = self._make_vllm_config(vllm_num_engines=2, vllm_tensor_parallel_size=1)
-        plan = grpo_fast_resource_plan.build_grpo_fast_resource_plan(args, vllm_config)
+        requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+            num_learners_per_node=args.num_learners_per_node,
+            single_gpu_mode=args.single_gpu_mode,
+            vllm_num_engines=vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        )
 
-        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(plan, {"GPU": 8, "CPU": 64})
+        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(requirements, {"GPU": 8, "CPU": 64})
 
         self.assertEqual(len(shortfalls), 1)
         self.assertIn("full topology requires at least CPU=65", shortfalls[0])
