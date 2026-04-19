@@ -32,9 +32,9 @@ uv run python mason.py \
     python open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
-    --async_steps 2 \
+    --async_steps 1 \
     --beta 0.0 \
-    --eval_pass_at_k 32 \
+    --eval_pass_at_k 16 \
     --log_train_solve_rate_metrics \
     --load_ref_policy false \
     --num_unique_prompts_rollout 48 \
@@ -46,11 +46,11 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 50 \
+    --dataset_mixer_eval_list mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128 100 \
     --dataset_mixer_eval_list_splits test \
     --max_prompt_token_length 2048 \
-    --response_length 8192 \
-    --pack_length 10240 \
+    --response_length 12000 \
+    --pack_length 14048 \
     --model_name_or_path "Qwen/Qwen3-4B-Instruct-2507" \
     --apply_verifiable_reward true \
     --manufactoria_api_url \$MANUFACTORIA_API_URL/test_solution \
@@ -58,8 +58,8 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 6 \
-    --vllm_num_engines 2 \
+    --num_learners_per_node 2 \
+    --vllm_num_engines 6 \
     --clip_higher 0.28 \
     --seed 1 \
     --local_eval_every 25 \
