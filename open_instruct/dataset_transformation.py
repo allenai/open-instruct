@@ -952,7 +952,7 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v8: Drop tools column after SFT tokenization.
-DATASET_CACHE_VERSION = "v8"
+DATASET_CACHE_VERSION = "v9"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1186,8 +1186,10 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
+    tools = row.get("tools") or None
     input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
+        tools=tools,
         tokenize=True,
         return_tensors="pt",
         return_dict=False,
@@ -1212,8 +1214,10 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
+    tools = row.get("tools") or None
     input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
+        tools=tools,
         tokenize=True,
         return_tensors="pt",
         return_dict=False,
@@ -1545,12 +1549,21 @@ TRANSFORM_FNS = {
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
+    "last_turn_tulu_tokenize_and_truncate_v1": (last_turn_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
+}
+
+# SFT tokenization functions that consume the tools column — don't re-add it to target_columns
+_SFT_TOKENIZE_FNS = {
+    "sft_tokenize_v1",
+    "sft_tokenize_mask_out_prompt_v1",
+    "sft_tulu_tokenize_and_truncate_v1",
+    "last_turn_tulu_tokenize_and_truncate_v1",
 }
 
 
@@ -1739,7 +1752,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
-        target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        # Only preserve tools for RLVR transforms; SFT tokenization consumes tools and must not keep it
+        if fn_name not in _SFT_TOKENIZE_FNS:
+            target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":
