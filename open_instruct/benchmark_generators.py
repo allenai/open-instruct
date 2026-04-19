@@ -54,10 +54,12 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
 
+    write_header = not csv_path.exists()
     with open(csv_path, "a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+        if write_header:
+            writer.writeheader()
 
         for batch_result in batch_results:
             response_lengths = batch_result["response_lengths"]
