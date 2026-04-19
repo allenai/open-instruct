@@ -951,8 +951,8 @@ ENV_CONFIG_KEY = "env_config"
 EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v7: Pass tools to apply_chat_template in SFT tokenization.
-DATASET_CACHE_VERSION = "v7"
+# to invalidate old caches. v8: Drop tools column after SFT tokenization.
+DATASET_CACHE_VERSION = "v8"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
