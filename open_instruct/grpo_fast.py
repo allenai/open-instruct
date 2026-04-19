@@ -1444,12 +1444,6 @@ def create_model_and_optimizer(
             f"with training_step={data_prep_actor_state['training_step']}"
         )
 
-    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
-
-    logger.info(
-        "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
-    )
-
     return (
         policy_group,
         vllm_engines,
@@ -2063,7 +2057,7 @@ def run_training(
             enable=False,
         )
 
-    def initialize_weight_sync() -> tuple[futures.Future, WeightSyncTrigger]:
+    def initialize_weight_sync(initial_step: int | None = None) -> tuple[futures.Future, WeightSyncTrigger]:
         logger.info("[Main Thread] Initializing native vLLM weight sync.")
 
         ray_get_with_progress(
@@ -2090,8 +2084,9 @@ def run_training(
             streaming_config.inflight_updates,
         )
 
+        step = resume_training_step if initial_step is None else initial_step
         logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=resume_training_step)
+        trigger.notify(step=step)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
 
@@ -2100,6 +2095,21 @@ def run_training(
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
     else:
         num_total_tokens = 0
+
+    # On resume, sync checkpoint weights to vLLM before the DataPreparationActor starts
+    # generating rollouts, so the first rollout batch uses the correct checkpoint weights.
+    # On a fresh run (resume_training_step == 1), vLLM and the trainer start with the same
+    # base model weights, so no pre-loop sync is needed; we use lazy init after step 1 instead
+    # (for ZeRO-3 compatibility — weights are fully available after the first forward/backward).
+    _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+    if resume_training_step > 1:
+        logger.info(
+            "[Main Thread] Resuming: syncing checkpoint weights to vLLM before generating rollouts."
+        )
+        weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(
+            initial_step=resume_training_step - 1
+        )
+    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
 
     if eval_dataset is not None:
         eval_data_loader = data_loader_lib.HFDataLoader(
@@ -2215,11 +2225,13 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        if training_step == resume_training_step:
-            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
-        elif weight_sync_trigger is not None:
+        if weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
+        elif training_step == 1:
+            # Fresh run: lazy init after step 1 to ensure ZeRO-3 weights are fully
+            # available (ZeRO-3 gathers params during the first forward/backward).
+            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
             args,

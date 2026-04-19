@@ -1,19 +1,14 @@
 #!/bin/bash
-# Tests that weight sync fires correctly when resuming training.
-# Runs phase 1 (1 step + checkpoint), then phase 2 (resume), and verifies
-# "[Main Thread] Initializing native vLLM weight sync." appears in phase 2 logs.
+# Two-phase resume weight sync test, run inside a Beaker container.
+# Phase 1: train 1 step and save a checkpoint.
+# Phase 2: resume from checkpoint and verify checkpoint weights are synced
+#          to vLLM *before* rollout generation (not after the first training step).
 set -euo pipefail
 
 export TORCH_COMPILE_DISABLE=1
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
-unset LD_LIBRARY_PATH
-export HF_HUB_CACHE=/tmp/hf_hub_cache_resume_test
-export HF_DATASETS_CACHE=/tmp/hf_datasets_cache_resume_test
-# Unset BEAKER_JOB_ID so is_beaker_job() returns False and the dataset cache
-# uses a local writable path instead of the read-only /weka path.
-unset BEAKER_JOB_ID
 
 CKPT_DIR="/tmp/grpo_resume_weight_sync_test_ckpt"
 OUTPUT_DIR="/tmp/grpo_resume_weight_sync_test_out"
@@ -22,7 +17,7 @@ LOG2="/tmp/grpo_resume_phase2.log"
 
 # num_training_steps = total_episodes / (num_unique_prompts_rollout * num_samples_per_prompt_rollout)
 # = 32 / (8 * 4) = 1  (phase 1)
-# = 64 / (8 * 4) = 2  (phase 2, so resume_training_step=2 and loop runs once)
+# = 64 / (8 * 4) = 2  (phase 2, so resume_training_step=2, loop runs once)
 
 COMMON_ARGS=(
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64
@@ -38,28 +33,25 @@ COMMON_ARGS=(
     --apply_verifiable_reward true
     --learning_rate 1e-6
     --num_epochs 1
-    --num_learners_per_node 1
+    --num_learners_per_node 2
     --vllm_tensor_parallel_size 1
     --beta 0.01
     --seed 3
     --local_eval_every -1
-    --vllm_sync_backend gloo
+    --vllm_sync_backend nccl
     --vllm_gpu_memory_utilization 0.4
     --vllm_enforce_eager
-    --single_gpu_mode
     --push_to_hub false
     --output_dir "$OUTPUT_DIR"
     --checkpoint_state_dir "$CKPT_DIR"
     --checkpoint_state_freq 1
-    --deepspeed_stage 2
+    --deepspeed_stage 3
 )
 
 rm -rf "$CKPT_DIR" "$OUTPUT_DIR" "$LOG1" "$LOG2"
 
-PYTHON=/root/calzone/open-instruct/.venv/bin/python
-
-echo "=== Phase 1: 1 training step (saves checkpoint at step 1) ==="
-"$PYTHON" open_instruct/grpo_fast.py \
+echo "=== Phase 1: 1 training step with ZeRO-3 (2 learner GPUs) ==="
+python open_instruct/grpo_fast.py \
     "${COMMON_ARGS[@]}" \
     --total_episodes 32 \
     2>&1 | tee "$LOG1"
@@ -72,18 +64,18 @@ else
 fi
 
 echo ""
-echo "=== Phase 2: Resume from checkpoint (should init weight sync at resume step) ==="
-"$PYTHON" open_instruct/grpo_fast.py \
+echo "=== Phase 2: Resume from ZeRO-3 checkpoint (eager sync before rollouts) ==="
+python open_instruct/grpo_fast.py \
     "${COMMON_ARGS[@]}" \
     --total_episodes 64 \
     2>&1 | tee "$LOG2"
 
 if grep -q "Resuming: syncing checkpoint weights to vLLM before generating rollouts" "$LOG2"; then
-    echo "✅ Phase 2: checkpoint weights synced to vLLM before rollout generation — fix confirmed!"
+    echo "✅ Phase 2: ZeRO-3 checkpoint weights synced to vLLM before rollout generation — confirmed!"
 else
-    echo "❌ Phase 2: checkpoint weight sync before rollouts NOT found — fix failed"
+    echo "❌ Phase 2: ZeRO-3 checkpoint weight sync before rollouts NOT found — failed"
     exit 1
 fi
 
 echo ""
-echo "=== All checks passed ==="
+echo "=== All checks passed (ZeRO-3 multi-GPU GatheredParameters path verified) ==="
