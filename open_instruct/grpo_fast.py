@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import contextlib
+import glob
 import os
 import pathlib
 from concurrent import futures
@@ -162,6 +163,63 @@ def get_unique_final_output_dir(output_dir: str) -> str:
 
     logger.warning(f"Final output directory {output_dir} already exists. Saving final model to {candidate}.")
     return str(candidate)
+
+
+def load_latest_checkpoint_client_state(checkpoint_state_dir: str) -> dict[str, Any] | None:
+    latest_tag_path = os.path.join(checkpoint_state_dir, "latest")
+    candidate_dirs: list[str] = []
+
+    if os.path.exists(latest_tag_path):
+        with open(latest_tag_path) as f:
+            latest_tag = f.read().strip()
+        if latest_tag:
+            candidate_dirs.append(os.path.join(checkpoint_state_dir, latest_tag))
+
+    global_step_dirs = [
+        os.path.join(checkpoint_state_dir, entry)
+        for entry in os.listdir(checkpoint_state_dir)
+        if entry.startswith("global_step") and os.path.isdir(os.path.join(checkpoint_state_dir, entry))
+    ]
+    candidate_dirs.extend(
+        sorted(global_step_dirs, key=lambda path: int(os.path.basename(path).replace("global_step", "")), reverse=True)
+    )
+    candidate_dirs.append(checkpoint_state_dir)
+
+    seen_dirs: set[str] = set()
+    for checkpoint_dir in candidate_dirs:
+        if checkpoint_dir in seen_dirs:
+            continue
+        seen_dirs.add(checkpoint_dir)
+        model_state_paths = sorted(glob.glob(os.path.join(checkpoint_dir, "mp_rank_*_model_states.pt")))
+        if not model_state_paths:
+            continue
+
+        preferred_path = os.path.join(checkpoint_dir, "mp_rank_00_model_states.pt")
+        checkpoint_path = preferred_path if os.path.exists(preferred_path) else model_state_paths[0]
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        deepspeed_states = {
+            "module",
+            "buffer_names",
+            "optimizer",
+            "param_shapes",
+            "frozen_param_shapes",
+            "shared_params",
+            "frozen_param_fragments",
+            "lr_scheduler",
+            "data_sampler",
+            "random_ltd",
+            "sparse_tensor_module_names",
+            "skipped_steps",
+            "global_steps",
+            "global_samples",
+            "dp_world_size",
+            "mp_world_size",
+            "ds_config",
+            "ds_version",
+        }
+        return {key: value for key, value in checkpoint.items() if key not in deepspeed_states}
+
+    return None
 
 
 def update_dataset_solve_rate(
@@ -2783,10 +2841,9 @@ def main(
     checkpoint_state = None
     data_prep_actor_state = None
     if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+        checkpoint_state = load_latest_checkpoint_client_state(args.checkpoint_state_dir)
+        if checkpoint_state is not None:
+            logger.info("Loaded checkpoint client state from %s", args.checkpoint_state_dir)
             data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
             if data_prep_actor_state:
                 # Use trainer's authoritative training_step for DataPreparationActor.
