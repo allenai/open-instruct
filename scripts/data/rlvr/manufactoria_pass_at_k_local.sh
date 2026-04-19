@@ -28,8 +28,9 @@ export MANUFACTORIA_API_URL=http://localhost:1235
 # _run_one() {
   # local split="$1"
 uv run python scripts/data/rlvr/manufactoria_pass_at_k_dataset.py \
+--use-existing-completions \
 --dataset "mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128" \
---split "train[:1]" \
+--split "train" \
 --model "/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/qwen3_4b_it_manufac_pass_rate__1__1776024283_checkpoints/step_650" \
 --chat-template "from_model" \
 --num-samples 128 \
@@ -43,7 +44,8 @@ uv run python scripts/data/rlvr/manufactoria_pass_at_k_dataset.py \
 --seed 1 \
 --manufactoria-scoring-mode "pass_rate" \
 --manufactoria-max-execution-time 1.0 \
---save-local-dir "/tmp/manufactoria_pass_at_k_outputs" $@
+--save-local-dir "/tmp/manufactoria_pass_at_k_outputs" \
+--push-to-hub mnoukhov/manufactoria-qwen3-4b-instruct-warmup650-pass128-rescored $@
 # }
 
 # _run_one "train[:1]"

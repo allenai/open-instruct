@@ -357,7 +357,28 @@ def _extract_per_test_pass_vector(result_metadata: dict[str, Any], n_tests: int)
 
 
 def _per_test_pass_rates_from_row(row: dict[str, Any]) -> list[float]:
-    """Per-test pass rate in [0, 1] for each test; empty if missing counts or num_samples."""
+    """Per-test pass rate in [0, 1] for each test; empty if unavailable.
+
+    Prefers the ``Per-test pass rate`` column (floats). Older datasets used ``count/num_samples``
+    strings; those are still accepted. Falls back to ``Per-test pass count`` / ``num_samples``.
+    """
+    ptr = row.get("Per-test pass rate")
+    if isinstance(ptr, list) and ptr:
+        out: list[float] = []
+        for x in ptr:
+            if isinstance(x, (int, float)):
+                out.append(float(x))
+            elif isinstance(x, str) and "/" in x:
+                num_s, _, den_s = x.partition("/")
+                try:
+                    den = float(den_s)
+                    if den > 0:
+                        out.append(float(num_s) / den)
+                except ValueError:
+                    continue
+        if out:
+            return out
+
     ptc = row.get("Per-test pass count")
     if not isinstance(ptc, list) or not ptc:
         return []
@@ -365,6 +386,17 @@ def _per_test_pass_rates_from_row(row: dict[str, Any]) -> list[float]:
     if num_samples <= 0:
         return []
     return [float(c) / float(num_samples) for c in ptc]
+
+
+def _row_avg_test_pass_rate(row: dict[str, Any]) -> float | None:
+    """Mean of per-test pass rates for one prompt (equal weight per test). None if unavailable."""
+    avg = row.get("avg_test_pass_rate")
+    if isinstance(avg, (int, float)):
+        return float(avg)
+    rates = _per_test_pass_rates_from_row(row)
+    if not rates:
+        return None
+    return float(sum(rates) / len(rates))
 
 
 def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit: int = 8) -> None:
@@ -379,6 +411,8 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
     difficulty_flat: list[int] = []
     weighted_rate_sum = 0.0
     weighted_rate_count = 0
+    row_avg_sum = 0.0
+    row_avg_count = 0
 
     for row in rows:
         ns = int(row.get("num_samples", 0) or 0)
@@ -394,6 +428,10 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
         for r in _per_test_pass_rates_from_row(row):
             weighted_rate_sum += r
             weighted_rate_count += 1
+        row_avg = _row_avg_test_pass_rate(row)
+        if row_avg is not None:
+            row_avg_sum += row_avg
+            row_avg_count += 1
 
     logger.info("dry-run summary: rows=%d", n)
     if total_completions > 0:
@@ -403,9 +441,16 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
             total_full_pass_completions,
             total_completions,
         )
+    if row_avg_count > 0:
+        logger.info(
+            "dry-run summary: avg_test_pass_rate=%.6f (mean of per-prompt avg; equal weight per prompt, n=%d)",
+            row_avg_sum / row_avg_count,
+            row_avg_count,
+        )
     if weighted_rate_count > 0:
         logger.info(
-            "dry-run summary: mean_per_test_pass_rate_over_all_tests=%.6f (%d test slots)",
+            "dry-run summary: mean_per_test_pass_rate_over_test_slots=%.6f (micro-avg over %d test slots; "
+            "prompts with more tests count more)",
             weighted_rate_sum / weighted_rate_count,
             weighted_rate_count,
         )
@@ -426,11 +471,14 @@ def print_rescored_dataset_summary(rows: list[dict[str, Any]], sample_row_limit:
         rates = _per_test_pass_rates_from_row(row)
         ptc = row.get("Per-test pass count")
         n_pt = len(ptc) if isinstance(ptc, list) else 0
+        ravg = _row_avg_test_pass_rate(row)
         logger.info(
-            "  row %d: num_samples=%s full_pass_count=%s per_test_pass_count_len=%d per_test_pass_rates=%s",
+            "  row %d: num_samples=%s full_pass_count=%s avg_test_pass_rate=%s per_test_pass_count_len=%d "
+            "per_test_pass_rates=%s",
             i,
             row.get("num_samples"),
             row.get("Full pass count"),
+            f"{ravg:.6f}" if ravg is not None else "n/a",
             n_pt,
             rates,
         )
@@ -536,7 +584,13 @@ def build_output_row(
         row["generator_max_tokens"] = args.response_length
     if with_difficulty:
         row["Per-test pass count"] = per_test_pass_count
-        row["Per-test pass rate"] = [_format_pass_rate(count, num_samples) for count in per_test_pass_count]
+        row["Per-test pass rate"] = (
+            [float(c) / float(num_samples) for c in per_test_pass_count] if num_samples > 0 else []
+        )
+        if per_test_pass_count and num_samples > 0:
+            row["avg_test_pass_rate"] = float(sum(per_test_pass_count)) / (
+                float(num_samples) * float(len(per_test_pass_count))
+            )
     return row
 
 
