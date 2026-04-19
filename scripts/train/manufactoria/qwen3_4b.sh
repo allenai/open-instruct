@@ -37,7 +37,7 @@ uv run python mason.py \
     --eval_pass_at_k 16 \
     --log_train_solve_rate_metrics \
     --load_ref_policy false \
-    --num_unique_prompts_rollout 48 \
+    --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 16 \
     --num_mini_batches 1 \
     --num_epochs 1 \
