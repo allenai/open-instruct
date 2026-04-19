@@ -2099,10 +2099,10 @@ def run_training(
 
     # On resume, sync checkpoint weights to vLLM before the DataPreparationActor starts
     # generating rollouts so the first rollout batch uses the correct checkpoint weights.
-    # ZeRO-3 BF16 p.data is populated from FP32 masters via update_lp_params() right after
-    # load_checkpoint, so the eager sync is safe for all DeepSpeed stages.
+    # The checkpoint was saved after an optimizer step, so ZeRO-3 BF16 p.data is valid.
     # On a fresh run (resume_training_step == 1), vLLM and the trainer start with the same
-    # base model weights, so no pre-loop sync is needed; we use lazy init after step 1 instead.
+    # base model weights, so no pre-loop sync is needed; lazy init fires after step 1 instead
+    # (ZeRO-3 BF16 p.data is only safe to broadcast after the first forward/backward).
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
     if resume_training_step > 1:
         logger.info(
@@ -2231,9 +2231,8 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif training_step == 1:
-            # Fresh run only: lazy init after step 1 ensures ZeRO-3 p.data has gone through
-            # at least one forward/backward before being broadcast (belt-and-suspenders; the
-            # update_lp_params call at checkpoint load covers the resume case).
+            # Fresh run only: lazy init after step 1 ensures ZeRO-3 BF16 p.data has gone
+            # through at least one forward/backward before being broadcast to vLLM.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
