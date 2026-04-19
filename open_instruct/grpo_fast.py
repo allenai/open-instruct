@@ -2232,10 +2232,9 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif training_step == 1:
-            # Fresh run only: ZeRO-3 does not explicitly copy HF weights into BF16 p.data
-            # during initialization (unlike _rigid_load_state_dict on resume which does so
-            # at lines 2850-2855 of stage3.py).  Syncing before step 1 would broadcast
-            # uninitialized weights.  After the first forward/backward p.data is valid.
+            # Fresh run only: vLLM already loaded the same HF weights as the trainer, so
+            # no pre-loop sync is needed.  We initialise the sync channel here (after step 1)
+            # so that subsequent steps can broadcast updated weights.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
