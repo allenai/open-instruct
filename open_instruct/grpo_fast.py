@@ -2091,7 +2091,7 @@ def run_training(
         )
 
         logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=1)
+        trigger.notify(step=resume_training_step)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
 
@@ -2215,7 +2215,7 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        if training_step == 1:
+        if training_step == resume_training_step:
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
         elif weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
