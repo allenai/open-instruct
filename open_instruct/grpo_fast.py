@@ -350,6 +350,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self.model.optimizer, "update_lp_params"):
                     self.model.optimizer.update_lp_params()
                     logger.info("Refreshed BF16 parameters from FP32 masters after ZeRO-3 checkpoint load.")
+                elif args.deepspeed_stage == 3:
+                    logger.warning(
+                        "ZeRO-3 checkpoint loaded but optimizer.update_lp_params() not found — "
+                        "BF16 p.data may be NaN before the first optimizer step. "
+                        "Weight sync on resume may broadcast NaN weights to vLLM. "
+                        "Check DeepSpeed version for API changes."
+                    )
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
