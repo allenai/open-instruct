@@ -789,6 +789,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         array_metrics[key] = value
                 return self.local_metrics.get_metrics_list(), array_metrics
 
+    def dummy_optimizer_step(self) -> None:
+        """Run one zero-loss optimizer step to initialize ZeRO-3's internal NCCL
+        communicators and parameter-partition pointers before setup_model_update_group
+        is called on resume.  Loss is multiplied by 0 so autograd gradients are zero;
+        the optimizer still fires (advancing momentum/variance slightly) but weight
+        changes are negligible compared to the N-step resume drift we're avoiding."""
+        device = next(self.model.parameters()).device
+        dummy_ids = torch.ones(1, 2, dtype=torch.long, device=device)
+        output = self.model(input_ids=dummy_ids, labels=dummy_ids)
+        self.model.backward(output.loss * 0.0)
+        self.model.step()
+
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
 
@@ -2058,7 +2070,7 @@ def run_training(
             enable=False,
         )
 
-    def initialize_weight_sync(initial_step: int | None = None) -> tuple[futures.Future, WeightSyncTrigger]:
+    def initialize_weight_sync() -> tuple[futures.Future, WeightSyncTrigger]:
         logger.info("[Main Thread] Initializing native vLLM weight sync.")
 
         ray_get_with_progress(
@@ -2085,9 +2097,8 @@ def run_training(
             streaming_config.inflight_updates,
         )
 
-        step = resume_training_step if initial_step is None else initial_step
         logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=step)
+        trigger.notify(step=resume_training_step)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
 
@@ -2097,21 +2108,24 @@ def run_training(
     else:
         num_total_tokens = 0
 
-    # On resume, sync checkpoint weights to vLLM before the DataPreparationActor starts
-    # generating rollouts so the first rollout batch uses the correct checkpoint weights.
-    # Safe for ZeRO-3: _rigid_load_state_dict explicitly copies FP32 masters → BF16 p.data
-    # (stage3.py:2850-2855), so p.data is valid immediately after load_checkpoint.
-    # On a fresh run (resume_training_step == 1), skip the pre-loop sync: ZeRO-3 does not
-    # populate BF16 p.data from HF weights until the first forward/backward, so syncing
-    # before step 1 would broadcast uninitialized weights.  Use lazy init after step 1.
+    # With DeepSpeed ZeRO-3 the model-update NCCL group must not be initialised
+    # before the first optimizer step — doing so causes GatheredParameters to
+    # broadcast NaN weights to vLLM.
+    #
+    # On resume with ZeRO-3: run a dummy zero-loss step first so ZeRO-3's NCCL
+    # communicators and partition pointers are valid, then immediately sync
+    # checkpoint weights to vLLM before generating the first rollout batch.
+    #
+    # On fresh starts (resume_training_step == 1): vLLM and the trainer share
+    # the same base model, so no pre-loop sync is needed; defer to after step 1.
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-    if resume_training_step > 1:
-        logger.info(
-            "[Main Thread] Resuming: syncing checkpoint weights to vLLM before generating rollouts."
+    if resume_training_step > 1 and args.deepspeed_stage == 3:
+        logger.info("[Main Thread] ZeRO-3 resume: running dummy optimizer step to prime NCCL state.")
+        ray_get_with_progress(
+            [m.dummy_optimizer_step.remote() for m in policy_group.models],
+            desc="ZeRO-3 resume dummy step",
         )
-        weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(
-            initial_step=resume_training_step - 1
-        )
+        weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
 
     if eval_dataset is not None:
@@ -2231,10 +2245,10 @@ def run_training(
         if weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
-        elif training_step == 1:
-            # Fresh run only: vLLM already loaded the same HF weights as the trainer, so
-            # no pre-loop sync is needed.  We initialise the sync channel here (after step 1)
-            # so that subsequent steps can broadcast updated weights.
+        elif training_step == resume_training_step:
+            # Fresh starts and non-ZeRO-3 resumes: initialise weight sync after
+            # the first training step.  ZeRO-3 resumes are handled pre-loop via
+            # a dummy step, so weight_sync_trigger is already set in that case.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(

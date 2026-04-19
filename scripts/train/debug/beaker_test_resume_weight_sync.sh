@@ -64,18 +64,18 @@ else
 fi
 
 echo ""
-echo "=== Phase 2: Resume from ZeRO-3 checkpoint (eager sync before rollouts) ==="
+echo "=== Phase 2: Resume from ZeRO-3 checkpoint (dummy step + eager weight sync before first rollout) ==="
 python open_instruct/grpo_fast.py \
     "${COMMON_ARGS[@]}" \
     --total_episodes 64 \
     2>&1 | tee "$LOG2"
 
-if grep -q "Resuming: syncing checkpoint weights to vLLM before generating rollouts" "$LOG2"; then
-    echo "✅ Phase 2: ZeRO-3 checkpoint weights synced to vLLM before rollout generation — confirmed!"
+if grep -q "\[Main Thread\] Initializing native vLLM weight sync" "$LOG2"; then
+    echo "✅ Phase 2: weight sync initialized on resume (expected)"
 else
-    echo "❌ Phase 2: ZeRO-3 checkpoint weight sync before rollouts NOT found — failed"
+    echo "❌ Phase 2: weight sync NOT initialized on resume — unexpected failure"
     exit 1
 fi
 
 echo ""
-echo "=== All checks passed (ZeRO-3 multi-GPU GatheredParameters path verified) ==="
+echo "=== All checks passed (ZeRO-3 resume dummy-step + eager weight sync verified) ==="

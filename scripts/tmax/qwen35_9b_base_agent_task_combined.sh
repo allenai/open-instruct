@@ -47,6 +47,7 @@ uv run python mason.py \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enforce_eager \

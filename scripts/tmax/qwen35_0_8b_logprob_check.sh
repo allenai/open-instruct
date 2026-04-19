@@ -64,6 +64,7 @@ uv run python mason.py \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --seed 42 \
     --local_eval_every 5 \
     --vllm_sync_backend gloo \
