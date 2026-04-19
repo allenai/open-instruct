@@ -2099,10 +2099,11 @@ def run_training(
 
     # On resume, sync checkpoint weights to vLLM before the DataPreparationActor starts
     # generating rollouts so the first rollout batch uses the correct checkpoint weights.
-    # The checkpoint was saved after an optimizer step, so ZeRO-3 BF16 p.data is valid.
-    # On a fresh run (resume_training_step == 1), vLLM and the trainer start with the same
-    # base model weights, so no pre-loop sync is needed; lazy init fires after step 1 instead
-    # (ZeRO-3 BF16 p.data is only safe to broadcast after the first forward/backward).
+    # Safe for ZeRO-3: _rigid_load_state_dict explicitly copies FP32 masters → BF16 p.data
+    # (stage3.py:2850-2855), so p.data is valid immediately after load_checkpoint.
+    # On a fresh run (resume_training_step == 1), skip the pre-loop sync: ZeRO-3 does not
+    # populate BF16 p.data from HF weights until the first forward/backward, so syncing
+    # before step 1 would broadcast uninitialized weights.  Use lazy init after step 1.
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
     if resume_training_step > 1:
         logger.info(
@@ -2231,9 +2232,10 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif training_step == 1:
-            # Fresh run only: vLLM already has the same base model weights as the trainer,
-            # so no pre-loop sync is needed.  Lazy init here just establishes the sync
-            # channel after the first training step so subsequent steps can broadcast.
+            # Fresh run only: ZeRO-3 does not explicitly copy HF weights into BF16 p.data
+            # during initialization (unlike _rigid_load_state_dict on resume which does so
+            # at lines 2850-2855 of stage3.py).  Syncing before step 1 would broadcast
+            # uninitialized weights.  After the first forward/backward p.data is valid.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
