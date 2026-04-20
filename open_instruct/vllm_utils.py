@@ -788,13 +788,6 @@ class LLMRayActor:
             self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=request["update_info"]))
         )
 
-    def apply_weight_update(self, update_info: dict, model_step: int) -> None:
-        while not self.inflight_updates and len(self.active_tasks) > 0:
-            self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
-        self.current_model_step = model_step
-
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
 
@@ -1427,7 +1420,8 @@ def broadcast_weights_to_vllm(
 
     if is_rank_0:
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-        refs = [engine.apply_weight_update.remote(update_info, model_step) for engine in vllm_engines]
+        refs = [engine.update_weights.remote({"update_info": update_info}) for engine in vllm_engines]
+        refs += [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     else:
         refs = []
 
