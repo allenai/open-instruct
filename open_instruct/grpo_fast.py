@@ -1404,9 +1404,7 @@ def create_model_and_optimizer(
 
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
 
-    logger.info(
-        "======== ⏸️ lazily initializing native vLLM weight sync after the first training step of this run ========="
-    )
+    logger.info("======== ⏸️ native vLLM weight sync will be initialized before the training loop starts =========")
 
     return (
         policy_group,
@@ -2118,6 +2116,9 @@ def run_training(
         wandb_url=wandb_url,
     )
     last_eval_collected = True
+
+    weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(resume_training_step)
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -2211,9 +2212,7 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        if training_step == resume_training_step:
-            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(training_step)
-        elif weight_sync_trigger is not None:
+        if training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
 
