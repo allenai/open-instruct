@@ -118,6 +118,9 @@ class GRPOExperimentConfig(
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
     """Whether to use DAPO or CISPO loss function."""
+    use_delight: bool = False
+    """Whether to gate per-token policy-gradient terms with the Delightful Policy Gradient sigmoid
+    of delight = advantage * surprisal (https://arxiv.org/abs/2603.14608)."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -342,6 +345,10 @@ def compute_grpo_loss(
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    if config.use_delight:
+        # Delightful Policy Gradient gate; temperature eta is fixed to 1 per the paper.
+        advantages = advantages * torch.sigmoid(-advantages * new_logprobs.detach())
+
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)

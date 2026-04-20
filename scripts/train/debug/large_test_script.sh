@@ -67,4 +67,5 @@ uv run python mason.py \
         --checkpoint_state_dir /tmp/checkpoint_test \
         --active_sampling \
         --async_steps 4 \
+        --use_delight true \
 	--push_to_hub False
