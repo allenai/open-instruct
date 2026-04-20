@@ -81,7 +81,7 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, vllm_utils
+from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, value_model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
@@ -108,7 +108,6 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct import value_model_utils
 from open_instruct.rl_utils import (
     Timer,
     calculate_advantages_packed,
@@ -534,9 +533,7 @@ class PolicyTrainerRayProcess(RayProcess):
     # full list of supported features (SAE, decoupled/length-adaptive GAE, GT / rollout_context /
     # correct_demo / lm_yesno conditioning).
     # ------------------------------------------------------------
-    def _init_value_model(
-        self, args: grpo_utils.GRPOExperimentConfig, model_config: ModelConfig
-    ) -> None:
+    def _init_value_model(self, args: grpo_utils.GRPOExperimentConfig, model_config: ModelConfig) -> None:
         """Initialize a standalone value model as a DeepSpeed-managed module.
 
         The value model is a full causal LM whose lm_head is replaced with a scalar `Linear(h, 1)`
@@ -590,9 +587,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 value_head.bias.data.copy_(rm.score.bias.data)
             self.value_model.lm_head = value_head
             del rm
-            logger.info(
-                f"{self.rank=}: Initialized value model from RM {value_model_path} with trained score head"
-            )
+            logger.info(f"{self.rank=}: Initialized value model from RM {value_model_path} with trained score head")
         else:
             self.value_model = AutoModelForCausalLM.from_pretrained(
                 value_model_path,
@@ -602,18 +597,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 use_cache=False,
             )
             if args.use_lm_value_model:
-                logger.info(
-                    f"{self.rank=}: Keeping LM head for LM value model (Yes/No probability extraction)"
-                )
+                logger.info(f"{self.rank=}: Keeping LM head for LM value model (Yes/No probability extraction)")
             else:
                 hidden_size = self.value_model.config.hidden_size
                 value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
                 std = 1.0 / (hidden_size + 1) ** 0.5
                 torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
                 self.value_model.lm_head = value_head
-                logger.info(
-                    f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})"
-                )
+                logger.info(f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})")
 
         disable_dropout_in_model(self.value_model)
 
@@ -622,9 +613,7 @@ class PolicyTrainerRayProcess(RayProcess):
             no_ids = self.tokenizer.encode("No", add_special_tokens=False)
             self._lm_value_yes_id = yes_ids[0]
             self._lm_value_no_id = no_ids[0]
-            logger.info(
-                f"{self.rank=}: LM-value yes_id={self._lm_value_yes_id}, no_id={self._lm_value_no_id}"
-            )
+            logger.info(f"{self.rank=}: LM-value yes_id={self._lm_value_yes_id}, no_id={self._lm_value_no_id}")
 
         if args.init_value_from_pretrained_checkpoint:
             pretrained_path = os.path.join(args.init_value_from_pretrained_checkpoint, "value_model.bin")
@@ -773,14 +762,7 @@ class PolicyTrainerRayProcess(RayProcess):
             mask = m[s:e]
             if ids.numel() == 0:
                 continue
-            result.append(
-                {
-                    "offset_in_pack": s,
-                    "length": e - s,
-                    "input_ids": ids,
-                    "response_is_resp": mask,
-                }
-            )
+            result.append({"offset_in_pack": s, "length": e - s, "input_ids": ids, "response_is_resp": mask})
         return result
 
     def _forward_value_with_conditioning(
@@ -827,7 +809,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 new_pos = torch.arange(new_ids.numel(), device=ids.device)
                 # Which positions in new_ids correspond to ORIGINAL response tokens (for value extraction)?
                 orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
-                orig_mask[: first_resp] = mask[:first_resp]  # copy original prompt portion (all False)
+                orig_mask[:first_resp] = mask[:first_resp]  # copy original prompt portion (all False)
                 orig_mask[first_resp + cond_tensor.numel() :] = mask[first_resp:]
             else:
                 # Prefix template: prepend conditioning.
@@ -863,10 +845,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return out_values
 
     def forward_value(
-        self,
-        query_responses: torch.Tensor,
-        position_ids: torch.Tensor,
-        response_mask: torch.Tensor,
+        self, query_responses: torch.Tensor, position_ids: torch.Tensor, response_mask: torch.Tensor
     ) -> torch.Tensor:
         """Compute per-token values for a packed sequence.
 
@@ -1001,10 +980,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.policy_warmup_steps > 0 and training_step <= self.args.policy_warmup_steps:
             skip_policy_update = True
         rewarmup_end = self.args.value_rewarmup_start + self.args.value_rewarmup_steps
-        if (
-            self.args.value_rewarmup_steps > 0
-            and self.args.value_rewarmup_start <= training_step <= rewarmup_end
-        ):
+        if self.args.value_rewarmup_steps > 0 and self.args.value_rewarmup_start <= training_step <= rewarmup_end:
             skip_policy_update = True
 
         # Optionally reset the policy optimizer on the first post-warmup step so the momentum
@@ -1103,9 +1079,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     resp_mask = data_BT.response_masks[i][:, 1:].bool()
                     if self.args.value_model_ground_truth_conditioning:
                         gts_pack = (data_BT.ground_truths[i] if data_BT.ground_truths is not None else []) or []
-                        sibs_pack = (
-                            data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
-                        )
+                        sibs_pack = data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
                         values_BT = self._forward_value_with_conditioning(
                             data_BT.query_responses[i],
                             data_BT.position_ids[i],
@@ -1114,9 +1088,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             sibs_pack,
                         )
                     else:
-                        values_BT = self.forward_value(
-                            data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
-                        )
+                        values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
                     # Build per-pack numpy arrays aligned with values (seq_len - 1).
                     rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
                     dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
@@ -1305,12 +1277,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_values = ctx["old_values"]
                         # Re-forward with grad on the value model (with conditioning if enabled).
                         if self.args.value_model_ground_truth_conditioning:
-                            gts_pack = (
-                                data_BT.ground_truths[i] if data_BT.ground_truths is not None else []
-                            ) or []
-                            sibs_pack = (
-                                data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
-                            )
+                            gts_pack = (data_BT.ground_truths[i] if data_BT.ground_truths is not None else []) or []
+                            sibs_pack = data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
                             new_values = self._forward_value_with_conditioning(
                                 data_BT.query_responses[i],
                                 data_BT.position_ids[i],
@@ -1325,9 +1293,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         if self.args.use_lm_value_model:
                             # Treat returns >= 1 as positive label (terminal outcome).
                             terminal_labels = (returns >= 1.0).float()
-                            per_tok = value_model_utils.lm_yesno_bce_loss(
-                                new_values, terminal_labels, resp_mask
-                            )
+                            per_tok = value_model_utils.lm_yesno_bce_loss(new_values, terminal_labels, resp_mask)
                             v_clipfrac = torch.zeros((), device=device)
                             # Diagnostics
                             with torch.no_grad():
@@ -1372,9 +1338,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     if lm_correct_count:
                         self.local_metrics["value/lm_p_yes_correct"] = lm_p_yes_correct_sum / lm_correct_count
                     if lm_incorrect_count:
-                        self.local_metrics["value/lm_p_yes_incorrect"] = (
-                            lm_p_yes_incorrect_sum / lm_incorrect_count
-                        )
+                        self.local_metrics["value/lm_p_yes_incorrect"] = lm_p_yes_incorrect_sum / lm_incorrect_count
                     if lm_accuracy_total:
                         self.local_metrics["value/lm_accuracy"] = lm_accuracy_correct / lm_accuracy_total
                 for k, v in sae_step_metrics.items():
@@ -1556,9 +1520,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "use_value_model": bool(self.args.use_value_model),
                     "use_lm_value_model": bool(self.args.use_lm_value_model),
                     "use_sae": bool(self.args.use_sae),
-                    "value_model_ground_truth_conditioning": bool(
-                        self.args.value_model_ground_truth_conditioning
-                    ),
+                    "value_model_ground_truth_conditioning": bool(self.args.value_model_ground_truth_conditioning),
                     "gt_conditioning_template": self.args.gt_conditioning_template,
                     "rollout_context_num_siblings": int(self.args.rollout_context_num_siblings),
                 }
@@ -2909,9 +2871,7 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif in_warmup:
-            logger.debug(
-                f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup"
-            )
+            logger.debug(f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup")
 
         last_eval_collected = maybe_evaluate(
             args,
