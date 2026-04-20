@@ -36,6 +36,7 @@ All notable changes to this project will be documented in this file.
 - Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
 - Fix incorrect hardcoded checkpoint state path for multi-GPU DeepSpeed resumption (https://github.com/allenai/open-instruct/pull/1589).
 - Route GRPO LLM judge requests through the shared semaphore-guarded LiteLLM helper, preserving judge-specific retries and cost accounting while removing stale per-verifier client cleanup code (https://github.com/allenai/open-instruct/pull/1587).
+- Harden `grpo_fast` startup with explicit Ray resource preflight checks and actionable learner placement-group timeout diagnostics for single-node runs (https://github.com/allenai/open-instruct/pull/1586).
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 

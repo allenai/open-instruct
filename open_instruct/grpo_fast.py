@@ -81,7 +81,7 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-from open_instruct import logger_utils, model_utils, vllm_utils
+from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
@@ -160,6 +160,9 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
+CLUSTER_STARTUP_TIMEOUT_S = 1200.0
+PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
+LEARNER_ACTOR_NUM_CPUS = 4
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
@@ -169,6 +172,84 @@ def _build_vlm_name_mapper(model_name: str):
     if "qwen3.5" in model_name.lower():
         return lambda name: f"language_model.{name}"
     return None
+
+
+def _startup_debug_context(
+    args: grpo_utils.GRPOExperimentConfig,
+    requirements: dict[str, Any],
+    cluster_resources: dict[str, float] | None = None,
+    available_resources: dict[str, float] | None = None,
+) -> str:
+    ray_address = os.environ.get("RAY_ADDRESS", "<unset>")
+    return "\n".join(
+        [
+            grpo_fast_resource_plan.format_grpo_fast_startup_requirements(requirements),
+            f"Ray cluster resources: {grpo_fast_resource_plan.format_resource_snapshot(cluster_resources)}",
+            f"Ray available resources: {grpo_fast_resource_plan.format_resource_snapshot(available_resources)}",
+            (
+                "Runtime context: "
+                f"num_nodes={args.num_nodes}, single_gpu_mode={args.single_gpu_mode}, RAY_ADDRESS={ray_address}"
+            ),
+        ]
+    )
+
+
+def wait_for_grpo_fast_minimum_cluster_resources(
+    args: grpo_utils.GRPOExperimentConfig,
+    requirements: dict[str, Any],
+    timeout_s: float = CLUSTER_STARTUP_TIMEOUT_S,
+    poll_interval_s: float = 5.0,
+) -> dict[str, float]:
+    """Wait for Ray to see enough resources for GRPO startup before creating placement groups."""
+    deadline = time.perf_counter() + timeout_s
+    last_cluster_resources: dict[str, float] = {}
+
+    while True:
+        last_cluster_resources = ray.cluster_resources()
+        shortfalls = grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(requirements, last_cluster_resources)
+        if not shortfalls:
+            logger.info("Ray cluster resources satisfy GRPO startup requirements.")
+            logger.info(_startup_debug_context(args, requirements, last_cluster_resources, ray.available_resources()))
+            return last_cluster_resources
+
+        if time.perf_counter() >= deadline:
+            break
+
+        logger.info("Waiting for Ray resources before creating learner placement group: " + "; ".join(shortfalls))
+        time.sleep(poll_interval_s)
+
+    available_resources = ray.available_resources()
+    raise RuntimeError(
+        "Timed out waiting for Ray to report the minimum resources required for GRPO startup.\n"
+        + "\n".join(
+            f"- {shortfall}"
+            for shortfall in grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(
+                requirements, last_cluster_resources
+            )
+        )
+        + "\n"
+        + _startup_debug_context(args, requirements, last_cluster_resources, available_resources)
+    )
+
+
+def wait_for_grpo_fast_placement_group(
+    args: grpo_utils.GRPOExperimentConfig,
+    requirements: dict[str, Any],
+    pg: PlacementGroup,
+    timeout_s: float = PLACEMENT_GROUP_READY_TIMEOUT_S,
+) -> None:
+    """Wait for the learner placement group and raise an actionable error if it never schedules."""
+    try:
+        ray_get_with_progress([pg.ready()], desc="Waiting for placement group", timeout=timeout_s)
+    except TimeoutError as exc:
+        cluster_resources = ray.cluster_resources()
+        available_resources = ray.available_resources()
+        raise RuntimeError(
+            "Timed out waiting for the learner placement group to be scheduled.\n"
+            "Ray reported enough total resources earlier, so this usually means the requested bundles cannot be placed "
+            "on the currently available nodes or CPUs/GPUs are fragmented.\n"
+            + _startup_debug_context(args, requirements, cluster_resources, available_resources)
+        ) from exc
 
 
 @ray.remote(num_gpus=1)
@@ -870,7 +951,7 @@ class ModelGroup:
         self.ray_process_cls = ray_process_cls
         self.num_gpus_per_node = num_gpus_per_node
         self.num_gpus_per_actor = 0.48 if single_gpu_mode else 1
-        self.num_cpus_per_actor = 4
+        self.num_cpus_per_actor = LEARNER_ACTOR_NUM_CPUS
         self.models = []
         world_size = sum(self.num_gpus_per_node)
         master_policy = ray_process_cls.options(
@@ -1218,10 +1299,16 @@ def create_model_and_optimizer(
     dict[str, Any] | None,
 ]:
     """Create the model, optimizer, and vLLM engines."""
-    # Create placement group
-    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
-    pg = placement_group(bundles, strategy="STRICT_SPREAD")
-    ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+    resource_requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+        num_learners_per_node=args.num_learners_per_node,
+        single_gpu_mode=args.single_gpu_mode,
+        vllm_num_engines=vllm_config.vllm_num_engines,
+        vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+    )
+    wait_for_grpo_fast_minimum_cluster_resources(args, resource_requirements)
+
+    pg = placement_group(resource_requirements["learner_pg_bundles"], strategy="STRICT_SPREAD")
+    wait_for_grpo_fast_placement_group(args, resource_requirements, pg)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -1235,7 +1322,7 @@ def create_model_and_optimizer(
 
     # Create DataPreparationActor FIRST so StreamingDataLoader can find it
     _data_prep_actor = data_loader_lib.DataPreparationActor.options(
-        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
+        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=grpo_fast_resource_plan.DATA_PREPARATION_ACTOR_NUM_CPUS
     ).remote(  # type: ignore[unresolved-attribute]
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
