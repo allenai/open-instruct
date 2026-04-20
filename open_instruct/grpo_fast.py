@@ -1078,8 +1078,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 for i in range(num_samples):
                     resp_mask = data_BT.response_masks[i][:, 1:].bool()
                     if self.args.value_model_ground_truth_conditioning:
-                        gts_pack = (data_BT.ground_truths[i] if data_BT.ground_truths is not None else []) or []
-                        sibs_pack = data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
+                        gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
+                        sibs_pack = data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
                         values_BT = self._forward_value_with_conditioning(
                             data_BT.query_responses[i],
                             data_BT.position_ids[i],
@@ -1277,8 +1277,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_values = ctx["old_values"]
                         # Re-forward with grad on the value model (with conditioning if enabled).
                         if self.args.value_model_ground_truth_conditioning:
-                            gts_pack = (data_BT.ground_truths[i] if data_BT.ground_truths is not None else []) or []
-                            sibs_pack = data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
+                            gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
+                            sibs_pack = (
+                                data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
+                            )
                             new_values = self._forward_value_with_conditioning(
                                 data_BT.query_responses[i],
                                 data_BT.position_ids[i],

@@ -64,4 +64,5 @@ mkdir -p "$HOME/.triton/autotune"
     --gamma 1.0 \
     --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
-    --output_dir /tmp/vip_smoke_output
+    --output_dir /tmp/vip_smoke_output \
+    "${@}"

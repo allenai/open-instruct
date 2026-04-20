@@ -20,6 +20,11 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix sibling rollouts nesting in `grpo_fast.py`: `sibling_rollouts[i]` and `ground_truths[i]` are indexed by micro-batch and contain a list-of-packs; forward passes now correctly index `[i][0]` for the single-pack case used by GT conditioning templates `rollout_context` and `correct_demo` (https://github.com/allenai/open-instruct/pull/TODO).
+- Fix `dict.update()` duplicate-kwarg error in `grpo_fast.py` when `StreamingDataLoaderConfig` mirrors `use_value_model` from `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/TODO).
+- Fix `--use_lm_value_model` CLI test: add required `--gt_conditioning_template lm_yesno` in the local smoke-test script (https://github.com/allenai/open-instruct/pull/TODO).
+- Fix `value_estimation make_dataset` CLI args in smoke-test: use correct arg names (`--dataset_split`, `--max_prompt_length`, `--gpu_memory_utilization`) and remove unsupported flags (https://github.com/allenai/open-instruct/pull/TODO).
+- Fix `value_estimation compare_runs` CLI: use `--score_dataset_paths` instead of positional args and `--output_markdown_path` instead of `--output_prefix` (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
 - Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
