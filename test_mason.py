@@ -51,6 +51,8 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
                     "200",
                     "--checkpoint_state_dir",
                     "/weka/path",
+                    "--resume_checkpoint_dir",
+                    "/weka/old_run",
                     "--gs_checkpoint_state_dir",
                     "gs://bucket",
                     "--output",

@@ -412,18 +412,19 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         optimization_steps_done = 0
         checkpoint_state = None
-        if args.checkpoint_state_dir:
+        load_checkpoint_dir = args.resume_checkpoint_dir or args.checkpoint_state_dir
+        if load_checkpoint_dir:
             # check if the dir exists
-            if not os.path.exists(args.checkpoint_state_dir):
+            if not os.path.exists(load_checkpoint_dir):
                 logger.warning(
-                    f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
+                    f"Skipping loading checkpoint state from {load_checkpoint_dir} because it does not exist!"
                 )
             else:
                 # remove mpu for loading checkpoints, add it back after loading
                 old_mpu = self.mpu
                 self.model.mpu = None
                 path, states = self.model.load_checkpoint(
-                    args.checkpoint_state_dir,
+                    load_checkpoint_dir,
                     load_module_strict=True,
                     load_optimizer_states=True,
                     load_lr_scheduler_states=True,
@@ -431,7 +432,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 self.model.mpu = old_mpu
                 if path is None:
-                    raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                    raise ValueError(f"Failed to load checkpoint from {load_checkpoint_dir}")
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
@@ -453,14 +454,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
                 if args.load_ref_policy and states.get("ref_policy_saved", False):
-                    ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
+                    ref_policy_dir = os.path.join(load_checkpoint_dir, "ref_policy")
                     model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
                     if os.path.exists(model_path):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
                 logger.info(
-                    f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
+                    f"{self.rank=}: Loaded checkpoint from {load_checkpoint_dir} with {optimization_steps_done=}"
                 )
         self.model.train()
 

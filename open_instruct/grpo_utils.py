@@ -175,6 +175,9 @@ class GRPOExperimentConfig(
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
+    resume_checkpoint_dir: str | None = None
+    """If set, load DeepSpeed training state (weights, optimizer, RNG, client state) from this directory
+    instead of ``checkpoint_state_dir``. Saves still go to ``checkpoint_state_dir`` when it is set."""
     warn_if_low_disk_space: bool = False
     """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None
@@ -297,6 +300,12 @@ class GRPOExperimentConfig(
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
             if self.deepspeed_checkpoint_load_universal:
                 ensure_universal_checkpoint_exists(self.checkpoint_state_dir)
+        if self.resume_checkpoint_dir is not None:
+            if not os.path.exists(self.resume_checkpoint_dir):
+                raise ValueError(f"`resume_checkpoint_dir` does not exist: {self.resume_checkpoint_dir}")
+            calibrate_checkpoint_state_dir(self.resume_checkpoint_dir)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(self.resume_checkpoint_dir)
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
