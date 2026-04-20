@@ -124,6 +124,15 @@ def parse_args() -> argparse.Namespace:
         help="Verifier scoring mode (match training; qwen3_4b_phase1_has_8gpu uses pass_rate)",
     )
     parser.add_argument(
+        "--pass-rate-all-pass-bonus",
+        type=float,
+        default=0.0,
+        help=(
+            "Manufactoria pass_rate: fraction in [0, 1] of raw score from all-pass; rest from pass rate "
+            "(must match training --pass_rate_all_pass_bonus; validated at verifier init)."
+        ),
+    )
+    parser.add_argument(
         "--pass-score-threshold",
         type=float,
         default=1.0,
@@ -574,6 +583,7 @@ def build_output_row(
         "Full pass rate": _format_pass_rate(full_pass_count, num_samples),
         "num_samples": num_samples,
         "generator_manufactoria_scoring_mode": args.manufactoria_scoring_mode,
+        "generator_pass_rate_all_pass_bonus": args.pass_rate_all_pass_bonus,
         "generator_pass_score_threshold": args.pass_score_threshold,
     }
     if not args.use_existing_completions:
@@ -661,6 +671,7 @@ def main() -> None:
             manufactoria_api_url=args.manufactoria_api_url,
             manufactoria_max_execution_time=args.manufactoria_max_execution_time,
             manufactoria_scoring_mode=args.manufactoria_scoring_mode,
+            pass_rate_all_pass_bonus=args.pass_rate_all_pass_bonus,
         )
     )
 

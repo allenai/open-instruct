@@ -183,6 +183,26 @@ class TestBallsimVerifier(unittest.IsolatedAsyncioTestCase):
 
         self.assertAlmostEqual(result.score, 2 / 3)
 
+    async def test_pass_rate_scoring_all_pass_bonus(self):
+        verifier = BallsimVerifier(
+            BallsimVerifierConfig(
+                ballsim_api_url="http://localhost:2345/test_program",
+                ballsim_max_execution_time=1.0,
+                ballsim_scoring_mode="pass_rate",
+                pass_rate_all_pass_bonus=0.25,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": [1, 1, 1], "runtimes": [0.1, 0.2, 0.1]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(BallsimVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```python\npass\n```", ["assert True"], None)
+
+        self.assertAlmostEqual(result.score, 1.0)
+
     async def test_all_pass_scoring(self):
         verifier = BallsimVerifier(
             BallsimVerifierConfig(
@@ -231,6 +251,63 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
         self.assertEqual(result.metadata["all_pass_score"], 0.0)
 
+    async def test_pass_rate_scoring_all_pass_bonus(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="pass_rate",
+                pass_rate_all_pass_bonus=0.5,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": True,
+            "results": [{"passed": True}, {"passed": True}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        # Half the raw score from pass rate, half from all-pass; max stays 1.0.
+        self.assertAlmostEqual(result.score, 1.0)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 1.0)
+        self.assertEqual(result.metadata["all_pass_score"], 1.0)
+
+    async def test_pass_rate_scoring_partial_with_bonus(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="pass_rate",
+                pass_rate_all_pass_bonus=0.5,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": False,
+            "results": [{"passed": True}, {"passed": False}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        self.assertAlmostEqual(result.score, (2 / 3) * 0.5)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
+        self.assertEqual(result.metadata["all_pass_score"], 0.0)
+
     async def test_all_pass_scoring(self):
         verifier = ManufactoriaVerifier(
             ManufactoriaVerifierConfig(
@@ -257,6 +334,32 @@ class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.score, 0.0)
         self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
         self.assertEqual(result.metadata["all_pass_score"], 0.0)
+
+    async def test_all_pass_mode_ignores_pass_rate_bonus(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="all_pass",
+                pass_rate_all_pass_bonus=0.99,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": True,
+            "results": [{"passed": True}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        self.assertEqual(result.score, 1.0)
 
 
 class TestGSM8KVerifier(unittest.TestCase):

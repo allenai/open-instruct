@@ -105,6 +105,11 @@ class BallsimVerifierConfig(VerifierConfig):
     ballsim_api_url: str
     ballsim_max_execution_time: float
     ballsim_scoring_mode: str = "all_pass"
+    # pass_rate mode: fraction in [0, 1] of raw score from all-pass; rest from pass_rate.
+    pass_rate_all_pass_bonus: float = 0.0
+
+    def __post_init__(self) -> None:
+        assert 0.0 <= self.pass_rate_all_pass_bonus <= 1.0, self.pass_rate_all_pass_bonus
 
 
 @dataclasses.dataclass
@@ -112,6 +117,11 @@ class ManufactoriaVerifierConfig(VerifierConfig):
     manufactoria_api_url: str
     manufactoria_max_execution_time: float
     manufactoria_scoring_mode: str = "all_pass"
+    # pass_rate mode: fraction in [0, 1] of raw score from all-pass; rest from pass_rate.
+    pass_rate_all_pass_bonus: float = 0.0
+
+    def __post_init__(self) -> None:
+        assert 0.0 <= self.pass_rate_all_pass_bonus <= 1.0, self.pass_rate_all_pass_bonus
 
 
 @dataclasses.dataclass
@@ -1213,11 +1223,13 @@ class BallsimVerifier(VerifierFunction):
             result = await asyncio.to_thread(make_request)
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
+            all_pass_score = 1.0 if pass_rate == 1.0 else 0.0
 
             if self.verifier_config.ballsim_scoring_mode == "pass_rate":
-                score = pass_rate
+                p = self.verifier_config.pass_rate_all_pass_bonus
+                score = (1.0 - p) * pass_rate + p * all_pass_score
             else:
-                score = 1.0 if pass_rate == 1.0 else 0.0
+                score = all_pass_score
             return VerificationResult(score=score)
         except Exception as e:
             logger.warning(f"Error verifying ballsim code sample: {e}")
@@ -1358,7 +1370,8 @@ class ManufactoriaVerifier(VerifierFunction):
                 return VerificationResult(score=0.0)
 
             if self.verifier_config.manufactoria_scoring_mode == "pass_rate":
-                score = pass_rate_score
+                p = self.verifier_config.pass_rate_all_pass_bonus
+                score = (1.0 - p) * pass_rate_score + p * all_pass_score
             else:
                 score = all_pass_score
             metadata = {"pass_rate_score": float(pass_rate_score), "all_pass_score": float(all_pass_score)}

@@ -10,7 +10,7 @@ DATASET_SPLITS="${DATASET_SPLITS:-train}"
 LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-userprompt-quartiles 1.0}"
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
-BEAKER_IMAGE="michaeln/open_instruct"
+BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/rhea ai2/saturn}"
 PRIORITY="${PRIORITY:-high}"

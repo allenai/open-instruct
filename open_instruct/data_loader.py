@@ -545,6 +545,9 @@ class StreamingDataLoaderConfig:
     )
     ballsim_max_execution_time: float = 1.0
     ballsim_scoring_mode: Literal["all_pass", "pass_rate"] = "all_pass"
+    pass_rate_all_pass_bonus: float = 0.0
+    """Manufactoria/Ballsim ``pass_rate`` mode: fraction in ``[0, 1]`` of the raw verifier score from the all-pass
+    term (asserted on config init); ``1 -`` this fraction comes from pass rate."""
 
     # Max length verifier
     max_length_verifier_max_length: int = 32768
