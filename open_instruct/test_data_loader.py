@@ -157,6 +157,18 @@ class TestGroupedAdvantages(unittest.TestCase):
 
         self.assertTrue(np.allclose(advantages, np.array([-0.125, 0.375, -0.125, 0.375], dtype=float)))
 
+    def test_compute_grouped_advantages_can_disable_baseline_count_rescale(self):
+        advantages = data_loader.compute_grouped_advantages(
+            np.array([0.0, 1.0, 0.0, 1.0], dtype=float),
+            prompt_sample_counts=[4],
+            prompt_baseline_sample_counts=[8],
+            prompt_baseline_reward_sums=[2.0],
+            advantage_normalization_type="centered",
+            rescale_by_baseline_counts=False,
+        )
+
+        self.assertTrue(np.allclose(advantages, np.array([-0.25, 0.75, -0.25, 0.75], dtype=float)))
+
     def test_compute_grouped_advantages_max_rl_divides_by_mean(self):
         advantages = data_loader.compute_grouped_advantages(
             np.array([0.0, 1.0, 0.0, 1.0], dtype=float),
@@ -173,6 +185,7 @@ class TestNeverGiveUpPendingAge(unittest.TestCase):
     def test_streaming_config_defaults_pending_age_to_two(self):
         config = data_loader.StreamingDataLoaderConfig()
         self.assertEqual(config.maintain_pending_ngu_age, 2)
+        self.assertTrue(config.maintain_pending_ngu_count_rescale)
 
     def test_accumulate_inference_batches_drops_stale_pending_counts(self):
         inference_results_Q = Queue(maxsize=1)

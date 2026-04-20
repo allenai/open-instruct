@@ -478,9 +478,14 @@ class StreamingDataLoaderConfig:
     """Keep full ``GenerationResult`` objects across zero-std never-give-up retries so they can be merged into one
     training batch. Independent of :attr:`maintain_pending_ngu_counts`, which controls advantage baseline statistics."""
     maintain_pending_ngu_counts: bool = True
-    """Include discarded never-give-up attempts in the grouped reward **baseline** (mean/std denominators and optional
-    advantage rescaling). When True with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the
-    baseline even though their completions are not retained for merging."""
+    """Include discarded never-give-up attempts in the grouped reward **baseline** (mean and std denominators). When True
+    with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the baseline even though their
+    completions are not retained for merging. Advantage rescaling by ``sample_count / baseline_count`` is separate; see
+    :attr:`maintain_pending_ngu_count_rescale`."""
+    maintain_pending_ngu_count_rescale: bool = True
+    """Multiply per-sample advantages by ``sample_count / baseline_sample_count`` after normalization (only matters when
+    :attr:`maintain_pending_ngu_counts` makes the baseline count larger than the current batch). Independent of baseline
+    construction."""
     no_resampling_pass_rate: float | None = None
     no_resampling_persist: bool = True
     advantage_normalization_type: str = "centered"
@@ -2241,7 +2246,7 @@ class DataPreparationActor:
                 batch_stats.prompt_baseline_sample_counts,
                 batch_stats.prompt_baseline_reward_sums,
                 advantage_normalization_type=self.config.advantage_normalization_type,
-                rescale_by_baseline_counts=self.config.maintain_pending_ngu_counts,
+                rescale_by_baseline_counts=self.config.maintain_pending_ngu_count_rescale,
             )
 
             if self.config.save_traces and self.config.rollouts_save_path:
