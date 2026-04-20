@@ -517,6 +517,7 @@ class PolicyTrainerRayProcess(RayProcess):
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
         self._streaming_dataloader = streaming_config.build_dataloader(
+            data_prep_actor_name=data_loader_lib.DATA_PREP_ACTOR_NAME,
             tokenizer=tokenizer,
             dp_rank=dp_rank,
             fs_local_rank=self.local_rank,
