@@ -458,6 +458,17 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
+    def warmup_for_weight_sync(self):
+        """Run a dummy forward so DeepSpeed Stage 3 materializes sharded params.
+
+        Without this, the first broadcast after ``deepspeed.initialize`` can send
+        uninitialized storage to vLLM -- producing NaN logprobs on the first rollout.
+        """
+        torch.cuda.set_device(self.local_rank)
+        input_ids = torch.tensor([[self.pad_token_id]], device=self.device, dtype=torch.long)
+        with torch.no_grad():
+            self.model(input_ids=input_ids)
+
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
@@ -2117,6 +2128,10 @@ def run_training(
     )
     last_eval_collected = True
 
+    ray_get_with_progress(
+        [m.warmup_for_weight_sync.remote() for m in policy_group.models],
+        desc="Warming up learner for first weight sync",
+    )
     weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(resume_training_step)
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
