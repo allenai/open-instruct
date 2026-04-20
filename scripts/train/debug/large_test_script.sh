@@ -68,4 +68,6 @@ uv run python mason.py \
         --active_sampling \
         --async_steps 4 \
         --use_delight true \
+        --use_kondo_gate true \
+        --kondo_gate_rate 0.5 \
 	--push_to_hub False

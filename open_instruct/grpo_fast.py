@@ -471,6 +471,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
+        self._kondo_gate = (
+            grpo_utils.KondoGateState(args, self.device, process_group=None, seed=args.seed)
+            if args.use_kondo_gate
+            else None
+        )
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -654,6 +659,8 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        group_had_backward = False
+        kondo_gate_stats: list[tuple[int, float, float]] = []  # (should_backward, gate_prob, lambda) per sample
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -729,7 +736,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.truncated_importance_sampling_ratio_cap,
                     )
 
-                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT, delight_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=data_BT.advantages[i][:, 1:],
@@ -746,15 +753,32 @@ class PolicyTrainerRayProcess(RayProcess):
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
                     loss *= self.args.world_size // self.args.sequence_parallel_size
 
+                    should_backward = True
+                    gate_prob = 1.0
+                    gate_lambda = float("-inf")
+                    if self._kondo_gate is not None:
+                        sample_delight = masked_mean(delight_BT, response_mask_BT, None, None)
+                        should_backward, gate_prob, gate_lambda = self._kondo_gate.decide(sample_delight)
+                    kondo_gate_stats.append((int(should_backward), gate_prob, gate_lambda))
+
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    # Tell deepspeed whether this backward is the last in the accumulation group.
-                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                    self.model.backward(loss)
+                    if should_backward:
+                        # Tell deepspeed whether this backward is the last in the accumulation group.
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        self.model.backward(loss)
+                        group_had_backward = True
+                    elif is_accumulation_boundary and group_had_backward:
+                        # The last sample in the group was gated but earlier ungated samples left
+                        # un-reduce-scattered grads. Trigger the reduce-scatter with a zero-contribution backward.
+                        self.model.set_gradient_accumulation_boundary(True)
+                        self.model.backward(loss * 0.0)
                     if is_accumulation_boundary:
-                        self.model.step()
-                        grad_norms.append(float(self.model.get_global_grad_norm()))
+                        if group_had_backward:
+                            self.model.step()
+                            grad_norms.append(float(self.model.get_global_grad_norm()))
+                        group_had_backward = False
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
@@ -776,7 +800,17 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
-                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
+                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms) if grad_norms else 0.0
+                if self._kondo_gate is not None and kondo_gate_stats:
+                    self.local_metrics["val/kondo_gate_backward_frac"] = sum(s[0] for s in kondo_gate_stats) / len(
+                        kondo_gate_stats
+                    )
+                    self.local_metrics["val/kondo_gate_prob_avg"] = sum(s[1] for s in kondo_gate_stats) / len(
+                        kondo_gate_stats
+                    )
+                    finite_lams = [s[2] for s in kondo_gate_stats if math.isfinite(s[2])]
+                    if finite_lams:
+                        self.local_metrics["val/kondo_lambda"] = sum(finite_lams) / len(finite_lams)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:

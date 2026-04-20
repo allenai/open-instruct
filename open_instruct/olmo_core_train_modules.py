@@ -321,6 +321,8 @@ class GRPOTrainModule(TransformerTrainModule):
         if ref_policy is not None:
             self.ref_policy = ref_policy.to(device=self.device).eval().requires_grad_(False)
 
+        self._kondo_gate: grpo_utils.KondoGateState | None = None
+
     def pre_train(self):
         # GRPO batches are prompt-grouped and do their own accumulation/token normalization
         # inside train_batch(), so the base TransformerTrainModule global-batch validation
@@ -413,6 +415,13 @@ class GRPOTrainModule(TransformerTrainModule):
 
         num_steps = 0
         local_step = 0
+        group_had_backward = False
+        kondo_gate_stats: list[tuple[int, float, float]] = []
+
+        if self.grpo_config.use_kondo_gate and self._kondo_gate is None:
+            self._kondo_gate = grpo_utils.KondoGateState(
+                self.grpo_config, self.device, process_group=self.trainer.dp_process_group, seed=self.grpo_config.seed
+            )
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
@@ -450,7 +459,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
                 )
 
-                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                pg_losses, pg_losses2, pg_loss, kl, delight = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
@@ -464,7 +473,18 @@ class GRPOTrainModule(TransformerTrainModule):
                 loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
 
                 loss = loss * dp_world_size
-                loss.backward()
+
+                should_backward = True
+                gate_prob = 1.0
+                gate_lambda = float("-inf")
+                if self._kondo_gate is not None:
+                    sample_delight = masked_mean(delight, response_mask, None, None)
+                    should_backward, gate_prob, gate_lambda = self._kondo_gate.decide(sample_delight)
+                kondo_gate_stats.append((int(should_backward), gate_prob, gate_lambda))
+
+                if should_backward:
+                    loss.backward()
+                    group_had_backward = True
 
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
@@ -487,14 +507,16 @@ class GRPOTrainModule(TransformerTrainModule):
                 local_step += 1
 
                 if local_step % accumulation_steps == 0:
-                    if not dry_run:
+                    if not dry_run and group_had_backward:
                         self.optim_step()
                     self.zero_grads()
+                    group_had_backward = False
 
         if local_step % accumulation_steps != 0:
-            if not dry_run:
+            if not dry_run and group_had_backward:
                 self.optim_step()
             self.zero_grads()
+            group_had_backward = False
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
@@ -516,3 +538,14 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
             self.record_metric("_token_count", global_tokens, reduce_type=None)
+            if self._kondo_gate is not None and kondo_gate_stats:
+                n = len(kondo_gate_stats)
+                self.record_metric(
+                    "val/kondo_gate_backward_frac", sum(s[0] for s in kondo_gate_stats) / n, reduce_type=None
+                )
+                self.record_metric(
+                    "val/kondo_gate_prob_avg", sum(s[1] for s in kondo_gate_stats) / n, reduce_type=None
+                )
+                finite_lams = [s[2] for s in kondo_gate_stats if math.isfinite(s[2])]
+                if finite_lams:
+                    self.record_metric("val/kondo_lambda", sum(finite_lams) / len(finite_lams), reduce_type=None)

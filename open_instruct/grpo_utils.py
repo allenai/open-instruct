@@ -121,6 +121,18 @@ class GRPOExperimentConfig(
     use_delight: bool = False
     """Whether to gate per-token policy-gradient terms with the Delightful Policy Gradient sigmoid
     of delight = advantage * surprisal (https://arxiv.org/abs/2603.14608)."""
+    use_kondo_gate: bool = False
+    """Whether to enable the Kondo gate (https://arxiv.org/abs/2603.20526): per-sample Bernoulli gate
+    on whether to run the backward pass, driven by sample-level delight against an adaptive threshold."""
+    kondo_gate_rate: float = 1.0
+    """Target fraction rho of samples that receive a backward pass. 1.0 is a no-op even when the gate
+    is enabled (always backward). Smaller values keep only the highest-delight samples."""
+    kondo_gate_temperature: float = 1.0
+    """Temperature eta in the Kondo gate Bernoulli probability sigma((chi - lambda) / eta)."""
+    kondo_gate_history_size: int = 1024
+    """Size of the ring buffer of past sample delights used to compute lambda = quantile_{1-rho}."""
+    kondo_gate_warmup: int = 128
+    """Never gate until the history contains at least this many sample delights."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -236,6 +248,18 @@ class GRPOExperimentConfig(
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+        if self.use_kondo_gate:
+            if not (0.0 < self.kondo_gate_rate <= 1.0):
+                raise ValueError(f"`kondo_gate_rate` must be in (0, 1], got {self.kondo_gate_rate}")
+            if self.kondo_gate_temperature <= 0.0:
+                raise ValueError(f"`kondo_gate_temperature` must be > 0, got {self.kondo_gate_temperature}")
+            if self.kondo_gate_warmup <= 0:
+                raise ValueError(f"`kondo_gate_warmup` must be > 0, got {self.kondo_gate_warmup}")
+            if self.kondo_gate_history_size < self.kondo_gate_warmup:
+                raise ValueError(
+                    f"`kondo_gate_history_size` ({self.kondo_gate_history_size}) must be >= "
+                    f"`kondo_gate_warmup` ({self.kondo_gate_warmup})."
+                )
 
         total_learner_gpus = sum(self.num_learners_per_node)
         if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
@@ -344,10 +368,11 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    delight = -advantages * new_logprobs.detach()
     if config.use_delight:
         # Delightful Policy Gradient gate; temperature eta is fixed to 1 per the paper.
-        advantages = advantages * torch.sigmoid(-advantages * new_logprobs.detach())
+        advantages = advantages * torch.sigmoid(delight)
 
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -376,7 +401,66 @@ def compute_grpo_loss(
     else:
         kl = torch.zeros_like(pg_loss_max)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
+    return pg_losses, pg_losses2, pg_loss_max, kl, delight
+
+
+class KondoGateState:
+    """Per-sample Kondo gate over delight (https://arxiv.org/abs/2603.20526).
+
+    Maintains a ring buffer of past sample-level delight values, computes an adaptive
+    threshold lambda = quantile_{1-rho}(history), and draws a Bernoulli gate with
+    probability sigma((chi - lambda) / eta). All-reduces the sample delight across DP
+    ranks and uses an identically-seeded generator so every rank produces the same
+    gate decision -- required to keep DeepSpeed / FSDP collectives in sync.
+    """
+
+    def __init__(
+        self,
+        config: GRPOExperimentConfig,
+        device: torch.device,
+        process_group: dist.ProcessGroup | None = None,
+        seed: int = 0,
+    ) -> None:
+        self.config = config
+        self.device = device
+        self.process_group = process_group
+        self.history_size = config.kondo_gate_history_size
+        self.warmup = config.kondo_gate_warmup
+        self.rate = config.kondo_gate_rate
+        self.temperature = config.kondo_gate_temperature
+        self._buffer = torch.zeros(self.history_size, device=device)
+        self._count = 0
+        self._write_idx = 0
+        self._generator = torch.Generator(device=device)
+        self._generator.manual_seed(int(seed))
+
+    def _reduced_delight(self, sample_delight: torch.Tensor) -> torch.Tensor:
+        if not dist.is_available() or not dist.is_initialized():
+            return sample_delight
+        value = sample_delight.detach().clone().to(self.device)
+        dist.all_reduce(value, op=dist.ReduceOp.SUM, group=self.process_group)
+        world_size = dist.get_world_size(group=self.process_group)
+        return value / world_size
+
+    def _append(self, value: torch.Tensor) -> None:
+        self._buffer[self._write_idx] = value
+        self._write_idx = (self._write_idx + 1) % self.history_size
+        self._count = min(self._count + 1, self.history_size)
+
+    def decide(self, sample_delight: torch.Tensor) -> tuple[bool, float, float]:
+        """All-reduces the scalar delight, appends to history, returns (should_backward, gate_prob, lambda).
+
+        Identical return values on every rank in the process group.
+        """
+        chi = self._reduced_delight(sample_delight).reshape(())
+        self._append(chi)
+        if self._count < self.warmup or self.rate >= 1.0:
+            return True, 1.0, float("-inf")
+        history = self._buffer[: self._count]
+        lam = torch.quantile(history, 1.0 - self.rate)
+        prob = torch.sigmoid((chi - lam) / self.temperature)
+        gate = torch.bernoulli(prob, generator=self._generator)
+        return bool(gate.item()), float(prob.item()), float(lam.item())
 
 
 def forward_for_logprobs(
