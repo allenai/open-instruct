@@ -23,6 +23,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \
+       --artifact_ttl 1d \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-guess-number-nothink 1.0 \
     --dataset_mixer_list_splits train \
