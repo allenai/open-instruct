@@ -352,6 +352,8 @@ class IFEvalVerifier(VerifierFunction):
                 rewards.append(1.0)
             else:
                 rewards.append(0.0)
+        if not rewards:
+            return VerificationResult(score=0.0)
         return VerificationResult(score=sum(rewards) / len(rewards))
 
 
