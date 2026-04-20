@@ -228,5 +228,6 @@ include = [
     "open_instruct/environments/tools/parsers.py",
     "open_instruct/environments/tools/tools.py",
     "open_instruct/environments/tools/utils.py",
+    "open_instruct/dpo_tune_cache.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]

@@ -19,6 +19,7 @@ DPO tuning script. Adapted from our finetuning script.
 # isort: off
 import contextlib
 import os
+from typing import Any
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -75,25 +76,16 @@ logger = logger_utils.setup_logger(__name__)
 
 def build_deepspeed_config(
     zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
-) -> dict:
-    config = {
-        "bf16": {"enabled": "auto"},
-        "zero_optimization": {
-            "stage": zero_stage,
-            "overlap_comm": True,
-            "contiguous_gradients": True,
-            "reduce_bucket_size": "auto",
-        },
-        "gradient_accumulation_steps": "auto",
-        "gradient_clipping": "auto",
-        "steps_per_print": 1e5,
-        "train_batch_size": "auto",
-        "train_micro_batch_size_per_gpu": "auto",
-        "wall_clock_breakdown": False,
+) -> dict[str, Any]:
+    zero_optimization: dict[str, Any] = {
+        "stage": zero_stage,
+        "overlap_comm": True,
+        "contiguous_gradients": True,
+        "reduce_bucket_size": "auto",
     }
 
     if zero_stage == 3:
-        config["zero_optimization"].update(
+        zero_optimization.update(
             {
                 "sub_group_size": 1e9,
                 "stage3_prefetch_bucket_size": "auto",
@@ -106,10 +98,21 @@ def build_deepspeed_config(
         )
 
     if offload_optimizer:
-        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
+        zero_optimization["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
 
     if offload_param:
-        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
+        zero_optimization["offload_param"] = {"device": "cpu", "pin_memory": True}
+
+    config: dict[str, Any] = {
+        "bf16": {"enabled": "auto"},
+        "zero_optimization": zero_optimization,
+        "gradient_accumulation_steps": "auto",
+        "gradient_clipping": "auto",
+        "steps_per_print": 1e5,
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "wall_clock_breakdown": False,
+    }
 
     return config
 
@@ -269,6 +272,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
         return
 
     # Load pretrained model and tokenizer
+    assert isinstance(args.additional_model_arguments, dict)
     if args.config_name:
         config = AutoConfig.from_pretrained(
             args.config_name,
@@ -287,6 +291,9 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
+
+    assert args.attn_implementation is not None
+    hf_attn_impl = model_utils.olmo_core_attn_to_hf(args.attn_implementation)
 
     def load_model():
         if args.model_name_or_path:
@@ -308,7 +315,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     quantization_config=bnb_config,
                     device_map=device_map,
                     dtype=torch.bfloat16,
-                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
+                    attn_implementation=hf_attn_impl,
                 )
             elif args.use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -323,7 +330,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
+                    attn_implementation=hf_attn_impl,
                     # liger-kernel specific args
                     fused_linear_cross_entropy=False,  # don't fuse the linear layer with CE loss, since we want logits
                 )
@@ -336,7 +343,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
                     dtype=torch.bfloat16,
-                    attn_implementation=model_utils.olmo_core_attn_to_hf(args.attn_implementation),
+                    attn_implementation=hf_attn_impl,
                 )
         else:
             logger.info("Training new model from scratch")
@@ -717,7 +724,12 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
 
     if args.output_dir is not None:
         model_utils.save_with_accelerate(
-            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+            accelerator,
+            model,
+            tokenizer,
+            args.output_dir,
+            args.use_lora,
+            chat_template_name=tc.chat_template_name or "tulu",
         )
 
     if accelerator.is_main_process:
@@ -735,7 +747,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
         launch_ai2_evals_on_weka(
             path=args.output_dir,
-            leaderboard_name=args.hf_repo_revision,
+            leaderboard_name=args.hf_repo_revision or args.exp_name,
             oe_eval_max_length=args.oe_eval_max_length,
             wandb_url=wandb_tracker.run.url if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
@@ -751,7 +763,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
 
 
 def print_gpu_stats(init_gpu_memory: int | None):
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and init_gpu_memory is not None:
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
         logger.info(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
@@ -761,5 +773,7 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
+    args: dpo_utils.DPOExperimentConfig
+    tc: TokenizerConfig
+    args, tc = parser.parse_args_into_dataclasses()  # type: ignore[assignment]
     main(args, tc)
