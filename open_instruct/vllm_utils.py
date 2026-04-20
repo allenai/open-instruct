@@ -781,8 +781,30 @@ class LLMRayActor:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
     def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], packed: bool = True
+        self,
+        names: list[str] | dict[str, Any],
+        dtype_names: list[str] | None = None,
+        shapes: list[list[int]] | None = None,
+        packed: bool = True,
     ) -> None:
+        """Apply a weight update from the trainer.
+
+        vLLM's ``IPCWeightTransferEngine`` (single-GPU / IPC path) calls
+        ``update_weights.remote({"update_info": ...})`` with IPC handles inside
+        ``update_info``. The NCCL path passes ``names``, ``dtype_names``, and
+        ``shapes`` as separate arguments.
+        """
+        if isinstance(names, dict):
+            if "update_info" not in names:
+                raise TypeError(
+                    "update_weights dict payload must contain 'update_info' (vLLM IPC weight transfer format)."
+                )
+            request = WeightTransferUpdateRequest(update_info=names["update_info"])
+            return self._run_async(self.llm_engine.update_weights(request))
+
+        if dtype_names is None or shapes is None:
+            raise TypeError("update_weights requires dtype_names and shapes when names is a list (NCCL format).")
+
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)

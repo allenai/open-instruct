@@ -750,7 +750,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.truncated_importance_sampling_ratio_cap,
                     )
 
-                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                    pg_loss_BT, clip_mask_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=data_BT.advantages[i][:, 1:],
@@ -759,7 +759,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_weights=tis_clamped_BT,
                     )
 
-                    per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
+                    per_token_loss_BT = pg_loss_BT + self.args.beta * kl_BT
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
@@ -780,9 +780,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
                         i,
-                        pg_losses_BT,
-                        pg_losses2_BT,
-                        pg_loss_max_BT,
+                        pg_loss_BT,
+                        clip_mask_BT,
                         ratio_BT,
                         loss,
                         response_mask_BT,
