@@ -539,23 +539,6 @@ async def compute_rewards(actor: "LLMRayActor", result: GenerationResult, exampl
     return scores, metrics
 
 
-def _worker_weight_fingerprint(worker, param_names: list[str]) -> dict[str, float]:
-    """Worker-side fingerprint computed via ``collective_rpc``.
-
-    Reads parameters from ``worker.model_runner.model`` (vLLM V1 convention) and
-    returns ``abs().mean()`` per named parameter as a Python float. Unknown param
-    names are silently skipped.
-    """
-    model = worker.model_runner.model
-    params_by_name = dict(model.named_parameters())
-    fingerprints: dict[str, float] = {}
-    for name in param_names:
-        if name not in params_by_name:
-            continue
-        fingerprints[name] = float(params_by_name[name].data.detach().float().abs().mean().item())
-    return fingerprints
-
-
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -822,16 +805,6 @@ class LLMRayActor:
 
     def set_model_step(self, model_step: int) -> None:
         self.current_model_step = model_step
-
-    def get_weight_fingerprint(self, param_names: list[str]) -> dict[str, float]:
-        """Returns deterministic scalar fingerprints (abs-mean) of named parameters on worker rank 0.
-
-        Used to verify that vLLM actor weights match the learner's after a weight sync
-        (e.g. on resume from a checkpoint). Mirrors ``PolicyTrainer.get_weight_fingerprint``
-        so scalars are directly comparable.
-        """
-        results = self._run_async(self.llm_engine.collective_rpc(_worker_weight_fingerprint, args=(param_names,)))
-        return results[0] if results else {}
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():

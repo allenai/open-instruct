@@ -483,50 +483,6 @@ class PolicyTrainerRayProcess(RayProcess):
             name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
 
-    def get_parameter_names(self, max_params: int) -> list[str]:
-        """Returns parameter names whose names align between HF and vLLM.
-
-        vLLM fuses q/k/v_proj into qkv_proj and gate/up_proj into gate_up_proj,
-        so most attention/MLP weights can't be compared by name across the two.
-        Embeddings, final norm, and per-layer layernorms keep matching names on
-        both sides and are the stable anchors for fingerprint verification.
-        """
-        all_names = [name for name, _ in self.model.module.named_parameters()]
-        shared = [
-            name
-            for name in all_names
-            if name.endswith("embed_tokens.weight")
-            or name.endswith("model.norm.weight")
-            or name.endswith("input_layernorm.weight")
-            or name.endswith("post_attention_layernorm.weight")
-        ]
-        if not shared:
-            return all_names[:max_params]
-        if len(shared) <= max_params:
-            return shared
-        step = max(1, len(shared) // max_params)
-        return shared[::step][:max_params]
-
-    def get_weight_fingerprint(self, param_names: list[str]) -> dict[str, float]:
-        """Returns deterministic scalar fingerprints of named parameters on rank 0.
-
-        Used to verify that weights are consistent between the learner and the vLLM actors
-        (e.g. after loading a checkpoint and performing the first weight sync).
-        """
-        fingerprints: dict[str, float] = {}
-        params_by_name = dict(self.model.module.named_parameters())
-        for name in param_names:
-            if name not in params_by_name:
-                continue
-            param = params_by_name[name]
-            if self.args.deepspeed_stage == 3:
-                with deepspeed.zero.GatheredParameters([param], modifier_rank=0):
-                    if deepspeed.comm.get_rank() == 0:
-                        fingerprints[name] = float(param.data.detach().float().abs().mean().item())
-            else:
-                fingerprints[name] = float(param.data.detach().float().abs().mean().item())
-        return fingerprints
-
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
             return
@@ -1429,51 +1385,6 @@ def create_model_and_optimizer(
     )
 
 
-_WEIGHT_SYNC_FINGERPRINT_MAX_PARAMS = 4
-_WEIGHT_SYNC_FINGERPRINT_RTOL = 1e-2
-
-
-def _log_weight_sync_fingerprints(policy_group: "ModelGroup", vllm_engines, step: int) -> None:
-    """Compares learner vs. vLLM fingerprints for a handful of params after a sync.
-
-    On mismatch, logs a warning (rather than raising) — a mismatch here is diagnostic,
-    not always fatal, because e.g. name mappers can legitimately rename parameters.
-    """
-    sample_names = ray.get(policy_group.models[0].get_parameter_names.remote(_WEIGHT_SYNC_FINGERPRINT_MAX_PARAMS))
-    if not sample_names:
-        return
-
-    learner_fps_list, _ = ray_get_with_progress(
-        [m.get_weight_fingerprint.remote(sample_names) for m in policy_group.models],
-        desc="[Weight Sync Verify] learner fingerprint",
-        enable=False,
-    )
-    learner_fp = next((fp for fp in learner_fps_list if fp), {})
-
-    engine_fps, _ = ray_get_with_progress(
-        [engine.get_weight_fingerprint.remote(sample_names) for engine in vllm_engines],
-        desc="[Weight Sync Verify] vLLM fingerprint",
-        enable=False,
-    )
-
-    for engine_idx, engine_fp in enumerate(engine_fps):
-        for name, learner_val in learner_fp.items():
-            engine_val = engine_fp.get(name)
-            if engine_val is None:
-                logger.warning(f"[Weight Sync Verify] step={step} param={name!r} missing on vLLM engine {engine_idx}")
-                continue
-            if abs(engine_val - learner_val) > _WEIGHT_SYNC_FINGERPRINT_RTOL * max(abs(learner_val), 1e-8):
-                logger.warning(
-                    f"[Weight Sync Verify] step={step} param={name!r} MISMATCH: "
-                    f"learner={learner_val:.6g} vs vLLM[{engine_idx}]={engine_val:.6g}"
-                )
-            else:
-                logger.info(
-                    f"[Weight Sync Verify] step={step} param={name!r} OK: "
-                    f"learner={learner_val:.6g} vLLM[{engine_idx}]={engine_val:.6g}"
-                )
-
-
 def create_generation_configs(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -2096,8 +2007,6 @@ def run_training(
         logger.info(f"[Main Thread] Triggering initial native vLLM weight sync at step {initial_step}.")
         trigger.notify(step=initial_step)
         health_check_fn(future, expect_new_weight_sync=True)
-        if args.verbose:
-            _log_weight_sync_fingerprints(policy_group, vllm_engines, initial_step)
         return future, trigger
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
