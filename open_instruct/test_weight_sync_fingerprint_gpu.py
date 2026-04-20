@@ -92,7 +92,18 @@ class TestWeightSyncFingerprintGPU(TestGrpoFastBase):
         )
         ray.get(engines[0].ready.remote())
 
-        sample_names = [name for name, _ in trainer_model.named_parameters() if "weight" in name][:4]
+        # vLLM fuses q/k/v_proj into qkv_proj and gate/up_proj into gate_up_proj,
+        # so only params whose names are identical on both sides can be compared
+        # by name: embeddings, final norm, and per-layer layernorms.
+        candidate_names = [
+            name
+            for name, _ in trainer_model.named_parameters()
+            if name.endswith("embed_tokens.weight")
+            or name.endswith("model.norm.weight")
+            or name.endswith("input_layernorm.weight")
+            or name.endswith("post_attention_layernorm.weight")
+        ]
+        sample_names = candidate_names[:4]
         self.assertGreater(len(sample_names), 0)
 
         trainer_fp = _fingerprint_local(trainer_model, sample_names)

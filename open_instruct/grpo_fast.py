@@ -473,16 +473,28 @@ class PolicyTrainerRayProcess(RayProcess):
         )
 
     def get_parameter_names(self, max_params: int) -> list[str]:
-        """Returns a stable-ordered, deterministic sample of parameter names.
+        """Returns parameter names whose names align between HF and vLLM.
 
-        Used by the weight-sync verify helper to pick a small set of params
-        whose fingerprints to compare across the learner and the vLLM actors.
+        vLLM fuses q/k/v_proj into qkv_proj and gate/up_proj into gate_up_proj,
+        so most attention/MLP weights can't be compared by name across the two.
+        Embeddings, final norm, and per-layer layernorms keep matching names on
+        both sides and are the stable anchors for fingerprint verification.
         """
-        names = [name for name, _ in self.model.module.named_parameters()]
-        if len(names) <= max_params:
-            return names
-        step = max(1, len(names) // max_params)
-        return names[::step][:max_params]
+        all_names = [name for name, _ in self.model.module.named_parameters()]
+        shared = [
+            name
+            for name in all_names
+            if name.endswith("embed_tokens.weight")
+            or name.endswith("model.norm.weight")
+            or name.endswith("input_layernorm.weight")
+            or name.endswith("post_attention_layernorm.weight")
+        ]
+        if not shared:
+            return all_names[:max_params]
+        if len(shared) <= max_params:
+            return shared
+        step = max(1, len(shared) // max_params)
+        return shared[::step][:max_params]
 
     def get_weight_fingerprint(self, param_names: list[str]) -> dict[str, float]:
         """Returns deterministic scalar fingerprints of named parameters on rank 0.
