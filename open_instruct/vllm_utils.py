@@ -781,7 +781,7 @@ class LLMRayActor:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
     def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], packed: bool = True
+        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], model_step: int, packed: bool = True
     ) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
@@ -789,7 +789,8 @@ class LLMRayActor:
         request = WeightTransferUpdateRequest(
             update_info={"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
         )
-        return self._run_async(self.llm_engine.update_weights(request))
+        self._run_async(self.llm_engine.update_weights(request))
+        self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1366,6 +1367,7 @@ def _broadcast_weights_ipc(
     vllm_engines: list[ray.actor.ActorHandle],
     name_mapper: Callable[[str], str] | None,
     gather_whole_model: bool,
+    model_step: int,
 ) -> list[ray.ObjectRef]:
     """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
     is_rank_0 = torch.distributed.get_rank() == 0
@@ -1383,6 +1385,7 @@ def _broadcast_weights_ipc(
             for engine in vllm_engines:
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
 
 
@@ -1390,6 +1393,7 @@ def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: Any | None,
+    model_step: int,
     name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
@@ -1400,6 +1404,9 @@ def broadcast_weights_to_vllm(
 
     When model_update_group is None, uses IPC backend (single GPU mode).
     Otherwise uses NCCL backend.
+
+    `model_step` is stamped onto each vLLM engine as part of the weight-update RPC,
+    so no separate `set_model_step` call is needed.
     """
     if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
@@ -1409,14 +1416,17 @@ def broadcast_weights_to_vllm(
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
     if model_update_group is None:
-        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model)
+        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
     use_packed = False
 
     if is_rank_0:
-        refs = [engine.update_weights.remote(names, dtype_names, shapes, packed=use_packed) for engine in vllm_engines]
+        refs = [
+            engine.update_weights.remote(names, dtype_names, shapes, model_step, packed=use_packed)
+            for engine in vllm_engines
+        ]
     else:
         refs = []
 

@@ -458,7 +458,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
-    def broadcast_to_vllm(self):
+    def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
@@ -468,6 +468,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            model_step=model_step,
             gather_whole_model=self.args.gather_whole_model,
             name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
@@ -1453,10 +1454,10 @@ def weight_sync_thread(
                 ray.get(actor_manager.set_should_stop.remote(True))
                 logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-                # Broadcast weights to vLLM engines
-                # First get the futures
+                # Broadcast weights to vLLM engines. model_step is stamped onto vLLM
+                # engines as part of the update_weights RPC — no separate set_model_step RPC.
                 weight_broadcast_futures: list[ray.ObjectRef] = [
-                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                    m.broadcast_to_vllm.remote(target_model_step or 0) for m in policy_group.models
                 ]
 
                 # Wait for all trainer-side broadcasts to finish and collect timing stats.
@@ -1489,13 +1490,6 @@ def weight_sync_thread(
         finally:
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1983,9 +1977,6 @@ def run_training(
 
         logger.info("======== ✅ weight sync thread starts =========")
         trigger = WeightSyncTrigger()
-        ray_get_with_progress(
-            [engine.set_model_step.remote(0) for engine in vllm_engines], desc="Initializing vLLM model step to 0"
-        )
         future = executor.submit(
             weight_sync_thread,
             args,
