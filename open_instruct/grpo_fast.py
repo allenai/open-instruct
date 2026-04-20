@@ -1368,11 +1368,7 @@ def create_model_and_optimizer(
             "Restored data prep actor state from checkpoint "
             f"with training_step={data_prep_actor_state['training_step']}"
         )
-
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
-
-    logger.info("======== ⏸️ native vLLM weight sync will be initialized before the training loop starts =========")
-
     return (
         policy_group,
         vllm_engines,
