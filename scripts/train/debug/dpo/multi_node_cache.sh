@@ -12,6 +12,7 @@ uv run python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \

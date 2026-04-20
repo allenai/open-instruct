@@ -40,6 +40,7 @@ if [ -n "$1" ]; then
         --gpus 1 \
         --non_resumable \
         --no_auto_dataset_cache \
+        --artifact_ttl 1d \
         -- \
         $LAUNCH_CMD
 else
