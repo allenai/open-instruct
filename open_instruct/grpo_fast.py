@@ -1725,6 +1725,7 @@ def maybe_evaluate(
             filter_zero_std_samples=False,
             replenish_prompts=False,
             max_possible_score=max_possible_score,
+            training_step=training_step,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")

@@ -745,6 +745,7 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     base_env_config: EnvConfig,
+    training_step: int,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -753,7 +754,6 @@ def accumulate_inference_batches(
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
-    training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
@@ -1008,8 +1008,7 @@ def accumulate_inference_batches(
     combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
     combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
     combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
-    if training_step is not None:
-        combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
+    combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(

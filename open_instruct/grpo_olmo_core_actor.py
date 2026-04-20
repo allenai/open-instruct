@@ -194,8 +194,18 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
     def setup_model_update_group(self, vllm_engines: list) -> None:
         """Set up the process group for weight synchronization with vLLM engines."""
         self.vllm_engines = vllm_engines
+        self.model_update_group = None
 
         if not vllm_engines or self.rank != 0:
+            return
+
+        if self.grpo_config.single_gpu_mode:
+            refs = [
+                engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info={}))
+                for engine in vllm_engines
+            ]
+            ray.get(refs)
+            logger.info(f"[Rank {self.rank}] vLLM IPC weight transfer engines initialized (single_gpu_mode)")
             return
 
         master_address = self.get_current_node_ip()
