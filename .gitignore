@@ -160,4 +160,5 @@ dmypy.json
 cache/
 local_dataset_cache/
 scratch/
-.claude/worktrees/
+.claude/
+scripts/tmax/
