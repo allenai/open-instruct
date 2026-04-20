@@ -21,8 +21,6 @@ import torch
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
-from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import logger_utils, utils, vllm_utils
 from open_instruct.ground_truth_utils import RewardConfig
@@ -113,27 +111,10 @@ class TestWeightSyncFingerprintGPU(TestGrpoFastBase):
             self.assertIn(name, pre_sync_engine_fp)
             self.assertNotAlmostEqual(trainer_fp[name], pre_sync_engine_fp[name], places=4)
 
-        weight_transfer_port = utils.find_free_port()
-        world_size = 2
-        ray.get(
-            engines[0].init_weight_transfer_engine.remote(
-                WeightTransferInitRequest(
-                    init_info={
-                        "master_address": master_address,
-                        "master_port": weight_transfer_port,
-                        "rank_offset": 1,
-                        "world_size": world_size,
-                    }
-                )
-            )
-        )
-        model_update_group = NCCLWeightTransferEngine.trainer_init(
-            {"master_address": master_address, "master_port": weight_transfer_port, "world_size": world_size}
-        )
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=trainer_model,
             vllm_engines=engines,
-            model_update_group=model_update_group,
+            model_update_group=None,
             name_mapper=None,
             gather_whole_model=True,
         )
