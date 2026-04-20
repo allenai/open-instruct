@@ -2895,7 +2895,7 @@ def main(
 
 
 if __name__ == "__main__":
-    utils.check_oe_eval_internal()
+    # utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus(
         (
