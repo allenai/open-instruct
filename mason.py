@@ -38,6 +38,7 @@ CACHE_EXCLUDED_ARGS = {
     "--with_tracking": False,
     "--checkpoint_state_freq": True,
     "--checkpoint_state_dir": True,
+    "--resume_checkpoint_dir": True,
     "--gs_checkpoint_state_dir": True,
 }
 WANDB_TAG_MAX_LENGTH = 64

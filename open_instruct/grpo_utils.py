@@ -136,6 +136,8 @@ class GRPOExperimentConfig(
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
+    resume_checkpoint_dir: str | None = None
+    """If set, load DeepSpeed and client checkpoint state from this directory only; new checkpoints still go to `checkpoint_state_dir`."""
     warn_if_low_disk_space: bool = False
     """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None
@@ -207,6 +209,17 @@ class GRPOExperimentConfig(
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+        if self.resume_checkpoint_dir is not None and not os.path.exists(self.resume_checkpoint_dir):
+            raise ValueError(f"`resume_checkpoint_dir` does not exist: {self.resume_checkpoint_dir}")
+        if (
+            self.resume_checkpoint_dir is not None
+            and self.checkpoint_state_dir is None
+            and self.checkpoint_state_freq > 0
+        ):
+            raise ValueError(
+                "`checkpoint_state_dir` must be provided when using `resume_checkpoint_dir` with "
+                "`checkpoint_state_freq` > 0 (new checkpoints are only written to `checkpoint_state_dir`)."
+            )
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
