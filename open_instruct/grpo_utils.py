@@ -138,6 +138,8 @@ class GRPOExperimentConfig(
     """Where to save the model checkpoint (if applicable)"""
     resume_checkpoint_dir: str | None = None
     """If set, load DeepSpeed and client checkpoint state from this directory only; new checkpoints still go to `checkpoint_state_dir`."""
+    resume_checkpoint_tag: str | None = None
+    """If set, load this DeepSpeed checkpoint tag (e.g. ``global_step3500``) under the load root; ignores ``latest``."""
     warn_if_low_disk_space: bool = False
     """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None
@@ -219,6 +221,13 @@ class GRPOExperimentConfig(
             raise ValueError(
                 "`checkpoint_state_dir` must be provided when using `resume_checkpoint_dir` with "
                 "`checkpoint_state_freq` > 0 (new checkpoints are only written to `checkpoint_state_dir`)."
+            )
+        if self.resume_checkpoint_tag is not None and (
+            self.resume_checkpoint_dir is None and self.checkpoint_state_dir is None
+        ):
+            raise ValueError(
+                "`resume_checkpoint_tag` requires `resume_checkpoint_dir` or `checkpoint_state_dir` "
+                "(the DeepSpeed checkpoint root directory)."
             )
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):

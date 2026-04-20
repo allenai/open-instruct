@@ -165,25 +165,38 @@ def get_unique_final_output_dir(output_dir: str) -> str:
     return str(candidate)
 
 
-def load_latest_checkpoint_client_state(checkpoint_state_dir: str) -> dict[str, Any] | None:
-    latest_tag_path = os.path.join(checkpoint_state_dir, "latest")
+def load_latest_checkpoint_client_state(
+    checkpoint_state_dir: str, *, checkpoint_tag: str | None = None
+) -> dict[str, Any] | None:
+    root = os.path.abspath(checkpoint_state_dir)
     candidate_dirs: list[str] = []
 
-    if os.path.exists(latest_tag_path):
-        with open(latest_tag_path) as f:
-            latest_tag = f.read().strip()
-        if latest_tag:
-            candidate_dirs.append(os.path.join(checkpoint_state_dir, latest_tag))
+    if checkpoint_tag is not None:
+        step_dir = os.path.join(root, checkpoint_tag)
+        if os.path.isdir(step_dir):
+            candidate_dirs.append(step_dir)
+        else:
+            logger.warning("No checkpoint step directory for tag %s: %s", checkpoint_tag, step_dir)
+            return None
+    else:
+        latest_tag_path = os.path.join(root, "latest")
+        if os.path.exists(latest_tag_path):
+            with open(latest_tag_path) as f:
+                latest_tag = f.read().strip()
+            if latest_tag:
+                candidate_dirs.append(os.path.join(root, latest_tag))
 
-    global_step_dirs = [
-        os.path.join(checkpoint_state_dir, entry)
-        for entry in os.listdir(checkpoint_state_dir)
-        if entry.startswith("global_step") and os.path.isdir(os.path.join(checkpoint_state_dir, entry))
-    ]
-    candidate_dirs.extend(
-        sorted(global_step_dirs, key=lambda path: int(os.path.basename(path).replace("global_step", "")), reverse=True)
-    )
-    candidate_dirs.append(checkpoint_state_dir)
+        global_step_dirs = [
+            os.path.join(root, entry)
+            for entry in os.listdir(root)
+            if entry.startswith("global_step") and os.path.isdir(os.path.join(root, entry))
+        ]
+        candidate_dirs.extend(
+            sorted(
+                global_step_dirs, key=lambda path: int(os.path.basename(path).replace("global_step", "")), reverse=True
+            )
+        )
+        candidate_dirs.append(root)
 
     seen_dirs: set[str] = set()
     for checkpoint_dir in candidate_dirs:
@@ -414,19 +427,26 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {checkpoint_load_dir} because it does not exist!"
                 )
             else:
+                ds_load_dir = os.path.abspath(checkpoint_load_dir)
+                ds_tag = args.resume_checkpoint_tag
                 # remove mpu for loading checkpoints, add it back after loading
                 old_mpu = self.mpu
                 self.model.mpu = None
                 path, states = self.model.load_checkpoint(
-                    checkpoint_load_dir,
+                    ds_load_dir,
+                    tag=ds_tag,
                     load_module_strict=True,
                     load_optimizer_states=True,
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
                 self.model.mpu = old_mpu
-                if path is None:
-                    raise ValueError(f"Failed to load checkpoint from {checkpoint_load_dir}")
+                if path is None or states is None:
+                    raise ValueError(
+                        f"Failed to load DeepSpeed checkpoint (load_dir={ds_load_dir!r}, tag={ds_tag!r}). "
+                        "Use the checkpoint root (directory that contains a `latest` file or `global_step*` "
+                        "subdirectories) and set `--resume_checkpoint_tag` when there is no `latest` file."
+                    )
                 optimization_steps_done = states["training_step"]
 
                 rng_states = states["rng_states"]
@@ -447,14 +467,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
                 if args.load_ref_policy and states.get("ref_policy_saved", False):
-                    ref_policy_dir = os.path.join(checkpoint_load_dir, "ref_policy")
+                    ref_policy_dir = os.path.join(ds_load_dir, "ref_policy")
                     model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
                     if os.path.exists(model_path):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
                 logger.info(
-                    f"{self.rank=}: Loaded checkpoint from {checkpoint_load_dir} with {optimization_steps_done=}"
+                    f"{self.rank=}: Loaded checkpoint from load_dir={ds_load_dir!r} tag={ds_tag!r} "
+                    f"with {optimization_steps_done=}"
                 )
         self.model.train()
 
@@ -2850,7 +2871,9 @@ def main(
     data_prep_actor_state = None
     checkpoint_load_dir = get_checkpoint_load_dir(args)
     if checkpoint_load_dir and os.path.exists(checkpoint_load_dir):
-        checkpoint_state = load_latest_checkpoint_client_state(checkpoint_load_dir)
+        checkpoint_state = load_latest_checkpoint_client_state(
+            checkpoint_load_dir, checkpoint_tag=args.resume_checkpoint_tag
+        )
         if checkpoint_state is not None:
             logger.info("Loaded checkpoint client state from %s", checkpoint_load_dir)
             data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")

@@ -237,3 +237,8 @@ include = [
     "open_instruct/environments/tools/utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
+
+[tool.pyright]
+exclude = [".venv"]
+venvPath = "."
+venv = ".venv"
