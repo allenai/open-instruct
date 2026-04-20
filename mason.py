@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import hashlib
 import os
+import pathlib
 import random
 import re
 import secrets
@@ -493,10 +494,10 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         need_to_override_output_dir = False
                         break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
+                    new_output_dir_path = pathlib.Path(args.auto_output_dir_path) / whoami
                     if args.artifact_ttl:
-                        new_output_dir = f"{args.auto_output_dir_path}/{whoami}/tmp-{args.artifact_ttl}"
-                    else:
-                        new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
+                        new_output_dir_path = new_output_dir_path / f"tmp-{args.artifact_ttl}"
+                    new_output_dir = f"{new_output_dir_path}/"
                     console.log(
                         f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`"
                     )
@@ -671,9 +672,12 @@ def maybe_override_checkpoint_dir(
     ):
         return command
 
-    new_checkpoint_state_dir = f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+    new_checkpoint_state_path = (
+        pathlib.Path(auto_checkpoint_state_dir) / whoami / f"{int(time.time())}_{random.randint(0, 1000000)}"
+    )
     if artifact_ttl:
-        new_checkpoint_state_dir = f"{new_checkpoint_state_dir}/tmp-{artifact_ttl}"
+        new_checkpoint_state_path = new_checkpoint_state_path / f"tmp-{artifact_ttl}"
+    new_checkpoint_state_dir = str(new_checkpoint_state_path)
     console.log(
         f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
     )
