@@ -210,6 +210,15 @@ class PackedSequences(Generic[T]):
     """
     rewards: list[torch.Tensor] | None = None
     """packed rewards (batch_size, pack_length)"""
+    ground_truths: list[list[str]] | None = None
+    """per-pack list of per-sub-sequence ground-truth answer strings. Populated only when the
+    value model is active and ground-truth conditioning / rollout-context conditioning is used."""
+    sibling_rollouts: list[list[list[dict]]] | None = None
+    """per-pack list of per-sub-sequence list of sibling rollouts ({text, is_correct}).
+    Populated only when rollout_context / correct_demo / lm_yesno_siblings conditioning is used.
+    """
+    segment_boundaries: list[torch.Tensor] | None = None
+    """packed SAE segment boundary mask (batch_size, pack_length); 1 at a boundary token."""
 
 
 def reset_position_ids(attention_mask):
@@ -421,6 +430,198 @@ def calculate_advantages_packed(
     advantages = np.stack(advantages_reversed[::-1], axis=1)
     returns = advantages + values
     return advantages, returns
+
+
+def calculate_length_adaptive_lambda(response_length: int, alpha: float = 0.05) -> float:
+    """Length-adaptive lambda for GAE (VAPO, Section 4.2).
+
+    Formula: lambda = 1 - 1/(alpha * length), clamped to [0, 0.999].
+    """
+    effective_length = max(response_length, 1)
+    lam = 1.0 - 1.0 / (alpha * effective_length)
+    return max(0.0, min(0.999, lam))
+
+
+def _backward_gae(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    lam,  # scalar or ndarray of shape values
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+) -> np.ndarray:
+    """Shared backward sweep for GAE. `lam` can be a scalar or a per-position array.
+
+    Follows the VAPO/SAE convention where GAE propagates through query positions (only blocked by
+    sequence boundaries via nonterminal). The delta is still zeroed at query positions since they
+    carry no reward or value.
+    """
+    gen_length = values.shape[1]
+    lastgaelam = 0.0
+    advantages_reversed: list[np.ndarray] = []
+    lam_is_array = isinstance(lam, np.ndarray)
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        current_lam = lam[:, t] if lam_is_array else lam
+        lastgaelam = delta + gamma * current_lam * lastgaelam * nonterminal
+        advantages_reversed.append(lastgaelam)
+    return np.stack(advantages_reversed[::-1], axis=1)
+
+
+def calculate_advantages_packed_vapo(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    lam_policy: float = 0.95,
+    lam_critic: float = 1.0,
+    length_adaptive: bool = False,
+    length_adaptive_alpha: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Decoupled GAE (VAPO): critic uses lam_critic (typically 1.0) for unbiased MC returns,
+    policy uses lam_policy (fixed or length-adaptive).
+
+    Returns:
+        (policy_advantages, critic_returns, avg_policy_lambda_used)
+    """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+
+    advantages_critic = _backward_gae(values, rewards, gamma, lam_critic, dones, response_masks)
+    critic_returns = advantages_critic + values
+
+    if length_adaptive:
+        batch_size = values.shape[0]
+        lam_policy_arr = np.full_like(values, lam_policy, dtype=np.float64)
+        for b in range(batch_size):
+            eos_positions = np.where(dones[b] > 0)[0]
+            start = 0
+            for eos_pos in eos_positions:
+                end = int(eos_pos) + 1
+                seq_resp_len = int(response_masks[b, start:end].sum())
+                seq_lambda = calculate_length_adaptive_lambda(seq_resp_len, length_adaptive_alpha)
+                lam_policy_arr[b, start:end] = seq_lambda
+                start = end
+        policy_advantages = _backward_gae(values, rewards, gamma, lam_policy_arr, dones, response_masks)
+        avg_lam = float(lam_policy_arr[response_masks > 0].mean()) if (response_masks > 0).any() else lam_policy
+    else:
+        policy_advantages = _backward_gae(values, rewards, gamma, lam_policy, dones, response_masks)
+        avg_lam = lam_policy
+
+    return policy_advantages, critic_returns, avg_lam
+
+
+def _sae_lambda_array(
+    values: np.ndarray,
+    logprobs: np.ndarray,
+    response_masks: np.ndarray,
+    sae_threshold: float,
+    boundary_lam,  # scalar or ndarray shape values
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Build the per-position lambda array for SAE.
+
+    Inside a segment (next token is not a boundary) lambda=1; at boundary positions we use
+    `boundary_lam`. Returns (lambda_arr, is_boundary_mask, boundary_fraction).
+    """
+    gen_length = values.shape[1]
+    log_threshold = np.log(sae_threshold + 1e-30)
+    is_boundary = (logprobs < log_threshold) & (response_masks > 0)
+
+    boundary_is_array = isinstance(boundary_lam, np.ndarray)
+    lambda_arr = np.ones_like(values, dtype=np.float64)
+    if gen_length > 1:
+        next_boundary = is_boundary[:, 1:]
+        if boundary_is_array:
+            lambda_arr[:, :-1] = np.where(next_boundary, boundary_lam[:, :-1], 1.0)
+        else:
+            lambda_arr[:, :-1] = np.where(next_boundary, boundary_lam, 1.0)
+    if boundary_is_array:
+        lambda_arr[:, -1] = boundary_lam[:, -1]
+    else:
+        lambda_arr[:, -1] = boundary_lam
+
+    resp_tokens = int((response_masks > 0).sum())
+    boundary_count = int(is_boundary.sum())
+    avg_boundary_frac = boundary_count / max(resp_tokens, 1)
+    return lambda_arr, is_boundary, avg_boundary_frac
+
+
+def calculate_advantages_packed_sae(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    lam: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    logprobs: np.ndarray,
+    sae_threshold: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Segmental Advantage Estimation (SAE).
+
+    Returns (advantages, returns, boundary_fraction).
+    """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+    lambda_arr, _, avg_boundary_frac = _sae_lambda_array(
+        values, logprobs, response_masks, sae_threshold, boundary_lam=lam
+    )
+    advantages = _backward_gae(values, rewards, gamma, lambda_arr, dones, response_masks)
+    returns = advantages + values
+    return advantages, returns, avg_boundary_frac
+
+
+def calculate_advantages_packed_sae_vapo(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    logprobs: np.ndarray,
+    sae_threshold: float = 0.2,
+    lam_policy: float = 0.95,
+    lam_critic: float = 1.0,
+    length_adaptive: bool = False,
+    length_adaptive_alpha: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """SAE + decoupled GAE.
+
+    Critic uses lam_critic=1.0 (standard GAE). Policy uses SAE-style position-dependent lambda at
+    boundaries. With length_adaptive=True the boundary lambda itself varies per sub-sequence.
+
+    Returns (policy_advantages, critic_returns, avg_boundary_fraction).
+    """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+
+    advantages_critic = _backward_gae(values, rewards, gamma, lam_critic, dones, response_masks)
+    critic_returns = advantages_critic + values
+
+    if length_adaptive:
+        batch_size = values.shape[0]
+        boundary_lam_arr = np.full_like(values, lam_policy, dtype=np.float64)
+        for b in range(batch_size):
+            eos_positions = np.where(dones[b] > 0)[0]
+            start = 0
+            for eos_pos in eos_positions:
+                end = int(eos_pos) + 1
+                seq_resp_len = int(response_masks[b, start:end].sum())
+                seq_lambda = calculate_length_adaptive_lambda(seq_resp_len, length_adaptive_alpha)
+                boundary_lam_arr[b, start:end] = seq_lambda
+                start = end
+        boundary_lam: float | np.ndarray = boundary_lam_arr
+    else:
+        boundary_lam = lam_policy
+
+    lambda_arr, _, avg_boundary_frac = _sae_lambda_array(
+        values, logprobs, response_masks, sae_threshold, boundary_lam=boundary_lam
+    )
+    policy_advantages = _backward_gae(values, rewards, gamma, lambda_arr, dones, response_masks)
+
+    return policy_advantages, critic_returns, avg_boundary_frac
 
 
 def masked_mean(

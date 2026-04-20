@@ -111,18 +111,53 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    # Optional value-model plumbing. When use_value_model=False these remain None and the
+    # trainer uses the GRPO group-relative advantages above.
+    rewards: list[torch.Tensor] | None = None
+    """Per-token reward tensor aligned with query_responses (same shape). Typically sparse - a
+    single nonzero entry at the terminal response token for each sub-sequence."""
+    dones: list[torch.Tensor] | None = None
+    """Per-token done mask (float) aligned with query_responses (same shape). 1 at the terminal
+    token of each sub-sequence, 0 elsewhere."""
+    ground_truths: list[list[str]] | None = None
+    """Per-pack list of per-sub-sequence ground-truth answer strings (used for value-model
+    conditioning; one entry per packed sub-sequence)."""
+    sibling_rollouts: list[list[list[dict]]] | None = None
+    """Per-pack list of per-sub-sequence list of sibling rollouts
+    (each sibling is a dict: ``{"text": str, "is_correct": bool}``). Used by the
+    rollout_context / correct_demo / lm_yesno_siblings value conditioning templates."""
+    segment_boundaries: list[torch.Tensor] | None = None
+    """Per-token boolean mask (1 where a SAE segment starts, 0 elsewhere). None when SAE is off."""
+
+    _TENSOR_LIST_FIELDS = (
+        "query_responses",
+        "attention_masks",
+        "position_ids",
+        "advantages",
+        "response_masks",
+        "vllm_logprobs",
+        "rewards",
+        "dones",
+        "segment_boundaries",
+    )
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+        return CollatedBatchData(
+            **{
+                f.name: (getattr(self, f.name)[idx] if getattr(self, f.name) is not None else None)
+                for f in dataclasses.fields(self)
+            }
+        )
 
     def __len__(self) -> int:
         return len(self.query_responses)
 
     def to(self, device: torch.device, non_blocking: bool = True) -> "CollatedBatchData":
-        return dataclasses.replace(
-            self,
-            **{
-                f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
-                for f in dataclasses.fields(self)
-            },
-        )
+        replacements: dict[str, Any] = {}
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            if value is None:
+                continue
+            if f.name in self._TENSOR_LIST_FIELDS:
+                replacements[f.name] = [t.to(device, non_blocking=non_blocking) for t in value]
+        return dataclasses.replace(self, **replacements)

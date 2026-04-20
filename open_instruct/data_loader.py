@@ -494,6 +494,15 @@ class StreamingDataLoaderConfig:
     # Computed at post_init
     max_possible_score: float = 1.0
 
+    # Value-model related (populated from GRPOExperimentConfig via setup_runtime_variables so the
+    # DataPreparationActor knows whether to carry rewards/dones/GT/siblings/SAE boundaries).
+    use_value_model: bool = field(default=False, init=False)
+    use_sae: bool = field(default=False, init=False)
+    sae_threshold: float = field(default=0.2, init=False)
+    value_model_ground_truth_conditioning: bool = field(default=False, init=False)
+    gt_conditioning_template: str = field(default="answer_prefix", init=False)
+    rollout_context_num_siblings: int = field(default=0, init=False)
+
     def __post_init__(self):
         if self.eval_response_length is None:
             self.eval_response_length = self.response_length
@@ -1026,6 +1035,122 @@ def accumulate_inference_batches(
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
+def _extract_subseq_indices_per_pack(response_masks: list[torch.Tensor]) -> list[list[int]]:
+    """For each packed sequence, return the ordered list of 1-based sub-sequence indices present."""
+    result: list[list[int]] = []
+    for rm in response_masks:
+        flat = rm.view(-1).tolist()
+        seen: list[int] = []
+        seen_set: set[int] = set()
+        for v in flat:
+            if v == 0:
+                continue
+            if v in seen_set:
+                continue
+            seen.append(int(v))
+            seen_set.add(int(v))
+        result.append(seen)
+    return result
+
+
+def populate_value_model_fields(
+    packed_sequences: PackedSequences,
+    scores: np.ndarray,
+    batch_ground_truths: list[Any],
+    decoded_responses: list[str] | None,
+    num_samples_per_prompt: int,
+    max_possible_score: float,
+    use_sae: bool,
+    sae_threshold: float,
+    need_ground_truths: bool,
+    need_siblings: bool,
+    num_siblings_to_sample: int,
+    rng: np.random.Generator,
+) -> None:
+    """Populate value-model-related fields on the packed_sequences in-place.
+
+    - packed_sequences.rewards: per-token rewards (same shape as dones), with `scores[i]` placed at
+      the EOS token of each sub-sequence and zeros elsewhere.
+    - packed_sequences.segment_boundaries (if `use_sae`): boolean mask marking tokens with
+      vllm_logprob < log(sae_threshold) within response positions.
+    - packed_sequences.ground_truths (if `need_ground_truths`): per-pack list of per-sub-seq GT strings.
+    - packed_sequences.sibling_rollouts (if `need_siblings`): per-pack list of per-sub-seq list of
+      `{"text", "is_correct"}` dicts drawn uniformly at random from the same prompt group
+      (excluding self).
+    """
+    assert packed_sequences.dones is not None
+
+    # 1) Per-token rewards: lookup_rewards[dones[t]] gives scores[i] at the EOS of sub-seq i.
+    lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
+    lookup_rewards[1:] = scores.astype(np.float32)
+    packed_rewards: list[torch.Tensor] = []
+    for packed_dones in packed_sequences.dones:
+        dones_np = packed_dones.cpu().numpy().astype(np.int64)
+        packed_rewards.append(torch.tensor(lookup_rewards[dones_np], dtype=torch.float32))
+    packed_sequences.rewards = packed_rewards
+
+    # 2) SAE segment boundaries.
+    if use_sae:
+        assert packed_sequences.vllm_logprobs is not None
+        assert packed_sequences.response_masks is not None
+        threshold_logprob = float(np.log(max(sae_threshold, 1e-12)))
+        segments: list[torch.Tensor] = []
+        for logp, resp_mask in zip(packed_sequences.vllm_logprobs, packed_sequences.response_masks):
+            in_response = (resp_mask > 0).to(dtype=torch.bool)
+            is_boundary = (logp < threshold_logprob) & in_response
+            segments.append(is_boundary.to(dtype=torch.bool))
+        packed_sequences.segment_boundaries = segments
+
+    # 3) Per-pack ground truths (one string per sub-sequence in the pack).
+    gt_per_pack: list[list[str]] | None = None
+    if need_ground_truths:
+        subseq_indices_per_pack = _extract_subseq_indices_per_pack(packed_sequences.response_masks)
+        gt_per_pack = []
+        for pack_subseqs in subseq_indices_per_pack:
+            pack_gts: list[str] = []
+            for one_based_idx in pack_subseqs:
+                sample_idx = one_based_idx - 1
+                gt = batch_ground_truths[sample_idx]
+                if isinstance(gt, list):
+                    gt = gt[0] if gt else ""
+                pack_gts.append(str(gt) if gt is not None else "")
+            gt_per_pack.append(pack_gts)
+        packed_sequences.ground_truths = gt_per_pack
+
+    # 4) Sibling rollouts per sub-sequence (uniform random within prompt group, exclude self).
+    if need_siblings:
+        subseq_indices_per_pack = (
+            _extract_subseq_indices_per_pack(packed_sequences.response_masks)
+            if not need_ground_truths
+            else subseq_indices_per_pack  # noqa: F821 - reused from above
+        )
+        siblings_per_pack: list[list[list[dict]]] = []
+        texts = decoded_responses if decoded_responses is not None else [""] * len(scores)
+        for pack_subseqs in subseq_indices_per_pack:
+            pack_siblings: list[list[dict]] = []
+            for one_based_idx in pack_subseqs:
+                sample_idx = one_based_idx - 1
+                group_idx = sample_idx // num_samples_per_prompt
+                group_start = group_idx * num_samples_per_prompt
+                group_end = group_start + num_samples_per_prompt
+                group_mates = [j for j in range(group_start, group_end) if j != sample_idx and j < len(scores)]
+                if len(group_mates) == 0 or num_siblings_to_sample <= 0:
+                    pack_siblings.append([])
+                    continue
+                n = min(num_siblings_to_sample, len(group_mates))
+                chosen = rng.choice(group_mates, size=n, replace=False).tolist()
+                sibs = [
+                    {
+                        "text": str(texts[j]) if j < len(texts) else "",
+                        "is_correct": bool(float(scores[j]) >= max_possible_score),
+                    }
+                    for j in chosen
+                ]
+                pack_siblings.append(sibs)
+            siblings_per_pack.append(pack_siblings)
+        packed_sequences.sibling_rollouts = siblings_per_pack
+
+
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
     dp_world_size: int,
@@ -1064,6 +1189,13 @@ def prepare_collated_data_for_workers(
     assert packed_sequences.position_ids is not None
     assert packed_sequences.advantages is not None
     assert packed_sequences.vllm_logprobs is not None
+
+    has_rewards = packed_sequences.rewards is not None
+    has_dones = packed_sequences.dones is not None
+    has_segments = packed_sequences.segment_boundaries is not None
+    has_gt = packed_sequences.ground_truths is not None
+    has_siblings = packed_sequences.sibling_rollouts is not None
+
     for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
@@ -1071,6 +1203,15 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)] if has_rewards else None
+        per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)] if has_dones else None
+        per_device_packed_segments = (
+            packed_sequences.segment_boundaries[B * i : B * (i + 1)] if has_segments else None
+        )
+        per_device_packed_gt = packed_sequences.ground_truths[B * i : B * (i + 1)] if has_gt else None
+        per_device_packed_siblings = (
+            packed_sequences.sibling_rollouts[B * i : B * (i + 1)] if has_siblings else None
+        )
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1080,6 +1221,11 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_rewards: list[torch.Tensor] | None = [] if has_rewards else None
+        collated_dones: list[torch.Tensor] | None = [] if has_dones else None
+        collated_segments: list[torch.Tensor] | None = [] if has_segments else None
+        collated_gt: list[list[str]] | None = [] if has_gt else None
+        collated_siblings: list[list[list[dict]]] | None = [] if has_siblings else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1100,6 +1246,28 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            if collated_rewards is not None:
+                assert per_device_packed_rewards is not None
+                collated_rewards.append(
+                    collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0, pin_memory)
+                )
+            if collated_dones is not None:
+                assert per_device_packed_dones is not None
+                collated_dones.append(
+                    collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory)
+                )
+            if collated_segments is not None:
+                assert per_device_packed_segments is not None
+                collated_segments.append(
+                    collate_fn([per_device_packed_segments[idx] for idx in micro_range], 0, pin_memory)
+                )
+            if collated_gt is not None:
+                assert per_device_packed_gt is not None
+                # Non-tensor: keep as list-of-lists, indexed by shuffle order.
+                collated_gt.append([per_device_packed_gt[idx] for idx in micro_range])
+            if collated_siblings is not None:
+                assert per_device_packed_siblings is not None
+                collated_siblings.append([per_device_packed_siblings[idx] for idx in micro_range])
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1108,6 +1276,11 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                rewards=collated_rewards,
+                dones=collated_dones,
+                segment_boundaries=collated_segments,
+                ground_truths=collated_gt,
+                sibling_rollouts=collated_siblings,
             )
         )
     return collated_data
@@ -1358,6 +1531,40 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+
+            # Populate value-model fields (rewards, SAE boundaries, per-sub-seq ground truths,
+            # sibling rollouts) when the value model is active. This is a no-op for plain GRPO.
+            if self.config.use_value_model:
+                need_gt = (
+                    self.config.value_model_ground_truth_conditioning
+                    or self.config.gt_conditioning_template
+                    in {
+                        "rollout_context",
+                        "correct_demo",
+                        "lm_yesno",
+                        "lm_yesno_blind",
+                        "lm_yesno_siblings",
+                    }
+                )
+                need_siblings = self.config.gt_conditioning_template in {
+                    "rollout_context",
+                    "correct_demo",
+                    "lm_yesno_siblings",
+                }
+                populate_value_model_fields(
+                    packed_sequences=packed_sequences,
+                    scores=scores,
+                    batch_ground_truths=batch.ground_truths,
+                    decoded_responses=batch.decoded_responses,
+                    num_samples_per_prompt=self.config.num_samples_per_prompt_rollout,
+                    max_possible_score=self.config.max_possible_score,
+                    use_sae=self.config.use_sae,
+                    sae_threshold=self.config.sae_threshold,
+                    need_ground_truths=need_gt,
+                    need_siblings=need_siblings,
+                    num_siblings_to_sample=self.config.rollout_context_num_siblings,
+                    rng=np.random.default_rng(seed=(step * 97 + 1)),
+                )
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id

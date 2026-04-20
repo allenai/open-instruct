@@ -123,6 +123,70 @@ class GRPOExperimentConfig(
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
+    # Value model (PPO / LM-yesno / SAE). When use_value_model=True, the trainer trains an explicit
+    # value function V(s) and computes advantages via GAE instead of the group-relative scheme.
+    use_value_model: bool = False
+    """Whether to train and use a scalar PPO value model alongside the policy."""
+    value_model_name_or_path: str | None = None
+    """Optional path/hf name for initializing the value model. Defaults to the policy's model_name_or_path."""
+    init_value_from_rm: bool = False
+    """If True, initialize the value model's backbone from a trained reward model
+    (AutoModelForSequenceClassification) and reuse its `score` head as the value head."""
+    init_value_from_pretrained_checkpoint: str | None = None
+    """Path to a directory containing a previously-saved `value_model.bin` to load into the value model."""
+    value_loss_coef: float = 0.5
+    """Coefficient for the value MSE loss (multiplied inside the value backward)."""
+    value_learning_rate: float | None = None
+    """Learning rate for the value model. Falls back to `learning_rate` if None."""
+    vf_clip_range: float = 0.2
+    """Optional PPO2-style clipping range on value predictions. Set to 0 to disable."""
+    gamma: float = 1.0
+    """Discount factor for GAE returns."""
+    gae_lambda: float = 0.95
+    """Lambda for GAE advantage smoothing."""
+    decoupled_gae: bool = False
+    """If True, use unbiased MC returns for the critic (lam_critic=1.0) and `gae_lambda` for the policy."""
+    length_adaptive_gae: bool = False
+    """If True, scale the policy lambda per sub-sequence: lam = clamp(1 - 1/(alpha*len), 0, 0.999)."""
+    length_adaptive_gae_alpha: float = 0.05
+    """Alpha for length-adaptive lambda."""
+    value_warmup_steps: int = 0
+    """If >0, freeze the policy for this many steps while the value model trains on rollouts."""
+    policy_warmup_steps: int = 0
+    """If >0, freeze the policy for this many steps regardless of whether the value model is enabled."""
+    value_rewarmup_start: int = 0
+    """Training step at which to re-freeze the policy to warm up the value model again."""
+    value_rewarmup_steps: int = 0
+    """Length of the re-warmup window starting at `value_rewarmup_start`."""
+    reset_optimizer_after_value_warmup: bool = False
+    """If True, reset the policy optimizer's state after the value warmup window ends."""
+    value_num_mini_batches: int | None = None
+    """Optional separate mini-batch count for the value model's inner loop. Defaults to `num_mini_batches`."""
+    whiten_advantages: bool = False
+    """If True, whiten GAE advantages across the batch before applying them."""
+
+    # SAE (Segmental Advantage Estimation)
+    use_sae: bool = False
+    """If True, use segmental advantage estimation: lam jumps to `sae_threshold` at low-prob tokens."""
+    sae_threshold: float = 0.2
+    """Segment boundary threshold on token probability (boundary when p(token) < sae_threshold)."""
+
+    # LM-as-value model (Yes/No token probability as the value)
+    use_lm_value_model: bool = False
+    """If True, keep the LM head and use softmax([yes_logit, no_logit])[0] as the value. Requires
+    use_value_model=True and a compatible `gt_conditioning_template` (lm_yesno / lm_yesno_blind / lm_yesno_siblings)."""
+
+    # Value-model conditioning (applied only during the value forward, between prompt and response)
+    value_model_ground_truth_conditioning: bool = False
+    """If True, splice a conditioning string built from the ground truth into the value forward."""
+    gt_conditioning_template: str = "answer_prefix"
+    """Template name. One of:
+    answer_prefix, boxed_answer, cot_spoiler, expected_accuracy,
+    rollout_context, correct_demo, lm_yesno, lm_yesno_blind, lm_yesno_siblings.
+    """
+    rollout_context_num_siblings: int = 4
+    """Number of sibling rollouts to include when using the rollout_context / correct_demo / lm_yesno_siblings templates."""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -279,6 +343,64 @@ class GRPOExperimentConfig(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+
+        # Value model validation
+        if self.init_value_from_rm and not self.use_value_model:
+            raise ValueError("--init_value_from_rm requires --use_value_model.")
+        if self.init_value_from_pretrained_checkpoint is not None and not self.use_value_model:
+            raise ValueError("--init_value_from_pretrained_checkpoint requires --use_value_model.")
+        if self.value_model_name_or_path is not None and not self.use_value_model:
+            raise ValueError("--value_model_name_or_path requires --use_value_model.")
+        if self.init_value_from_rm and self.init_value_from_pretrained_checkpoint is not None:
+            raise ValueError(
+                "Cannot combine --init_value_from_rm and --init_value_from_pretrained_checkpoint; "
+                "pick one initialization source for the value model."
+            )
+        if self.length_adaptive_gae and not self.use_value_model:
+            raise ValueError("--length_adaptive_gae requires --use_value_model.")
+        if self.decoupled_gae and not self.use_value_model:
+            raise ValueError("--decoupled_gae requires --use_value_model.")
+
+        # SAE validation
+        if self.use_sae and not self.use_value_model:
+            raise ValueError("--use_sae requires --use_value_model.")
+        if self.use_sae and not (0.0 < self.sae_threshold < 1.0):
+            raise ValueError(f"--sae_threshold must be in (0, 1), got {self.sae_threshold}.")
+
+        # LM value model validation
+        if self.use_lm_value_model and not self.use_value_model:
+            raise ValueError("--use_lm_value_model requires --use_value_model.")
+        valid_lm_templates = {"lm_yesno", "lm_yesno_blind", "lm_yesno_siblings"}
+        if self.use_lm_value_model:
+            # Force GT conditioning on since the LM-yesno templates need it.
+            self.value_model_ground_truth_conditioning = True
+            if self.gt_conditioning_template not in valid_lm_templates:
+                raise ValueError(
+                    f"--use_lm_value_model requires --gt_conditioning_template in {sorted(valid_lm_templates)}, "
+                    f"got {self.gt_conditioning_template!r}."
+                )
+
+        # GT conditioning validation
+        valid_gt_templates = {
+            "answer_prefix",
+            "boxed_answer",
+            "cot_spoiler",
+            "expected_accuracy",
+            "rollout_context",
+            "correct_demo",
+            "lm_yesno",
+            "lm_yesno_blind",
+            "lm_yesno_siblings",
+        }
+        if self.gt_conditioning_template not in valid_gt_templates:
+            raise ValueError(
+                f"--gt_conditioning_template must be one of {sorted(valid_gt_templates)}, "
+                f"got {self.gt_conditioning_template!r}."
+            )
+        if self.value_model_ground_truth_conditioning and not self.use_value_model:
+            raise ValueError("--value_model_ground_truth_conditioning requires --use_value_model.")
+        if self.rollout_context_num_siblings < 0:
+            raise ValueError(f"--rollout_context_num_siblings must be >=0, got {self.rollout_context_num_siblings}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:

@@ -108,7 +108,15 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils import Timer, masked_mean
+from open_instruct import value_model_utils
+from open_instruct.rl_utils import (
+    Timer,
+    calculate_advantages_packed,
+    calculate_advantages_packed_sae,
+    calculate_advantages_packed_sae_vapo,
+    calculate_advantages_packed_vapo,
+    masked_mean,
+)
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -440,6 +448,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
+                # Save value model path to load later (after value_model is initialized)
+                self.value_model_checkpoint_path = None
+                if args.use_value_model and states.get("value_model_saved", False):
+                    value_model_dir = os.path.join(args.checkpoint_state_dir, "value_model")
+                    if os.path.exists(os.path.join(value_model_dir, "value_model.bin")):
+                        self.value_model_checkpoint_path = value_model_dir
+                        logger.info(f"{self.rank=}: Will load value model from {value_model_dir}")
+
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
@@ -471,6 +487,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
+
+        # Value model (optional)
+        self.value_model = None
+        if args.use_value_model:
+            self._init_value_model(args, model_config)
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -507,6 +528,170 @@ class PolicyTrainerRayProcess(RayProcess):
         self.dataloader = iter(self._streaming_dataloader)
 
         return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
+
+    # ------------------------------------------------------------
+    # Value model: scalar PPO critic, optionally LM-yesno (keeps LM head). See the plan for the
+    # full list of supported features (SAE, decoupled/length-adaptive GAE, GT / rollout_context /
+    # correct_demo / lm_yesno conditioning).
+    # ------------------------------------------------------------
+    def _init_value_model(
+        self, args: grpo_utils.GRPOExperimentConfig, model_config: ModelConfig
+    ) -> None:
+        """Initialize a standalone value model as a DeepSpeed-managed module.
+
+        The value model is a full causal LM whose lm_head is replaced with a scalar `Linear(h, 1)`
+        head (unless `use_lm_value_model=True` in which case the LM head is preserved and we
+        extract P(Yes/No) at the end of each sub-sequence). It is independent from the policy
+        weights and optimizer state.
+        """
+        logger.info(f"{self.rank=}: Initializing value model")
+
+        checkpoint_path = getattr(self, "value_model_checkpoint_path", None)
+
+        # Temporarily clear the HfDeepSpeedConfig weak ref so the model loads with full weights
+        # (not ZeRO-3 sharded/meta). We need full weights to replace the lm head.
+        import transformers.integrations.deepspeed as _hf_ds_integration  # noqa: PLC0415
+
+        saved_ds_config = _hf_ds_integration._hf_deepspeed_config_weak_ref
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = None
+
+        value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
+        value_revision = model_config.model_revision if args.value_model_name_or_path is None else None
+        hf_attn = model_utils.olmo_core_attn_to_hf(model_config.attn_implementation)
+
+        if args.init_value_from_rm:
+            from transformers import AutoModelForSequenceClassification  # noqa: PLC0415
+
+            rm = AutoModelForSequenceClassification.from_pretrained(
+                value_model_path,
+                revision=value_revision,
+                num_labels=1,
+                dtype=torch.bfloat16,
+                attn_implementation=hf_attn,
+                use_cache=False,
+            )
+            self.value_model = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                dtype=torch.bfloat16,
+                attn_implementation=hf_attn,
+                use_cache=False,
+            )
+            rm_backbone = getattr(rm, rm.base_model_prefix)
+            attr = rm.base_model_prefix
+            if not hasattr(self.value_model, attr):
+                attr = "model"
+            vm_backbone = getattr(self.value_model, attr)
+            vm_backbone.load_state_dict(rm_backbone.state_dict())
+            hidden_size = rm.config.hidden_size
+            value_head = torch.nn.Linear(hidden_size, 1, bias=rm.score.bias is not None, dtype=torch.bfloat16)
+            value_head.weight.data.copy_(rm.score.weight.data)
+            if rm.score.bias is not None:
+                value_head.bias.data.copy_(rm.score.bias.data)
+            self.value_model.lm_head = value_head
+            del rm
+            logger.info(
+                f"{self.rank=}: Initialized value model from RM {value_model_path} with trained score head"
+            )
+        else:
+            self.value_model = AutoModelForCausalLM.from_pretrained(
+                value_model_path,
+                revision=value_revision,
+                dtype=torch.bfloat16,
+                attn_implementation=hf_attn,
+                use_cache=False,
+            )
+            if args.use_lm_value_model:
+                logger.info(
+                    f"{self.rank=}: Keeping LM head for LM value model (Yes/No probability extraction)"
+                )
+            else:
+                hidden_size = self.value_model.config.hidden_size
+                value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+                std = 1.0 / (hidden_size + 1) ** 0.5
+                torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
+                self.value_model.lm_head = value_head
+                logger.info(
+                    f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})"
+                )
+
+        disable_dropout_in_model(self.value_model)
+
+        if args.use_lm_value_model:
+            yes_ids = self.tokenizer.encode("Yes", add_special_tokens=False)
+            no_ids = self.tokenizer.encode("No", add_special_tokens=False)
+            self._lm_value_yes_id = yes_ids[0]
+            self._lm_value_no_id = no_ids[0]
+            logger.info(
+                f"{self.rank=}: LM-value yes_id={self._lm_value_yes_id}, no_id={self._lm_value_no_id}"
+            )
+
+        if args.init_value_from_pretrained_checkpoint:
+            pretrained_path = os.path.join(args.init_value_from_pretrained_checkpoint, "value_model.bin")
+            state_dict = torch.load(pretrained_path, map_location="cpu", weights_only=True)
+            missing, unexpected = self.value_model.load_state_dict(state_dict, strict=False)
+            logger.info(
+                f"{self.rank=}: Loaded pretrained value model from {pretrained_path} "
+                f"(missing={len(missing)}, unexpected={len(unexpected)})"
+            )
+
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
+
+        if checkpoint_path is not None:
+            model_file = os.path.join(checkpoint_path, "value_model.bin")
+            state_dict = torch.load(model_file, map_location=self.device, weights_only=True)
+            self.value_model.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded value model weights from checkpoint {model_file}")
+
+        value_ds_config = get_train_ds_config(
+            offload=args.deepspeed_offload_param,
+            adam_offload=args.deepspeed_offload_optimizer,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            max_norm=args.max_grad_norm if args.max_grad_norm is not None else 0.0,
+            zpg=args.deepspeed_zpg,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
+        value_ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        value_ds_config["gradient_accumulation_steps"] = 1
+
+        value_lr = args.value_learning_rate if args.value_learning_rate is not None else args.learning_rate
+        if args.set_weight_decay_on_bias_and_norm:
+            value_optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
+        else:
+            value_optim_params = self.value_model.parameters()
+        self.value_optimizer = torch.optim.AdamW(value_optim_params, lr=value_lr, fused=args.fused_optimizer)
+
+        effective_value_mini_batches = (
+            args.value_num_mini_batches if args.value_num_mini_batches is not None else args.num_mini_batches
+        )
+        num_value_scheduler_steps = args.num_training_steps * args.num_epochs * effective_value_mini_batches
+        warm_up_steps = int(num_value_scheduler_steps * args.warmup_ratio)
+        if args.value_warmup_steps > 0:
+            warm_up_steps = max(warm_up_steps, args.value_warmup_steps)
+        value_scheduler = get_scheduler(
+            args.lr_scheduler_type,
+            optimizer=self.value_optimizer,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_value_scheduler_steps,
+        )
+
+        self.value_model, self.value_optimizer, _, self.value_scheduler = deepspeed.initialize(
+            model=self.value_model,
+            optimizer=self.value_optimizer,
+            config=value_ds_config,
+            lr_scheduler=value_scheduler,
+            dist_init_required=False,
+            mpu=self.mpu,
+        )
+
+        unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+        if hasattr(unwrapped, "gradient_checkpointing_enable"):
+            unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+
+        self.value_model.train()
+        self._value_effective_mini_batches = effective_value_mini_batches
+        logger.info(f"{self.rank=}: Value model ready (lr={value_lr}, mini_batches={effective_value_mini_batches})")
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -564,6 +749,214 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
+    def _unpack_subseqs(
+        self, query_responses: torch.Tensor, position_ids: torch.Tensor, response_mask: torch.Tensor
+    ) -> list[dict]:
+        """Unpack a single packed sequence into a list of per-sub-sequence dicts.
+
+        Returns a list with one entry per sub-sequence, each containing:
+            prompt_ids (Tensor), response_ids (Tensor), response_is_resp (BoolTensor), offset_in_pack (int).
+
+        Sub-sequence boundaries are detected by `position_ids` resetting to 0.
+        """
+        assert query_responses.shape[0] == 1, "Expected unbatched packed sequence (batch=1)."
+        q = query_responses[0]
+        p = position_ids[0]
+        m = response_mask[0].bool()
+        seq_len = q.shape[0]
+        # Find sub-seq boundary starts where position == 0 (or first).
+        starts = [0] + [int(i) for i in range(1, seq_len) if int(p[i].item()) == 0]
+        ends = starts[1:] + [seq_len]
+        result: list[dict] = []
+        for s, e in zip(starts, ends):
+            ids = q[s:e]
+            mask = m[s:e]
+            if ids.numel() == 0:
+                continue
+            result.append(
+                {
+                    "offset_in_pack": s,
+                    "length": e - s,
+                    "input_ids": ids,
+                    "response_is_resp": mask,
+                }
+            )
+        return result
+
+    def _forward_value_with_conditioning(
+        self,
+        query_responses: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        ground_truths_for_pack: list[str],
+        siblings_for_pack: list[list[dict]] | None,
+    ) -> torch.Tensor:
+        """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
+
+        Returns a values tensor of shape (batch=1, seq_len-1) matching `query_responses[:, 1:]`.
+        """
+        args = self.args
+        template = args.gt_conditioning_template
+        is_postfix = value_model_utils.is_postfix_template(template)
+        subseqs = self._unpack_subseqs(query_responses, position_ids, response_mask)
+        full_len = query_responses.shape[1]
+        # Value tensor aligned to seq_len-1 (the shifted layout the rest of step uses).
+        out_values = torch.zeros(1, full_len - 1, dtype=torch.float32, device=query_responses.device)
+
+        value_model_wrapped = self.value_model
+        # Forward each sub-sequence independently with the conditioning spliced in.
+        for i, sub in enumerate(subseqs):
+            ids = sub["input_ids"]  # (len,)
+            mask = sub["response_is_resp"]  # (len,)
+            gt = ground_truths_for_pack[i] if i < len(ground_truths_for_pack) else ""
+            siblings = siblings_for_pack[i] if (siblings_for_pack is not None and i < len(siblings_for_pack)) else None
+            cond_text = value_model_utils.build_conditioning_text(template, gt, siblings)
+            cond_ids = self.tokenizer.encode(cond_text, add_special_tokens=False)
+            if len(cond_ids) == 0:
+                cond_ids = [self.tokenizer.pad_token_id]
+            cond_tensor = torch.tensor(cond_ids, dtype=ids.dtype, device=ids.device)
+
+            # Find the first response position within the sub-seq; splice conditioning there (postfix)
+            # or prepend it (prefix).
+            first_resp = int(mask.long().argmax().item()) if bool(mask.any().item()) else ids.numel()
+            if is_postfix:
+                prompt_part = ids[:first_resp]
+                response_part = ids[first_resp:]
+                new_ids = torch.cat([prompt_part, cond_tensor, response_part], dim=0)
+                # Position IDs continue from the prompt through conditioning, then response.
+                new_pos = torch.arange(new_ids.numel(), device=ids.device)
+                # Which positions in new_ids correspond to ORIGINAL response tokens (for value extraction)?
+                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
+                orig_mask[: first_resp] = mask[:first_resp]  # copy original prompt portion (all False)
+                orig_mask[first_resp + cond_tensor.numel() :] = mask[first_resp:]
+            else:
+                # Prefix template: prepend conditioning.
+                new_ids = torch.cat([cond_tensor, ids], dim=0)
+                new_pos = torch.arange(new_ids.numel(), device=ids.device)
+                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
+                orig_mask[cond_tensor.numel() :] = mask
+
+            # Forward this sub-seq (batch=1).
+            new_ids_2d = new_ids.unsqueeze(0)
+            new_pos_2d = new_pos.unsqueeze(0)
+            output = value_model_wrapped(input_ids=new_ids_2d, position_ids=new_pos_2d)
+            logits = getattr(output, "logits", output)
+            shifted = logits[:, :-1]  # (1, new_len-1, vocab)
+            if args.use_lm_value_model:
+                values = value_model_utils.extract_yes_no_value(
+                    shifted.float(), self._lm_value_yes_id, self._lm_value_no_id
+                )
+            else:
+                values = shifted.squeeze(-1).float()
+            # Extract values at ORIGINAL response positions and scatter back into out_values.
+            # `orig_mask` is aligned to new_ids; shifted values align to new_ids[:, 1:], so pull
+            # positions where `orig_mask[1:]` is True.
+            orig_mask_shifted = orig_mask[1:]
+            new_resp_values = values[0][orig_mask_shifted]  # (num_resp_tokens,)
+            # Write to original sub-sequence response positions within the full packed output.
+            base = sub["offset_in_pack"]
+            orig_resp_abs_positions = [base + t - 1 for t in range(ids.numel()) if bool(mask[t]) and t > 0]
+            # `t > 0` because values live in shifted coordinates; t=0 has no shifted predecessor.
+            n = min(len(orig_resp_abs_positions), new_resp_values.numel())
+            for k, pos in enumerate(orig_resp_abs_positions[:n]):
+                out_values[0, pos] = new_resp_values[k]
+        return out_values
+
+    def forward_value(
+        self,
+        query_responses: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute per-token values for a packed sequence.
+
+        For the scalar head, returns the `Linear(h, 1)` output (shape: batch, seq_len-1), shifted
+        by 1 so values[t] aligns with a prediction about token t+1.
+        For the LM-yesno head, returns `softmax([yes_logit, no_logit])[0]` at each response token.
+        Non-response positions are zeroed.
+
+        The forward intentionally does NOT splice ground-truth conditioning; that lives in
+        `_forward_value_with_gt` which wraps this call.
+        """
+        assert self.value_model is not None, "value_model is not initialized"
+        output = self.value_model(input_ids=query_responses, position_ids=position_ids)
+        logits = getattr(output, "logits", output)
+        logits = logits[:, :-1]
+        if self.args.use_lm_value_model:
+            values = value_model_utils.extract_yes_no_value(
+                logits.float(), self._lm_value_yes_id, self._lm_value_no_id
+            )
+        else:
+            values = logits.squeeze(-1).float()
+        values = torch.where(response_mask, values, torch.zeros_like(values))
+        return values
+
+    def _dispatch_gae(
+        self,
+        values_np: np.ndarray,
+        rewards_np: np.ndarray,
+        dones_np: np.ndarray,
+        response_masks_np: np.ndarray,
+        logprobs_np: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray, dict]:
+        """Run the appropriate GAE variant based on flags. Returns (advantages, returns, metrics)."""
+        args = self.args
+        metrics: dict[str, float] = {}
+        if args.use_sae and args.decoupled_gae:
+            assert logprobs_np is not None
+            policy_adv, critic_returns, bf = calculate_advantages_packed_sae_vapo(
+                values=values_np,
+                rewards=rewards_np,
+                gamma=args.gamma,
+                dones=dones_np,
+                response_masks=response_masks_np,
+                logprobs=logprobs_np,
+                sae_threshold=args.sae_threshold,
+                lam_policy=args.gae_lambda,
+                lam_critic=1.0,
+                length_adaptive=args.length_adaptive_gae,
+                length_adaptive_alpha=args.length_adaptive_gae_alpha,
+            )
+            metrics["value/sae_boundary_frac"] = bf
+            return policy_adv, critic_returns, metrics
+        if args.use_sae:
+            assert logprobs_np is not None
+            adv, returns, bf = calculate_advantages_packed_sae(
+                values=values_np,
+                rewards=rewards_np,
+                gamma=args.gamma,
+                lam=args.gae_lambda,
+                dones=dones_np,
+                response_masks=response_masks_np,
+                logprobs=logprobs_np,
+                sae_threshold=args.sae_threshold,
+            )
+            metrics["value/sae_boundary_frac"] = bf
+            return adv, returns, metrics
+        if args.decoupled_gae:
+            policy_adv, critic_returns, avg_lam = calculate_advantages_packed_vapo(
+                values=values_np,
+                rewards=rewards_np,
+                gamma=args.gamma,
+                dones=dones_np,
+                response_masks=response_masks_np,
+                lam_policy=args.gae_lambda,
+                lam_critic=1.0,
+                length_adaptive=args.length_adaptive_gae,
+                length_adaptive_alpha=args.length_adaptive_gae_alpha,
+            )
+            metrics["value/avg_lambda"] = avg_lam
+            return policy_adv, critic_returns, metrics
+        adv, returns = calculate_advantages_packed(
+            values=values_np,
+            rewards=rewards_np,
+            gamma=args.gamma,
+            lam=args.gae_lambda,
+            dones=dones_np,
+            response_masks=response_masks_np,
+        )
+        return adv, returns, metrics
+
     def calculate_token_counts(
         self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
     ) -> dict[int, float]:
@@ -589,12 +982,49 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
-    def step(self):
+    def step(self, training_step: int = 0):
         """Execute one training step: fetch data from the dataloader and train on it.
+
+        Args:
+            training_step: Current global training step (1-indexed). Used to gate the frozen-policy
+                value warmup and re-warmup windows.
 
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        # Decide whether to skip the policy update this step. This is True during either the
+        # initial value-warmup window, a mid-run value re-warmup window, or a plain policy-warmup
+        # window (which freezes the policy regardless of the value model).
+        skip_policy_update = False
+        if self.args.value_warmup_steps > 0 and training_step <= self.args.value_warmup_steps:
+            skip_policy_update = True
+        if self.args.policy_warmup_steps > 0 and training_step <= self.args.policy_warmup_steps:
+            skip_policy_update = True
+        rewarmup_end = self.args.value_rewarmup_start + self.args.value_rewarmup_steps
+        if (
+            self.args.value_rewarmup_steps > 0
+            and self.args.value_rewarmup_start <= training_step <= rewarmup_end
+        ):
+            skip_policy_update = True
+
+        # Optionally reset the policy optimizer on the first post-warmup step so the momentum
+        # built up during the frozen phase doesn't leak into the unfrozen phase.
+        if (
+            self.args.reset_optimizer_after_value_warmup
+            and self.args.value_warmup_steps > 0
+            and training_step == self.args.value_warmup_steps + 1
+        ):
+            try:
+                optimizer = self.optimizer
+                for state in optimizer.state.values():
+                    for k in list(state.keys()):
+                        if isinstance(state[k], torch.Tensor):
+                            state[k].zero_()
+                logger.info(f"{self.rank=}: Reset policy optimizer state at training_step={training_step}")
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(f"Failed to reset policy optimizer: {e}")
+
+        self._skip_policy_update = skip_policy_update
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
@@ -654,6 +1084,80 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+
+        # Value model: compute V(s_t) for each token, run GAE, overwrite advantages with the GAE
+        # result, and stash per-sample returns + old values for the value-loss pass after the
+        # policy loop. No-op when `use_value_model=False`.
+        value_loss_inputs: list[dict] | None = None
+        sae_step_metrics: dict[str, float] = {}
+        if self.args.use_value_model:
+            assert data_BT.rewards is not None and data_BT.dones is not None, (
+                "use_value_model=True but rewards/dones are missing from CollatedBatchData; "
+                "did DataPreparationActor populate them?"
+            )
+            value_loss_inputs = []
+            per_sample_bf: list[float] = []
+            per_sample_lam: list[float] = []
+            with Timer("Value forward (no-grad)", noop=self.rank != 0), torch.no_grad():
+                for i in range(num_samples):
+                    resp_mask = data_BT.response_masks[i][:, 1:].bool()
+                    if self.args.value_model_ground_truth_conditioning:
+                        gts_pack = (data_BT.ground_truths[i] if data_BT.ground_truths is not None else []) or []
+                        sibs_pack = (
+                            data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
+                        )
+                        values_BT = self._forward_value_with_conditioning(
+                            data_BT.query_responses[i],
+                            data_BT.position_ids[i],
+                            data_BT.response_masks[i].bool(),
+                            gts_pack,
+                            sibs_pack,
+                        )
+                    else:
+                        values_BT = self.forward_value(
+                            data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
+                        )
+                    # Build per-pack numpy arrays aligned with values (seq_len - 1).
+                    rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
+                    dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
+                    resp_masks_np = resp_mask.long().cpu().numpy()
+                    logprobs_np = None
+                    if self.args.use_sae:
+                        logprobs_np = data_BT.vllm_logprobs[i][:, 1:].float().cpu().numpy()
+                    adv_np, returns_np, step_metrics = self._dispatch_gae(
+                        values_np=values_BT.float().cpu().numpy(),
+                        rewards_np=rewards,
+                        dones_np=dones,
+                        response_masks_np=resp_masks_np,
+                        logprobs_np=logprobs_np,
+                    )
+                    if "value/sae_boundary_frac" in step_metrics:
+                        per_sample_bf.append(step_metrics["value/sae_boundary_frac"])
+                    if "value/avg_lambda" in step_metrics:
+                        per_sample_lam.append(step_metrics["value/avg_lambda"])
+                    # Optionally whiten advantages.
+                    if self.args.whiten_advantages and resp_masks_np.sum() > 0:
+                        mask_f = resp_masks_np.astype("float32")
+                        m = (adv_np * mask_f).sum() / mask_f.sum()
+                        v = (((adv_np - m) ** 2) * mask_f).sum() / mask_f.sum()
+                        adv_np = (adv_np - m) / (float(v) ** 0.5 + 1e-8)
+                        adv_np = adv_np * mask_f
+                    # Override data_BT.advantages (shape (batch, seq_len)); the downstream slice
+                    # `advantages[i][:, 1:]` will align with values.
+                    new_adv = torch.zeros_like(data_BT.advantages[i])
+                    new_adv[:, 1:] = torch.from_numpy(adv_np.astype("float32")).to(device)
+                    data_BT.advantages[i] = new_adv
+                    value_loss_inputs.append(
+                        {
+                            "returns": torch.from_numpy(returns_np.astype("float32")).to(device),
+                            "old_values": values_BT.detach(),
+                            "response_mask": resp_mask,
+                        }
+                    )
+            if per_sample_bf:
+                sae_step_metrics["value/sae_boundary_frac"] = float(np.mean(per_sample_bf))
+            if per_sample_lam:
+                sae_step_metrics["value/avg_lambda"] = float(np.mean(per_sample_lam))
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -749,12 +1253,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    # Tell deepspeed whether this backward is the last in the accumulation group.
-                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                    self.model.backward(loss)
-                    if is_accumulation_boundary:
-                        self.model.step()
-                        grad_norms.append(float(self.model.get_global_grad_norm()))
+                    if self._skip_policy_update:
+                        # Frozen-policy (value warmup / policy warmup): we still run the forward
+                        # so value targets and metrics are computed on the same samples, but skip
+                        # the backward/step.
+                        pass
+                    else:
+                        # Tell deepspeed whether this backward is the last in the accumulation group.
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        self.model.backward(loss)
+                        if is_accumulation_boundary:
+                            self.model.step()
+                            grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
@@ -773,10 +1283,109 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_unclamped=tis_unclamped_BT,
                     )
 
+            # Value loss + backward pass (independent DeepSpeed engine on self.value_model).
+            if self.args.use_value_model and value_loss_inputs is not None:
+                with Timer("[Training Processes] Value loss", noop=self.rank != 0):
+                    value_accum_steps = max(
+                        math.ceil(num_samples / max(self._value_effective_mini_batches, 1) - 0.5), 1
+                    )
+                    value_losses: list[float] = []
+                    value_clipfracs: list[float] = []
+                    lm_p_yes_sum = 0.0
+                    lm_p_yes_correct_sum = 0.0
+                    lm_p_yes_incorrect_sum = 0.0
+                    lm_correct_count = 0
+                    lm_incorrect_count = 0
+                    lm_accuracy_correct = 0
+                    lm_accuracy_total = 0
+                    for i in range(num_samples):
+                        ctx = value_loss_inputs[i]
+                        resp_mask = ctx["response_mask"]
+                        returns = ctx["returns"]
+                        old_values = ctx["old_values"]
+                        # Re-forward with grad on the value model (with conditioning if enabled).
+                        if self.args.value_model_ground_truth_conditioning:
+                            gts_pack = (
+                                data_BT.ground_truths[i] if data_BT.ground_truths is not None else []
+                            ) or []
+                            sibs_pack = (
+                                data_BT.sibling_rollouts[i] if data_BT.sibling_rollouts is not None else None
+                            )
+                            new_values = self._forward_value_with_conditioning(
+                                data_BT.query_responses[i],
+                                data_BT.position_ids[i],
+                                data_BT.response_masks[i].bool(),
+                                gts_pack,
+                                sibs_pack,
+                            )
+                        else:
+                            new_values = self.forward_value(
+                                data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
+                            )
+                        if self.args.use_lm_value_model:
+                            # Treat returns >= 1 as positive label (terminal outcome).
+                            terminal_labels = (returns >= 1.0).float()
+                            per_tok = value_model_utils.lm_yesno_bce_loss(
+                                new_values, terminal_labels, resp_mask
+                            )
+                            v_clipfrac = torch.zeros((), device=device)
+                            # Diagnostics
+                            with torch.no_grad():
+                                lm_p_yes_sum += masked_mean(new_values, resp_mask).item()
+                                correct_mask = resp_mask & (returns >= 1.0)
+                                incorrect_mask = resp_mask & (returns < 1.0)
+                                if correct_mask.any():
+                                    lm_p_yes_correct_sum += masked_mean(new_values, correct_mask).item()
+                                    lm_correct_count += 1
+                                if incorrect_mask.any():
+                                    lm_p_yes_incorrect_sum += masked_mean(new_values, incorrect_mask).item()
+                                    lm_incorrect_count += 1
+                                preds = (new_values >= 0.5).float()
+                                lm_accuracy_correct += int(((preds == terminal_labels) * resp_mask).sum().item())
+                                lm_accuracy_total += int(resp_mask.sum().item())
+                        else:
+                            per_tok, v_clipfrac = value_model_utils.value_clipped_mse_loss(
+                                new_values, returns, old_values, resp_mask, self.args.vf_clip_range
+                            )
+                        denom = resp_mask.sum().clamp(min=1).float()
+                        v_loss = (per_tok.sum() / denom) * self.args.value_loss_coef
+                        v_loss = v_loss * (self.args.world_size // self.args.sequence_parallel_size)
+                        torch.cuda.empty_cache()
+                        is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
+                        self.value_model.set_gradient_accumulation_boundary(is_value_boundary)
+                        self.value_model.backward(v_loss)
+                        if is_value_boundary:
+                            self.value_model.step()
+                        value_losses.append(float(v_loss.detach()))
+                        value_clipfracs.append(float(v_clipfrac.detach()))
+
+                if value_losses:
+                    self.local_metrics["loss/value_avg"] = sum(value_losses) / len(value_losses)
+                    self.local_metrics["value/clipfrac_avg"] = sum(value_clipfracs) / len(value_clipfracs)
+                    if hasattr(self.value_model, "get_global_grad_norm"):
+                        gn = float(self.value_model.get_global_grad_norm())
+                        if math.isfinite(gn):
+                            self.local_metrics["value/grad_norm"] = gn
+                if self.args.use_lm_value_model:
+                    if num_samples:
+                        self.local_metrics["value/lm_p_yes_mean"] = lm_p_yes_sum / num_samples
+                    if lm_correct_count:
+                        self.local_metrics["value/lm_p_yes_correct"] = lm_p_yes_correct_sum / lm_correct_count
+                    if lm_incorrect_count:
+                        self.local_metrics["value/lm_p_yes_incorrect"] = (
+                            lm_p_yes_incorrect_sum / lm_incorrect_count
+                        )
+                    if lm_accuracy_total:
+                        self.local_metrics["value/lm_accuracy"] = lm_accuracy_correct / lm_accuracy_total
+                for k, v in sae_step_metrics.items():
+                    self.local_metrics[k] = v
+
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
-                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
+                if grad_norms:
+                    self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
+                self.local_metrics["value/warmup"] = float(self._skip_policy_update)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -824,6 +1433,28 @@ class PolicyTrainerRayProcess(RayProcess):
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
+
+        # Save value model checkpoint (model only, no optimizer) alongside the policy.
+        if self.args.use_value_model and self.value_model is not None:
+            value_dir = os.path.join(checkpoint_state_dir, "value_model")
+            os.makedirs(value_dir, exist_ok=True)
+            value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+            if self.args.deepspeed_stage == 3:
+                # Gather all params for rank 0 to serialize.
+                gathered: dict[str, torch.Tensor] = {}
+                for k, v in value_to_save.named_parameters():
+                    params_to_fetch = _z3_params_to_fetch([v])
+                    with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                        if self.rank == 0:
+                            gathered[k] = v.data.detach().cpu()
+                if self.rank == 0:
+                    torch.save(gathered, os.path.join(value_dir, "value_model.bin"))
+            else:
+                if self.rank == 0:
+                    torch.save(value_to_save.state_dict(), os.path.join(value_dir, "value_model.bin"))
+            if self.rank == 0:
+                logger.info(f"Saved value model to {value_dir}")
+            client_state["value_model_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
         # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
@@ -914,7 +1545,48 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             self.tokenizer.save_pretrained(output_dir)
+
+            # Dump the training args next to the policy so score_dataset can warn on
+            # conditioning mismatches when someone scores with this checkpoint.
+            try:
+                args_path = output_path / "training_args.json"
+                import json as _json  # noqa: PLC0415
+
+                args_dict = {
+                    "use_value_model": bool(self.args.use_value_model),
+                    "use_lm_value_model": bool(self.args.use_lm_value_model),
+                    "use_sae": bool(self.args.use_sae),
+                    "value_model_ground_truth_conditioning": bool(
+                        self.args.value_model_ground_truth_conditioning
+                    ),
+                    "gt_conditioning_template": self.args.gt_conditioning_template,
+                    "rollout_context_num_siblings": int(self.args.rollout_context_num_siblings),
+                }
+                with open(args_path, "w") as f:
+                    _json.dump(args_dict, f, indent=2)
+            except Exception as e:  # pragma: no cover - purely advisory
+                logger.warning(f"Failed to write training_args.json: {e}")
+
             marker_path.touch()
+
+        # Save the value model alongside the policy in the HF-style checkpoint dir.
+        if self.args.use_value_model and self.value_model is not None:
+            value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+            value_out_dir = output_path / "value_model"
+            if self.args.deepspeed_stage == 3:
+                value_gathered: dict[str, torch.Tensor] = {}
+                for k, v in value_to_save.named_parameters():
+                    params_to_fetch = _z3_params_to_fetch([v])
+                    with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                        if self.rank == 0:
+                            value_gathered[k] = v.data.detach().cpu()
+                if self.rank == 0:
+                    value_out_dir.mkdir(parents=True, exist_ok=True)
+                    torch.save(value_gathered, value_out_dir / "value_model.bin")
+            else:
+                if self.rank == 0:
+                    value_out_dir.mkdir(parents=True, exist_ok=True)
+                    torch.save(value_to_save.state_dict(), value_out_dir / "value_model.bin")
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
@@ -1071,6 +1743,15 @@ def setup_runtime_variables(
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    # Sync value-model flags down into the streaming config so the DataPreparationActor
+    # knows whether to populate rewards / dones / GT / siblings / SAE boundaries.
+    streaming_config.use_value_model = args.use_value_model
+    streaming_config.use_sae = args.use_sae
+    streaming_config.sae_threshold = args.sae_threshold
+    streaming_config.value_model_ground_truth_conditioning = args.value_model_ground_truth_conditioning
+    streaming_config.gt_conditioning_template = args.gt_conditioning_template
+    streaming_config.rollout_context_num_siblings = args.rollout_context_num_siblings
     return args
 
 
@@ -1622,7 +2303,7 @@ def one_training_step(
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
-            [policy_group.models[i].step.remote() for i in range(args.world_size)],
+            [policy_group.models[i].step.remote(training_step) for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
@@ -2211,11 +2892,26 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
+        # Skip weight sync during any value/policy warmup window: the policy hasn't changed, so
+        # we don't need to broadcast new weights to vLLM (and broadcasting them would waste time).
+        in_warmup = False
+        if args.value_warmup_steps > 0 and training_step <= args.value_warmup_steps:
+            in_warmup = True
+        if args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps:
+            in_warmup = True
+        rewarmup_end = args.value_rewarmup_start + args.value_rewarmup_steps
+        if args.value_rewarmup_steps > 0 and args.value_rewarmup_start <= training_step <= rewarmup_end:
+            in_warmup = True
+
         if training_step == 1:
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
-        elif weight_sync_trigger is not None:
+        elif weight_sync_trigger is not None and not in_warmup:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
+        elif in_warmup:
+            logger.debug(
+                f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup"
+            )
 
         last_eval_collected = maybe_evaluate(
             args,
