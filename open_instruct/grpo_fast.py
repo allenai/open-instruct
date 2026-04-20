@@ -1430,13 +1430,10 @@ def weight_sync_thread(
     vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    resume_training_step: int = 1,
     inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
-    if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
@@ -1975,7 +1972,8 @@ def run_training(
         logger.info("======== ✅ model update group setup successfully =========")
 
         logger.info("======== ✅ weight sync thread starts =========")
-        trigger = WeightSyncTrigger(step=1)
+        initial_step = resume_training_step - 1
+        trigger = WeightSyncTrigger(step=initial_step)
         future = executor.submit(
             weight_sync_thread,
             args,
@@ -1985,12 +1983,11 @@ def run_training(
             vllm_engines,
             actor_manager,
             weight_sync_metrics_Q,
-            1,
             streaming_config.inflight_updates,
         )
 
         logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=1)
+        trigger.notify(step=initial_step)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
 
