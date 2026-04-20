@@ -474,8 +474,13 @@ class StreamingDataLoaderConfig:
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
     maintain_pending_ngu_age: int = 2
-    maintain_pending_ngu_completions: bool = False
+    maintain_pending_ngu_completions: bool = True
+    """Keep full ``GenerationResult`` objects across zero-std never-give-up retries so they can be merged into one
+    training batch. Independent of :attr:`maintain_pending_ngu_counts`, which controls advantage baseline statistics."""
     maintain_pending_ngu_counts: bool = True
+    """Include discarded never-give-up attempts in the grouped reward **baseline** (mean/std denominators and optional
+    advantage rescaling). When True with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the
+    baseline even though their completions are not retained for merging."""
     no_resampling_pass_rate: float | None = None
     no_resampling_persist: bool = True
     advantage_normalization_type: str = "centered"
@@ -1355,7 +1360,7 @@ def accumulate_inference_batches(
     never_give_up_state: NeverGiveUpAccumulationState | None = None,
     never_give_up_state_lock: Any = None,
     maintain_pending_ngu_age: int = 2,
-    maintain_pending_ngu_completions: bool = False,
+    maintain_pending_ngu_completions: bool = True,
     maintain_pending_ngu_counts: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
@@ -1621,7 +1626,7 @@ def accumulate_inference_batches(
                     prompt_id_suffix=prompt_id_suffix,
                 )
             if requeue_same_prompt and chain_id is not None and active_sampling:
-                if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
+                if maintain_pending_ngu_completions:
                     pending_results.append(result)
                     pending_metrics.append(result.reward_metrics)
                 if maintain_pending_ngu_counts:
@@ -1675,7 +1680,9 @@ def accumulate_inference_batches(
                     base_env_config=base_env_config,
                 )
 
+        merged_prior_ngu_completions = False
         if pending_results:
+            merged_prior_ngu_completions = True
             pending_results.append(result)
             pending_metrics.append(result.reward_metrics)
             result, merged_reward_metrics = merge_generation_results(pending_results, pending_metrics)
@@ -1691,8 +1698,19 @@ def accumulate_inference_batches(
             merged_reward_metrics = result.reward_metrics
             sample_count = generation_config.n
 
-        baseline_sample_count = pending_response_count + sample_count
-        baseline_reward_sum = pending_reward_sum + float(reward_scores.sum())
+        reward_scores_sum = float(reward_scores.sum())
+        if maintain_pending_ngu_counts:
+            if merged_prior_ngu_completions:
+                # Pending ``GenerationResult`` tensors were merged; rewards are already fully represented in
+                # ``reward_scores`` (do not also add ``pending_response_count`` / ``pending_reward_sum``).
+                baseline_sample_count = sample_count
+                baseline_reward_sum = reward_scores_sum
+            else:
+                baseline_sample_count = pending_response_count + sample_count
+                baseline_reward_sum = pending_reward_sum + reward_scores_sum
+        else:
+            baseline_sample_count = sample_count
+            baseline_reward_sum = reward_scores_sum
 
         accepted_response_tokens = sum(len(response) for response in result.responses)
         if target_is_tokens:
