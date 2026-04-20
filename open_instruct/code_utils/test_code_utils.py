@@ -1,14 +1,16 @@
 """Unit-tests for `get_successful_tests_fast`."""
 
 import gc
+import json
 import multiprocessing
+import pathlib
 import unittest
 
-import datasets
 import parameterized
 
-import open_instruct.utils as open_instruct_utils
 from open_instruct.code_utils import code_utils
+
+TEST_DATA_DIR = pathlib.Path(__file__).parent.parent / "test_data"
 
 SIMPLE_PROGRAM = "a = 1"
 FAILING_TEST = "assert False"
@@ -46,17 +48,12 @@ class GetSuccessfulTestsFastTests(BaseCodeTestCase):
 
     def test_tiger_lab_acecode_sample(self):
         """Tests the script against an actual AceCode record."""
-        ds = datasets.load_dataset(
-            "TIGER-Lab/AceCode-87K", split="train", num_proc=open_instruct_utils.max_num_processes()
-        )
+        with open(TEST_DATA_DIR / "acecode_sample.jsonl") as f:
+            record = json.loads(f.readline())
+        program = record["inferences"][-1]["completion"]
+        tests = code_utils.decode_tests(record["test_cases"])
 
-        # Choose the same sample index used in the original snippet.
-        i = 1
-        program = ds[i]["inferences"][-1]["completion"]
-        tests = code_utils.decode_tests(ds[i]["test_cases"])
-
-        # The dataset also stores a pass-rate; we can use it to sanity-check.
-        expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])
+        expected_passes = int(len(tests) * record["inferences"][-1]["pass_rate"])
 
         result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)
         self.assertEqual(sum(result), expected_passes)

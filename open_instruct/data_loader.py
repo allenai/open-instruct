@@ -53,6 +53,7 @@ from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
+DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 MANUFACTORIA_TEST_PASS_ROWS_KEY = "objective/manufactoria_test_pass_rows"
 
 
@@ -276,8 +277,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Load a state dictionary to restore the data loader's state."""
         self._excluded_indices = set(state_dict.get("excluded_indices", []))
         self._epoch_excluded_indices = set(state_dict.get("epoch_excluded_indices", []))
-        self._epoch = state_dict["epoch"]
+        # Re-enter the saved epoch through the standard reshuffle path so sharding state is rebuilt consistently.
+        self._epoch = state_dict["epoch"] - 1
         self._reshard(self._epoch, include_epoch_excluded_indices=True)
+        assert self._epoch == state_dict["epoch"]
         self.batches_processed = state_dict["batches_processed"]
         self._current_iter = None
 
@@ -456,6 +459,7 @@ class StreamingDataLoaderConfig:
     # Data loading/packing
     max_prompt_token_length: int = 256
     response_length: int = 256
+    eval_response_length: int | None = None
     pack_length: int = 512
 
     # Batching
@@ -566,6 +570,8 @@ class StreamingDataLoaderConfig:
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if self.eval_response_length is None:
+            self.eval_response_length = self.response_length
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -1610,10 +1616,10 @@ def accumulate_inference_batches(
                     prompt_id_suffix=prompt_id_suffix,
                 )
             if requeue_same_prompt and chain_id is not None and active_sampling:
-                if maintain_pending_ngu_completions:
+                if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
                     pending_results.append(result)
                     pending_metrics.append(result.reward_metrics)
-                elif maintain_pending_ngu_counts:
+                if maintain_pending_ngu_counts:
                     pending_response_count += len(result.responses)
                     pending_reward_sum += float(reward_scores.sum())
                 if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
@@ -1874,13 +1880,13 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
-    if len(all_model_steps) != len(results):
-        raise ValueError(
-            f"Expected model_step for every accumulated result, got {len(all_model_steps)} model steps for {len(results)} results."
-        )
-    model_steps_array = np.array(all_model_steps, dtype=float)
-    combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
-    combined_reward_metrics["model_step_values"] = model_steps_array.tolist()
+    if all_model_steps:
+        model_steps_array = np.array(all_model_steps, dtype=float)
+        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+        combined_reward_metrics["model_step_span"] = float(model_steps_array.max() - model_steps_array.min())
+        combined_reward_metrics["model_step_values"] = model_steps_array.tolist()
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
@@ -2439,6 +2445,7 @@ class DataPreparationActor:
     def get_state(self) -> dict:
         state = {
             "training_step": self.current_prepared_step + 1,
+            "last_consumed_step": self._last_consumed_step,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
         with self.never_give_up_state_lock:
@@ -2447,7 +2454,11 @@ class DataPreparationActor:
 
     def set_state(self, state: dict):
         self.training_step = state["training_step"]
+        self._last_consumed_step = state.get("last_consumed_step", self.training_step - 1)
         self.iter_dataloader.load_state_dict(state["iter_dataloader_state"])
         if "never_give_up_state" in state:
             with self.never_give_up_state_lock:
                 self.never_give_up_state = copy.deepcopy(state["never_give_up_state"])
+
+    def restore_state(self, state: dict):
+        self.set_state(state)

@@ -6,6 +6,7 @@ Tests for:
 - run_utils.py: LiteLLM calls and JSON extraction
 - metrics.py: Rubric metrics computation and buffer filtering
 - RubricVerifier: Rubric-based scoring in ground_truth_utils.py
+- evolving_rubric_step.py: End-to-end evolving rubric step wiring
 
 Usage:
     # From the repo root:
@@ -18,8 +19,12 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
+from open_instruct.model_utils import Batch
+from open_instruct.rubrics import RubricManager
+from open_instruct.rubrics.evolving_rubric_step import _build_ground_truth_overrides
 from open_instruct.rubrics.metrics import (
     compute_rubric_count_metrics,
     compute_rubric_reward_metrics,
@@ -644,6 +649,310 @@ class TestFilterRubricBuffer(unittest.TestCase):
         filter_rubric_buffer(buffer, stats, max_active_rubrics=10)
         self.assertEqual(len(buffer["Q1"]["active_rubrics"]), 3)
         self.assertEqual(len(buffer["Q1"]["inactive_rubrics"]), 0)
+
+
+# =============================================================================
+# Tests for evolving_rubric_step.py (end-to-end wiring)
+# =============================================================================
+
+
+def _make_rubric_ground_truth(query: str, rubrics: list[dict]) -> str:
+    """Build a JSON ground-truth string in the format expected by the rubric pipeline."""
+    return json.dumps({"query": query, "rubrics": rubrics})
+
+
+def _make_batch_ground_truths(queries_and_rubrics: list[tuple[str, list[dict]]], num_samples: int) -> list[list[str]]:
+    """Build batch ground truths: each entry is ``[json_str]`` repeated ``num_samples`` times per query."""
+    gts: list[list[str]] = []
+    for query, rubrics in queries_and_rubrics:
+        gt = [_make_rubric_ground_truth(query, rubrics)]
+        for _ in range(num_samples):
+            gts.append(gt)
+    return gts
+
+
+_STEP_SAMPLE_QUERIES = [
+    ("What is the capital of France?", [{"description": "Correctly identifies Paris", "weight": 1.0}]),
+    ("Explain photosynthesis.", [{"description": "Mentions sunlight", "weight": 1.0}]),
+]
+
+_FAKE_EVOLVING_RUBRICS = {
+    "positive_rubrics": [{"description": "Provides historical context", "title": "HistContext"}],
+    "negative_rubrics": [{"description": "Contains factual errors", "title": "FactErr"}],
+}
+
+
+def _mock_streaming_config(num_samples=2, max_active=5, cache_dir=None):
+    """Create a mock streaming config for ``RubricManager``."""
+    cfg = MagicMock()
+    cfg.num_samples_per_prompt_rollout = num_samples
+    cfg.max_active_rubrics = max_active
+    cfg.cache_evolving_rubric_data_dir = cache_dir
+    return cfg
+
+
+class TestRubricManagerInit(unittest.TestCase):
+    """Test ``RubricManager`` initialization from ground truths."""
+
+    def test_basic_init(self):
+        """Test buffer initialises persistent rubrics from ground truths."""
+        gts = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
+        mgr = RubricManager(_mock_streaming_config(), gts)
+
+        self.assertEqual(len(mgr._buffer), 2)
+        for query, rubrics in _STEP_SAMPLE_QUERIES:
+            self.assertIn(query, mgr._buffer)
+            entry = mgr._buffer[query]
+            self.assertEqual(len(entry["persistent_rubrics"]), len(rubrics))
+            self.assertEqual(len(entry["active_rubrics"]), 0)
+
+    def test_wrapped_in_list(self):
+        """Ground truths from the dataset come wrapped in a list."""
+        gts = [[_make_rubric_ground_truth(q, r)] for q, r in _STEP_SAMPLE_QUERIES]
+        mgr = RubricManager(_mock_streaming_config(), gts)
+        self.assertEqual(len(mgr._buffer), 2)
+
+    def test_dedup_same_query(self):
+        """Duplicate queries should produce a single buffer entry."""
+        gts = [_make_rubric_ground_truth("Q1", [{"description": "d", "weight": 1.0}])] * 5
+        mgr = RubricManager(_mock_streaming_config(), gts)
+        self.assertEqual(len(mgr._buffer), 1)
+
+
+class TestBuildGroundTruthOverrides(unittest.TestCase):
+    """Test ``_build_ground_truth_overrides`` helper."""
+
+    def test_no_indices_returns_empty(self):
+        """No indices → empty dict."""
+        result = _build_ground_truth_overrides(["gt1", "gt2"], None)
+        self.assertEqual(result, {})
+
+    def test_empty_indices_returns_empty(self):
+        """Empty indices list → empty dict."""
+        result = _build_ground_truth_overrides([], [])
+        self.assertEqual(result, {})
+
+    def test_deduplicates_indices(self):
+        """Indices repeat for num_samples_per_prompt_rollout > 1."""
+        result = _build_ground_truth_overrides(
+            updated_ground_truths=["gt_a", "gt_a", "gt_b", "gt_b"], indices=[0, 0, 1, 1]
+        )
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], "gt_a")
+        self.assertEqual(result[1], "gt_b")
+
+    def test_single_index(self):
+        """Single ground truth and index."""
+        result = _build_ground_truth_overrides(["gt_x"], [42])
+        self.assertEqual(result, {42: "gt_x"})
+
+
+class TestRubricManagerRunStepMocked(unittest.TestCase):
+    """E2E test of ``RubricManager.run_step`` with mocked LLM calls."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.num_samples = 2
+        self.ground_truths = _make_batch_ground_truths(_STEP_SAMPLE_QUERIES, self.num_samples)
+        self.decoded_responses = [
+            "Paris is the capital of France.",
+            "The capital is Paris, a beautiful city.",
+            "Photosynthesis converts sunlight into energy.",
+            "Plants use sunlight via photosynthesis.",
+        ]
+        self.indices = [0, 0, 1, 1]
+        gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
+        self.mgr = RubricManager(_mock_streaming_config(num_samples=self.num_samples), gts_for_buffer)
+
+    @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
+    def test_step_returns_metrics_and_overrides(self, mock_generate):
+        """Test that a step returns expected metrics, overrides, and updates the buffer."""
+        mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
+
+        metrics, overrides = self.mgr.run_step(
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
+        )
+
+        self.assertIn("evolving_rubrics/valid_rate", metrics)
+        self.assertIn("evolving_rubrics/num_new_rubrics", metrics)
+        self.assertIn("evolving_rubrics/num_active_rubrics", metrics)
+        self.assertGreater(metrics["evolving_rubrics/valid_rate"], 0)
+
+        self.assertIsInstance(overrides, dict)
+        self.assertGreater(len(overrides), 0)
+
+        for query, _ in _STEP_SAMPLE_QUERIES:
+            self.assertGreater(len(self.mgr._buffer[query]["active_rubrics"]), 0)
+
+    @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
+    def test_step_with_cache_dir(self, mock_generate):
+        """Test that cache files are written when a cache dir is specified."""
+        mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
+        cache_dir = tempfile.mkdtemp()
+        try:
+            gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
+            mgr = RubricManager(
+                _mock_streaming_config(num_samples=self.num_samples, cache_dir=cache_dir), gts_for_buffer
+            )
+            _metrics, _overrides = mgr.run_step(
+                decoded_responses=self.decoded_responses,
+                ground_truths=self.ground_truths,
+                indices=self.indices,
+                step=42,
+            )
+            cache_files = os.listdir(cache_dir)
+            self.assertGreater(len(cache_files), 0)
+            self.assertTrue(any("step42" in f for f in cache_files))
+        finally:
+            shutil.rmtree(cache_dir)
+
+    @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
+    def test_step_with_none_rubrics(self, mock_generate):
+        """LLM generation can fail and return None for some prompts."""
+        mock_generate.side_effect = [None, _FAKE_EVOLVING_RUBRICS]
+
+        metrics, _overrides = self.mgr.run_step(
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
+        )
+
+        self.assertIn("evolving_rubrics/skipped", metrics)
+        self.assertGreater(metrics["evolving_rubrics/skipped"], 0)
+
+    @patch("open_instruct.rubrics.rubric_utils.generate_instance_wise_evolving_rubrics")
+    def test_buffer_grows_across_steps(self, mock_generate):
+        """Active rubrics should accumulate across multiple steps."""
+        mock_generate.return_value = _FAKE_EVOLVING_RUBRICS
+
+        _metrics, _overrides = self.mgr.run_step(
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=0
+        )
+        active_count_1 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
+
+        mock_generate.return_value = {
+            "positive_rubrics": [{"description": "New rubric", "title": "New"}],
+            "negative_rubrics": [],
+        }
+        _metrics, _overrides = self.mgr.run_step(
+            decoded_responses=self.decoded_responses, ground_truths=self.ground_truths, indices=self.indices, step=1
+        )
+        active_count_2 = len(self.mgr._buffer[_STEP_SAMPLE_QUERIES[0][0]]["active_rubrics"])
+
+        self.assertGreater(active_count_2, active_count_1)
+
+
+class TestBatchIndicesFromModel(unittest.TestCase):
+    """Verify that ``Batch.indices`` is populated correctly by the index-collecting logic."""
+
+    def test_indices_structure(self):
+        """Batch.indices should repeat each dataset index num_samples_per_prompt times."""
+        num_prompts = 3
+        num_samples = 2
+        queries = [[1, 2]] * (num_prompts * num_samples)
+        ground_truths = [["gt"]] * (num_prompts * num_samples)
+        datasets_list = ["ds"] * (num_prompts * num_samples)
+        raw_queries = ["raw"] * (num_prompts * num_samples)
+        decoded = ["resp"] * (num_prompts * num_samples)
+        scores = [0.5] * (num_prompts * num_samples)
+
+        indices = []
+        for i in range(num_prompts):
+            for _ in range(num_samples):
+                indices.append(i)
+
+        batch = Batch(
+            queries=queries,
+            ground_truths=ground_truths,
+            datasets=datasets_list,
+            raw_queries=raw_queries,
+            decoded_responses=decoded,
+            indices=indices,
+            scores=scores,
+        )
+
+        self.assertIsNotNone(batch.indices)
+        self.assertEqual(len(batch.indices), num_prompts * num_samples)
+        self.assertEqual(batch.indices, [0, 0, 1, 1, 2, 2])
+
+    def test_batch_slicing_preserves_indices(self):
+        """Slicing a Batch should preserve the indices."""
+        batch = Batch(
+            queries=[[1]] * 4,
+            ground_truths=[["gt"]] * 4,
+            datasets=["ds"] * 4,
+            raw_queries=["raw"] * 4,
+            decoded_responses=["resp"] * 4,
+            indices=[10, 10, 20, 20],
+            scores=[0.5] * 4,
+        )
+
+        sliced = batch[2:]
+        self.assertEqual(sliced.indices, [20, 20])
+
+
+@unittest.skipIf(not _check_litellm_available(), "litellm not installed")
+@unittest.skipIf(
+    not (os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_API_KEY")), "No API credentials available"
+)
+class TestRubricManagerWithAPI(unittest.TestCase):
+    """Full E2E test with real LLM calls (requires API)."""
+
+    def test_live_rubric_generation(self):
+        """Test that a single evolving rubric step generates new rubrics."""
+        os.environ.setdefault("RUBRIC_GENERATION_MODEL", "gpt-4.1-mini")
+
+        num_samples = 2
+        ground_truths = _make_batch_ground_truths(_STEP_SAMPLE_QUERIES, num_samples)
+        decoded_responses = [
+            "Paris is the capital of France, known for the Eiffel Tower.",
+            "The capital of France is Paris.",
+            "Photosynthesis converts sunlight to chemical energy in plants.",
+            "Plants absorb sunlight for photosynthesis.",
+        ]
+        indices = [0, 0, 1, 1]
+
+        gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
+        mgr = RubricManager(_mock_streaming_config(num_samples=num_samples), gts_for_buffer)
+
+        metrics, overrides = mgr.run_step(
+            decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0
+        )
+
+        self.assertIn("evolving_rubrics/valid_rate", metrics)
+        self.assertIn("evolving_rubrics/num_new_rubrics", metrics)
+        self.assertGreater(metrics["evolving_rubrics/valid_rate"], 0, "At least one rubric should be generated")
+        self.assertIsInstance(overrides, dict)
+
+        total_active = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
+        self.assertGreater(total_active, 0, "Buffer should have active rubrics after generation")
+
+    def test_live_two_step_buffer_growth(self):
+        """Run two steps to verify buffer accumulates across steps."""
+        os.environ.setdefault("RUBRIC_GENERATION_MODEL", "gpt-4.1-mini")
+
+        num_samples = 2
+        ground_truths = _make_batch_ground_truths(_STEP_SAMPLE_QUERIES, num_samples)
+        decoded_responses = [
+            "Paris is the capital.",
+            "France's capital is Paris.",
+            "Photosynthesis uses sunlight.",
+            "Plants convert sunlight.",
+        ]
+        indices = [0, 0, 1, 1]
+
+        gts_for_buffer = [_make_rubric_ground_truth(q, r) for q, r in _STEP_SAMPLE_QUERIES]
+        mgr = RubricManager(_mock_streaming_config(num_samples=num_samples, max_active=10), gts_for_buffer)
+
+        _metrics, _overrides = mgr.run_step(
+            decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=0
+        )
+        active_step0 = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
+
+        _metrics, _overrides = mgr.run_step(
+            decoded_responses=decoded_responses, ground_truths=ground_truths, indices=indices, step=1
+        )
+        active_step1 = sum(len(v["active_rubrics"]) for v in mgr._buffer.values())
+
+        self.assertGreaterEqual(active_step1, active_step0)
 
 
 if __name__ == "__main__":

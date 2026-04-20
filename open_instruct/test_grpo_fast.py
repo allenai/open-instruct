@@ -162,7 +162,7 @@ class TestGrpoFastBase(unittest.TestCase):
         return self.create_mock_result(request.index, request.prompt_id, num_samples_per_prompt)
 
     def create_mock_result(
-        self, index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None, model_step=0
+        self, index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None, model_step: int | None = None
     ):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
@@ -499,6 +499,36 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
         self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
+
+    def test_accumulate_inference_batches_collects_model_step_metrics(self):
+        num_prompts = 2
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=4)
+        self._ray_queues.append(inference_results_Q)
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(num_prompts)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        inference_results_Q.put(self.create_mock_result(0, "0_0", model_step=10))
+        inference_results_Q.put(self.create_mock_result(1, "0_1", model_step=12))
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+
+        mock_model_dims = self.create_llama7b_model_dims()
+        _, _, reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+        )
+
+        self.assertEqual(reward_metrics["model_step_min"], 10.0)
+        self.assertEqual(reward_metrics["model_step_max"], 12.0)
+        self.assertEqual(reward_metrics["model_step_mean"], 11.0)
 
     @unittest.skip("Timing-sensitive test that is flaky in CI environments")
     def test_accumulate_waits_for_all_engines(self):

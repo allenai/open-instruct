@@ -33,7 +33,6 @@ from rich.pretty import pprint
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast, grpo_utils, logger_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
@@ -197,10 +196,11 @@ def main(
     assert model_config.model_name_or_path is not None, "model_name_or_path must be set"
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
-    data_prep_actor_name = "data_prep_singleton"
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
 
-    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(  # type: ignore[attr-defined]
+    _data_prep_actor = data_loader_lib.DataPreparationActor.options(  # type: ignore[unresolved-attribute]
+        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
+    ).remote(
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
         param_prompt_Q=prompt_Q,
@@ -240,7 +240,6 @@ def main(
         max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
-        data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
         attn_implementation=model_config.attn_implementation,
     )

@@ -109,7 +109,7 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        result, is_eval = vllm_utils.process_completed_request(
+        result, is_eval, _example = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=1001.0,
@@ -180,7 +180,7 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        result, is_eval = vllm_utils.process_completed_request(
+        result, is_eval, _example = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=2000.5,

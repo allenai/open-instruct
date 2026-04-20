@@ -15,13 +15,13 @@ from typing import Any, cast
 import ray
 import ray.exceptions
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
 from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
@@ -73,7 +73,7 @@ class VLLMWeightSyncCallback(Callback):
     """
 
     vllm_engines: list[ray.actor.ActorHandle]
-    model_update_group: dist.ProcessGroup | None = None
+    model_update_group: Any | None = None
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
@@ -105,7 +105,6 @@ class VLLMWeightSyncCallback(Callback):
             model=model,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
-            model_step=self.trainer.global_step,
             name_mapper=self.name_mapper,
         )
         if refs:
@@ -166,7 +165,7 @@ class RefPolicyUpdateCallback(Callback):
 class DataPreparationActorCheckpointCallback(Callback):
     """Callback to save and restore DataPreparationActor state during checkpointing."""
 
-    data_prep_actor_name: str = "data_prep_singleton"
+    data_prep_actor_name: str = data_loader_lib.DATA_PREP_ACTOR_NAME
 
     def state_dict(self) -> dict[str, Any]:
         """Save DataPreparationActor state before checkpointing."""

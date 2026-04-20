@@ -1,3 +1,4 @@
+import math
 import unittest
 from queue import Empty
 from types import SimpleNamespace
@@ -7,14 +8,15 @@ import numpy as np
 from datasets import Dataset
 
 from open_instruct import data_loader as data_loader_lib
+from open_instruct import grpo_utils
+from open_instruct.data_types import EnvConfig
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import maybe_evaluate
-from open_instruct.grpo_utils import estimate_pass_at_k
+from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
 
 
 class _QueueWithSize:
@@ -23,6 +25,35 @@ class _QueueWithSize:
 
     def qsize(self) -> int:
         return self._size
+
+
+class TestCreateGenerationConfigs(unittest.TestCase):
+    def test_eval_response_length_defaults_to_response_length(self):
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(
+            max_prompt_token_length=128, response_length=128, pack_length=512
+        )
+        self.assertEqual(streaming_config.eval_response_length, streaming_config.response_length)
+
+    def test_eval_uses_pass_at_k_and_eval_response_length(self):
+        args = grpo_utils.GRPOExperimentConfig(eval_pass_at_k=8)
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(response_length=256, eval_response_length=512)
+        vllm_config = data_loader_lib.VLLMConfig()
+
+        configs = create_generation_configs(args, streaming_config, vllm_config)
+
+        self.assertEqual(configs["train"].n, streaming_config.num_samples_per_prompt_rollout)
+        self.assertEqual(configs["train"].max_tokens, 256)
+        self.assertEqual(configs["eval"].n, 8)
+        self.assertEqual(configs["eval"].max_tokens, 512)
+
+    def test_vllm_max_model_len_uses_longest_response_length(self):
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(
+            max_prompt_token_length=1024, response_length=256, eval_response_length=512, pack_length=1536
+        )
+        max_model_len = streaming_config.max_prompt_token_length + max(
+            streaming_config.response_length, streaming_config.eval_response_length
+        )
+        self.assertEqual(max_model_len, 1536)
 
 
 class TestMaybeEvaluate(unittest.TestCase):
@@ -38,9 +69,7 @@ class TestMaybeEvaluate(unittest.TestCase):
         )
 
     def test_non_final_step_defers_when_eval_results_incomplete(self):
-        args = SimpleNamespace(
-            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
-        )
+        args = SimpleNamespace(num_training_steps=10, with_tracking=False)
         eval_dataset = self._build_eval_dataset(num_prompts=3)
         eval_queue = _QueueWithSize(size=2)
         eval_generation_config = SimpleNamespace(n=32)
@@ -55,15 +84,14 @@ class TestMaybeEvaluate(unittest.TestCase):
                 eval_dataset=eval_dataset,
                 eval_generation_config=eval_generation_config,
                 model_dims=Mock(),
+                base_env_config=EnvConfig(),
                 max_possible_score=1.0,
             )
 
         mock_accumulate.assert_not_called()
 
     def test_final_step_calls_accumulate_even_when_queue_is_incomplete(self):
-        args = SimpleNamespace(
-            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=None
-        )
+        args = SimpleNamespace(num_training_steps=10, with_tracking=False)
         eval_dataset = self._build_eval_dataset(num_prompts=3)
         eval_queue = _QueueWithSize(size=0)
         eval_generation_config = SimpleNamespace(n=32)
@@ -78,19 +106,14 @@ class TestMaybeEvaluate(unittest.TestCase):
                 eval_dataset=eval_dataset,
                 eval_generation_config=eval_generation_config,
                 model_dims=Mock(),
+                base_env_config=EnvConfig(),
                 max_possible_score=1.0,
             )
 
         mock_accumulate.assert_called_once()
 
-    def test_records_eval_model_step_metrics(self):
-        args = SimpleNamespace(
-            num_training_steps=200,
-            with_tracking=False,
-            backend_timeout=120,
-            eval_only=False,
-            eval_timeout_minutes=None,
-        )
+    def test_records_eval_model_step_summary(self):
+        args = SimpleNamespace(num_training_steps=200, with_tracking=False)
         eval_dataset = self._build_eval_dataset(num_prompts=1)
         eval_queue = _QueueWithSize(size=1)
         eval_generation_config = SimpleNamespace(n=2)
@@ -110,12 +133,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             ground_truths=["42", "42"],
             active_tools=None,
         )
-        reward_metrics = {
-            "model_step_min": 100.0,
-            "model_step_max": 105.0,
-            "model_step_mean": 103.0,
-            "model_step_span": 5.0,
-        }
+        reward_metrics = {"model_step_min": 102.0, "model_step_max": 104.0, "model_step_mean": 103.0}
 
         with (
             patch(
@@ -134,249 +152,18 @@ class TestMaybeEvaluate(unittest.TestCase):
                 eval_dataset=eval_dataset,
                 eval_generation_config=eval_generation_config,
                 model_dims=Mock(),
+                base_env_config=EnvConfig(),
                 max_possible_score=1.0,
             )
 
         logged = mock_print_metrics.call_args.args[0]
+        self.assertEqual(logged["eval/model_step_min"], 102.0)
+        self.assertEqual(logged["eval/model_step_max"], 104.0)
         self.assertEqual(logged["eval/model_step_mean"], 103.0)
-        self.assertEqual(logged["eval/model_step_diff"], -3.0)
 
-    def test_records_eval_pass_at_powers_of_two_k(self):
-        args = SimpleNamespace(
-            num_training_steps=200,
-            with_tracking=False,
-            backend_timeout=120,
-            eval_only=False,
-            eval_timeout_minutes=None,
-        )
+    def test_records_pass_at_k_metrics(self):
+        args = SimpleNamespace(num_training_steps=200, with_tracking=False)
         eval_dataset = self._build_eval_dataset(num_prompts=2)
-        eval_queue = _QueueWithSize(size=2)
-        eval_generation_config = SimpleNamespace(n=4)
-        tokenizer = Mock()
-        tokenizer.batch_decode.return_value = ["prompt"] * 8
-        tokenizer.pad_token = "<pad>"
-
-        eval_result = SimpleNamespace(
-            responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
-            finish_reasons=["stop"] * 8,
-            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
-        )
-        eval_batch = SimpleNamespace(
-            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-            queries=[[1, 2, 3]] * 8,
-            decoded_responses=[f"resp_{i}" for i in range(8)],
-            ground_truths=["42"] * 8,
-            active_tools=None,
-        )
-
-        with (
-            patch(
-                "open_instruct.grpo_fast.accumulate_inference_batches",
-                return_value=(eval_result, eval_batch, {"model_step_mean": 100.0}, None),
-            ),
-            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
-            patch("open_instruct.grpo_fast.print_rich_table"),
-        ):
-            maybe_evaluate(
-                args=args,
-                training_step=100,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=tokenizer,
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                max_possible_score=1.0,
-            )
-
-        logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/pass_at_1"], 0.25)
-        self.assertEqual(logged["eval/pass_at_2"], 0.5)
-        self.assertEqual(logged["eval/pass_at_4"], 1.0)
-        self.assertGreaterEqual(logged["eval/pass_at_4"], logged["eval/pass_at_2"])
-
-    def test_records_eval_pass_at_powers_of_two_k_per_dataset_subset(self):
-        args = SimpleNamespace(
-            num_training_steps=200,
-            with_tracking=False,
-            backend_timeout=120,
-            eval_only=False,
-            eval_timeout_minutes=None,
-        )
-        eval_dataset = Dataset.from_dict(
-            {
-                INPUT_IDS_PROMPT_KEY: [[1, 2, 3], [1, 2, 3]],
-                GROUND_TRUTHS_KEY: ["42", "42"],
-                VERIFIER_SOURCE_KEY: ["subset/a", "subset b"],
-                RAW_PROMPT_KEY: ["prompt_a", "prompt_b"],
-                "index": [0, 1],
-            }
-        )
-        eval_queue = _QueueWithSize(size=2)
-        eval_generation_config = SimpleNamespace(n=4)
-        tokenizer = Mock()
-        tokenizer.batch_decode.return_value = ["prompt"] * 8
-        tokenizer.pad_token = "<pad>"
-
-        eval_result = SimpleNamespace(
-            responses=[[1], [2], [3], [4], [5], [6], [7], [8]],
-            finish_reasons=["stop"] * 8,
-            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
-        )
-        eval_batch = SimpleNamespace(
-            scores=[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-            queries=[[1, 2, 3]] * 8,
-            decoded_responses=[f"resp_{i}" for i in range(8)],
-            ground_truths=["42"] * 8,
-            active_tools=None,
-        )
-        eval_batch_stats = SimpleNamespace(
-            percent_solved_hist=np.array([0.25, 0.25]),
-            prompt_indices=[0, 1],
-            prompt_datasets=["subset_a", "subset_b"],
-            filtered_prompt_datasets=[],
-            filtered_prompt_datasets_zero=[],
-            filtered_prompt_datasets_solved=[],
-            filtered_prompt_datasets_nonzero=[],
-            completions_used_by_dataset={},
-            given_up_prompts_by_dataset={},
-            test_prompt_indices=[],
-            test_indices=[],
-            test_passes=[],
-            test_difficulties=[],
-        )
-
-        with (
-            patch(
-                "open_instruct.grpo_fast.accumulate_inference_batches",
-                return_value=(eval_result, eval_batch, {"model_step_mean": 100.0}, eval_batch_stats),
-            ),
-            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
-            patch("open_instruct.grpo_fast.print_rich_table"),
-        ):
-            maybe_evaluate(
-                args=args,
-                training_step=100,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=tokenizer,
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                max_possible_score=1.0,
-            )
-
-        logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/subset_a/pass_at_1"], 0.25)
-        self.assertEqual(logged["eval/subset_a/pass_at_2"], 0.5)
-        self.assertEqual(logged["eval/subset_a/pass_at_4"], 1.0)
-        self.assertGreaterEqual(logged["eval/subset_a/pass_at_4"], logged["eval/subset_a/pass_at_2"])
-        self.assertEqual(logged["eval/subset_b/pass_at_1"], 0.25)
-        self.assertEqual(logged["eval/subset_b/pass_at_2"], 0.5)
-        self.assertEqual(logged["eval/subset_b/pass_at_4"], 1.0)
-        self.assertGreaterEqual(logged["eval/subset_b/pass_at_4"], logged["eval/subset_b/pass_at_2"])
-
-    def test_records_eval_sequence_lengths_per_dataset(self):
-        args = SimpleNamespace(
-            num_training_steps=200,
-            with_tracking=False,
-            backend_timeout=120,
-            eval_only=False,
-            eval_timeout_minutes=None,
-        )
-        eval_dataset = Dataset.from_dict(
-            {
-                INPUT_IDS_PROMPT_KEY: [[1, 2, 3], [1, 2, 3]],
-                GROUND_TRUTHS_KEY: ["42", "42"],
-                VERIFIER_SOURCE_KEY: ["subset/a", "subset b"],
-                RAW_PROMPT_KEY: ["prompt_a", "prompt_b"],
-                "index": [0, 1],
-            }
-        )
-        eval_queue = _QueueWithSize(size=2)
-        eval_generation_config = SimpleNamespace(n=4)
-        tokenizer = Mock()
-        tokenizer.batch_decode.return_value = ["prompt"] * 8
-        tokenizer.pad_token = "<pad>"
-
-        eval_result = SimpleNamespace(
-            responses=[[0], [0, 1], [0, 1, 2], [0, 1, 2, 3], [0] * 5, [0] * 6, [0] * 7, [0] * 8],
-            finish_reasons=["stop"] * 8,
-            token_statistics=SimpleNamespace(num_prompt_tokens=16, num_response_tokens=8, generation_time=2.0),
-        )
-        eval_batch = SimpleNamespace(
-            scores=[1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0],
-            queries=[[1, 2, 3]] * 8,
-            decoded_responses=[f"resp_{i}" for i in range(8)],
-            ground_truths=["42"] * 8,
-            active_tools=None,
-        )
-        eval_batch_stats = SimpleNamespace(
-            percent_solved_hist=np.array([]),
-            prompt_indices=[],
-            prompt_datasets=["subset_a", "subset_b"],
-            filtered_prompt_datasets=[],
-            filtered_prompt_datasets_zero=[],
-            filtered_prompt_datasets_solved=[],
-            filtered_prompt_datasets_nonzero=[],
-            completions_used_by_dataset={},
-            given_up_prompts_by_dataset={},
-            test_prompt_indices=[],
-            test_indices=[],
-            test_passes=[],
-            test_difficulties=[],
-        )
-
-        with (
-            patch(
-                "open_instruct.grpo_fast.accumulate_inference_batches",
-                return_value=(eval_result, eval_batch, {"model_step_mean": 100.0}, eval_batch_stats),
-            ),
-            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
-            patch("open_instruct.grpo_fast.print_rich_table"),
-        ):
-            maybe_evaluate(
-                args=args,
-                training_step=100,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=tokenizer,
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                max_possible_score=1.0,
-            )
-
-        logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/subset_a/sequence_length_mean"], 2.5)
-        self.assertEqual(logged["eval/subset_a/sequence_length_solved_mean"], 2.0)
-        self.assertEqual(logged["eval/subset_a/sequence_length_unsolved_mean"], 3.0)
-        np.testing.assert_array_equal(logged["eval/subset_a/sequence_length_solved_hist"], np.array([1.0, 3.0]))
-        np.testing.assert_array_equal(logged["eval/subset_a/sequence_length_unsolved_hist"], np.array([2.0, 4.0]))
-
-        self.assertEqual(logged["eval/subset_b/sequence_length_mean"], 6.5)
-        self.assertEqual(logged["eval/subset_b/sequence_length_solved_mean"], 5.5)
-        self.assertEqual(logged["eval/subset_b/sequence_length_unsolved_mean"], 7.5)
-        np.testing.assert_array_equal(logged["eval/subset_b/sequence_length_solved_hist"], np.array([5.0, 6.0]))
-        np.testing.assert_array_equal(logged["eval/subset_b/sequence_length_unsolved_hist"], np.array([7.0, 8.0]))
-
-    def test_records_eval_filtered_prompt_metrics_per_dataset(self):
-        args = SimpleNamespace(
-            num_training_steps=200,
-            with_tracking=False,
-            backend_timeout=120,
-            eval_only=False,
-            eval_timeout_minutes=None,
-        )
-        eval_dataset = Dataset.from_dict(
-            {
-                INPUT_IDS_PROMPT_KEY: [[1, 2, 3], [1, 2, 3]],
-                GROUND_TRUTHS_KEY: ["42", "42"],
-                VERIFIER_SOURCE_KEY: ["subset/a", "subset b"],
-                RAW_PROMPT_KEY: ["prompt_a", "prompt_b"],
-                "index": [0, 1],
-            }
-        )
         eval_queue = _QueueWithSize(size=2)
         eval_generation_config = SimpleNamespace(n=2)
         tokenizer = Mock()
@@ -384,37 +171,22 @@ class TestMaybeEvaluate(unittest.TestCase):
         tokenizer.pad_token = "<pad>"
 
         eval_result = SimpleNamespace(
-            responses=[[0], [0, 1], [0] * 3, [0] * 4],
-            finish_reasons=["stop"] * 4,
-            token_statistics=SimpleNamespace(num_prompt_tokens=8, num_response_tokens=4, generation_time=2.0),
+            responses=[[1], [2], [3], [4]],
+            finish_reasons=["stop", "stop", "stop", "stop"],
+            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=4, generation_time=2.0),
         )
         eval_batch = SimpleNamespace(
-            scores=[1.0, 0.0, 0.5, 0.0],
+            scores=[1.0, 0.0, 0.0, 1.0],
             queries=[[1, 2, 3]] * 4,
-            decoded_responses=[f"resp_{i}" for i in range(4)],
+            decoded_responses=["resp_a", "resp_b", "resp_c", "resp_d"],
             ground_truths=["42"] * 4,
             active_tools=None,
-        )
-        eval_batch_stats = SimpleNamespace(
-            percent_solved_hist=np.array([0.5, 0.0]),
-            prompt_indices=[0, 1],
-            prompt_datasets=["subset_a", "subset_b"],
-            filtered_prompt_datasets=["subset_a", "subset_b", "subset_b"],
-            filtered_prompt_datasets_zero=["subset_a"],
-            filtered_prompt_datasets_solved=["subset_b"],
-            filtered_prompt_datasets_nonzero=["subset_b"],
-            completions_used_by_dataset={},
-            given_up_prompts_by_dataset={},
-            test_prompt_indices=[],
-            test_indices=[],
-            test_passes=[],
-            test_difficulties=[],
         )
 
         with (
             patch(
                 "open_instruct.grpo_fast.accumulate_inference_batches",
-                return_value=(eval_result, eval_batch, {"model_step_mean": 100.0}, eval_batch_stats),
+                return_value=(eval_result, eval_batch, {}, None),
             ),
             patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
             patch("open_instruct.grpo_fast.print_rich_table"),
@@ -428,113 +200,51 @@ class TestMaybeEvaluate(unittest.TestCase):
                 eval_dataset=eval_dataset,
                 eval_generation_config=eval_generation_config,
                 model_dims=Mock(),
+                base_env_config=EnvConfig(),
                 max_possible_score=1.0,
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/filtered_prompts/subset_a"], 1)
-        self.assertEqual(logged["eval/filtered_prompts/subset_b"], 2)
-        self.assertEqual(logged["eval/filtered_prompts_zero/subset_a"], 1)
-        self.assertEqual(logged["eval/filtered_prompts_zero/subset_b"], 0)
-        self.assertEqual(logged["eval/filtered_prompts_solved/subset_a"], 0)
-        self.assertEqual(logged["eval/filtered_prompts_solved/subset_b"], 1)
-        self.assertEqual(logged["eval/filtered_prompts_nonzero/subset_a"], 0)
-        self.assertEqual(logged["eval/filtered_prompts_nonzero/subset_b"], 1)
+        self.assertEqual(logged["eval/pass_at_1"], 0.5)
+        self.assertEqual(logged["eval/pass_at_2"], 1.0)
+        self.assertEqual(logged["eval/pass_at_1_unbiased"], 0.5)
+        self.assertEqual(logged["eval/pass_at_2_unbiased"], 1.0)
 
-    def test_final_step_uses_default_eval_timeout_minutes(self):
-        args = SimpleNamespace(
-            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=120
-        )
-        eval_dataset = self._build_eval_dataset(num_prompts=3)
-        eval_queue = _QueueWithSize(size=0)
-        eval_generation_config = SimpleNamespace(n=32)
 
-        with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
-            maybe_evaluate(
-                args=args,
-                training_step=10,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=Mock(),
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                max_possible_score=1.0,
-            )
+class TestComputePassAtKMetrics(unittest.TestCase):
+    def test_formula_matches_one_minus_comb_ratio_single_prompt(self):
+        n, c, k = 8, 3, 4
+        wrong = n - c
+        expected = 1.0 - math.comb(wrong, k) / math.comb(n, k)
+        correct = np.zeros((1, n), dtype=bool)
+        correct[0, :c] = True
+        m = grpo_utils.compute_pass_at_k_metrics(correct)
+        self.assertAlmostEqual(m["eval/pass_at_4_unbiased"], expected)
+        self.assertAlmostEqual(m["eval/pass_at_1"], c / n)
 
-        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 7200)
+    def test_two_prompts_n2_matches_maybe_evaluate_mock(self):
+        correct = np.array([[True, False], [False, True]])
+        m = grpo_utils.compute_pass_at_k_metrics(correct)
+        self.assertAlmostEqual(m["eval/pass_at_1"], 0.5)
+        self.assertAlmostEqual(m["eval/pass_at_2"], 1.0)
+        self.assertAlmostEqual(m["eval/pass_at_1_unbiased"], 0.5)
+        self.assertAlmostEqual(m["eval/pass_at_2_unbiased"], 1.0)
 
-    def test_final_step_uses_eval_timeout_minutes_override(self):
-        args = SimpleNamespace(
-            num_training_steps=10, with_tracking=False, backend_timeout=120, eval_only=False, eval_timeout_minutes=30
-        )
-        eval_dataset = self._build_eval_dataset(num_prompts=3)
-        eval_queue = _QueueWithSize(size=0)
-        eval_generation_config = SimpleNamespace(n=32)
+    def test_all_correct(self):
+        m = grpo_utils.compute_pass_at_k_metrics(np.ones((1, 4), dtype=bool))
+        self.assertEqual(m["eval/pass_at_1"], 1.0)
+        self.assertEqual(m["eval/pass_at_2_unbiased"], 1.0)
 
-        with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
-            maybe_evaluate(
-                args=args,
-                training_step=10,
-                evaluation_inference_results_Q=eval_queue,
-                tokenizer=Mock(),
-                episode=0,
-                eval_dataset=eval_dataset,
-                eval_generation_config=eval_generation_config,
-                model_dims=Mock(),
-                max_possible_score=1.0,
-            )
+    def test_all_wrong_when_k_fits(self):
+        m = grpo_utils.compute_pass_at_k_metrics(np.zeros((1, 4), dtype=bool))
+        self.assertEqual(m["eval/pass_at_1"], 0.0)
+        self.assertEqual(m["eval/pass_at_2_unbiased"], 0.0)
 
-        self.assertEqual(mock_accumulate.call_args.kwargs["timeout"], 1800)
-
-    def test_estimate_pass_at_k_matches_known_values(self):
-        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=0, k=1), 0.0)
-        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=1), 0.25)
-        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=2), 0.5)
-        self.assertEqual(estimate_pass_at_k(num_samples=4, num_correct=1, k=4), 1.0)
-
-    def test_compute_manufactoria_histograms(self):
-        batch_stats = data_loader_lib.BatchStatistics(
-            prompt_lengths=[],
-            response_lengths=[],
-            generated_completions=0,
-            filtered_prompts=0,
-            filtered_prompts_zero=0,
-            filtered_prompts_solved=0,
-            filtered_prompts_nonzero=0,
-            percent_solved_mean=0.0,
-            percent_solved_hist=np.array([]),
-            prompt_indices=[10, 11],
-            prompt_sample_counts=[2, 2],
-            prompt_baseline_sample_counts=[2, 2],
-            prompt_baseline_reward_sums=[0.0, 0.0],
-            prompt_datasets=["manufactoria", "manufactoria"],
-            filtered_prompt_datasets=[],
-            filtered_prompt_datasets_zero=[],
-            filtered_prompt_datasets_solved=[],
-            filtered_prompt_datasets_nonzero=[],
-            completions_used_by_dataset={},
-            given_up_prompts_by_dataset={},
-            test_prompt_indices=[10, 10, 10, 10, 11, 11, 11, 11],
-            test_indices=[0, 1, 0, 1, 2, 3, 2, 3],
-            test_passes=[1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
-            test_difficulties=[],
-            no_resampled_prompts=0,
-            total_prompts=2,
-        )
-
-        metrics = data_loader_lib.compute_manufactoria_test_pass_rate_metrics(
-            batch_stats=batch_stats,
-            count_key="val/train_manufactoria_test_pass_count",
-            by_index_key="val/train_manufactoria_test_pass_rate_by_index",
-            by_index_count_key="val/train_manufactoria_test_pass_rate_by_index_count",
-            difficulty_mean_prefix="val/train_manufactoria_test_pass_rate_mean_difficulty",
-            prompt_hist_key="val/prompt_test_pass_rate_hist",
-            test_hist_key="val/test_pass_rate_hist",
-        )
-
-        np.testing.assert_array_equal(metrics["val/test_pass_rate_hist"], np.array([1.0, 0.5, 0.0, 0.5]))
-        np.testing.assert_array_equal(metrics["val/prompt_test_pass_rate_hist"], np.array([0.75, 0.25]))
+    def test_fewer_than_k_wrong_returns_one(self):
+        """Any k-subset must include a correct completion (here k=2, only one wrong)."""
+        m = grpo_utils.compute_pass_at_k_metrics(np.array([[True, True, True, False]]))
+        self.assertEqual(m["eval/pass_at_1"], 0.75)
+        self.assertEqual(m["eval/pass_at_2_unbiased"], 1.0)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ from open_instruct.utils import (
     ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
+    get_optimizer_grouped_parameters,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
@@ -376,14 +377,16 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
+    # For VLM configs (e.g. Qwen3.5), model dim attributes live under text_config.
+    dims_config = getattr(config, "text_config", config)
     model_dims = ModelDims(
-        num_layers=config.num_hidden_layers,
-        hidden_size=config.hidden_size,
-        intermediate_size=config.intermediate_size,
-        vocab_size=config.vocab_size,
-        num_attn_heads=config.num_attention_heads,
-        head_dim=config.hidden_size // config.num_attention_heads,
-        num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+        num_layers=dims_config.num_hidden_layers,
+        hidden_size=dims_config.hidden_size,
+        intermediate_size=dims_config.intermediate_size,
+        vocab_size=dims_config.vocab_size,
+        num_attn_heads=dims_config.num_attention_heads,
+        head_dim=dims_config.hidden_size // dims_config.num_attention_heads,
+        num_kv_heads=getattr(dims_config, "num_key_value_heads", dims_config.num_attention_heads),
     )
 
     # Capture full dataset size by getting it from the dataset. Sharding happens inside the dataloaders, not the dataset, so we're fine to do this.
@@ -411,15 +414,8 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     )
 
     # Optimizer
-    # Split weights in two groups, one with weight decay and the other not.
-    no_decay = ["bias", "layer_norm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-        },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
-    ]
+    optimizer_grouped_parameters = get_optimizer_grouped_parameters(model, args.weight_decay)
+
     if args.use_qlora or args.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
@@ -587,7 +583,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                if accelerator.sync_gradients and args.max_grad_norm:
                     accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -677,7 +673,8 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
-                    logger.info(logger_str)
+                    if accelerator.is_main_process:
+                        logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
                     if accelerator.is_main_process:
