@@ -1,9 +1,18 @@
-"""GPU test for `LLMRayActor.get_weight_fingerprint`.
+"""GPU test: broadcasting divergent learner weights to vLLM actually updates vLLM.
 
-Verifies that the fingerprint method (used by `_log_weight_sync_fingerprints` to
-confirm vLLM actor weights match the learner on resume from a checkpoint) runs
-end-to-end on a real vLLM engine and returns matching abs-mean scalars for a
-stable set of parameter names (embeddings + norms).
+The bug this guards against: on resume from a checkpoint, the learner loads
+step-N weights while vLLM starts from the pretrain weights. Unless we broadcast
+before the first rollout, vLLM silently keeps pretrain weights. A previous
+version of this test loaded HF and vLLM from the same pretrain and confirmed
+fingerprints matched -- toothless, because it never exercised the case where
+learner weights differ from vLLM's loaded weights.
+
+This test:
+  1. Creates a vLLM engine from the pretrain.
+  2. Creates an HF model, perturbs its weights (simulating a trained learner).
+  3. Broadcasts via ``broadcast_weights_to_vllm`` (IPC, single-GPU).
+  4. Asserts vLLM's fingerprint now matches the *perturbed* HF weights, not
+     the pretrain weights.
 
 To run::
 
@@ -28,18 +37,26 @@ from open_instruct.test_grpo_fast import TestGrpoFastBase
 logger = logger_utils.setup_logger(__name__)
 
 
+UNFUSED_PARAM_SUFFIXES = (
+    "embed_tokens.weight",
+    "model.norm.weight",
+    "input_layernorm.weight",
+    "post_attention_layernorm.weight",
+)
+
+
 def _fingerprint_local(model, param_names: list[str]) -> dict[str, float]:
     params_by_name = dict(model.named_parameters())
-    out: dict[str, float] = {}
-    for name in param_names:
-        if name in params_by_name:
-            out[name] = float(params_by_name[name].data.detach().float().abs().mean().item())
-    return out
+    return {
+        name: float(params_by_name[name].data.detach().float().abs().mean().item())
+        for name in param_names
+        if name in params_by_name
+    }
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-class TestWeightSyncFingerprintGPU(TestGrpoFastBase):
-    def test_fingerprint_matches_pretrained_weights(self):
+class TestWeightSyncBroadcastUpdatesVLLM(TestGrpoFastBase):
+    def test_broadcast_divergent_weights_updates_vllm(self):
         model_name = "Qwen/Qwen3-0.6B"
         AutoTokenizer.from_pretrained(model_name)
 
@@ -85,27 +102,47 @@ class TestWeightSyncFingerprintGPU(TestGrpoFastBase):
         )
         ray.get(engines[0].ready.remote())
 
-        candidate_names = [
-            name
-            for name, _ in trainer_model.named_parameters()
-            if name.endswith("embed_tokens.weight")
-            or name.endswith("model.norm.weight")
-            or name.endswith("input_layernorm.weight")
-            or name.endswith("post_attention_layernorm.weight")
+        sample_names = [name for name, _ in trainer_model.named_parameters() if name.endswith(UNFUSED_PARAM_SUFFIXES)][
+            :4
         ]
-        sample_names = candidate_names[:4]
         self.assertGreater(len(sample_names), 0)
 
-        trainer_fp = _fingerprint_local(trainer_model, sample_names)
-        engine_fp = ray.get(engines[0].get_weight_fingerprint.remote(sample_names))
-        logger.info(f"trainer={trainer_fp} engine={engine_fp}")
+        pretrain_fp = _fingerprint_local(trainer_model, sample_names)
+        vllm_pretrain_fp = ray.get(engines[0].get_weight_fingerprint.remote(sample_names))
         for name in sample_names:
-            self.assertIn(name, engine_fp)
             self.assertAlmostEqual(
-                trainer_fp[name],
-                engine_fp[name],
-                delta=1e-2 * max(abs(trainer_fp[name]), 1e-8),
-                msg=f"fingerprint mismatch for {name!r}",
+                pretrain_fp[name],
+                vllm_pretrain_fp[name],
+                delta=1e-2 * max(abs(pretrain_fp[name]), 1e-8),
+                msg=f"pretrain fingerprint mismatch for {name!r}",
+            )
+
+        with torch.no_grad():
+            for _, param in trainer_model.named_parameters():
+                param.data.mul_(1.25)
+
+        perturbed_fp = _fingerprint_local(trainer_model, sample_names)
+        for name in sample_names:
+            self.assertGreater(
+                abs(perturbed_fp[name] - pretrain_fp[name]),
+                1e-3 * max(abs(pretrain_fp[name]), 1e-8),
+                msg=f"perturbation did not change fingerprint for {name!r}",
+            )
+
+        refs = vllm_utils.broadcast_weights_to_vllm(
+            model=trainer_model, vllm_engines=engines, model_update_group=None, gather_whole_model=True
+        )
+        ray.get(refs)
+        ray.get([engine.wake_up.remote() for engine in engines])
+
+        vllm_after_fp = ray.get(engines[0].get_weight_fingerprint.remote(sample_names))
+        logger.info(f"pretrain={pretrain_fp} perturbed={perturbed_fp} vllm_after={vllm_after_fp}")
+        for name in sample_names:
+            self.assertAlmostEqual(
+                perturbed_fp[name],
+                vllm_after_fp[name],
+                delta=1e-2 * max(abs(perturbed_fp[name]), 1e-8),
+                msg=f"vLLM did not pick up perturbed weights for {name!r}",
             )
 
         torch.distributed.destroy_process_group()
