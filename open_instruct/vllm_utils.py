@@ -780,15 +780,13 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, request: dict | WeightTransferUpdateRequest, model_step: int | None = None) -> None:
+    def update_weights(self, request: dict | WeightTransferUpdateRequest) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         if isinstance(request, dict):
             request = WeightTransferUpdateRequest(update_info=request["update_info"])
         self._run_async(self.llm_engine.update_weights(request))
-        if model_step is not None:
-            self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1383,7 +1381,7 @@ def _broadcast_weights_ipc(
             for engine in vllm_engines:
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
+            ray.get([engine.set_model_step.remote(model_step) for engine in vllm_engines])
     return []
 
 
@@ -1422,10 +1420,7 @@ def broadcast_weights_to_vllm(
 
     if is_rank_0:
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-        refs = [
-            engine.update_weights.remote({"update_info": update_info}, model_step=model_step)
-            for engine in vllm_engines
-        ]
+        refs = [engine.update_weights.remote({"update_info": update_info}) for engine in vllm_engines]
     else:
         refs = []
 
@@ -1447,6 +1442,8 @@ def broadcast_weights_to_vllm(
                     )
             finally:
                 block.reshard()
+        if is_rank_0:
+            ray.get([engine.set_model_step.remote(model_step) for engine in vllm_engines])
         return refs
 
     params = list(model.named_parameters())
@@ -1467,4 +1464,7 @@ def broadcast_weights_to_vllm(
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+
+    if is_rank_0:
+        ray.get([engine.set_model_step.remote(model_step) for engine in vllm_engines])
     return refs
