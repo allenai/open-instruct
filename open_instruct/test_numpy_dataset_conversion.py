@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 
 import numpy as np
 from parameterized import parameterized
@@ -56,6 +57,154 @@ class TestSelectTokenDtype(unittest.TestCase):
     def test_raises_for_vocab_too_big(self):
         with self.assertRaises(ValueError):
             numpy_dataset_conversion._select_token_dtype(2**64 + 1)
+
+
+class TestIncrementalCheckpoint(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp_dir.cleanup)
+        self.output_dir = self.tmp_dir.name
+
+    def _scalar_state(self):
+        return {
+            "current_position": 0,
+            "num_samples_skipped": 0,
+            "per_dataset_counts": {},
+            "per_dataset_tokens": {},
+            "per_dataset_trainable_tokens": {},
+            "per_dataset_filtered": {},
+        }
+
+    def test_save_and_load_roundtrip(self):
+        token_ids = [1, 2, 3, 4, 5, 6]
+        labels_mask = [1, 0, 1, 0, 1, 1]
+        document_boundaries = [(0, 3), (3, 6)]
+        tw, sw = numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=2,
+            token_ids=token_ids,
+            labels_mask=labels_mask,
+            document_boundaries=document_boundaries,
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=0,
+            prev_samples_written=0,
+        )
+        self.assertEqual(tw, 6)
+        self.assertEqual(sw, 2)
+
+        loaded = numpy_dataset_conversion.load_checkpoint(self.output_dir)
+        self.assertEqual(loaded["token_ids"], token_ids)
+        self.assertEqual(loaded["labels_mask"], labels_mask)
+        self.assertEqual(loaded["document_boundaries"], document_boundaries)
+        self.assertEqual(loaded["samples_processed"], 2)
+        self.assertEqual(loaded["tokens_written"], 6)
+        self.assertEqual(loaded["samples_written"], 2)
+
+    def test_incremental_save_appends_only_new_data(self):
+        token_ids = [1, 2, 3]
+        labels_mask = [1, 0, 1]
+        document_boundaries = [(0, 3)]
+        tw1, sw1 = numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=1,
+            token_ids=token_ids,
+            labels_mask=labels_mask,
+            document_boundaries=document_boundaries,
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=0,
+            prev_samples_written=0,
+        )
+
+        tokens_path = os.path.join(self.output_dir, "_checkpoint_token_ids.bin")
+        size_after_first = os.path.getsize(tokens_path)
+
+        token_ids.extend([4, 5, 6, 7])
+        labels_mask.extend([0, 0, 1, 1])
+        document_boundaries.append((3, 7))
+
+        tw2, sw2 = numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=2,
+            token_ids=token_ids,
+            labels_mask=labels_mask,
+            document_boundaries=document_boundaries,
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=tw1,
+            prev_samples_written=sw1,
+        )
+        size_after_second = os.path.getsize(tokens_path)
+
+        self.assertEqual(tw2, 7)
+        self.assertEqual(sw2, 2)
+        self.assertEqual(size_after_second - size_after_first, 4 * np.dtype(np.uint32).itemsize)
+
+        loaded = numpy_dataset_conversion.load_checkpoint(self.output_dir)
+        self.assertEqual(loaded["token_ids"], token_ids)
+        self.assertEqual(loaded["labels_mask"], labels_mask)
+        self.assertEqual(loaded["document_boundaries"], document_boundaries)
+
+    def test_load_truncates_partial_trailing_bytes(self):
+        numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=1,
+            token_ids=[10, 20, 30],
+            labels_mask=[1, 1, 0],
+            document_boundaries=[(0, 3)],
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=0,
+            prev_samples_written=0,
+        )
+        tokens_path = os.path.join(self.output_dir, "_checkpoint_token_ids.bin")
+        with open(tokens_path, "ab") as f:
+            f.write(b"\xff\xff")
+
+        loaded = numpy_dataset_conversion.load_checkpoint(self.output_dir)
+        self.assertEqual(loaded["token_ids"], [10, 20, 30])
+        self.assertEqual(os.path.getsize(tokens_path), 3 * np.dtype(np.uint32).itemsize)
+
+    def test_legacy_json_checkpoint_is_migrated(self):
+        json_path = os.path.join(self.output_dir, "_checkpoint.json")
+        with open(json_path, "w") as f:
+            json.dump(
+                {
+                    "samples_processed": 2,
+                    "token_ids": [1, 2, 3, 4],
+                    "labels_mask": [1, 0, 1, 1],
+                    "document_boundaries": [[0, 2], [2, 4]],
+                    "current_position": 4,
+                    "num_samples_skipped": 0,
+                    "per_dataset_counts": {},
+                    "per_dataset_tokens": {},
+                    "per_dataset_trainable_tokens": {},
+                    "per_dataset_filtered": {},
+                },
+                f,
+            )
+        loaded = numpy_dataset_conversion.load_checkpoint(self.output_dir)
+        self.assertEqual(loaded["token_ids"], [1, 2, 3, 4])
+        self.assertEqual(loaded["document_boundaries"], [(0, 2), (2, 4)])
+        self.assertEqual(loaded["tokens_written"], 0)
+        self.assertEqual(loaded["samples_written"], 0)
+
+    def test_remove_checkpoint_removes_all_files(self):
+        numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=1,
+            token_ids=[1, 2],
+            labels_mask=[1, 0],
+            document_boundaries=[(0, 2)],
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=0,
+            prev_samples_written=0,
+        )
+        numpy_dataset_conversion.remove_checkpoint(self.output_dir)
+        for name in (
+            "_checkpoint.json",
+            "_checkpoint_token_ids.bin",
+            "_checkpoint_labels_mask.bin",
+            "_checkpoint_document_boundaries.bin",
+        ):
+            self.assertFalse(os.path.exists(os.path.join(self.output_dir, name)))
 
 
 class TestWriteMemmapChunked(unittest.TestCase):
@@ -361,6 +510,96 @@ class TestConvertHfToNumpySft(unittest.TestCase):
             stats = json.load(f)
         self.assertEqual(stats["overall_statistics"]["total_instances"], 2)
         self.assertGreater(stats["overall_statistics"]["total_tokens"], 0)
+
+
+class TestResumeEquivalence(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+
+        self.original_hf_home = os.environ.get("HF_HOME")
+        self.original_hf_datasets_cache = os.environ.get("HF_DATASETS_CACHE")
+        self.original_transformers_cache = os.environ.get("TRANSFORMERS_CACHE")
+
+        os.environ["HF_HOME"] = self.temp_dir.name
+        os.environ["HF_DATASETS_CACHE"] = os.path.join(self.temp_dir.name, "datasets")
+        os.environ["TRANSFORMERS_CACHE"] = os.path.join(self.temp_dir.name, "transformers")
+
+    def tearDown(self):
+        for key, original in [
+            ("HF_HOME", self.original_hf_home),
+            ("HF_DATASETS_CACHE", self.original_hf_datasets_cache),
+            ("TRANSFORMERS_CACHE", self.original_transformers_cache),
+        ]:
+            if original is not None:
+                os.environ[key] = original
+            else:
+                os.environ.pop(key, None)
+        gc.collect()
+
+    def _make_tc(self):
+        return dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH,
+            tokenizer_revision="main",
+            use_fast=True,
+            chat_template_name="tulu",
+            add_bos=False,
+        )
+
+    def _run(self, output_dir, checkpoint_interval, resume):
+        numpy_dataset_conversion.convert_hf_to_numpy_sft(
+            output_dir=output_dir,
+            dataset_mixer_list=[os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            dataset_mixer_list_splits=["train"],
+            tc=self._make_tc(),
+            dataset_transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            transform_fn_args=[{"max_seq_length": 4096}, {}],
+            dataset_target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=self.temp_dir.name,
+            num_examples=50,
+            checkpoint_interval=checkpoint_interval,
+            resume=resume,
+        )
+
+    def test_one_shot_matches_interrupt_plus_resume(self):
+        golden = os.path.join(self.temp_dir.name, "golden")
+        self._run(golden, checkpoint_interval=1000, resume=False)
+
+        interrupted = os.path.join(self.temp_dir.name, "interrupted")
+        real_save = numpy_dataset_conversion.save_checkpoint
+        call_count = {"n": 0}
+
+        def fail_after_first(*args, **kwargs):
+            result = real_save(*args, **kwargs)
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("simulated interrupt")
+            return result
+
+        with (
+            unittest.mock.patch.object(numpy_dataset_conversion, "save_checkpoint", side_effect=fail_after_first),
+            self.assertRaises(RuntimeError),
+        ):
+            self._run(interrupted, checkpoint_interval=10, resume=False)
+
+        self._run(interrupted, checkpoint_interval=10, resume=True)
+
+        artifacts = sorted(
+            name
+            for name in os.listdir(golden)
+            if name.startswith("token_ids_part_") or name.startswith("labels_mask_part_")
+        )
+        self.assertGreater(len(artifacts), 0, "golden run produced no artifacts")
+        for name in artifacts:
+            golden_path = os.path.join(golden, name)
+            interrupted_path = os.path.join(interrupted, name)
+            if name.endswith(".gz"):
+                with gzip.open(golden_path, "rb") as f1, gzip.open(interrupted_path, "rb") as f2:
+                    self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
+            else:
+                with open(golden_path, "rb") as f1, open(interrupted_path, "rb") as f2:
+                    self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
 
 
 if __name__ == "__main__":

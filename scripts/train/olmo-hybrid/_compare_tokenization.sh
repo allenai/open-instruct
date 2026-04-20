@@ -27,6 +27,10 @@ hash_file() {
   sha256sum "$1" | awk '{print $1}'
 }
 
+hash_gz_contents() {
+  gzip -dc "$1" | sha256sum | awk '{print $1}'
+}
+
 hash_stats_json() {
   jq -S 'del(.timestamp, .output_directory)' "$1" | sha256sum | awk '{print $1}'
 }
@@ -51,6 +55,9 @@ compare_file() {
   if [[ "$rel" == "dataset_statistics.json" ]]; then
     new_hash=$(hash_stats_json "$new_path")
     ref_hash=$(hash_stats_json "$ref_path")
+  elif [[ "$rel" == *.gz ]]; then
+    new_hash=$(hash_gz_contents "$new_path")
+    ref_hash=$(hash_gz_contents "$ref_path")
   else
     new_hash=$(hash_file "$new_path")
     ref_hash=$(hash_file "$ref_path")
@@ -70,8 +77,10 @@ compare_file() {
   fi
 }
 
-mapfile -t new_files < <(cd "$NEW_DIR" && ls | sort)
-mapfile -t ref_files < <(cd "$REFERENCE_DIR" && ls | sort)
+new_files=()
+while IFS= read -r line; do new_files+=("$line"); done < <(cd "$NEW_DIR" && ls | sort)
+ref_files=()
+while IFS= read -r line; do ref_files+=("$line"); done < <(cd "$REFERENCE_DIR" && ls | sort)
 
 echo "--- File listings ---"
 echo "new:       ${new_files[*]}"
