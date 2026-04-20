@@ -1462,8 +1462,6 @@ def create_model_and_optimizer(
             f"with training_step={data_prep_actor_state['training_step']}"
         )
 
-    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
-
     logger.info(
         "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
     )
