@@ -33,7 +33,7 @@ uv run python mason.py \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
   --no-host-networking \
-  --gpus 1 \
+  --gpus 0 \
   --priority urgent \
   --description "7B hybrid SFT tokenization byte-for-byte verify" \
   --no_auto_dataset_cache \
@@ -49,4 +49,5 @@ uv run python mason.py \
       --output_dir "$NEW_DIR" \
       --visualize True \
       --chat_template_name "olmo123" \
-      --max_seq_length 32768 \&\& bash scripts/train/olmo-hybrid/_compare_tokenization.sh "$NEW_DIR" "$REFERENCE_DIR"
+      --max_seq_length 32768 \
+      --resume True \&\& bash scripts/train/olmo-hybrid/_compare_tokenization.sh "$NEW_DIR" "$REFERENCE_DIR"

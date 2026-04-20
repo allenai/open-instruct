@@ -25,7 +25,7 @@ uv run python mason.py \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
   --no-host-networking \
-  --gpus 8 \
+  --gpus 0 \
   --priority urgent \
   --preemptible \
   --description "7B hybrid SFT tokenization" \
@@ -42,4 +42,5 @@ uv run python mason.py \
       --output_dir /weka/oe-adapt-default/${BEAKER_USER}/dataset/olmo-hybrid-fresh \
       --visualize True \
       --chat_template_name "olmo123" \
-      --max_seq_length 32768
+      --max_seq_length 32768 \
+      --resume True
