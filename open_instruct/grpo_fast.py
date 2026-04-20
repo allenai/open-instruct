@@ -1404,18 +1404,17 @@ class WeightSyncTrigger:
     def __init__(self) -> None:
         self._event = threading.Event()
         self._lock = threading.Lock()
-        self._step: int | None = None
+        self._step: int = 0
 
-    def notify(self, step: int | None = None) -> None:
+    def notify(self, step: int) -> None:
         with self._lock:
-            if step is not None:
-                self._step = step
+            self._step = step
         self._event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
         return self._event.wait(timeout=timeout)
 
-    def get_step_and_clear(self) -> int | None:
+    def get_step_and_clear(self) -> int:
         """Atomically gets the step and clears the event."""
         with self._lock:
             step = self._step
@@ -1457,7 +1456,7 @@ def weight_sync_thread(
                 # Broadcast weights to vLLM engines. model_step is stamped onto vLLM
                 # engines as part of the update_weights RPC — no separate set_model_step RPC.
                 weight_broadcast_futures: list[ray.ObjectRef] = [
-                    m.broadcast_to_vllm.remote(target_model_step or 0) for m in policy_group.models
+                    m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models
                 ]
 
                 # Wait for all trainer-side broadcasts to finish and collect timing stats.
