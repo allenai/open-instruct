@@ -472,6 +472,38 @@ class PolicyTrainerRayProcess(RayProcess):
             name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
 
+    def get_parameter_names(self, max_params: int) -> list[str]:
+        """Returns a stable-ordered, deterministic sample of parameter names.
+
+        Used by the weight-sync verify helper to pick a small set of params
+        whose fingerprints to compare across the learner and the vLLM actors.
+        """
+        names = [name for name, _ in self.model.module.named_parameters()]
+        if len(names) <= max_params:
+            return names
+        step = max(1, len(names) // max_params)
+        return names[::step][:max_params]
+
+    def get_weight_fingerprint(self, param_names: list[str]) -> dict[str, float]:
+        """Returns deterministic scalar fingerprints of named parameters on rank 0.
+
+        Used to verify that weights are consistent between the learner and the vLLM actors
+        (e.g. after loading a checkpoint and performing the first weight sync).
+        """
+        fingerprints: dict[str, float] = {}
+        params_by_name = dict(self.model.module.named_parameters())
+        for name in param_names:
+            if name not in params_by_name:
+                continue
+            param = params_by_name[name]
+            if self.args.deepspeed_stage == 3:
+                with deepspeed.zero.GatheredParameters([param], modifier_rank=0):
+                    if deepspeed.comm.get_rank() == 0:
+                        fingerprints[name] = float(param.data.detach().float().abs().mean().item())
+            else:
+                fingerprints[name] = float(param.data.detach().float().abs().mean().item())
+        return fingerprints
+
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
             return
@@ -1361,7 +1393,7 @@ def create_model_and_optimizer(
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
 
     logger.info(
-        "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
+        "======== ⏸️ lazily initializing native vLLM weight sync after the first training step of this run ========="
     )
 
     return (
@@ -1374,6 +1406,51 @@ def create_model_and_optimizer(
         _data_prep_actor,
         checkpoint_state,
     )
+
+
+_WEIGHT_SYNC_FINGERPRINT_MAX_PARAMS = 4
+_WEIGHT_SYNC_FINGERPRINT_RTOL = 1e-2
+
+
+def _log_weight_sync_fingerprints(policy_group: "ModelGroup", vllm_engines, step: int) -> None:
+    """Compares learner vs. vLLM fingerprints for a handful of params after a sync.
+
+    On mismatch, logs a warning (rather than raising) — a mismatch here is diagnostic,
+    not always fatal, because e.g. name mappers can legitimately rename parameters.
+    """
+    sample_names = ray.get(policy_group.models[0].get_parameter_names.remote(_WEIGHT_SYNC_FINGERPRINT_MAX_PARAMS))
+    if not sample_names:
+        return
+
+    learner_fps_list, _ = ray_get_with_progress(
+        [m.get_weight_fingerprint.remote(sample_names) for m in policy_group.models],
+        desc="[Weight Sync Verify] learner fingerprint",
+        enable=False,
+    )
+    learner_fp = next((fp for fp in learner_fps_list if fp), {})
+
+    engine_fps, _ = ray_get_with_progress(
+        [engine.get_weight_fingerprint.remote(sample_names) for engine in vllm_engines],
+        desc="[Weight Sync Verify] vLLM fingerprint",
+        enable=False,
+    )
+
+    for engine_idx, engine_fp in enumerate(engine_fps):
+        for name, learner_val in learner_fp.items():
+            engine_val = engine_fp.get(name)
+            if engine_val is None:
+                logger.warning(f"[Weight Sync Verify] step={step} param={name!r} missing on vLLM engine {engine_idx}")
+                continue
+            if abs(engine_val - learner_val) > _WEIGHT_SYNC_FINGERPRINT_RTOL * max(abs(learner_val), 1e-8):
+                logger.warning(
+                    f"[Weight Sync Verify] step={step} param={name!r} MISMATCH: "
+                    f"learner={learner_val:.6g} vs vLLM[{engine_idx}]={engine_val:.6g}"
+                )
+            else:
+                logger.info(
+                    f"[Weight Sync Verify] step={step} param={name!r} OK: "
+                    f"learner={learner_val:.6g} vLLM[{engine_idx}]={engine_val:.6g}"
+                )
 
 
 def create_generation_configs(
@@ -1430,13 +1507,10 @@ def weight_sync_thread(
     vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    resume_training_step: int = 1,
     inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
-    if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
@@ -1972,7 +2046,7 @@ def run_training(
             enable=False,
         )
 
-    def initialize_weight_sync() -> tuple[futures.Future, WeightSyncTrigger]:
+    def initialize_weight_sync(initial_step: int) -> tuple[futures.Future, WeightSyncTrigger]:
         logger.info("[Main Thread] Initializing native vLLM weight sync.")
 
         ray_get_with_progress(
@@ -1995,13 +2069,14 @@ def run_training(
             vllm_engines,
             actor_manager,
             weight_sync_metrics_Q,
-            1,
             streaming_config.inflight_updates,
         )
 
-        logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=1)
+        logger.info(f"[Main Thread] Triggering initial native vLLM weight sync at step {initial_step}.")
+        trigger.notify(step=initial_step)
         health_check_fn(future, expect_new_weight_sync=True)
+        if args.verbose:
+            _log_weight_sync_fingerprints(policy_group, vllm_engines, initial_step)
         return future, trigger
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
@@ -2124,8 +2199,8 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        if training_step == 1:
-            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
+        if training_step == resume_training_step:
+            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(training_step)
         elif weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
