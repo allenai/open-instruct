@@ -575,6 +575,8 @@ class StreamingDataLoaderConfig:
     def __post_init__(self):
         if self.eval_response_length is None:
             self.eval_response_length = self.response_length
+        if self.eval_response_length < 1:
+            raise ValueError(f"`eval_response_length` must be >= 1, got {self.eval_response_length}")
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )

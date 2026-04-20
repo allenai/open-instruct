@@ -1643,9 +1643,12 @@ class TestDataPreparation(TestGrpoFastBase):
 
 class TestSetupRuntimeVariables(unittest.TestCase):
     def test_eval_only_aligns_response_length_with_eval_response_length(self):
-        args = grpo_utils.ExperimentConfig(eval_only=True, eval_response_length=1024, push_to_hub=False, save_freq=-1)
+        args = grpo_utils.ExperimentConfig(eval_only=True, push_to_hub=False, save_freq=-1)
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(
-            response_length=256, pack_length=2048, dataset_mixer_eval_list=["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"]
+            response_length=256,
+            eval_response_length=1024,
+            pack_length=2048,
+            dataset_mixer_eval_list=["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"],
         )
 
         grpo_fast.setup_runtime_variables(args, streaming_config, EnvsConfig())

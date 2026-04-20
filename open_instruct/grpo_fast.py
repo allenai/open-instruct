@@ -1066,8 +1066,8 @@ def setup_runtime_variables(
         )
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
-    if args.eval_only and args.eval_response_length is not None:
-        streaming_config.response_length = max(streaming_config.response_length, args.eval_response_length)
+    if args.eval_only and streaming_config.eval_response_length > streaming_config.response_length:
+        streaming_config.response_length = streaming_config.eval_response_length
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1498,9 +1498,7 @@ def create_generation_configs(
         "n": args.eval_pass_at_k,
         "temperature": args.eval_temperature if args.eval_temperature is not None else generation_config.temperature,
         "top_p": args.eval_top_p if args.eval_top_p is not None else generation_config.top_p,
-        "max_tokens": args.eval_response_length
-        if args.eval_response_length is not None
-        else streaming_config.eval_response_length,
+        "max_tokens": streaming_config.eval_response_length,
     }
     if args.eval_top_k is not None and "top_k" in getattr(type(generation_config), "__annotations__", {}):
         eval_changes["top_k"] = args.eval_top_k
