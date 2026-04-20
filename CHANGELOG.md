@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix `_get_batch_logps` division-by-zero in `dpo_utils.py` when `average_log_prob=True` and a sequence has every label masked (`-100`), by clamping the token count to `min=1` to match the padding-free variant.
 - Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
 - Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
