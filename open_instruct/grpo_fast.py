@@ -1401,10 +1401,10 @@ def create_generation_configs(
 class WeightSyncTrigger:
     """Event-like trigger that also carries the latest target model step."""
 
-    def __init__(self) -> None:
+    def __init__(self, step: int) -> None:
         self._event = threading.Event()
         self._lock = threading.Lock()
-        self._step: int = 0
+        self._step: int = step
 
     def notify(self, step: int) -> None:
         with self._lock:
@@ -1975,7 +1975,7 @@ def run_training(
         logger.info("======== ✅ model update group setup successfully =========")
 
         logger.info("======== ✅ weight sync thread starts =========")
-        trigger = WeightSyncTrigger()
+        trigger = WeightSyncTrigger(step=1)
         future = executor.submit(
             weight_sync_thread,
             args,
