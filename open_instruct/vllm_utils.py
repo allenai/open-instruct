@@ -780,15 +780,20 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, request: dict | WeightTransferUpdateRequest, model_step: int | None = None) -> None:
+    def update_weights(self, request: dict) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        if isinstance(request, dict):
-            request = WeightTransferUpdateRequest(update_info=request["update_info"])
-        self._run_async(self.llm_engine.update_weights(request))
-        if model_step is not None:
-            self.current_model_step = model_step
+        self._run_async(
+            self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=request["update_info"]))
+        )
+
+    def apply_weight_update(self, update_info: dict, model_step: int) -> None:
+        while not self.inflight_updates and len(self.active_tasks) > 0:
+            self.check_background_threads()
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
+        self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1422,10 +1427,7 @@ def broadcast_weights_to_vllm(
 
     if is_rank_0:
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-        refs = [
-            engine.update_weights.remote({"update_info": update_info}, model_step=model_step)
-            for engine in vllm_engines
-        ]
+        refs = [engine.apply_weight_update.remote(update_info, model_step) for engine in vllm_engines]
     else:
         refs = []
 
