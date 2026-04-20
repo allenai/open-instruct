@@ -1766,7 +1766,7 @@ def setup_experiment_tracking(
     all_configs = {}
     if (beaker_config := maybe_get_beaker_config()) is not None:
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
+    all_configs.update({**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config)})
     all_configs.update(**asdict(vllm_config))
 
     wandb_url = None
