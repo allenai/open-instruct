@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import hashlib
 import os
+import pathlib
 import random
 import re
 import secrets
@@ -168,6 +169,13 @@ def get_args():
         type=str,
         default="/weka/oe-adapt-default/allennlp/deletable_checkpoint_states",
         help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix",
+    )
+    parser.add_argument(
+        "--artifact_ttl",
+        type=str,
+        default=None,
+        help="If set, append `/tmp-<ttl>` as the final dir of auto-generated "
+        "--output_dir and --checkpoint_state_dir (e.g. '1d' for 1-day retention).",
     )
     parser.add_argument(
         "--env",
@@ -471,7 +479,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     raise Exception(f"Error code {return_code} when creating cached dataset")
                 console.log("✅✅✅ Finished running the caching command")
 
-        command = maybe_override_checkpoint_dir(command, args.auto_checkpoint_state_dir, whoami, is_external_user)
+        command = maybe_override_checkpoint_dir(
+            command, args.auto_checkpoint_state_dir, whoami, is_external_user, args.artifact_ttl
+        )
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -484,12 +494,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         need_to_override_output_dir = False
                         break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
-                    new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
+                    new_output_dir_path = pathlib.Path(args.auto_output_dir_path) / whoami
+                    if args.artifact_ttl:
+                        new_output_dir_path = new_output_dir_path / f"tmp-{args.artifact_ttl}"
                     console.log(
-                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`"
+                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir_path}/`"
                     )
                     command.append("--output_dir")
-                    command.append(new_output_dir)
+                    command.append(f"{new_output_dir_path}/")
             else:
                 no_eval_commands = [
                     ["--try_launch_beaker_eval_jobs", "False"],
@@ -629,7 +641,11 @@ def maybe_download_tokenizer_from_gs_bucket(
 
 
 def maybe_override_checkpoint_dir(
-    command: list[str], auto_checkpoint_state_dir: str, whoami: str, is_external_user: bool
+    command: list[str],
+    auto_checkpoint_state_dir: str,
+    whoami: str,
+    is_external_user: bool,
+    artifact_ttl: str | None = None,
 ):
     """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
 
@@ -655,11 +671,15 @@ def maybe_override_checkpoint_dir(
     ):
         return command
 
-    new_checkpoint_state_dir = f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-    console.log(
-        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+    new_checkpoint_state_path = (
+        pathlib.Path(auto_checkpoint_state_dir) / whoami / f"{int(time.time())}_{random.randint(0, 1000000)}"
     )
-    command.extend(["--checkpoint_state_dir", new_checkpoint_state_dir])
+    if artifact_ttl:
+        new_checkpoint_state_path = new_checkpoint_state_path / f"tmp-{artifact_ttl}"
+    console.log(
+        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_path}`"
+    )
+    command.extend(["--checkpoint_state_dir", str(new_checkpoint_state_path)])
 
     return command
 
