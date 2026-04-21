@@ -16,6 +16,7 @@ import logging
 import os
 import threading
 import time
+from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -442,6 +443,14 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
+    max_inflight_enqueue_step_age: int | None = None
+    """Optional wait-based freshness barrier for async prompt queues.
+
+    When set, data prep pauses before preparing the next training step if the
+    oldest not-yet-returned prompt was enqueued more than this many logical
+    trainer steps ago. No rollouts are dropped; the pipeline simply waits for
+    old requests to finish before moving farther ahead.
+    """
     eval_response_length: int | None = None
     """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 
@@ -525,6 +534,8 @@ class StreamingDataLoaderConfig:
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+        if self.max_inflight_enqueue_step_age is not None and self.max_inflight_enqueue_step_age < 0:
+            raise ValueError("`max_inflight_enqueue_step_age` must be >= 0 when provided.")
 
         assert (
             self.apply_verifiable_reward
@@ -724,7 +735,8 @@ def add_prompt_to_generator(
     is_eval: bool,
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
-) -> None:
+    enqueue_step: int | None = None,
+) -> data_types.PromptRequest:
     index = int(example["index"])
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
@@ -732,18 +744,19 @@ def add_prompt_to_generator(
 
     ground_truth = ground_truth_overrides.get(index) if ground_truth_overrides else None
 
-    param_prompt_Q.put(
-        data_types.PromptRequest(
-            prompt=example[INPUT_IDS_PROMPT_KEY],
-            generation_config=generation_config,
-            index=index,
-            prompt_id=f"{epoch_number}_{index}",
-            is_eval=is_eval,
-            active_tools=example.get(TOOLS_COLUMN_KEY),
-            env_config=env_config,
-            ground_truth=ground_truth,
-        )
+    request = data_types.PromptRequest(
+        prompt=example[INPUT_IDS_PROMPT_KEY],
+        generation_config=generation_config,
+        index=index,
+        prompt_id=f"{epoch_number}_{index}",
+        is_eval=is_eval,
+        active_tools=example.get(TOOLS_COLUMN_KEY),
+        env_config=env_config,
+        ground_truth=ground_truth,
+        enqueue_step=enqueue_step,
     )
+    param_prompt_Q.put(request)
+    return request
 
 
 def accumulate_inference_batches(
@@ -763,6 +776,11 @@ def accumulate_inference_batches(
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
+    prefetched_results: deque[data_types.GenerationResult | data_types.ShutdownSentinel] | None = None,
+    on_queue_result_received: Callable[[data_types.GenerationResult | data_types.ShutdownSentinel], None]
+    | None = None,
+    on_prompt_enqueued: Callable[[data_types.PromptRequest], None] | None = None,
+    replenish_enqueue_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
@@ -791,11 +809,14 @@ def accumulate_inference_batches(
     all_indices = []
     all_percent_solved = []
     all_model_steps = []
+    all_enqueue_steps = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
+    accepted_rollout_step_ages: list[float] = []
+    accepted_enqueue_step_deltas: list[float] = []
     progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
@@ -806,22 +827,31 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
-    collected_results = []  # Track results for potential requeue on timeout
+    collected_results_from_queue = []  # Track queue-fetched results for potential requeue on timeout
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
         )
         try:
-            result = inference_results_Q.get(timeout=timeout)
+            from_prefetch = prefetched_results is not None and len(prefetched_results) > 0
+            if from_prefetch:
+                result = prefetched_results.popleft()
+            else:
+                result = inference_results_Q.get(timeout=timeout)
         except Empty:
-            if requeue_on_timeout and collected_results:
+            if requeue_on_timeout and collected_results_from_queue:
                 logger.info(
-                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                    "[accumulate_inference_batches] Timeout with %s/%s queue results collected, requeuing",
+                    len(collected_results_from_queue),
+                    num_prompts,
                 )
-                for r in collected_results:
+                for r in collected_results_from_queue:
                     inference_results_Q.put(r)
             raise
-        collected_results.append(result)
+        if not from_prefetch:
+            collected_results_from_queue.append(result)
+            if on_queue_result_received is not None:
+                on_queue_result_received(result)
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )
@@ -835,18 +865,11 @@ def accumulate_inference_batches(
             f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.index]
-        query = example[INPUT_IDS_PROMPT_KEY]
-        ground_truth = example[GROUND_TRUTHS_KEY]
-        dataset_name = example[VERIFIER_SOURCE_KEY]
-        raw_query = example[RAW_PROMPT_KEY]
-        sample_active_tools = example.get(TOOLS_COLUMN_KEY)
-
         if replenish_prompts:
             assert iter_dataloader is not None
             assert param_prompt_Q is not None
             example = next(iter_dataloader)
-            add_prompt_to_generator(
+            request = add_prompt_to_generator(
                 example,
                 iter_dataloader._epoch,
                 param_prompt_Q,
@@ -854,7 +877,17 @@ def accumulate_inference_batches(
                 is_eval=False,
                 base_env_config=base_env_config,
                 ground_truth_overrides=ground_truth_overrides,
+                enqueue_step=replenish_enqueue_step,
             )
+            if on_prompt_enqueued is not None:
+                on_prompt_enqueued(request)
+
+        example = dataset[result.index]
+        query = example[INPUT_IDS_PROMPT_KEY]
+        ground_truth = example[GROUND_TRUTHS_KEY]
+        dataset_name = example[VERIFIER_SOURCE_KEY]
+        raw_query = example[RAW_PROMPT_KEY]
+        sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
@@ -913,6 +946,12 @@ def accumulate_inference_batches(
         all_percent_solved.append(percent_solved)
         if result.model_step is not None:
             all_model_steps.append(result.model_step)
+            if training_step is not None:
+                accepted_rollout_step_ages.append(float(training_step - result.model_step))
+        if result.enqueue_step is not None:
+            all_enqueue_steps.append(result.enqueue_step)
+            if training_step is not None:
+                accepted_enqueue_step_deltas.append(float(training_step - result.enqueue_step))
 
     if len(results) == 0:
         logging.warning(
@@ -934,6 +973,8 @@ def accumulate_inference_batches(
     combined_tool_call_stats = []
     combined_rollout_states = []
     combined_logprobs = []
+    combined_sample_model_steps = []
+    combined_sample_enqueue_steps = []
 
     earliest_start_time = float("inf")
     prompt_lengths = []
@@ -957,6 +998,14 @@ def accumulate_inference_batches(
         combined_rollout_states.extend(result.request_info.rollout_states)
 
         combined_logprobs.extend(result.logprobs)
+        if result.sample_model_steps is not None:
+            combined_sample_model_steps.extend(result.sample_model_steps)
+        else:
+            combined_sample_model_steps.extend([result.model_step] * len(result.responses))
+        if result.sample_enqueue_steps is not None:
+            combined_sample_enqueue_steps.extend(result.sample_enqueue_steps)
+        else:
+            combined_sample_enqueue_steps.extend([result.enqueue_step] * len(result.responses))
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
@@ -996,6 +1045,8 @@ def accumulate_inference_batches(
         prompt_id=results[0].prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
+        sample_model_steps=combined_sample_model_steps,
+        sample_enqueue_steps=combined_sample_enqueue_steps,
     )
 
     if actor_manager is not None:
@@ -1018,6 +1069,21 @@ def accumulate_inference_batches(
         combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
         combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
         combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    if all_enqueue_steps:
+        enqueue_steps_array = np.array(all_enqueue_steps, dtype=float)
+        combined_reward_metrics["enqueue_step_min"] = float(enqueue_steps_array.min())
+        combined_reward_metrics["enqueue_step_max"] = float(enqueue_steps_array.max())
+        combined_reward_metrics["enqueue_step_mean"] = float(enqueue_steps_array.mean())
+    if accepted_rollout_step_ages:
+        accepted_rollout_step_ages_array = np.array(accepted_rollout_step_ages, dtype=float)
+        combined_reward_metrics["rollout_step_age_min"] = float(accepted_rollout_step_ages_array.min())
+        combined_reward_metrics["rollout_step_age_max"] = float(accepted_rollout_step_ages_array.max())
+        combined_reward_metrics["rollout_step_age_mean"] = float(accepted_rollout_step_ages_array.mean())
+    if accepted_enqueue_step_deltas:
+        accepted_enqueue_step_deltas_array = np.array(accepted_enqueue_step_deltas, dtype=float)
+        combined_reward_metrics["enqueue_step_delta_min"] = float(accepted_enqueue_step_deltas_array.min())
+        combined_reward_metrics["enqueue_step_delta_max"] = float(accepted_enqueue_step_deltas_array.max())
+        combined_reward_metrics["enqueue_step_delta_mean"] = float(accepted_enqueue_step_deltas_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
@@ -1189,6 +1255,8 @@ class DataPreparationActor:
         self.metrics: dict[int, dict] = {}
         self.current_prepared_step = -1
         self._last_consumed_step = -1
+        self._pending_results: deque[data_types.GenerationResult | data_types.ShutdownSentinel] = deque()
+        self._outstanding_enqueue_steps: Counter[int] = Counter()
         self.lock = threading.Lock()
         self.training_step = 0
         self.total_samples_written = 0
@@ -1213,6 +1281,99 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
         logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
+    def _track_enqueued_prompt(self, request: data_types.PromptRequest) -> None:
+        if request.enqueue_step is None:
+            return
+        self._outstanding_enqueue_steps[request.enqueue_step] += 1
+
+    def _track_completed_result(self, result: data_types.GenerationResult | data_types.ShutdownSentinel) -> None:
+        if isinstance(result, data_types.ShutdownSentinel) or result.enqueue_step is None:
+            return
+
+        outstanding = self._outstanding_enqueue_steps.get(result.enqueue_step, 0)
+        if outstanding <= 0:
+            logger.warning(
+                "[DataPreparationActor] Completed prompt %s reported enqueue_step=%s, but no outstanding request was tracked.",
+                result.prompt_id,
+                result.enqueue_step,
+            )
+            return
+
+        if outstanding == 1:
+            del self._outstanding_enqueue_steps[result.enqueue_step]
+        else:
+            self._outstanding_enqueue_steps[result.enqueue_step] = outstanding - 1
+
+    def _buffer_completed_results(self, timeout: float = 0.0) -> int:
+        buffered = 0
+        while True:
+            try:
+                result = self.inference_results_Q.get(timeout=timeout if buffered == 0 else 0.0)
+            except Empty:
+                break
+
+            self._track_completed_result(result)
+            self._pending_results.append(result)
+            buffered += 1
+
+            if isinstance(result, data_types.ShutdownSentinel):
+                break
+
+        return buffered
+
+    def _get_queue_freshness_metrics(self, current_step: int) -> dict[str, float]:
+        oldest_enqueue_step = min(self._outstanding_enqueue_steps) if self._outstanding_enqueue_steps else None
+        metrics = {
+            "queue/outstanding_prompts": float(sum(self._outstanding_enqueue_steps.values())),
+            "queue/pending_completed_prompts": float(len(self._pending_results)),
+            "queue/oldest_outstanding_enqueue_step": float(oldest_enqueue_step)
+            if oldest_enqueue_step is not None
+            else -1.0,
+            "queue/oldest_outstanding_enqueue_age": (
+                float(current_step - oldest_enqueue_step) if oldest_enqueue_step is not None else 0.0
+            ),
+        }
+
+        if self.config.max_inflight_enqueue_step_age is not None:
+            stale_cutoff = current_step - self.config.max_inflight_enqueue_step_age
+            stale_outstanding_prompts = sum(
+                count for enqueue_step, count in self._outstanding_enqueue_steps.items() if enqueue_step < stale_cutoff
+            )
+            metrics["queue/stale_outstanding_prompts"] = float(stale_outstanding_prompts)
+
+        return metrics
+
+    def _wait_for_fresh_enough_outstanding_prompts(self, current_step: int) -> tuple[float, dict[str, float]]:
+        wait_start_time = time.perf_counter()
+        self._buffer_completed_results(timeout=0.0)
+
+        if self.config.max_inflight_enqueue_step_age is None:
+            return 0.0, self._get_queue_freshness_metrics(current_step)
+
+        wait_count = 0
+        while self._outstanding_enqueue_steps:
+            oldest_enqueue_step = min(self._outstanding_enqueue_steps)
+            oldest_enqueue_age = current_step - oldest_enqueue_step
+            if oldest_enqueue_age <= self.config.max_inflight_enqueue_step_age:
+                break
+
+            if wait_count % 10 == 0:
+                logger.info(
+                    "[DataPreparationActor] Step %s: waiting for enqueue_step %s to finish "
+                    "(age=%s, max_allowed=%s, outstanding=%s, pending=%s)",
+                    current_step,
+                    oldest_enqueue_step,
+                    oldest_enqueue_age,
+                    self.config.max_inflight_enqueue_step_age,
+                    sum(self._outstanding_enqueue_steps.values()),
+                    len(self._pending_results),
+                )
+
+            self._buffer_completed_results(timeout=0.1)
+            wait_count += 1
+
+        return time.perf_counter() - wait_start_time, self._get_queue_freshness_metrics(current_step)
+
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
 
@@ -1222,8 +1383,9 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        for _ in range(num_initial_prompts):
-            add_prompt_to_generator(
+        for prompt_idx in range(num_initial_prompts):
+            enqueue_step = self.training_step + (prompt_idx // self.global_batch_size)
+            request = add_prompt_to_generator(
                 next(self.iter_dataloader),
                 self.iter_dataloader._epoch,
                 self.param_prompt_Q,
@@ -1231,7 +1393,9 @@ class DataPreparationActor:
                 is_eval=False,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
+                enqueue_step=enqueue_step,
             )
+            self._track_enqueued_prompt(request)
 
         for step in range(self.training_step, self.num_training_steps):
             generation_idle_wait_start_time = time.perf_counter()
@@ -1241,6 +1405,7 @@ class DataPreparationActor:
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
+            freshness_wait_time, freshness_metrics = self._wait_for_fresh_enough_outstanding_prompts(step)
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1260,6 +1425,10 @@ class DataPreparationActor:
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
                 training_step=step,
+                prefetched_results=self._pending_results,
+                on_queue_result_received=self._track_completed_result,
+                on_prompt_enqueued=self._track_enqueued_prompt,
+                replenish_enqueue_step=step + self.config.async_steps,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
@@ -1286,7 +1455,11 @@ class DataPreparationActor:
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                    self.metrics[step] = {
+                        "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                        "time/generation_idle_waiting_for_freshness_barrier": freshness_wait_time,
+                        **freshness_metrics,
+                    }
                     self.current_prepared_step = step
                 continue
 
@@ -1373,7 +1546,11 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "time/generation_idle_waiting_for_freshness_barrier": freshness_wait_time,
+                    **freshness_metrics,
+                }
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1381,14 +1558,10 @@ class DataPreparationActor:
                 unsolved_num_responses = (~solved_mask).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
                 sequence_length_solved = (
-                    np.array([])
-                    if np.all(scores == 0)
-                    else np.array(sequence_lengths[solved_mask])
+                    np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[solved_mask])
                 )
                 sequence_length_unsolved = (
-                    np.array([])
-                    if np.all(solved_mask)
-                    else np.array(sequence_lengths[~solved_mask])
+                    np.array([]) if np.all(solved_mask) else np.array(sequence_lengths[~solved_mask])
                 )
                 stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 
@@ -1397,6 +1570,7 @@ class DataPreparationActor:
 
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "time/generation_idle_waiting_for_freshness_barrier": freshness_wait_time,
                     "scores": scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
@@ -1421,6 +1595,7 @@ class DataPreparationActor:
                     "val/advantages_hist": advantages,
                     **reward_metrics,
                     **batch_metrics_prefixed,
+                    **freshness_metrics,
                 }
 
                 tool_stats = EnvStatistics(tool_names=self.tool_names)

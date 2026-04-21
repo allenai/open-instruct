@@ -375,6 +375,9 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         start_time=metadata["start_time"],
         logprobs=logprobs,
         model_step=metadata.get("model_step"),
+        enqueue_step=metadata.get("enqueue_step"),
+        sample_model_steps=[metadata.get("model_step")] * len(response_ids),
+        sample_enqueue_steps=[metadata.get("enqueue_step")] * len(response_ids),
     )
     is_eval = metadata["is_eval"]
 
@@ -447,6 +450,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "active_tools": request.active_tools,
         "env_config": request.env_config,
         "ground_truth": request.ground_truth,
+        "enqueue_step": request.enqueue_step,
     }
 
     for j in range(request.generation_config.n):

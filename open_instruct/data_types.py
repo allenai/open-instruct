@@ -59,6 +59,9 @@ class GenerationResult:
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
     model_step: int | None = None
+    enqueue_step: int | None = None
+    sample_model_steps: list[int | None] | None = None
+    sample_enqueue_steps: list[int | None] | None = None
 
 
 @dataclass
@@ -99,6 +102,8 @@ class PromptRequest:
     ground_truth: Any = None
     """Optional ground truth override (e.g. from evolving rubrics). When set, the vLLM
     engine uses this instead of looking up the ground truth from the dataset."""
+    enqueue_step: int | None = None
+    """Logical trainer step when this prompt was enqueued into the async rollout pipeline."""
 
 
 @dataclass

@@ -41,6 +41,8 @@ class RolloutRecord:
     ground_truth: list[int] | None = None
     request_info: dict | None = None
     logprobs: list[float] | None = None
+    model_step: int | None = None
+    enqueue_step: int | None = None
 
 
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
@@ -118,6 +120,16 @@ def _save_rollouts(
                     ground_truth=batch.ground_truths[i],
                     request_info=_get_request_info_for_sample(result.request_info, i),
                     logprobs=result.logprobs[i] if result.logprobs else None,
+                    model_step=(
+                        result.sample_model_steps[i]
+                        if result.sample_model_steps is not None and i < len(result.sample_model_steps)
+                        else result.model_step
+                    ),
+                    enqueue_step=(
+                        result.sample_enqueue_steps[i]
+                        if result.sample_enqueue_steps is not None and i < len(result.sample_enqueue_steps)
+                        else result.enqueue_step
+                    ),
                 )
             )
         )

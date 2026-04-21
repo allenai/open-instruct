@@ -2132,8 +2132,7 @@ def run_training(
     if resume_training_step > 1 and args.deepspeed_stage == 3:
         logger.info("[Main Thread] ZeRO-3 resume: running dummy optimizer step to prime NCCL state.")
         ray_get_with_progress(
-            [m.dummy_optimizer_step.remote() for m in policy_group.models],
-            desc="ZeRO-3 resume dummy step",
+            [m.dummy_optimizer_step.remote() for m in policy_group.models], desc="ZeRO-3 resume dummy step"
         )
         weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")

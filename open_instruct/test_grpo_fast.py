@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import unittest
+from collections import deque
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -155,10 +156,18 @@ class TestGrpoFastBase(unittest.TestCase):
 
     def create_mock_result_from_request(self, request: PromptRequest, num_samples_per_prompt=1):
         """Create a mock GenerationResult from a PromptRequest."""
-        return self.create_mock_result(request.index, request.prompt_id, num_samples_per_prompt)
+        return self.create_mock_result(
+            request.index, request.prompt_id, num_samples_per_prompt, enqueue_step=request.enqueue_step
+        )
 
     def create_mock_result(
-        self, index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None, model_step: int | None = None
+        self,
+        index: int,
+        prompt_id: str,
+        num_samples_per_prompt=1,
+        reward_scores=None,
+        model_step: int | None = None,
+        enqueue_step: int | None = None,
     ):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
@@ -187,6 +196,9 @@ class TestGrpoFastBase(unittest.TestCase):
             reward_scores=reward_scores,
             reward_metrics={"time/reward": 0.0},
             model_step=model_step,
+            enqueue_step=enqueue_step,
+            sample_model_steps=[model_step] * total_responses,
+            sample_enqueue_steps=[enqueue_step] * total_responses,
         )
 
     def create_mock_tokenizer_and_reward_fn(self):
