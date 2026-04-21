@@ -37,7 +37,7 @@ uv run python mason.py \
   --priority urgent \
   --description "olmo-hybrid tokenize small (num_examples=$NUM_EXAMPLES, suffix=$OUTPUT_SUFFIX)" \
   --no_auto_dataset_cache \
-  -- uv run python scripts/data/download_hf_repo.py --repo_id $TOKENIZER --local_dir $tokenizer_path \&\& uv run python scripts/data/convert_sft_data_for_olmocore.py \
+  -- uv run hf download $TOKENIZER --local-dir $tokenizer_path \&\& uv run python scripts/data/convert_sft_data_for_olmocore.py \
       --dataset_mixer_list \
          allenai/Dolci-Think-SFT-32B 1.0 \
          allenai/olmo-toolu-sft-mix-T2-S2-f2-bfclv3-decontaminated-200K-thinking-id-fixed 3.0 \

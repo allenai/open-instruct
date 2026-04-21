@@ -30,8 +30,6 @@ cd /tmp/oi-main-verify
 Two fixes you will likely need on the main worktree (both are harmless
 no-ops if your branch already contains them):
 
-- If the launcher on your branch calls `scripts/data/download_hf_repo.py`
-  and that file doesn't exist on `origin/main`, drop the download step.
 - `transformers v5` rejects tokenizer-only HF repos in
   `AutoConfig.from_pretrained`. Cherry-pick the path-substring fix if
   needed (this repo's commit `3f209e6e7`).
