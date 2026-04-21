@@ -42,7 +42,7 @@ uv run python mason.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 262144 \
+    --total_episodes 512000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
