@@ -27,6 +27,27 @@ from datasets import load_dataset
 logger = logging.getLogger(__name__)
 
 
+def _ensure_buildx_builder(builder_name: str) -> None:
+    """Ensure a docker-container buildx builder exists and is selected."""
+    inspect = subprocess.run(
+        ["docker", "buildx", "inspect", builder_name],
+        capture_output=True,
+        text=True,
+    )
+    if inspect.returncode != 0:
+        logger.info(f"Creating buildx builder '{builder_name}' with docker-container driver")
+        subprocess.run(
+            ["docker", "buildx", "create", "--name", builder_name, "--driver", "docker-container", "--use"],
+            check=True,
+        )
+    else:
+        # Force using the intended builder in case another one is currently active.
+        subprocess.run(["docker", "buildx", "use", builder_name], check=True)
+
+    # Bootstrap so QEMU/binfmt capabilities are initialized if available.
+    subprocess.run(["docker", "buildx", "inspect", "--bootstrap"], check=True)
+
+
 def container_def_to_dockerfile(container_def: str) -> str:
     """Convert a Singularity/Apptainer def to a Dockerfile."""
     base_image = "ubuntu:22.04"
@@ -79,6 +100,16 @@ def main():
         action="store_true",
         help="Build and push with docker buildx (required for multi-platform tags).",
     )
+    parser.add_argument(
+        "--force-rebuild",
+        action="store_true",
+        help="Rebuild and repush tags even if they already exist on the registry.",
+    )
+    parser.add_argument(
+        "--buildx-builder",
+        default="swerl-multiarch",
+        help="Buildx builder name to use when --use-buildx is enabled.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -123,25 +154,29 @@ def main():
     # Build and push images (parallel)
     lock = threading.Lock()
     use_buildx = args.use_buildx or "," in args.platform
+    if use_buildx and not args.dry_run:
+        _ensure_buildx_builder(args.buildx_builder)
 
     def build_one(content_hash: str, dockerfile_content: str, setup_script: str) -> None:
         image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
         tasks = hash_to_tasks[content_hash]
 
-        # Skip if image already exists on DockerHub
-        try:
-            check = subprocess.run(
-                ["docker", "manifest", "inspect", image_tag],
-                capture_output=True, timeout=15,
-            )
-            if check.returncode == 0:
-                logger.info(f"Skipping {image_tag} (exists on registry)")
-                with lock:
-                    for t in tasks:
-                        task_to_image[t] = image_tag
-                return
-        except Exception:
-            pass
+        # Skip if image already exists on DockerHub unless force-rebuild is requested.
+        if not args.force_rebuild:
+            try:
+                check = subprocess.run(
+                    ["docker", "manifest", "inspect", image_tag],
+                    capture_output=True,
+                    timeout=15,
+                )
+                if check.returncode == 0:
+                    logger.info(f"Skipping {image_tag} (exists on registry)")
+                    with lock:
+                        for t in tasks:
+                            task_to_image[t] = image_tag
+                    return
+            except Exception:
+                pass
 
         # Each worker needs its own Docker client
         worker_client = docker_sdk.from_env(timeout=300)
@@ -162,6 +197,8 @@ def main():
                             "build",
                             "--platform",
                             args.platform,
+                            "--builder",
+                            args.buildx_builder,
                             "--tag",
                             image_tag,
                             "--push",
