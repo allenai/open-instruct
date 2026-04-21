@@ -146,7 +146,10 @@ class SWERLSandboxEnv(RLEnvironment):
         per_sample_config = kwargs.get("env_config") or {}
 
         # Image must be task-specific; no fallback to default constructor image.
-        resolved_image = per_sample_config.get("image")
+        # Support both reset kwargs styles:
+        # 1) nested under env_config (newer path), and
+        # 2) top-level kwargs (EnvConfigEntry.kwargs expansion path).
+        resolved_image = kwargs.get("image") or per_sample_config.get("image")
         if not resolved_image and self._task_data_dir and task_id:
             task_dir = os.path.join(self._task_data_dir, task_id)
             image_file = os.path.join(task_dir, "image.txt")
