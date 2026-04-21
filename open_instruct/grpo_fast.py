@@ -1274,15 +1274,20 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss_denominator = accumulation_token_counts[batch_start]
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
-                    local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
-                        self.model,
-                        data_BT.query_responses[i],
-                        None,
-                        data_BT.position_ids[i],
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        return_entropy=self.args.record_entropy,
-                    )
+                    # When the policy is frozen (value warmup), use no_grad to prevent
+                    # ZeRO-3 computation graph accumulation without a matching backward call,
+                    # which would corrupt ZeRO-3 parameter state and cause NCCL hangs.
+                    _policy_ctx = torch.no_grad() if self._skip_policy_update else contextlib.nullcontext()
+                    with _policy_ctx:
+                        local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
+                            self.model,
+                            data_BT.query_responses[i],
+                            None,
+                            data_BT.position_ids[i],
+                            self.pad_token_id,
+                            self.streaming_config.temperature,
+                            return_entropy=self.args.record_entropy,
+                        )
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 

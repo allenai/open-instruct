@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 - Generative value model training script (`grpo_fast_genvalue.py`) wrapping `grpo_fast.py` with a second vLLM pool for per-step partial-rollout scoring, background scoring thread, `segment_rollout` (SAE/fixed-chunk boundary logic), and `GenValueExperimentConfig` validation (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `PolicyTrainerRayProcess.from_pretrained` to use `self.streaming_config` instead of the module-level global `streaming_config`, which caused a `NameError` when `grpo_fast` was imported as a module rather than run as `__main__` (https://github.com/allenai/open-instruct/pull/TODO).
 
+### Fixed
+- Fix NCCL allgather hang during value warmup (`value_warmup_steps` > 0): wrap frozen-policy forward pass in `torch.no_grad()` to prevent ZeRO-3 computation graph accumulation without a matching backward call, which corrupted ZeRO-3 parameter state across iterations (https://github.com/allenai/open-instruct/pull/TODO).
+
 ### Removed
 - Remove `--use_lm_value_model` option and its associated value head code. The scalar PPO critic is the only remaining value head (https://github.com/allenai/open-instruct/pull/TODO).
 
