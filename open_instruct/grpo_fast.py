@@ -1487,7 +1487,10 @@ def create_generation_configs(
         logprobs=1,
     )
     eval_generation_config = dataclasses.replace(
-        generation_config, n=args.eval_pass_at_k, max_tokens=streaming_config.eval_response_length
+        generation_config,
+        n=args.eval_pass_at_k,
+        max_tokens=streaming_config.eval_response_length,
+        top_p=args.eval_top_p or generation_config.top_p,
     )
     return {"train": generation_config, "eval": eval_generation_config}
 
