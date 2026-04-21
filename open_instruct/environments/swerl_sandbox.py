@@ -143,13 +143,9 @@ class SWERLSandboxEnv(RLEnvironment):
             raise RuntimeError("Reset failed without capturing an error.")
 
     def _do_reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
-        per_sample_config = kwargs.get("env_config") or {}
-
         # Image must be task-specific; no fallback to default constructor image.
-        # Support both reset kwargs styles:
-        # 1) nested under env_config (newer path), and
-        # 2) top-level kwargs (EnvConfigEntry.kwargs expansion path).
-        resolved_image = kwargs.get("image") or per_sample_config.get("image")
+        # Rely on sample-level reset kwargs for image selection.
+        resolved_image = kwargs.get("image")
         if not resolved_image and self._task_data_dir and task_id:
             task_dir = os.path.join(self._task_data_dir, task_id)
             image_file = os.path.join(task_dir, "image.txt")
@@ -162,10 +158,10 @@ class SWERLSandboxEnv(RLEnvironment):
             instance_details = {
                 "task_id": task_id,
                 "backend_type": self._backend_type,
-                "env_name": per_sample_config.get("env_name"),
-                "instance_name": kwargs.get("instance_name") or per_sample_config.get("instance_name"),
-                "instance_id": kwargs.get("instance_id") or per_sample_config.get("instance_id"),
-                "episode_id": kwargs.get("episode_id") or per_sample_config.get("episode_id"),
+                "env_name": kwargs.get("env_name"),
+                "instance_name": kwargs.get("instance_name"),
+                "instance_id": kwargs.get("instance_id"),
+                "episode_id": kwargs.get("episode_id"),
             }
             logger.error(
                 "Missing explicit image for SWERLSandboxEnv reset: %s",
