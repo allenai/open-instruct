@@ -15,6 +15,13 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 @dataclass
 class ExecutionResult:
     """Result from code or command execution."""
@@ -67,19 +74,25 @@ class DockerBackend(SandboxBackend):
         self._image = image
         self._timeout = timeout
         self._mem_limit = mem_limit
+        self._auto_remove = _env_flag("SWERL_DOCKER_AUTO_REMOVE", True)
         self._container = None
         self._client = None
 
     def start(self) -> None:
         previous_cid = self._container.short_id if self._container is not None else None
-        logger.info(f"Starting Docker container (image={self._image}, previous_container={previous_cid})")
+        logger.info(
+            "Starting Docker container (image=%s, previous_container=%s, auto_remove=%s)",
+            self._image,
+            previous_cid,
+            self._auto_remove,
+        )
         if self._client is None:
             self._client = docker_sdk.from_env(timeout=300)
         self._container = self._client.containers.run(
             self._image,
             command="sleep infinity",
             detach=True,
-            remove=True,
+            remove=self._auto_remove,
             mem_limit=self._mem_limit,
             memswap_limit=self._mem_limit,
         )
