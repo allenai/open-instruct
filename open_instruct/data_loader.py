@@ -674,7 +674,13 @@ def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, A
     max_steps = sample_env_config.get("max_steps", base_env_config.max_steps)
 
     merged = dict(base_env_config.env_configs)
-    for sample_entry in sample_env_config.get("env_configs", []):
+    sample_entries = list(sample_env_config.get("env_configs", []))
+    # Backward compatibility: support flat per-sample env_config shape
+    # like {"env_name": "swerl_sandbox", "image": "...", ...}.
+    if not sample_entries and "env_name" in sample_env_config:
+        sample_entries = [sample_env_config]
+
+    for sample_entry in sample_entries:
         env_name = sample_entry["env_name"]
         base = merged.get(env_name)
         is_text_env = sample_entry.get("is_text_env", base.is_text_env if base else False)
