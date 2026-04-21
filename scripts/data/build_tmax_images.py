@@ -24,6 +24,8 @@ import threading
 
 import docker as docker_sdk
 from datasets import load_dataset
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -413,7 +415,10 @@ def main():
         )
         effective_workers = 1
 
-    def build_one(content_hash: str, dockerfile_content: str, setup_script: str) -> None:
+    counters = {"pushed": 0, "skipped": 0, "failed": 0}
+
+    def build_one(content_hash: str, dockerfile_content: str, setup_script: str) -> str:
+        """Return one of 'pushed' | 'skipped' | 'failed'."""
         image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
         tasks = hash_to_tasks[content_hash]
 
@@ -430,7 +435,7 @@ def main():
                     with lock:
                         for t in tasks:
                             task_to_image[t] = image_tag
-                    return
+                    return "skipped"
             except Exception:
                 pass
 
@@ -496,12 +501,14 @@ def main():
             with lock:
                 for t in tasks:
                     task_to_image[t] = image_tag
+            return "pushed"
 
         except Exception as e:
             logger.error(f"Failed to build {image_tag}: {e}")
             with lock:
                 for t in tasks:
                     task_to_image[t] = "ubuntu:22.04"
+            return "failed"
 
     if args.dry_run:
         for content_hash in hash_to_dockerfile:
@@ -517,8 +524,33 @@ def main():
                 executor.submit(build_one, ch, df, ss)
                 for ch, (df, ss) in items
             ]
-            for f in concurrent.futures.as_completed(futures):
-                f.result()  # raise exceptions
+            with logging_redirect_tqdm():
+                progress = tqdm(
+                    total=len(futures),
+                    desc="Images",
+                    unit="img",
+                    smoothing=0.1,
+                )
+                try:
+                    for f in concurrent.futures.as_completed(futures):
+                        try:
+                            outcome = f.result()
+                        except Exception:
+                            outcome = "failed"
+                            logger.exception("build_one raised")
+                        counters[outcome] = counters.get(outcome, 0) + 1
+                        progress.set_postfix(
+                            pushed=counters["pushed"],
+                            skipped=counters["skipped"],
+                            failed=counters["failed"],
+                        )
+                        progress.update(1)
+                finally:
+                    progress.close()
+        logger.info(
+            "Build run complete: pushed=%d skipped=%d failed=%d",
+            counters["pushed"], counters["skipped"], counters["failed"],
+        )
 
     # Update the HF dataset with image tags.
     # Under --repair-missing we only overwrite the tasks we rebuilt and keep the
