@@ -476,9 +476,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 decision = grpo_utils.KondoGateDecision(True, 1.0, float("-inf"))
                 if self._kondo_gate is not None:
-                    delight_sum = (delight * response_mask).sum()
-                    token_count = response_mask.sum().float()
-                    decision = self._kondo_gate.decide(delight_sum, token_count)
+                    decision = self._kondo_gate.decide(delight, response_mask)
                 kondo_gate_stats.append(decision)
 
                 if decision.should_backward:

@@ -410,11 +410,6 @@ class KondoGateDecision(NamedTuple):
     lam: float
 
 
-# Refresh the quantile lambda every N decide() calls; stale lambda is fine because the
-# delight distribution shifts slowly relative to ring-buffer writes.
-_KONDO_QUANTILE_REFRESH = 32
-
-
 class KondoGateState:
     """Per-sample Kondo gate over delight (https://arxiv.org/abs/2603.20526).
 
@@ -443,10 +438,9 @@ class KondoGateState:
         self._write_idx = 0
         self._generator = torch.Generator(device=device)
         self._generator.manual_seed(int(seed))
-        self._cached_lam: torch.Tensor | None = None
-        self._calls_since_refresh = 0
+        self._log_calls = 0
 
-    def _reduced_chi(self, delight_sum: torch.Tensor, token_count: torch.Tensor) -> torch.Tensor:
+    def _reduced_chi(self, delight: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Reduce (sum_delight, sum_tokens) across the process group and return sum/count.
 
         With Ulysses SP, each rank holds a sequence-slice of its sample, so per-rank
@@ -455,7 +449,7 @@ class KondoGateState:
         and the result is identical on every rank in the group (required to keep
         DeepSpeed / FSDP collectives in sync).
         """
-        packed = torch.stack([delight_sum.detach(), token_count.detach()]).to(self.device)
+        packed = torch.stack([(delight * response_mask).sum().detach(), response_mask.sum().float().detach()])
         if dist.is_available() and dist.is_initialized():
             dist.all_reduce(packed, op=dist.ReduceOp.SUM, group=self.process_group)
         return packed[0] / packed[1].clamp_min(1.0)
@@ -465,26 +459,47 @@ class KondoGateState:
         self._write_idx = (self._write_idx + 1) % self.history_size
         self._count = min(self._count + 1, self.history_size)
 
-    def _quantile(self) -> torch.Tensor:
-        if self._cached_lam is None or self._calls_since_refresh >= _KONDO_QUANTILE_REFRESH:
-            self._cached_lam = torch.quantile(self._buffer[: self._count], 1.0 - self.rate)
-            self._calls_since_refresh = 0
-        self._calls_since_refresh += 1
-        return self._cached_lam
-
-    def decide(self, delight_sum: torch.Tensor, token_count: torch.Tensor) -> KondoGateDecision:
-        """All-reduces (delight_sum, token_count), computes chi = sum/count, and gates.
+    def decide(self, delight: torch.Tensor, response_mask: torch.Tensor) -> KondoGateDecision:
+        """Computes token-weighted chi over the response, all-reduces across ranks, and gates.
 
         Returns identical values on every rank in the process group.
         """
-        chi = self._reduced_chi(delight_sum, token_count)
+        chi = self._reduced_chi(delight, response_mask)
         self._append(chi)
+        self._log_calls += 1
+        should_log = self._log_calls <= 5 or self._log_calls % 50 == 0
         if self._count < self.warmup or self.rate >= 1.0:
+            if should_log:
+                logger.info(
+                    "[kondo] call=%d count=%d warmup=%d rate=%.3f chi=%.6g -> WARMUP (pass-through)",
+                    self._log_calls,
+                    self._count,
+                    self.warmup,
+                    self.rate,
+                    float(chi.item()),
+                )
             return KondoGateDecision(True, 1.0, float("-inf"))
-        lam = self._quantile()
+        lam = torch.quantile(self._buffer[: self._count], 1.0 - self.rate)
         prob = torch.sigmoid((chi - lam) / self.temperature)
         gate = torch.bernoulli(prob, generator=self._generator)
-        return KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
+        decision = KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
+        if should_log:
+            buf = self._buffer[: self._count]
+            logger.info(
+                "[kondo] call=%d count=%d chi=%.6g lam=%.6g prob=%.4f gate=%d temp=%.3g "
+                "buf[min/med/max]=%.6g/%.6g/%.6g",
+                self._log_calls,
+                self._count,
+                float(chi.item()),
+                decision.lam,
+                decision.prob,
+                int(decision.should_backward),
+                self.temperature,
+                float(buf.min()),
+                float(buf.median()),
+                float(buf.max()),
+            )
+        return decision
 
 
 def summarize_kondo_gate_stats(stats: list[KondoGateDecision]) -> dict[str, float]:
