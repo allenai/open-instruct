@@ -16,6 +16,7 @@ uv run mason.py \
     --workspace ai2/oe-adapt-code \
     --priority ${PRIORITY} \
     --pure_docker_mode \
+    --no_auto_dataset_cache \
     --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 1 \
