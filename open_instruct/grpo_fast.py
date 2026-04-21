@@ -882,13 +882,16 @@ class PolicyTrainerRayProcess(RayProcess):
         ground_truths_for_pack: list[str],
         siblings_for_pack: list[list[dict]] | None,
         hints_for_pack: list[str | None] | None = None,
+        sequential: bool = False,
     ) -> torch.Tensor:
         """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
 
-        All sub-sequences are expanded (conditioning text inserted) and padded to the same
-        length, then forwarded through the value model in a single batched call. This produces
-        one ZeRO-3 allgather cycle regardless of how many sub-sequences are in the pack,
-        preventing cross-PG NCCL deadlocks when weight sync runs concurrently.
+        When ``sequential=False`` (default), all sub-sequences are padded to the same length
+        and forwarded in a single batched call, producing one ZeRO-3 allgather cycle. Use this
+        for the no-grad scoring pass to prevent cross-PG NCCL deadlocks.
+
+        When ``sequential=True``, sub-sequences are forwarded one at a time. Use this for the
+        gradient (loss) pass to avoid OOM from large batched activations during backward.
 
         Returns a values tensor of shape (batch=1, seq_len-1) matching `query_responses[:, 1:]`.
         """
@@ -933,6 +936,27 @@ class PolicyTrainerRayProcess(RayProcess):
 
             expanded_ids_list.append(new_ids)
             orig_masks_list.append(orig_mask)
+
+        if sequential:
+            # Process each sub-sequence independently to bound peak activation memory during
+            # the gradient backward. Used for the loss pass (with gradients).
+            for i, sub in enumerate(subseqs):
+                ids = expanded_ids_list[i]
+                L = ids.shape[0]
+                orig_mask = orig_masks_list[i]
+                attn = torch.ones(1, L, dtype=torch.long, device=device)
+                pos = torch.arange(L, dtype=position_ids.dtype, device=device).unsqueeze(0)
+                output = self.value_model(input_ids=ids.unsqueeze(0), attention_mask=attn, position_ids=pos)
+                logits = getattr(output, "logits", output)
+                sub_values = logits[0, :-1].squeeze(-1).float()  # (L-1,)
+                orig_mask_shifted = orig_mask[1:]  # length L-1; aligns with shifted logits
+                new_resp_values = sub_values[orig_mask_shifted]
+                base = sub["offset_in_pack"]
+                mask = sub["response_is_resp"]
+                resp_positions = mask[1:].nonzero(as_tuple=True)[0] + base
+                n = min(resp_positions.numel(), new_resp_values.numel())
+                out_values[0, resp_positions[:n]] = new_resp_values[:n]
+            return out_values
 
         # Pad all expanded sequences to the same length for a single batched forward.
         n_subs = len(expanded_ids_list)
@@ -1498,6 +1522,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 data_BT.response_masks[i].bool(),
                                 gts_pack,
                                 sibs_pack,
+                                sequential=True,
                             )
                         else:
                             new_values = self.forward_value(
