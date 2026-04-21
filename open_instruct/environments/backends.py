@@ -70,7 +70,8 @@ class DockerBackend(SandboxBackend):
         self._client = None
 
     def start(self) -> None:
-        logger.info(f"Starting Docker container (image={self._image})")
+        previous_cid = self._container.short_id if self._container is not None else None
+        logger.info(f"Starting Docker container (image={self._image}, previous_container={previous_cid})")
         if self._client is None:
             self._client = docker_sdk.from_env(timeout=300)
         self._container = self._client.containers.run(
@@ -87,10 +88,37 @@ class DockerBackend(SandboxBackend):
         if self._container is None:
             raise RuntimeError("Container not started. Call start() first.")
 
+        container_id = self._container.short_id
+        logger.debug(
+            "Docker exec start (container=%s, image=%s, timeout=%ss, command=%r)",
+            container_id,
+            self._image,
+            self._timeout,
+            command,
+        )
         wrapped = (
             f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
         )
-        exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
+        try:
+            exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
+        except docker_sdk.errors.NotFound:
+            # The container can disappear between reset/start and exec (e.g. daemon cleanup
+            # or external removal). Recreate it once and retry this command.
+            logger.warning(
+                "Docker container disappeared before exec (container=%s, image=%s). "
+                "Restarting and retrying command once.",
+                container_id,
+                self._image,
+            )
+            self.start()
+            if self._container is None:
+                raise RuntimeError("Failed to restart Docker container after NotFound error.")
+            logger.info(
+                "Retrying command after container restart (old_container=%s, new_container=%s)",
+                container_id,
+                self._container.short_id,
+            )
+            exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
         stdout_raw = (output[0] or b"") if output else b""
         stderr_raw = (output[1] or b"") if output else b""
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
@@ -140,12 +168,14 @@ class DockerBackend(SandboxBackend):
     def close(self) -> None:
         if self._container is not None:
             cid = self._container.short_id
-            logger.info(f"Closing Docker container: {cid}")
+            logger.info(f"Closing Docker container: {cid} (image={self._image})")
             try:
                 self._container.kill()
+                logger.info(f"Killed Docker container: {cid}")
             except Exception:
                 try:
                     self._container.stop(timeout=3)
+                    logger.info(f"Stopped Docker container: {cid}")
                 except Exception as e:
                     logger.warning(f"Error stopping container {cid}: {e}")
             self._container = None
