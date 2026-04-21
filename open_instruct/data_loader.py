@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, padding_free_collator, utils, value_model_utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -1040,16 +1040,7 @@ def _extract_subseq_indices_per_pack(response_masks: list[torch.Tensor]) -> list
     result: list[list[int]] = []
     for rm in response_masks:
         flat = rm.view(-1).tolist()
-        seen: list[int] = []
-        seen_set: set[int] = set()
-        for v in flat:
-            if v == 0:
-                continue
-            if v in seen_set:
-                continue
-            seen.append(int(v))
-            seen_set.add(int(v))
-        result.append(seen)
+        result.append(list(dict.fromkeys(int(v) for v in flat if v != 0)))
     return result
 
 
@@ -1080,7 +1071,6 @@ def populate_value_model_fields(
     """
     assert packed_sequences.dones is not None
 
-    # 1) Per-token rewards: lookup_rewards[dones[t]] gives scores[i] at the EOS of sub-seq i.
     lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
     lookup_rewards[1:] = scores.astype(np.float32)
     packed_rewards: list[torch.Tensor] = []
@@ -1089,7 +1079,6 @@ def populate_value_model_fields(
         packed_rewards.append(torch.tensor(lookup_rewards[dones_np], dtype=torch.float32))
     packed_sequences.rewards = packed_rewards
 
-    # 2) SAE segment boundaries.
     if use_sae:
         assert packed_sequences.vllm_logprobs is not None
         assert packed_sequences.response_masks is not None
@@ -1101,10 +1090,14 @@ def populate_value_model_fields(
             segments.append(is_boundary.to(dtype=torch.bool))
         packed_sequences.segment_boundaries = segments
 
-    # 3) Per-pack ground truths (one string per sub-sequence in the pack).
+    subseq_indices_per_pack = (
+        _extract_subseq_indices_per_pack(packed_sequences.response_masks)
+        if (need_ground_truths or need_siblings)
+        else []
+    )
+
     gt_per_pack: list[list[str]] | None = None
     if need_ground_truths:
-        subseq_indices_per_pack = _extract_subseq_indices_per_pack(packed_sequences.response_masks)
         gt_per_pack = []
         for pack_subseqs in subseq_indices_per_pack:
             pack_gts: list[str] = []
@@ -1117,13 +1110,7 @@ def populate_value_model_fields(
             gt_per_pack.append(pack_gts)
         packed_sequences.ground_truths = gt_per_pack
 
-    # 4) Sibling rollouts per sub-sequence (uniform random within prompt group, exclude self).
     if need_siblings:
-        subseq_indices_per_pack = (
-            _extract_subseq_indices_per_pack(packed_sequences.response_masks)
-            if not need_ground_truths
-            else subseq_indices_per_pack  # noqa: F821 - reused from above
-        )
         siblings_per_pack: list[list[list[dict]]] = []
         texts = decoded_responses if decoded_responses is not None else [""] * len(scores)
         for pack_subseqs in subseq_indices_per_pack:
@@ -1532,25 +1519,12 @@ class DataPreparationActor:
             ]
             packed_sequences.advantages = packed_advantages
 
-            # Populate value-model fields (rewards, SAE boundaries, per-sub-seq ground truths,
-            # sibling rollouts) when the value model is active. This is a no-op for plain GRPO.
             if self.config.use_value_model:
                 need_gt = (
                     self.config.value_model_ground_truth_conditioning
-                    or self.config.gt_conditioning_template
-                    in {
-                        "rollout_context",
-                        "correct_demo",
-                        "lm_yesno",
-                        "lm_yesno_blind",
-                        "lm_yesno_siblings",
-                    }
+                    or self.config.gt_conditioning_template in value_model_utils.TEMPLATES_REQUIRING_GT
                 )
-                need_siblings = self.config.gt_conditioning_template in {
-                    "rollout_context",
-                    "correct_demo",
-                    "lm_yesno_siblings",
-                }
+                need_siblings = self.config.gt_conditioning_template in value_model_utils.TEMPLATES_REQUIRING_SIBLINGS
                 populate_value_model_fields(
                     packed_sequences=packed_sequences,
                     scores=scores,

@@ -215,7 +215,7 @@ class PackedSequences(Generic[T]):
     value model is active and ground-truth conditioning / rollout-context conditioning is used."""
     sibling_rollouts: list[list[list[dict]]] | None = None
     """per-pack list of per-sub-sequence list of sibling rollouts ({text, is_correct}).
-    Populated only when rollout_context / correct_demo / lm_yesno_siblings conditioning is used.
+    Populated only when rollout_context / correct_demo conditioning is used.
     """
     segment_boundaries: list[torch.Tensor] | None = None
     """packed SAE segment boundary mask (batch_size, pack_length); 1 at a boundary token."""

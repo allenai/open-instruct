@@ -123,13 +123,6 @@ run_phase "3_sae" \
     --use_sae --sae_threshold 0.2
 check_training_args "3_sae" "use_sae" "True"
 
-# ── Phase 4: LM-yesno ─────────────────────────────────────────────────────────
-run_phase "4_lm_yesno" \
-    --use_lm_value_model \
-    --gt_conditioning_template lm_yesno
-check_training_args "4_lm_yesno" "use_lm_value_model" "True"
-check_log "4_lm_yesno" "LM-value yes_id="
-
 # ── Phase 5: frozen-policy warmup ─────────────────────────────────────────────
 # Use warmup_steps=10 so it fires within our 5-step smoke window (we run >5 steps due to async).
 run_phase "5_warmup" \

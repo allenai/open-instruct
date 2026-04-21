@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Generative value model training script (`grpo_fast_genvalue.py`) wrapping `grpo_fast.py` with a second vLLM pool for per-step partial-rollout scoring, background scoring thread, `segment_rollout` (SAE/fixed-chunk boundary logic), and `GenValueExperimentConfig` validation (https://github.com/allenai/open-instruct/pull/TODO).
+- Fix `PolicyTrainerRayProcess.from_pretrained` to use `self.streaming_config` instead of the module-level global `streaming_config`, which caused a `NameError` when `grpo_fast` was imported as a module rather than run as `__main__` (https://github.com/allenai/open-instruct/pull/TODO).
+
+### Removed
+- Remove `--use_lm_value_model` option and all LM-yesno value head code (`get_yes_no_token_ids`, `extract_yes_no_value`, `lm_yesno_bce_loss`, `lm_yesno*` conditioning templates). The scalar PPO critic is the only remaining value head (https://github.com/allenai/open-instruct/pull/TODO).
+
 ### Changed
 - Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
 - Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).

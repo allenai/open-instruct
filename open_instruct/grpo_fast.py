@@ -78,6 +78,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
+from vllm import SamplingParams as VLLMSamplingParams
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
@@ -283,6 +284,15 @@ class PolicyTrainerRayProcess(RayProcess):
         self.world_size = world_size
         self.local_rank = local_rank
         self.dp_world_size = world_size // args.sequence_parallel_size
+        # Gen-value model handles (set by grpo_fast_genvalue.main() when applicable).
+        self._gen_value_engines: list | None = None
+        self._gen_value_training_queue = None
+
+    def set_gen_value_engines(self, engines: list) -> None:
+        self._gen_value_engines = engines
+
+    def set_gen_value_training_queue(self, queue: Any) -> None:
+        self._gen_value_training_queue = queue
 
     def get_dataloader_state(self) -> dict[str, Any]:
         return self._streaming_dataloader.state_dict()
@@ -516,7 +526,7 @@ class PolicyTrainerRayProcess(RayProcess):
             expected = list(range(dp_rank * args.sequence_parallel_size, (dp_rank + 1) * args.sequence_parallel_size))
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
-        self._streaming_dataloader = streaming_config.build_dataloader(
+        self._streaming_dataloader = self.streaming_config.build_dataloader(
             tokenizer=tokenizer,
             dp_rank=dp_rank,
             fs_local_rank=self.local_rank,
@@ -529,17 +539,14 @@ class PolicyTrainerRayProcess(RayProcess):
         return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
 
     # ------------------------------------------------------------
-    # Value model: scalar PPO critic, optionally LM-yesno (keeps LM head). See the plan for the
-    # full list of supported features (SAE, decoupled/length-adaptive GAE, GT / rollout_context /
-    # correct_demo / lm_yesno conditioning).
+    # Value model: scalar PPO critic. See the plan for the full list of supported features
+    # (SAE, decoupled/length-adaptive GAE, GT / rollout_context / correct_demo conditioning).
     # ------------------------------------------------------------
     def _init_value_model(self, args: grpo_utils.GRPOExperimentConfig, model_config: ModelConfig) -> None:
         """Initialize a standalone value model as a DeepSpeed-managed module.
 
         The value model is a full causal LM whose lm_head is replaced with a scalar `Linear(h, 1)`
-        head (unless `use_lm_value_model=True` in which case the LM head is preserved and we
-        extract P(Yes/No) at the end of each sub-sequence). It is independent from the policy
-        weights and optimizer state.
+        head. It is independent from the policy weights and optimizer state.
         """
         logger.info(f"{self.rank=}: Initializing value model")
 
@@ -596,24 +603,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 attn_implementation=hf_attn,
                 use_cache=False,
             )
-            if args.use_lm_value_model:
-                logger.info(f"{self.rank=}: Keeping LM head for LM value model (Yes/No probability extraction)")
-            else:
-                hidden_size = self.value_model.config.hidden_size
-                value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
-                std = 1.0 / (hidden_size + 1) ** 0.5
-                torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
-                self.value_model.lm_head = value_head
-                logger.info(f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})")
+            hidden_size = self.value_model.config.hidden_size
+            value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+            std = 1.0 / (hidden_size + 1) ** 0.5
+            torch.nn.init.normal_(value_head.weight, mean=0.0, std=std)
+            self.value_model.lm_head = value_head
+            logger.info(f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})")
 
         disable_dropout_in_model(self.value_model)
-
-        if args.use_lm_value_model:
-            yes_ids = self.tokenizer.encode("Yes", add_special_tokens=False)
-            no_ids = self.tokenizer.encode("No", add_special_tokens=False)
-            self._lm_value_yes_id = yes_ids[0]
-            self._lm_value_no_id = no_ids[0]
-            logger.info(f"{self.rank=}: LM-value yes_id={self._lm_value_yes_id}, no_id={self._lm_value_no_id}")
 
         if args.init_value_from_pretrained_checkpoint:
             pretrained_path = os.path.join(args.init_value_from_pretrained_checkpoint, "value_model.bin")
@@ -765,6 +762,92 @@ class PolicyTrainerRayProcess(RayProcess):
             result.append({"offset_in_pack": s, "length": e - s, "input_ids": ids, "response_is_resp": mask})
         return result
 
+    def _score_rollout_with_gen_value(
+        self,
+        query_responses: torch.Tensor,
+        response_mask: torch.Tensor,
+        ground_truth_str: str,
+    ) -> tuple[torch.Tensor, list[dict]]:
+        """Score a rollout at fixed-chunk segment boundaries using the gen-value vLLM pool.
+
+        Returns (values_BT, training_pairs) where values_BT has shape (1, seq_len-1) and
+        training_pairs is a list of {prompt, generated, outcome} dicts (outcome filled by caller).
+        """
+        args = self.args
+        device = query_responses.device
+        seq_len = query_responses.shape[1]
+        empty_values = torch.zeros(1, seq_len - 1, device=device)
+
+        if not self._gen_value_engines:
+            return empty_values, []
+
+        resp_mask_full = response_mask[0].bool()
+        resp_token_ids = query_responses[0][resp_mask_full].tolist()
+        n_resp = len(resp_token_ids)
+        if n_resp == 0:
+            return empty_values, []
+
+        chunk_size: int = getattr(args, "gen_value_chunk_size", 256)
+        score_min: float = getattr(args, "gen_value_score_min", 0.0)
+        score_max: float = getattr(args, "gen_value_score_max", 10.0)
+        conditioning: str = getattr(args, "gen_value_conditioning", "none")
+        allow_cot: bool = getattr(args, "gen_value_allow_cot", False)
+        max_new_tokens: int = getattr(args, "gen_value_max_new_tokens", 8)
+        temperature: float = getattr(args, "gen_value_temperature", 1.0)
+
+        boundaries: list[int] = []
+        t = chunk_size
+        while t < n_resp:
+            boundaries.append(t)
+            t += chunk_size
+        if not boundaries or boundaries[-1] != n_resp - 1:
+            boundaries.append(n_resp - 1)
+
+        prompts: list[str] = []
+        for bdry in boundaries:
+            partial_text = self.tokenizer.decode(resp_token_ids[: bdry + 1], skip_special_tokens=False)
+            prompt = value_model_utils.build_generative_value_prompt(
+                partial_response=partial_text,
+                conditioning=conditioning,
+                ground_truth=ground_truth_str if conditioning != "none" else "",
+                score_min=score_min,
+                score_max=score_max,
+                allow_cot=allow_cot,
+            )
+            prompts.append(prompt)
+
+        sampling_params = VLLMSamplingParams(n=1, temperature=temperature, max_tokens=max_new_tokens, top_p=1.0)
+        refs = [
+            self._gen_value_engines[k % len(self._gen_value_engines)].add_request.remote(prompt, sampling_params)
+            for k, prompt in enumerate(prompts)
+        ]
+        outputs = ray.get(refs)
+
+        scores: list[float] = []
+        generated_texts: list[str] = []
+        for output in outputs:
+            text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
+            generated_texts.append(text)
+            raw = value_model_utils.parse_generative_value_score(text, score_min, score_max, allow_cot)
+            scores.append(value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.5)
+
+        # Vectorised piecewise-constant values: each token index maps to its segment score.
+        # values_BT[:, t] corresponds to sequence position t+1 (shifted layout).
+        resp_indices_shifted = response_mask[0, 1:].bool().nonzero(as_tuple=True)[0]
+        segment_ends = torch.tensor([b + 1 for b in boundaries], device=device)
+        scores_t = torch.tensor(scores, device=device)
+        idx = torch.bucketize(torch.arange(n_resp, device=device), segment_ends, right=True)
+        values_flat = scores_t[idx]
+        values_BT = torch.zeros(1, seq_len - 1, device=device)
+        if resp_indices_shifted.numel() > 0:
+            values_BT[0, resp_indices_shifted] = values_flat[: resp_indices_shifted.numel()]
+
+        training_pairs = [
+            {"prompt": p, "generated": g, "outcome": None}
+            for p, g in zip(prompts, generated_texts)
+        ]
+        return values_BT, training_pairs
+
     def _forward_value_with_conditioning(
         self,
         query_responses: torch.Tensor,
@@ -786,10 +869,9 @@ class PolicyTrainerRayProcess(RayProcess):
         out_values = torch.zeros(1, full_len - 1, dtype=torch.float32, device=query_responses.device)
 
         value_model_wrapped = self.value_model
-        # Forward each sub-sequence independently with the conditioning spliced in.
         for i, sub in enumerate(subseqs):
-            ids = sub["input_ids"]  # (len,)
-            mask = sub["response_is_resp"]  # (len,)
+            ids = sub["input_ids"]
+            mask = sub["response_is_resp"]
             gt = ground_truths_for_pack[i] if i < len(ground_truths_for_pack) else ""
             siblings = siblings_for_pack[i] if (siblings_for_pack is not None and i < len(siblings_for_pack)) else None
             cond_text = value_model_utils.build_conditioning_text(template, gt, siblings)
@@ -805,43 +887,33 @@ class PolicyTrainerRayProcess(RayProcess):
                 prompt_part = ids[:first_resp]
                 response_part = ids[first_resp:]
                 new_ids = torch.cat([prompt_part, cond_tensor, response_part], dim=0)
-                # Position IDs continue from the prompt through conditioning, then response.
                 new_pos = torch.arange(new_ids.numel(), device=ids.device)
-                # Which positions in new_ids correspond to ORIGINAL response tokens (for value extraction)?
                 orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
-                orig_mask[:first_resp] = mask[:first_resp]  # copy original prompt portion (all False)
+                orig_mask[:first_resp] = mask[:first_resp]
                 orig_mask[first_resp + cond_tensor.numel() :] = mask[first_resp:]
             else:
-                # Prefix template: prepend conditioning.
                 new_ids = torch.cat([cond_tensor, ids], dim=0)
                 new_pos = torch.arange(new_ids.numel(), device=ids.device)
                 orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
                 orig_mask[cond_tensor.numel() :] = mask
 
-            # Forward this sub-seq (batch=1).
             new_ids_2d = new_ids.unsqueeze(0)
             new_pos_2d = new_pos.unsqueeze(0)
             output = value_model_wrapped(input_ids=new_ids_2d, position_ids=new_pos_2d)
             logits = getattr(output, "logits", output)
-            shifted = logits[:, :-1]  # (1, new_len-1, vocab)
-            if args.use_lm_value_model:
-                values = value_model_utils.extract_yes_no_value(
-                    shifted.float(), self._lm_value_yes_id, self._lm_value_no_id
-                )
-            else:
-                values = shifted.squeeze(-1).float()
+            shifted = logits[:, :-1]
+            values = shifted.squeeze(-1).float()
             # Extract values at ORIGINAL response positions and scatter back into out_values.
             # `orig_mask` is aligned to new_ids; shifted values align to new_ids[:, 1:], so pull
             # positions where `orig_mask[1:]` is True.
             orig_mask_shifted = orig_mask[1:]
-            new_resp_values = values[0][orig_mask_shifted]  # (num_resp_tokens,)
-            # Write to original sub-sequence response positions within the full packed output.
+            new_resp_values = values[0][orig_mask_shifted]
             base = sub["offset_in_pack"]
-            orig_resp_abs_positions = [base + t - 1 for t in range(ids.numel()) if bool(mask[t]) and t > 0]
+            # mask[1:] selects t=1..end; indices are (t-1) so abs position = base + (t-1).
             # `t > 0` because values live in shifted coordinates; t=0 has no shifted predecessor.
-            n = min(len(orig_resp_abs_positions), new_resp_values.numel())
-            for k, pos in enumerate(orig_resp_abs_positions[:n]):
-                out_values[0, pos] = new_resp_values[k]
+            resp_positions = mask[1:].nonzero(as_tuple=True)[0] + base
+            n = min(resp_positions.numel(), new_resp_values.numel())
+            out_values[0, resp_positions[:n]] = new_resp_values[:n]
         return out_values
 
     def forward_value(
@@ -849,10 +921,8 @@ class PolicyTrainerRayProcess(RayProcess):
     ) -> torch.Tensor:
         """Compute per-token values for a packed sequence.
 
-        For the scalar head, returns the `Linear(h, 1)` output (shape: batch, seq_len-1), shifted
-        by 1 so values[t] aligns with a prediction about token t+1.
-        For the LM-yesno head, returns `softmax([yes_logit, no_logit])[0]` at each response token.
-        Non-response positions are zeroed.
+        Returns the `Linear(h, 1)` output (shape: batch, seq_len-1), shifted by 1 so values[t]
+        aligns with a prediction about token t+1. Non-response positions are zeroed.
 
         The forward intentionally does NOT splice ground-truth conditioning; that lives in
         `_forward_value_with_gt` which wraps this call.
@@ -861,12 +931,7 @@ class PolicyTrainerRayProcess(RayProcess):
         output = self.value_model(input_ids=query_responses, position_ids=position_ids)
         logits = getattr(output, "logits", output)
         logits = logits[:, :-1]
-        if self.args.use_lm_value_model:
-            values = value_model_utils.extract_yes_no_value(
-                logits.float(), self._lm_value_yes_id, self._lm_value_no_id
-            )
-        else:
-            values = logits.squeeze(-1).float()
+        values = logits.squeeze(-1).float()
         values = torch.where(response_mask, values, torch.zeros_like(values))
         return values
 
@@ -974,14 +1039,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Decide whether to skip the policy update this step. This is True during either the
         # initial value-warmup window, a mid-run value re-warmup window, or a plain policy-warmup
         # window (which freezes the policy regardless of the value model).
-        skip_policy_update = False
-        if self.args.value_warmup_steps > 0 and training_step <= self.args.value_warmup_steps:
-            skip_policy_update = True
-        if self.args.policy_warmup_steps > 0 and training_step <= self.args.policy_warmup_steps:
-            skip_policy_update = True
-        rewarmup_end = self.args.value_rewarmup_start + self.args.value_rewarmup_steps
-        if self.args.value_rewarmup_steps > 0 and self.args.value_rewarmup_start <= training_step <= rewarmup_end:
-            skip_policy_update = True
+        skip_policy_update = _is_in_warmup_window(self.args, training_step)
 
         # Optionally reset the policy optimizer on the first post-warmup step so the momentum
         # built up during the frozen phase doesn't leak into the unfrozen phase.
@@ -1051,8 +1109,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
-                        torch.cuda.empty_cache()
-
         local_step = 0
         num_samples = len(data_BT.query_responses)
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
@@ -1066,6 +1122,14 @@ class PolicyTrainerRayProcess(RayProcess):
         # policy loop. No-op when `use_value_model=False`.
         value_loss_inputs: list[dict] | None = None
         sae_step_metrics: dict[str, float] = {}
+        # When use_generative_value_model=True and gen-value engines are wired up, we score
+        # each rollout at fixed-chunk boundaries and use those piecewise-constant estimates as
+        # the value function for GAE instead of the scalar value head.
+        _use_gen_value = (
+            getattr(self.args, "use_generative_value_model", False) and bool(self._gen_value_engines)
+        )
+        _gen_value_training_pairs: list[dict] = []
+
         if self.args.use_value_model:
             assert data_BT.rewards is not None and data_BT.dones is not None, (
                 "use_value_model=True but rewards/dones are missing from CollatedBatchData; "
@@ -1077,7 +1141,16 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Value forward (no-grad)", noop=self.rank != 0), torch.no_grad():
                 for i in range(num_samples):
                     resp_mask = data_BT.response_masks[i][:, 1:].bool()
-                    if self.args.value_model_ground_truth_conditioning:
+                    gv_pairs: list[dict] = []
+                    if _use_gen_value:
+                        gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
+                        gt_str = gts_pack[0] if gts_pack else ""
+                        values_BT, gv_pairs = self._score_rollout_with_gen_value(
+                            data_BT.query_responses[i],
+                            data_BT.response_masks[i],
+                            gt_str,
+                        )
+                    elif self.args.value_model_ground_truth_conditioning:
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
                         sibs_pack = data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
                         values_BT = self._forward_value_with_conditioning(
@@ -1092,6 +1165,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Build per-pack numpy arrays aligned with values (seq_len - 1).
                     rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
                     dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
+                    if gv_pairs:
+                        outcome = float(rewards[dones.astype(bool)].sum())
+                        for pair in gv_pairs:
+                            pair["outcome"] = outcome
+                        _gen_value_training_pairs.extend(gv_pairs)
                     resp_masks_np = resp_mask.long().cpu().numpy()
                     logprobs_np = None
                     if self.args.use_sae:
@@ -1130,6 +1208,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 sae_step_metrics["value/sae_boundary_frac"] = float(np.mean(per_sample_bf))
             if per_sample_lam:
                 sae_step_metrics["value/avg_lambda"] = float(np.mean(per_sample_lam))
+            # Push gen-value training pairs to the REINFORCE queue (fire-and-forget).
+            if _gen_value_training_pairs and self._gen_value_training_queue is not None:
+                with contextlib.suppress(Exception):
+                    self._gen_value_training_queue.put_nowait.remote(_gen_value_training_pairs)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -1222,8 +1304,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
                     loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
-                    torch.cuda.empty_cache()
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                     if self._skip_policy_update:
                         # Frozen-policy (value warmup / policy warmup): we still run the forward
@@ -1235,6 +1315,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                         self.model.backward(loss)
                         if is_accumulation_boundary:
+                            torch.cuda.empty_cache()
                             self.model.step()
                             grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
@@ -1263,13 +1344,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     value_losses: list[float] = []
                     value_clipfracs: list[float] = []
-                    lm_p_yes_sum = 0.0
-                    lm_p_yes_correct_sum = 0.0
-                    lm_p_yes_incorrect_sum = 0.0
-                    lm_correct_count = 0
-                    lm_incorrect_count = 0
-                    lm_accuracy_correct = 0
-                    lm_accuracy_total = 0
                     for i in range(num_samples):
                         ctx = value_loss_inputs[i]
                         resp_mask = ctx["response_mask"]
@@ -1292,37 +1366,17 @@ class PolicyTrainerRayProcess(RayProcess):
                             new_values = self.forward_value(
                                 data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
                             )
-                        if self.args.use_lm_value_model:
-                            # Treat returns >= 1 as positive label (terminal outcome).
-                            terminal_labels = (returns >= 1.0).float()
-                            per_tok = value_model_utils.lm_yesno_bce_loss(new_values, terminal_labels, resp_mask)
-                            v_clipfrac = torch.zeros((), device=device)
-                            # Diagnostics
-                            with torch.no_grad():
-                                lm_p_yes_sum += masked_mean(new_values, resp_mask).item()
-                                correct_mask = resp_mask & (returns >= 1.0)
-                                incorrect_mask = resp_mask & (returns < 1.0)
-                                if correct_mask.any():
-                                    lm_p_yes_correct_sum += masked_mean(new_values, correct_mask).item()
-                                    lm_correct_count += 1
-                                if incorrect_mask.any():
-                                    lm_p_yes_incorrect_sum += masked_mean(new_values, incorrect_mask).item()
-                                    lm_incorrect_count += 1
-                                preds = (new_values >= 0.5).float()
-                                lm_accuracy_correct += int(((preds == terminal_labels) * resp_mask).sum().item())
-                                lm_accuracy_total += int(resp_mask.sum().item())
-                        else:
-                            per_tok, v_clipfrac = value_model_utils.value_clipped_mse_loss(
-                                new_values, returns, old_values, resp_mask, self.args.vf_clip_range
-                            )
+                        per_tok, v_clipfrac = value_model_utils.value_clipped_mse_loss(
+                            new_values, returns, old_values, resp_mask, self.args.vf_clip_range
+                        )
                         denom = resp_mask.sum().clamp(min=1).float()
                         v_loss = (per_tok.sum() / denom) * self.args.value_loss_coef
                         v_loss = v_loss * (self.args.world_size // self.args.sequence_parallel_size)
-                        torch.cuda.empty_cache()
                         is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
                         self.value_model.set_gradient_accumulation_boundary(is_value_boundary)
                         self.value_model.backward(v_loss)
                         if is_value_boundary:
+                            torch.cuda.empty_cache()
                             self.value_model.step()
                         value_losses.append(float(v_loss.detach()))
                         value_clipfracs.append(float(v_clipfrac.detach()))
@@ -1334,15 +1388,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         gn = float(self.value_model.get_global_grad_norm())
                         if math.isfinite(gn):
                             self.local_metrics["value/grad_norm"] = gn
-                if self.args.use_lm_value_model:
-                    if num_samples:
-                        self.local_metrics["value/lm_p_yes_mean"] = lm_p_yes_sum / num_samples
-                    if lm_correct_count:
-                        self.local_metrics["value/lm_p_yes_correct"] = lm_p_yes_correct_sum / lm_correct_count
-                    if lm_incorrect_count:
-                        self.local_metrics["value/lm_p_yes_incorrect"] = lm_p_yes_incorrect_sum / lm_incorrect_count
-                    if lm_accuracy_total:
-                        self.local_metrics["value/lm_accuracy"] = lm_accuracy_correct / lm_accuracy_total
                 for k, v in sae_step_metrics.items():
                     self.local_metrics[k] = v
 
@@ -1361,6 +1406,25 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         array_metrics[key] = value
                 return self.local_metrics.get_metrics_list(), array_metrics
+
+    def _save_value_model(self, output_dir: str | pathlib.Path) -> None:
+        """Save value model weights to ``output_dir/value_model.bin``. All ranks must call this."""
+        value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+        out_path = pathlib.Path(output_dir)
+        if self.args.deepspeed_stage == 3:
+            gathered: dict[str, torch.Tensor] = {}
+            for k, v in value_to_save.named_parameters():
+                params_to_fetch = _z3_params_to_fetch([v])
+                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                    if self.rank == 0:
+                        gathered[k] = v.data.detach().cpu()
+            if self.rank == 0:
+                out_path.mkdir(parents=True, exist_ok=True)
+                torch.save(gathered, out_path / "value_model.bin")
+        else:
+            if self.rank == 0:
+                out_path.mkdir(parents=True, exist_ok=True)
+                torch.save(value_to_save.state_dict(), out_path / "value_model.bin")
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
@@ -1403,21 +1467,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Save value model checkpoint (model only, no optimizer) alongside the policy.
         if self.args.use_value_model and self.value_model is not None:
             value_dir = os.path.join(checkpoint_state_dir, "value_model")
-            os.makedirs(value_dir, exist_ok=True)
-            value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
-            if self.args.deepspeed_stage == 3:
-                # Gather all params for rank 0 to serialize.
-                gathered: dict[str, torch.Tensor] = {}
-                for k, v in value_to_save.named_parameters():
-                    params_to_fetch = _z3_params_to_fetch([v])
-                    with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
-                        if self.rank == 0:
-                            gathered[k] = v.data.detach().cpu()
-                if self.rank == 0:
-                    torch.save(gathered, os.path.join(value_dir, "value_model.bin"))
-            else:
-                if self.rank == 0:
-                    torch.save(value_to_save.state_dict(), os.path.join(value_dir, "value_model.bin"))
+            self._save_value_model(value_dir)
             if self.rank == 0:
                 logger.info(f"Saved value model to {value_dir}")
             client_state["value_model_saved"] = True
@@ -1520,7 +1570,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 args_dict = {
                     "use_value_model": bool(self.args.use_value_model),
-                    "use_lm_value_model": bool(self.args.use_lm_value_model),
                     "use_sae": bool(self.args.use_sae),
                     "value_model_ground_truth_conditioning": bool(self.args.value_model_ground_truth_conditioning),
                     "gt_conditioning_template": self.args.gt_conditioning_template,
@@ -1535,22 +1584,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Save the value model alongside the policy in the HF-style checkpoint dir.
         if self.args.use_value_model and self.value_model is not None:
-            value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
-            value_out_dir = output_path / "value_model"
-            if self.args.deepspeed_stage == 3:
-                value_gathered: dict[str, torch.Tensor] = {}
-                for k, v in value_to_save.named_parameters():
-                    params_to_fetch = _z3_params_to_fetch([v])
-                    with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
-                        if self.rank == 0:
-                            value_gathered[k] = v.data.detach().cpu()
-                if self.rank == 0:
-                    value_out_dir.mkdir(parents=True, exist_ok=True)
-                    torch.save(value_gathered, value_out_dir / "value_model.bin")
-            else:
-                if self.rank == 0:
-                    value_out_dir.mkdir(parents=True, exist_ok=True)
-                    torch.save(value_to_save.state_dict(), value_out_dir / "value_model.bin")
+            self._save_value_model(output_path / "value_model")
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
@@ -2634,6 +2668,16 @@ def cleanup_training_resources(
         logger.info("✅ Process group destroyed")
 
 
+def _is_in_warmup_window(args, training_step: int) -> bool:
+    """Return True if training_step falls inside any value/policy warmup window."""
+    if args.value_warmup_steps > 0 and training_step <= args.value_warmup_steps:
+        return True
+    if args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps:
+        return True
+    rewarmup_end = args.value_rewarmup_start + args.value_rewarmup_steps
+    return bool(args.value_rewarmup_steps > 0 and args.value_rewarmup_start <= training_step <= rewarmup_end)
+
+
 def run_training(
     args,
     streaming_config,
@@ -2858,14 +2902,7 @@ def run_training(
 
         # Skip weight sync during any value/policy warmup window: the policy hasn't changed, so
         # we don't need to broadcast new weights to vLLM (and broadcasting them would waste time).
-        in_warmup = False
-        if args.value_warmup_steps > 0 and training_step <= args.value_warmup_steps:
-            in_warmup = True
-        if args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps:
-            in_warmup = True
-        rewarmup_end = args.value_rewarmup_start + args.value_rewarmup_steps
-        if args.value_rewarmup_steps > 0 and args.value_rewarmup_start <= training_step <= rewarmup_end:
-            in_warmup = True
+        in_warmup = _is_in_warmup_window(args, training_step)
 
         if training_step == 1:
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()

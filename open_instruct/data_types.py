@@ -125,7 +125,7 @@ class CollatedBatchData:
     sibling_rollouts: list[list[list[dict]]] | None = None
     """Per-pack list of per-sub-sequence list of sibling rollouts
     (each sibling is a dict: ``{"text": str, "is_correct": bool}``). Used by the
-    rollout_context / correct_demo / lm_yesno_siblings value conditioning templates."""
+    rollout_context / correct_demo value conditioning templates."""
     segment_boundaries: list[torch.Tensor] | None = None
     """Per-token boolean mask (1 where a SAE segment starts, 0 elsewhere). None when SAE is off."""
 

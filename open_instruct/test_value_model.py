@@ -17,7 +17,6 @@ laptop and in CI. They focus on:
 """
 from __future__ import annotations
 
-import math
 import unittest
 
 import numpy as np
@@ -165,9 +164,6 @@ class TestConditioningBuilders(unittest.TestCase):
             "expected_accuracy",
             "rollout_context",
             "correct_demo",
-            "lm_yesno",
-            "lm_yesno_blind",
-            "lm_yesno_siblings",
         ]:
             txt = build_conditioning_text(t, ground_truth="42", siblings=siblings)
             self.assertIsInstance(txt, str)
@@ -184,7 +180,6 @@ class TestConditioningBuilders(unittest.TestCase):
 
         self.assertFalse(is_postfix_template("answer_prefix"))
         self.assertTrue(is_postfix_template("expected_accuracy"))
-        self.assertTrue(is_postfix_template("lm_yesno"))
 
 
 class TestScoreParsing(unittest.TestCase):
@@ -250,19 +245,6 @@ class TestValueLoss(unittest.TestCase):
         self.assertAlmostEqual(float(per_tok[0, 0]), 50.0, places=5)
         self.assertEqual(per_tok.shape, new_v.shape)
         self.assertGreaterEqual(float(clipfrac), 0.0)
-
-
-class TestLmYesnoBce(unittest.TestCase):
-    def test_perfect_prediction_has_zero_loss(self):
-        import torch
-
-        from open_instruct.value_model_utils import lm_yesno_bce_loss
-
-        pred = torch.tensor([[0.999, 0.001]])
-        target = torch.tensor([[1.0, 0.0]])
-        mask = torch.tensor([[1.0, 1.0]])
-        loss = lm_yesno_bce_loss(pred, target, mask)
-        self.assertLess(loss.mean().item(), 0.01)
 
 
 class TestGenValueSegmentation(unittest.TestCase):

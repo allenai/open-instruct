@@ -24,10 +24,10 @@ All three are CLI-addressable. Shell wrappers live in ``scripts/eval/value_estim
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import logging
-import math
 import os
 import pathlib
 import random
@@ -70,7 +70,7 @@ class ScoreDatasetConfig:
     input_dataset_path: str
     output_path: str
     value_model_path: str
-    value_model_type: str = "scalar"  # one of: scalar, lm_yesno, generative
+    value_model_type: str = "scalar"  # one of: scalar, generative
     # Conditioning flags; must match what the value model was trained with.
     value_model_ground_truth_conditioning: bool = False
     gt_conditioning_template: str = "answer_prefix"
@@ -148,28 +148,28 @@ def _run_rollouts(
             )
         result.append(cands)
     # Cleanly shut down the LLM engine so the next call can re-init without leaks.
-    try:
+    with contextlib.suppress(Exception):
         del llm
-    except Exception:
-        pass
     return result
+
+
+_VERIFIER_CACHE: dict[str, Any] = {}
 
 
 def _verify(prediction: str, ground_truth: str, verifier_name: str) -> bool:
     from open_instruct.ground_truth_utils import MathVerifier, StringMatcherVerifier  # noqa: PLC0415
 
-    verifier_name = (verifier_name or "math").lower()
-    if verifier_name in {"math", "strict_math"}:
-        v = MathVerifier()
-    else:
-        v = StringMatcherVerifier()
+    key = (verifier_name or "math").lower()
+    if key not in _VERIFIER_CACHE:
+        _VERIFIER_CACHE[key] = MathVerifier() if key in {"math", "strict_math"} else StringMatcherVerifier()
+    v = _VERIFIER_CACHE[key]
     return float(v(tokenized_prediction=[], prediction=prediction, label=ground_truth).score) >= 1.0
 
 
 def make_dataset(cfg: MakeDatasetConfig) -> str:
     """Build the value-estimation dataset described in the plan."""
-    from datasets import load_dataset  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
+    from datasets import load_dataset  # noqa: PLC0415
 
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -316,8 +316,6 @@ def score_dataset(cfg: ScoreDatasetConfig) -> str:
     import pandas as pd  # noqa: PLC0415
     from scipy.stats import pearsonr, spearmanr  # noqa: PLC0415
 
-    from open_instruct import value_model_utils  # noqa: PLC0415
-
     df = pd.read_parquet(cfg.input_dataset_path)
     logger.info(f"Loaded {len(df)} rows from {cfg.input_dataset_path}")
 
@@ -342,7 +340,7 @@ def score_dataset(cfg: ScoreDatasetConfig) -> str:
     all_preds: list[float] = []
     all_mc: list[float] = []
 
-    if cfg.value_model_type in {"scalar", "lm_yesno"}:
+    if cfg.value_model_type == "scalar":
         preds_per_row = _score_with_scalar_value(df, cfg)
     elif cfg.value_model_type == "generative":
         preds_per_row = _score_with_generative_value(df, cfg)
@@ -415,9 +413,6 @@ def _score_with_scalar_value(df, cfg: ScoreDatasetConfig) -> list[list[float]]:
     # (This only matters when loading from a plain HF checkpoint; our custom `value_model.bin` will
     # already have the right shape.)
     value_model.eval()
-    yes_id = tokenizer.encode("Yes", add_special_tokens=False)[0]
-    no_id = tokenizer.encode("No", add_special_tokens=False)[0]
-
     from open_instruct import value_model_utils  # noqa: PLC0415
 
     all_preds: list[list[float]] = []
@@ -442,10 +437,7 @@ def _score_with_scalar_value(df, cfg: ScoreDatasetConfig) -> list[list[float]]:
                 ids = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=16384).to(cfg.device)
                 out = value_model(**ids)
                 logits = getattr(out, "logits", out)[:, -1]  # last-token logit
-                if cfg.value_model_type == "lm_yesno":
-                    v = value_model_utils.extract_yes_no_value(logits.float(), yes_id, no_id).item()
-                else:
-                    v = float(logits.squeeze(-1).item())
+                v = float(logits.squeeze(-1).item())
                 preds.append(v)
             all_preds.append(preds)
     return all_preds
@@ -498,8 +490,8 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
         )
         if parsed is None:
             parsed = 0.5 * (cfg.gen_value_score_min + cfg.gen_value_score_max)
-        all_preds[row_idx][p_idx] = (parsed - cfg.gen_value_score_min) / max(
-            cfg.gen_value_score_max - cfg.gen_value_score_min, 1e-8
+        all_preds[row_idx][p_idx] = value_model_utils.rescale_gen_value_score(
+            parsed, cfg.gen_value_score_min, cfg.gen_value_score_max
         )
     return all_preds
 

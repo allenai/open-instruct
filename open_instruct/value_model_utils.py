@@ -5,34 +5,43 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Helpers for the PPO / LM-yesno / SAE value model used by grpo_fast.py.
+"""Helpers for the PPO / SAE value model used by grpo_fast.py.
 
 The value model itself is built, optimized, and DeepSpeed-managed inside
 `PolicyTrainerRayProcess.from_pretrained`; this module provides stateless helpers for:
 
 - building value-conditioning strings from ground truths + sibling rollouts;
 - running the value forward with or without between-prompt-and-response conditioning;
-- extracting per-token values for scalar and LM-yesno heads;
-- the binary cross-entropy loss used by the LM-yesno value model.
+- extracting per-token values for the scalar regression head.
 """
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
-import torch.nn.functional as F
 
 _ROLLOUT_CONTEXT_MAX_TOKENS = 4096
 _POSTFIX_TEMPLATES = {
     "expected_accuracy",
     "rollout_context",
     "correct_demo",
-    "lm_yesno",
-    "lm_yesno_blind",
-    "lm_yesno_siblings",
 }
 _PREFIX_TEMPLATES = {"answer_prefix", "boxed_answer", "cot_spoiler"}
+
+# Templates that need a ground-truth string to be meaningful.
+TEMPLATES_REQUIRING_GT: frozenset[str] = frozenset({"rollout_context", "correct_demo"})
+# Templates that need sibling rollouts (decoded responses from the same prompt group).
+TEMPLATES_REQUIRING_SIBLINGS: frozenset[str] = frozenset({"rollout_context", "correct_demo"})
+# All valid gt_conditioning_template values.
+ALL_GT_CONDITIONING_TEMPLATES: frozenset[str] = frozenset(_POSTFIX_TEMPLATES | _PREFIX_TEMPLATES)
+# Valid values for --gen_value_conditioning.
+GEN_VALUE_CONDITIONING_TYPES: frozenset[str] = frozenset({"none", "gt", "correct_demo", "rollout_context"})
+
+
+def rescale_gen_value_score(parsed: float, score_min: float, score_max: float) -> float:
+    """Rescale a raw gen-value score from [score_min, score_max] to [0, 1]."""
+    return max(0.0, min(1.0, (parsed - score_min) / max(score_max - score_min, 1e-8)))
 
 
 def is_postfix_template(template: str) -> bool:
@@ -65,19 +74,10 @@ def build_conditioning_text(
         )
     if template == "expected_accuracy":
         return f"Given the answer is {ground_truth}, Let me compute the expected accuracy of the partial rollout: "
-    if template == "lm_yesno":
-        return (
-            f"Answer: {ground_truth}. Here is a partial attempt. "
-            "Will this attempt get the answer? Yes/no.\n"
-        )
-    if template == "lm_yesno_blind":
-        return "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
     if template == "rollout_context":
         return _build_rollout_context(ground_truth, siblings or [])
     if template == "correct_demo":
         return _build_correct_demo_context(ground_truth, siblings or [])
-    if template == "lm_yesno_siblings":
-        return _build_lm_yesno_siblings_context(ground_truth, siblings or [])
     raise ValueError(f"Unknown gt_conditioning_template: {template!r}")
 
 
@@ -119,48 +119,6 @@ def _build_correct_demo_context(ground_truth: str, siblings: Sequence[dict]) -> 
         reference
         + f"Given the answer is {ground_truth}, compute the expected accuracy of the current attempt: "
     )
-
-
-def _build_lm_yesno_siblings_context(ground_truth: str, siblings: Sequence[dict]) -> str:
-    header = f"Answer: {ground_truth}\n"
-    lines: list[str] = []
-    for k, s in enumerate(siblings):
-        tag = "success" if s.get("is_correct") else "fail"
-        text = str(s.get("text", ""))
-        lines.append(f"Attempt {k + 1}: {text} Result: {tag}\n")
-    suffix = (
-        "Here is a partial attempt. Will this attempt get the answer? Yes/no.\n"
-        f"Attempt {len(siblings) + 1}: "
-    )
-    return header + "".join(lines) + suffix
-
-
-def extract_yes_no_value(logits: torch.Tensor, yes_id: int, no_id: int) -> torch.Tensor:
-    """Return softmax probability of the Yes token, restricted to {yes, no} logits.
-
-    Args:
-        logits: (..., vocab)
-        yes_id: token id for "Yes"/"yes"
-        no_id: token id for "No"/"no"
-    Returns: (...) tensor in [0, 1].
-    """
-    yes_logit = logits[..., yes_id]
-    no_logit = logits[..., no_id]
-    pair = torch.stack([yes_logit, no_logit], dim=-1)
-    return F.softmax(pair, dim=-1)[..., 0]
-
-
-def lm_yesno_bce_loss(
-    predicted_prob_yes: torch.Tensor,
-    target_is_correct: torch.Tensor,
-    mask: torch.Tensor,
-) -> torch.Tensor:
-    """Per-token BCE loss. All tensors are the same shape; `mask` is float/bool."""
-    eps = 1e-6
-    p = predicted_prob_yes.clamp(eps, 1.0 - eps)
-    t = target_is_correct.float()
-    loss = -(t * torch.log(p) + (1 - t) * torch.log(1 - p))
-    return loss * mask.float()
 
 
 _SCORE_RE = re.compile(r"\{\s*score\s*:\s*([-+]?[0-9]*\.?[0-9]+)\s*\}")

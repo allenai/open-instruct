@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils, value_model_utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -171,21 +171,13 @@ class GRPOExperimentConfig(
     sae_threshold: float = 0.2
     """Segment boundary threshold on token probability (boundary when p(token) < sae_threshold)."""
 
-    # LM-as-value model (Yes/No token probability as the value)
-    use_lm_value_model: bool = False
-    """If True, keep the LM head and use softmax([yes_logit, no_logit])[0] as the value. Requires
-    use_value_model=True and a compatible `gt_conditioning_template` (lm_yesno / lm_yesno_blind / lm_yesno_siblings)."""
-
     # Value-model conditioning (applied only during the value forward, between prompt and response)
     value_model_ground_truth_conditioning: bool = False
     """If True, splice a conditioning string built from the ground truth into the value forward."""
     gt_conditioning_template: str = "answer_prefix"
-    """Template name. One of:
-    answer_prefix, boxed_answer, cot_spoiler, expected_accuracy,
-    rollout_context, correct_demo, lm_yesno, lm_yesno_blind, lm_yesno_siblings.
-    """
+    """Template name. One of: answer_prefix, boxed_answer, cot_spoiler, expected_accuracy, rollout_context, correct_demo."""
     rollout_context_num_siblings: int = 4
-    """Number of sibling rollouts to include when using the rollout_context / correct_demo / lm_yesno_siblings templates."""
+    """Number of sibling rollouts to include when using the rollout_context / correct_demo templates."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -367,34 +359,10 @@ class GRPOExperimentConfig(
         if self.use_sae and not (0.0 < self.sae_threshold < 1.0):
             raise ValueError(f"--sae_threshold must be in (0, 1), got {self.sae_threshold}.")
 
-        # LM value model validation
-        if self.use_lm_value_model and not self.use_value_model:
-            raise ValueError("--use_lm_value_model requires --use_value_model.")
-        valid_lm_templates = {"lm_yesno", "lm_yesno_blind", "lm_yesno_siblings"}
-        if self.use_lm_value_model:
-            # Force GT conditioning on since the LM-yesno templates need it.
-            self.value_model_ground_truth_conditioning = True
-            if self.gt_conditioning_template not in valid_lm_templates:
-                raise ValueError(
-                    f"--use_lm_value_model requires --gt_conditioning_template in {sorted(valid_lm_templates)}, "
-                    f"got {self.gt_conditioning_template!r}."
-                )
-
         # GT conditioning validation
-        valid_gt_templates = {
-            "answer_prefix",
-            "boxed_answer",
-            "cot_spoiler",
-            "expected_accuracy",
-            "rollout_context",
-            "correct_demo",
-            "lm_yesno",
-            "lm_yesno_blind",
-            "lm_yesno_siblings",
-        }
-        if self.gt_conditioning_template not in valid_gt_templates:
+        if self.gt_conditioning_template not in value_model_utils.ALL_GT_CONDITIONING_TEMPLATES:
             raise ValueError(
-                f"--gt_conditioning_template must be one of {sorted(valid_gt_templates)}, "
+                f"--gt_conditioning_template must be one of {sorted(value_model_utils.ALL_GT_CONDITIONING_TEMPLATES)}, "
                 f"got {self.gt_conditioning_template!r}."
             )
         if self.value_model_ground_truth_conditioning and not self.use_value_model:
