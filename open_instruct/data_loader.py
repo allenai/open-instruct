@@ -38,6 +38,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, padding_free_collator, utils
+from open_instruct.data_loader_utils import compute_grouped_advantages
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -481,10 +482,16 @@ class StreamingDataLoaderConfig:
     with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the baseline even though their
     completions are not retained for merging. Advantage rescaling by ``sample_count / baseline_count`` is separate; see
     :attr:`maintain_pending_ngu_count_rescale`."""
-    maintain_pending_ngu_count_rescale: bool = True
-    """Multiply per-sample advantages by ``sample_count / baseline_sample_count`` after normalization (only matters when
-    :attr:`maintain_pending_ngu_counts` makes the baseline count larger than the current batch). Independent of baseline
-    construction."""
+    maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio"] | None = None
+    """How to adjust grouped advantages when NGU merges extra completions into the baseline count (see
+    :func:`open_instruct.data_loader_utils.compute_grouped_advantages`).
+
+    * ``None``: no NGU-specific rescaling.
+    * ``ratio``: after normalization, multiply each advantage by ``sample_count / baseline_sample_count`` (only matters
+      when :attr:`maintain_pending_ngu_counts` inflates the baseline count).
+    * ``anchor_pos``: after mean/std normalization, keep advantages at max-reward samples (by raw reward) fixed and scale
+      other advantages so the group sum is zero.
+    """
     no_resampling_pass_rate: float | None = None
     no_resampling_persist: bool = True
     advantage_normalization_type: str = "centered"
@@ -607,6 +614,11 @@ class StreamingDataLoaderConfig:
             raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
         if self.maintain_pending_ngu_age < 0:
             raise ValueError(f"`maintain_pending_ngu_age` must be non-negative, got {self.maintain_pending_ngu_age}.")
+        if self.maintain_pending_ngu_count_rescale not in (None, "anchor_pos", "ratio"):
+            raise ValueError(
+                "`maintain_pending_ngu_count_rescale` must be None, 'anchor_pos', or 'ratio', "
+                f"got {self.maintain_pending_ngu_count_rescale!r}."
+            )
         if self.max_samples_multiplier is not None and self.max_samples_multiplier < 0:
             raise ValueError(
                 f"`active_sampling_max_samples_multiplier` must be non-negative, got {self.max_samples_multiplier}."
@@ -1224,111 +1236,6 @@ def merge_generation_results(
         model_step=results[-1].model_step,
     )
     return merged_result, combined_reward_metrics
-
-
-def expand_grouped_scores(
-    scores: np.ndarray,
-    prompt_sample_counts: list[int],
-    prompt_baseline_sample_counts: list[int] | None = None,
-    prompt_baseline_reward_sums: list[float] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Expand per-group means/stds back to per-sample arrays for advantage normalization."""
-    if sum(prompt_sample_counts) != len(scores):
-        raise ValueError(
-            "Mismatch between prompt_sample_counts and scores: "
-            f"{sum(prompt_sample_counts)} grouped samples vs {len(scores)} scores."
-        )
-    if prompt_baseline_sample_counts is None:
-        prompt_baseline_sample_counts = prompt_sample_counts
-    if prompt_baseline_reward_sums is None:
-        prompt_baseline_reward_sums = []
-        start = 0
-        for sample_count in prompt_sample_counts:
-            group_scores = scores[start : start + sample_count]
-            prompt_baseline_reward_sums.append(float(group_scores.sum()))
-            start += sample_count
-    if len(prompt_sample_counts) != len(prompt_baseline_sample_counts):
-        raise ValueError(
-            "Mismatch between prompt_sample_counts and prompt_baseline_sample_counts: "
-            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_sample_counts)}."
-        )
-    if len(prompt_sample_counts) != len(prompt_baseline_reward_sums):
-        raise ValueError(
-            "Mismatch between prompt_sample_counts and prompt_baseline_reward_sums: "
-            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_reward_sums)}."
-        )
-
-    mean_grouped_rewards = []
-    std_grouped_rewards = []
-    start = 0
-    for sample_count, baseline_sample_count, baseline_reward_sum in zip(
-        prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums, strict=True
-    ):
-        group_scores = scores[start : start + sample_count]
-        if baseline_sample_count < sample_count:
-            raise ValueError(
-                "Each prompt_baseline_sample_count must be >= its prompt_sample_count, got "
-                f"{baseline_sample_count} < {sample_count}."
-            )
-        group_mean = baseline_reward_sum / baseline_sample_count
-        centered_sum_squares = float(np.square(group_scores - group_mean).sum())
-        group_std = np.sqrt(centered_sum_squares / baseline_sample_count)
-        mean_grouped_rewards.append(np.full(sample_count, group_mean, dtype=scores.dtype))
-        std_grouped_rewards.append(np.full(sample_count, group_std, dtype=scores.dtype))
-        start += sample_count
-
-    return np.concatenate(mean_grouped_rewards), np.concatenate(std_grouped_rewards)
-
-
-def expand_grouped_advantage_scales(
-    prompt_sample_counts: list[int], prompt_baseline_sample_counts: list[int] | None = None
-) -> np.ndarray:
-    """Expand per-group advantage scales for max-RL retry-chain normalization."""
-    if prompt_baseline_sample_counts is None:
-        prompt_baseline_sample_counts = prompt_sample_counts
-    if len(prompt_sample_counts) != len(prompt_baseline_sample_counts):
-        raise ValueError(
-            "Mismatch between prompt_sample_counts and prompt_baseline_sample_counts: "
-            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_sample_counts)}."
-        )
-
-    advantage_scales = []
-    for sample_count, baseline_sample_count in zip(prompt_sample_counts, prompt_baseline_sample_counts, strict=True):
-        if baseline_sample_count < sample_count:
-            raise ValueError(
-                "Each prompt_baseline_sample_count must be >= its prompt_sample_count, got "
-                f"{baseline_sample_count} < {sample_count}."
-            )
-        advantage_scales.append(np.full(sample_count, sample_count / baseline_sample_count, dtype=np.float32))
-
-    return np.concatenate(advantage_scales)
-
-
-def compute_grouped_advantages(
-    scores: np.ndarray,
-    prompt_sample_counts: list[int],
-    prompt_baseline_sample_counts: list[int] | None = None,
-    prompt_baseline_reward_sums: list[float] | None = None,
-    advantage_normalization_type: str = "centered",
-    rescale_by_baseline_counts: bool = False,
-) -> np.ndarray:
-    mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
-        scores, prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums
-    )
-
-    if advantage_normalization_type == "standard":
-        advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-    elif advantage_normalization_type == "centered":
-        advantages = scores - mean_grouped_rewards
-    elif advantage_normalization_type == "max_rl":
-        advantages = (scores - mean_grouped_rewards) / (mean_grouped_rewards + 1e-8)
-    else:
-        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
-
-    if rescale_by_baseline_counts:
-        advantages = advantages * expand_grouped_advantage_scales(prompt_sample_counts, prompt_baseline_sample_counts)
-
-    return advantages
 
 
 def accumulate_inference_batches(
@@ -2260,7 +2167,7 @@ class DataPreparationActor:
                 batch_stats.prompt_baseline_sample_counts,
                 batch_stats.prompt_baseline_reward_sums,
                 advantage_normalization_type=self.config.advantage_normalization_type,
-                rescale_by_baseline_counts=self.config.maintain_pending_ngu_count_rescale,
+                ngu_count_rescale=self.config.maintain_pending_ngu_count_rescale,
             )
 
             if self.config.save_traces and self.config.rollouts_save_path:

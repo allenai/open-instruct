@@ -152,7 +152,7 @@ class TestGroupedAdvantages(unittest.TestCase):
             prompt_baseline_sample_counts=[8],
             prompt_baseline_reward_sums=[2.0],
             advantage_normalization_type="centered",
-            rescale_by_baseline_counts=True,
+            ngu_count_rescale="ratio",
         )
 
         self.assertTrue(np.allclose(advantages, np.array([-0.125, 0.375, -0.125, 0.375], dtype=float)))
@@ -164,7 +164,7 @@ class TestGroupedAdvantages(unittest.TestCase):
             prompt_baseline_sample_counts=[8],
             prompt_baseline_reward_sums=[2.0],
             advantage_normalization_type="centered",
-            rescale_by_baseline_counts=False,
+            ngu_count_rescale=None,
         )
 
         self.assertTrue(np.allclose(advantages, np.array([-0.25, 0.75, -0.25, 0.75], dtype=float)))
@@ -180,12 +180,36 @@ class TestGroupedAdvantages(unittest.TestCase):
 
         self.assertTrue(np.allclose(advantages, np.array([-1.0, 3.0, -1.0, 3.0], dtype=float), atol=1e-6))
 
+    def test_compute_grouped_advantages_anchor_pos_matches_centered_when_baseline_matches_batch(self):
+        """When baseline mean equals batch mean, advantages already sum to zero; anchor scaling is identity."""
+        scores = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
+        centered = data_loader.compute_grouped_advantages(
+            scores, prompt_sample_counts=[4], advantage_normalization_type="centered", ngu_count_rescale=None
+        )
+        anchored = data_loader.compute_grouped_advantages(
+            scores, prompt_sample_counts=[4], advantage_normalization_type="centered", ngu_count_rescale="anchor_pos"
+        )
+        self.assertTrue(np.allclose(anchored, centered))
+
+    def test_compute_grouped_advantages_anchor_pos_rescales_when_ngu_baseline_differs(self):
+        """With inflated baseline counts, centered advantages need not sum to zero; anchor_pos zeros the group sum."""
+        advantages = data_loader.compute_grouped_advantages(
+            np.array([0.0, 1.0, 0.0, 1.0], dtype=float),
+            prompt_sample_counts=[4],
+            prompt_baseline_sample_counts=[8],
+            prompt_baseline_reward_sums=[2.0],
+            advantage_normalization_type="centered",
+            ngu_count_rescale="anchor_pos",
+        )
+        self.assertTrue(np.allclose(advantages, np.array([-0.75, 0.75, -0.75, 0.75], dtype=float)))
+        self.assertAlmostEqual(float(advantages.sum()), 0.0, places=6)
+
 
 class TestNeverGiveUpPendingAge(unittest.TestCase):
     def test_streaming_config_defaults_pending_age_to_two(self):
         config = data_loader.StreamingDataLoaderConfig()
         self.assertEqual(config.maintain_pending_ngu_age, 2)
-        self.assertTrue(config.maintain_pending_ngu_count_rescale)
+        self.assertIsNone(config.maintain_pending_ngu_count_rescale)
 
     def test_accumulate_inference_batches_drops_stale_pending_counts(self):
         inference_results_Q = Queue(maxsize=1)
