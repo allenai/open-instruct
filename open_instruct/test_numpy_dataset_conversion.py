@@ -79,7 +79,7 @@ class TestIncrementalCheckpoint(unittest.TestCase):
         token_ids = [1, 2, 3, 4, 5, 6]
         labels_mask = [1, 0, 1, 0, 1, 1]
         document_boundaries = [(0, 3), (3, 6)]
-        tw, sw = numpy_dataset_conversion.save_checkpoint(
+        tw, sw, _ = numpy_dataset_conversion.save_checkpoint(
             self.output_dir,
             samples_processed=2,
             token_ids=token_ids,
@@ -104,7 +104,7 @@ class TestIncrementalCheckpoint(unittest.TestCase):
         token_ids = [1, 2, 3]
         labels_mask = [1, 0, 1]
         document_boundaries = [(0, 3)]
-        tw1, sw1 = numpy_dataset_conversion.save_checkpoint(
+        tw1, sw1, _ = numpy_dataset_conversion.save_checkpoint(
             self.output_dir,
             samples_processed=1,
             token_ids=token_ids,
@@ -122,7 +122,7 @@ class TestIncrementalCheckpoint(unittest.TestCase):
         labels_mask.extend([0, 0, 1, 1])
         document_boundaries.append((3, 7))
 
-        tw2, sw2 = numpy_dataset_conversion.save_checkpoint(
+        tw2, sw2, _ = numpy_dataset_conversion.save_checkpoint(
             self.output_dir,
             samples_processed=2,
             token_ids=token_ids,

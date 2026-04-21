@@ -12,6 +12,7 @@ import gzip
 import json
 import os
 import sys
+import time
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
@@ -19,7 +20,7 @@ from typing import Any, Literal
 import numpy as np
 from tqdm import tqdm
 
-from open_instruct import dataset_transformation, logger_utils
+from open_instruct import dataset_transformation, logger_utils, utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -54,10 +55,10 @@ def save_checkpoint(
     scalar_state: dict[str, Any],
     prev_tokens_written: int,
     prev_samples_written: int,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Append new array data to on-disk binary files, then atomically update the
-    scalar JSON metadata. Returns the (tokens_written, samples_written) counts
-    that should be passed back as prev_* on the next call.
+    scalar JSON metadata. Returns (tokens_written, samples_written, bytes_appended);
+    the first two should be passed back as prev_* on the next call.
     """
     tokens_path = os.path.join(output_dir, _CHECKPOINT_TOKEN_IDS_FILENAME)
     labels_path = os.path.join(output_dir, _CHECKPOINT_LABELS_MASK_FILENAME)
@@ -71,9 +72,13 @@ def save_checkpoint(
     new_labels = np.asarray(labels_mask[prev_tokens_written:], dtype=_CHECKPOINT_LABELS_DTYPE)
     new_boundaries = np.asarray(document_boundaries[prev_samples_written:], dtype=_CHECKPOINT_BOUNDARIES_DTYPE)
 
-    _append_bytes(tokens_path, new_tokens.tobytes())
-    _append_bytes(labels_path, new_labels.tobytes())
-    _append_bytes(boundaries_path, new_boundaries.tobytes())
+    tokens_bytes = new_tokens.tobytes()
+    labels_bytes = new_labels.tobytes()
+    boundaries_bytes = new_boundaries.tobytes()
+    _append_bytes(tokens_path, tokens_bytes)
+    _append_bytes(labels_path, labels_bytes)
+    _append_bytes(boundaries_path, boundaries_bytes)
+    bytes_appended = len(tokens_bytes) + len(labels_bytes) + len(boundaries_bytes)
 
     tokens_written = len(token_ids)
     samples_written = len(document_boundaries)
@@ -91,7 +96,7 @@ def save_checkpoint(
         json.dump(meta, f)
     os.rename(tmp_path, json_path)
 
-    return tokens_written, samples_written
+    return tokens_written, samples_written, bytes_appended
 
 
 def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
@@ -327,6 +332,10 @@ def convert_hf_to_numpy_sft(
     logger.info("Collecting tokens from dataset...")
     sample: Mapping[str, Any]
     total_samples = len(train_dataset)
+    loop_start_time = time.perf_counter()
+    utils.maybe_update_beaker_description(
+        current_step=start_idx, total_steps=total_samples, start_time=loop_start_time
+    )
 
     train_dataset_iter = train_dataset.select(range(start_idx, total_samples))
 
@@ -372,7 +381,8 @@ def convert_hf_to_numpy_sft(
         )
 
         if (idx + 1) % checkpoint_interval == 0 and idx > start_idx:
-            last_tokens_written, last_samples_written = save_checkpoint(
+            checkpoint_start = time.perf_counter()
+            last_tokens_written, last_samples_written, checkpoint_bytes = save_checkpoint(
                 output_dir,
                 samples_processed=idx + 1,
                 token_ids=token_ids,
@@ -389,7 +399,15 @@ def convert_hf_to_numpy_sft(
                 prev_tokens_written=last_tokens_written,
                 prev_samples_written=last_samples_written,
             )
-            logger.info(f"Checkpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens)")
+            elapsed = time.perf_counter() - checkpoint_start
+            logger.info(
+                f"Checkpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens) "
+                f"in {elapsed:.2f}s [{checkpoint_bytes / (1024 * 1024):.1f} MiB, "
+                f"{checkpoint_bytes / (1024 * 1024) / elapsed:.1f} MiB/s]"
+            )
+            utils.maybe_update_beaker_description(
+                current_step=idx + 1, total_steps=total_samples, start_time=loop_start_time
+            )
 
     total_instances = len(train_dataset)
     total_tokens = len(token_ids)

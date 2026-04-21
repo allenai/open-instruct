@@ -32,7 +32,14 @@ hash_gz_contents() {
 }
 
 hash_stats_json() {
-  jq -S 'del(.timestamp, .output_directory)' "$1" | sha256sum | awk '{print $1}'
+  uv run python -c "
+import hashlib, json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+data.pop('timestamp', None)
+data.pop('output_directory', None)
+print(hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest())
+" "$1"
 }
 
 compare_file() {
