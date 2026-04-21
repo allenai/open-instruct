@@ -29,7 +29,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 16 \
+    --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -42,7 +42,7 @@ uv run python mason.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 256000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
