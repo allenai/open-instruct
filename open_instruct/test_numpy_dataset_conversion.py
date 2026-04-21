@@ -8,6 +8,7 @@ import gc
 import gzip
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -41,7 +42,7 @@ class TestIncrementalCheckpoint(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp_dir.cleanup)
-        self.output_dir = self.tmp_dir.name
+        self.output_dir = pathlib.Path(self.tmp_dir.name)
 
     def _scalar_state(self):
         return {
@@ -68,8 +69,8 @@ class TestIncrementalCheckpoint(unittest.TestCase):
             prev_samples_written=0,
         )
 
-        tokens_path = os.path.join(self.output_dir, "_checkpoint_token_ids.bin")
-        size_after_first = os.path.getsize(tokens_path)
+        tokens_path = self.output_dir / "_checkpoint_token_ids.bin"
+        size_after_first = tokens_path.stat().st_size
 
         token_ids.extend([4, 5, 6, 7])
         labels_mask.extend([0, 0, 1, 1])
@@ -85,7 +86,7 @@ class TestIncrementalCheckpoint(unittest.TestCase):
             prev_tokens_written=tw1,
             prev_samples_written=sw1,
         )
-        size_after_second = os.path.getsize(tokens_path)
+        size_after_second = tokens_path.stat().st_size
 
         self.assertEqual(tw2, 7)
         self.assertEqual(sw2, 2)

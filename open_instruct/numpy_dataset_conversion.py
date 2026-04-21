@@ -11,6 +11,7 @@ The output layout for each `output_dir` is:
 import gzip
 import json
 import os
+import pathlib
 import sys
 import time
 from collections.abc import Mapping
@@ -35,19 +36,19 @@ _CHECKPOINT_LABELS_DTYPE = np.uint8
 _CHECKPOINT_BOUNDARIES_DTYPE = np.int64
 
 
-def _append_bytes(path: str, data: bytes) -> None:
+def _append_bytes(path: pathlib.Path, data: bytes) -> None:
     with open(path, "ab") as f:
         f.write(data)
 
 
-def _truncate_to(path: str, size: int) -> None:
-    if os.path.exists(path) and os.path.getsize(path) != size:
+def _truncate_to(path: pathlib.Path, size: int) -> None:
+    if path.exists() and path.stat().st_size != size:
         with open(path, "r+b") as f:
             f.truncate(size)
 
 
 def save_checkpoint(
-    output_dir: str,
+    output_dir: pathlib.Path,
     samples_processed: int,
     token_ids: list[int],
     labels_mask: list[int],
@@ -56,29 +57,38 @@ def save_checkpoint(
     prev_tokens_written: int,
     prev_samples_written: int,
 ) -> tuple[int, int, int]:
-    """Append new array data to on-disk binary files, then atomically update the
-    scalar JSON metadata. Returns (tokens_written, samples_written, bytes_appended);
-    the first two should be passed back as prev_* on the next call.
+    """Append new array data to the binary files, then atomically update the JSON
+    metadata. Returns (tokens_written, samples_written, bytes_appended); the first
+    two should be passed back as prev_* on the next call.
     """
-    tokens_path = os.path.join(output_dir, _CHECKPOINT_TOKEN_IDS_FILENAME)
-    labels_path = os.path.join(output_dir, _CHECKPOINT_LABELS_MASK_FILENAME)
-    boundaries_path = os.path.join(output_dir, _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME)
+    tokens_path = output_dir / _CHECKPOINT_TOKEN_IDS_FILENAME
+    labels_path = output_dir / _CHECKPOINT_LABELS_MASK_FILENAME
+    boundaries_path = output_dir / _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME
+    json_path = output_dir / _CHECKPOINT_FILENAME
 
-    _truncate_to(tokens_path, prev_tokens_written * np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize)
-    _truncate_to(labels_path, prev_tokens_written * np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize)
-    _truncate_to(boundaries_path, prev_samples_written * 2 * np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize)
+    # The JSON file is rewritten atomically (write-temp + rename) *after* the binary
+    # appends, so it is the source of truth for how much has been durably committed.
+    # If a previous run crashed between the binary append and the JSON rename, the
+    # binary files may contain trailing bytes beyond `prev_*_written`. Truncate any
+    # such uncommitted bytes before appending this batch so the files stay in
+    # lock-step with the JSON metadata.
+    token_size = np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize
+    labels_size = np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize
+    boundary_size = np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize
+    _truncate_to(tokens_path, prev_tokens_written * token_size)
+    _truncate_to(labels_path, prev_tokens_written * labels_size)
+    _truncate_to(boundaries_path, prev_samples_written * 2 * boundary_size)
 
-    new_tokens = np.asarray(token_ids[prev_tokens_written:], dtype=_CHECKPOINT_TOKEN_DTYPE)
-    new_labels = np.asarray(labels_mask[prev_tokens_written:], dtype=_CHECKPOINT_LABELS_DTYPE)
-    new_boundaries = np.asarray(document_boundaries[prev_samples_written:], dtype=_CHECKPOINT_BOUNDARIES_DTYPE)
+    new_tokens = np.asarray(token_ids[prev_tokens_written:], dtype=_CHECKPOINT_TOKEN_DTYPE).tobytes()
+    new_labels = np.asarray(labels_mask[prev_tokens_written:], dtype=_CHECKPOINT_LABELS_DTYPE).tobytes()
+    new_boundaries = np.asarray(
+        document_boundaries[prev_samples_written:], dtype=_CHECKPOINT_BOUNDARIES_DTYPE
+    ).tobytes()
 
-    tokens_bytes = new_tokens.tobytes()
-    labels_bytes = new_labels.tobytes()
-    boundaries_bytes = new_boundaries.tobytes()
-    _append_bytes(tokens_path, tokens_bytes)
-    _append_bytes(labels_path, labels_bytes)
-    _append_bytes(boundaries_path, boundaries_bytes)
-    bytes_appended = len(tokens_bytes) + len(labels_bytes) + len(boundaries_bytes)
+    _append_bytes(tokens_path, new_tokens)
+    _append_bytes(labels_path, new_labels)
+    _append_bytes(boundaries_path, new_boundaries)
+    bytes_appended = len(new_tokens) + len(new_labels) + len(new_boundaries)
 
     tokens_written = len(token_ids)
     samples_written = len(document_boundaries)
@@ -89,19 +99,17 @@ def save_checkpoint(
         "tokens_written": tokens_written,
         "samples_written": samples_written,
     }
-
-    json_path = os.path.join(output_dir, _CHECKPOINT_FILENAME)
-    tmp_path = json_path + ".tmp"
+    tmp_path = json_path.with_suffix(json_path.suffix + ".tmp")
     with open(tmp_path, "w") as f:
         json.dump(meta, f)
-    os.rename(tmp_path, json_path)
+    tmp_path.rename(json_path)
 
     return tokens_written, samples_written, bytes_appended
 
 
-def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
-    json_path = os.path.join(output_dir, _CHECKPOINT_FILENAME)
-    if not os.path.exists(json_path):
+def load_checkpoint(output_dir: pathlib.Path) -> dict[str, Any] | None:
+    json_path = output_dir / _CHECKPOINT_FILENAME
+    if not json_path.exists():
         return None
     with open(json_path) as f:
         meta = json.load(f)
@@ -126,9 +134,9 @@ def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
     tokens_written = meta["tokens_written"]
     samples_written = meta["samples_written"]
 
-    tokens_path = os.path.join(output_dir, _CHECKPOINT_TOKEN_IDS_FILENAME)
-    labels_path = os.path.join(output_dir, _CHECKPOINT_LABELS_MASK_FILENAME)
-    boundaries_path = os.path.join(output_dir, _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME)
+    tokens_path = output_dir / _CHECKPOINT_TOKEN_IDS_FILENAME
+    labels_path = output_dir / _CHECKPOINT_LABELS_MASK_FILENAME
+    boundaries_path = output_dir / _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME
 
     _truncate_to(tokens_path, tokens_written * np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize)
     _truncate_to(labels_path, tokens_written * np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize)
@@ -156,16 +164,16 @@ def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
     }
 
 
-def remove_checkpoint(output_dir: str) -> None:
+def remove_checkpoint(output_dir: pathlib.Path) -> None:
     for filename in (
         _CHECKPOINT_FILENAME,
         _CHECKPOINT_TOKEN_IDS_FILENAME,
         _CHECKPOINT_LABELS_MASK_FILENAME,
         _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME,
     ):
-        path = os.path.join(output_dir, filename)
-        if os.path.exists(path):
-            os.remove(path)
+        path = output_dir / filename
+        if path.exists():
+            path.unlink()
             logger.info(f"Removed checkpoint file: {path}")
 
 
@@ -256,6 +264,7 @@ def convert_hf_to_numpy_sft(
     lets it pick up where it left off.
     """
     os.makedirs(output_dir, exist_ok=True)
+    output_path = pathlib.Path(output_dir)
 
     logger.info("Verify these values match the tokenizer config used in Olmo-core:")
     logger.info(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
@@ -295,7 +304,7 @@ def convert_hf_to_numpy_sft(
         logger.info(f"Selecting {num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(num_examples))
 
-    checkpoint = load_checkpoint(output_dir) if resume else None
+    checkpoint = load_checkpoint(output_path) if resume else None
     if checkpoint:
         start_idx = checkpoint["samples_processed"]
         token_ids = checkpoint["token_ids"]
@@ -383,7 +392,7 @@ def convert_hf_to_numpy_sft(
         if (idx + 1) % checkpoint_interval == 0 and idx > start_idx:
             checkpoint_start = time.perf_counter()
             last_tokens_written, last_samples_written, checkpoint_bytes = save_checkpoint(
-                output_dir,
+                output_path,
                 samples_processed=idx + 1,
                 token_ids=token_ids,
                 labels_mask=labels_mask,
@@ -437,7 +446,7 @@ def convert_hf_to_numpy_sft(
         logger.info(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
     logger.info("Data conversion completed successfully!")
-    remove_checkpoint(output_dir)
+    remove_checkpoint(output_path)
 
     write_dataset_statistics(
         output_dir=output_dir,
