@@ -214,6 +214,13 @@ def container_def_to_dockerfile(
 
     apt_pkgs, pip_pkgs, residual = split_package_installs(post_script)
 
+    # If the residual still contains any apt/apt-get reference (e.g. multi-line
+    # apt-get install with `\` continuation that the simple regex doesn't
+    # hoist), make sure apt lists are refreshed in the residual — the hoisted
+    # apt layer rm's /var/lib/apt/lists/* to keep its layer small.
+    if residual and apt_pkgs and re.search(r"\bapt(?:-get)?\b", residual):
+        residual = "apt-get update\n" + residual
+
     lines = [
         f"FROM {base_image}",
         "ENV DEBIAN_FRONTEND=noninteractive",
