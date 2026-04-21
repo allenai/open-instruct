@@ -138,7 +138,7 @@ def container_def_to_dockerfile(container_def: str) -> str:
         f"FROM {base_image}\n"
         f"ENV DEBIAN_FRONTEND=noninteractive\n"
         f"COPY setup.sh /tmp/setup.sh\n"
-        f"RUN bash /tmp/setup.sh\n"
+        f"RUN bash /tmp/setup.sh && rm -f /tmp/setup.sh\n"
         f"WORKDIR /workspace\n"
     ), post_script
 
