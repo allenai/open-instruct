@@ -277,10 +277,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Load a state dictionary to restore the data loader's state."""
         self._excluded_indices = set(state_dict.get("excluded_indices", []))
         self._epoch_excluded_indices = set(state_dict.get("epoch_excluded_indices", []))
-        # Re-enter the saved epoch through the standard reshuffle path so sharding state is rebuilt consistently.
-        self._epoch = state_dict["epoch"] - 1
+        # Rebuild sharding for the saved epoch (same seed as state_dict["epoch"]); _reshard does not advance _epoch.
+        self._epoch = state_dict["epoch"]
         self._reshard(self._epoch, include_epoch_excluded_indices=True)
-        assert self._epoch == state_dict["epoch"]
         self.batches_processed = state_dict["batches_processed"]
         self._current_iter = None
 
