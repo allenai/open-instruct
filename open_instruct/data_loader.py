@@ -882,7 +882,7 @@ def accumulate_inference_batches(
             total_filtered_prompts += 1
             if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
-            elif result.reward_scores[0] == max_possible_score:
+            elif result.reward_scores[0] >= max_possible_score - 1e-8:
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
@@ -1371,17 +1371,18 @@ class DataPreparationActor:
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
-                unsolved_num_responses = (scores < self.config.max_possible_score).sum()
+                solved_mask = scores >= (self.config.max_possible_score - 1e-8)
+                unsolved_num_responses = (~solved_mask).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
                 sequence_length_solved = (
                     np.array([])
                     if np.all(scores == 0)
-                    else np.array(sequence_lengths[scores == self.config.max_possible_score])
+                    else np.array(sequence_lengths[solved_mask])
                 )
                 sequence_length_unsolved = (
                     np.array([])
-                    if np.all(scores == self.config.max_possible_score)
-                    else np.array(sequence_lengths[scores == 0])
+                    if np.all(solved_mask)
+                    else np.array(sequence_lengths[~solved_mask])
                 )
                 stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 

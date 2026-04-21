@@ -82,7 +82,7 @@ class SWERLSandboxEnv(RLEnvironment):
         backend_kwargs["image"] = image
         self._backend_type = backend
         self._timeout = timeout
-        self._penalty = backend_kwargs.pop("penalty", -0.05)
+        backend_kwargs.pop("penalty", None)
         backend_kwargs.pop("call_name", None)
         self._backend_kwargs = backend_kwargs
         self._backend: SandboxBackend | None = None
@@ -126,7 +126,8 @@ class SWERLSandboxEnv(RLEnvironment):
     # ------------------------------------------------------------------
     async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         last_error = None
-        for attempt in range(3):
+        max_attempts = 5 if self._backend_type == "docker" else 3
+        for attempt in range(max_attempts):
             try:
                 return self._do_reset(task_id, **kwargs)
             except Exception as e:
@@ -137,25 +138,29 @@ class SWERLSandboxEnv(RLEnvironment):
                         self._backend.close()
                     self._backend = None
         if last_error is not None:
-            raise RuntimeError(f"Reset failed after 3 attempts: {last_error}") from last_error
+            raise RuntimeError(f"Reset failed after {max_attempts} attempts: {last_error}") from last_error
         else:
             raise RuntimeError("Reset failed without capturing an error.")
 
     def _do_reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         per_sample_config = kwargs.get("env_config") or {}
 
-        # Image priority: per-sample env_config > image.txt on disk > default from __init__
-        env_image = per_sample_config.get("image")
-        if env_image:
-            self._backend_kwargs["image"] = env_image
-        elif self._task_data_dir and task_id:
+        # Image must be task-specific; no fallback to default constructor image.
+        resolved_image = per_sample_config.get("image")
+        if not resolved_image and self._task_data_dir and task_id:
             task_dir = os.path.join(self._task_data_dir, task_id)
             image_file = os.path.join(task_dir, "image.txt")
             if os.path.isfile(image_file):
                 with open(image_file, encoding="utf-8") as f:
                     image_tag = f.read().strip()
                 if image_tag:
-                    self._backend_kwargs["image"] = image_tag
+                    resolved_image = image_tag
+        if not resolved_image:
+            raise ValueError(
+                "SWERLSandboxEnv requires an explicit image per task. "
+                "Set env_config.image or provide image.txt in task data."
+            )
+        self._backend_kwargs["image"] = resolved_image
 
         if self._backend is not None:
             self._backend.close()
@@ -205,12 +210,8 @@ class SWERLSandboxEnv(RLEnvironment):
         # Tests are NOT uploaded here — they're uploaded on submit to prevent peeking.
         self._tests_dir = os.path.join(task_dir, "tests") if os.path.isdir(os.path.join(task_dir, "tests")) else None
 
-        setup_file = os.path.join(task_dir, "setup.sh")
-        if os.path.isfile(setup_file):
-            with open(setup_file, encoding="utf-8") as f:
-                setup_content = f.read()
-            self._backend.write_file("/tmp/setup.sh", setup_content)
-            self._backend.run_command("chmod +x /tmp/setup.sh && bash /tmp/setup.sh")
+        # setup.sh is intentionally ignored here. Task images are expected to be
+        # prebuilt with dependencies and setup already applied at image build time.
 
     def _upload_directory(self, host_dir: str, container_dir: str) -> None:
         """Upload a local directory tree into the container as a single tar archive.
@@ -259,7 +260,7 @@ class SWERLSandboxEnv(RLEnvironment):
             args = coerce_args(_BASH_TOOL["function"]["parameters"], call.args)
             return self._execute_bash(args)
         else:
-            return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash", reward=self._penalty)
+            return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash")
 
     # ------------------------------------------------------------------
     # execute_bash
@@ -268,7 +269,7 @@ class SWERLSandboxEnv(RLEnvironment):
         assert self._backend is not None
         command = args.get("command", "")
         if not command:
-            return StepResult(result="Error: 'command' parameter is required.", reward=self._penalty)
+            return StepResult(result="Error: 'command' parameter is required.")
 
         result = self._backend.run_command(command)
 
