@@ -474,22 +474,27 @@ class KondoGateState:
                 float(chi.item()),
             )
             return KondoGateDecision(True, 1.0, float("-inf"))
-        lam = torch.quantile(self._buffer[: self._count], 1.0 - self.rate)
+        buf = self._buffer[: self._count]
+        q = 1.0 - self.rate
+        lam = torch.quantile(buf, q)
         prob = torch.sigmoid((chi - lam) / self.temperature)
         gate = torch.bernoulli(prob, generator=self._generator)
         decision = KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
-        buf = self._buffer[: self._count]
+        probe_qs = torch.tensor([0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0], device=buf.device, dtype=buf.dtype)
+        probes = torch.quantile(buf, probe_qs)
+        frac_above = float((buf > lam).float().mean())
         logger.info(
-            "[kondo] count=%d chi=%.6g lam=%.6g prob=%.4f gate=%d temp=%.3g buf[min/med/max]=%.6g/%.6g/%.6g",
+            "[kondo] count=%d chi=%.6g q=%.3f lam=%.6g prob=%.4f gate=%d temp=%.3g "
+            "frac_buf>lam=%.3f buf_quantiles[0/.1/.25/.5/.75/.9/1]=%s",
             self._count,
             float(chi.item()),
+            q,
             decision.lam,
             decision.prob,
             int(decision.should_backward),
             self.temperature,
-            float(buf.min()),
-            float(buf.median()),
-            float(buf.max()),
+            frac_above,
+            [f"{float(v):.6g}" for v in probes],
         )
         return decision
 
