@@ -97,6 +97,48 @@ class TestIncrementalCheckpoint(unittest.TestCase):
         self.assertEqual(loaded["labels_mask"], labels_mask)
         self.assertEqual(loaded["document_boundaries"], document_boundaries)
 
+    def test_load_raises_on_truncated_binary(self):
+        token_ids = [1, 2, 3, 4, 5]
+        labels_mask = [1, 0, 1, 0, 1]
+        document_boundaries = [(0, 5)]
+        numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=1,
+            token_ids=token_ids,
+            labels_mask=labels_mask,
+            document_boundaries=document_boundaries,
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=0,
+            prev_samples_written=0,
+        )
+
+        tokens_path = self.output_dir / "_checkpoint_token_ids.bin"
+        with open(tokens_path, "r+b") as f:
+            f.truncate(np.dtype(np.uint32).itemsize)
+
+        with self.assertRaises(RuntimeError):
+            numpy_dataset_conversion.load_checkpoint(self.output_dir)
+
+    def test_load_raises_on_missing_binary(self):
+        token_ids = [1, 2, 3]
+        labels_mask = [1, 0, 1]
+        document_boundaries = [(0, 3)]
+        numpy_dataset_conversion.save_checkpoint(
+            self.output_dir,
+            samples_processed=1,
+            token_ids=token_ids,
+            labels_mask=labels_mask,
+            document_boundaries=document_boundaries,
+            scalar_state=self._scalar_state(),
+            prev_tokens_written=0,
+            prev_samples_written=0,
+        )
+
+        (self.output_dir / "_checkpoint_token_ids.bin").unlink()
+
+        with self.assertRaises(RuntimeError):
+            numpy_dataset_conversion.load_checkpoint(self.output_dir)
+
 
 class TestWriteMemmapChunked(unittest.TestCase):
     def setUp(self):

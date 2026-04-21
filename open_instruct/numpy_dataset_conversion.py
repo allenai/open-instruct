@@ -42,9 +42,17 @@ def _append_bytes(path: pathlib.Path, data: bytes) -> None:
 
 
 def _truncate_to(path: pathlib.Path, size: int) -> None:
-    if path.exists() and path.stat().st_size != size:
-        with open(path, "r+b") as f:
-            f.truncate(size)
+    if not path.exists():
+        raise RuntimeError(f"Checkpoint file {path} does not exist.")
+    current_size = path.stat().st_size
+    if current_size == size:
+        return
+    if current_size < size:
+        raise RuntimeError(
+            f"Checkpoint file {path} is smaller than expected ({current_size} < {size}); data is corrupted."
+        )
+    with open(path, "r+b") as f:
+        f.truncate(size)
 
 
 def save_checkpoint(
@@ -75,9 +83,11 @@ def save_checkpoint(
     token_size = np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize
     labels_size = np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize
     boundary_size = np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize
-    _truncate_to(tokens_path, prev_tokens_written * token_size)
-    _truncate_to(labels_path, prev_tokens_written * labels_size)
-    _truncate_to(boundaries_path, prev_samples_written * 2 * boundary_size)
+    if prev_tokens_written > 0:
+        _truncate_to(tokens_path, prev_tokens_written * token_size)
+        _truncate_to(labels_path, prev_tokens_written * labels_size)
+    if prev_samples_written > 0:
+        _truncate_to(boundaries_path, prev_samples_written * 2 * boundary_size)
 
     new_tokens = np.asarray(token_ids[prev_tokens_written:], dtype=_CHECKPOINT_TOKEN_DTYPE).tobytes()
     new_labels = np.asarray(labels_mask[prev_tokens_written:], dtype=_CHECKPOINT_LABELS_DTYPE).tobytes()
@@ -138,9 +148,11 @@ def load_checkpoint(output_dir: pathlib.Path) -> dict[str, Any] | None:
     labels_path = output_dir / _CHECKPOINT_LABELS_MASK_FILENAME
     boundaries_path = output_dir / _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME
 
-    _truncate_to(tokens_path, tokens_written * np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize)
-    _truncate_to(labels_path, tokens_written * np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize)
-    _truncate_to(boundaries_path, samples_written * 2 * np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize)
+    if tokens_written > 0:
+        _truncate_to(tokens_path, tokens_written * np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize)
+        _truncate_to(labels_path, tokens_written * np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize)
+    if samples_written > 0:
+        _truncate_to(boundaries_path, samples_written * 2 * np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize)
 
     token_ids = np.fromfile(tokens_path, dtype=_CHECKPOINT_TOKEN_DTYPE, count=tokens_written).tolist()
     labels_mask = np.fromfile(labels_path, dtype=_CHECKPOINT_LABELS_DTYPE, count=tokens_written).tolist()
