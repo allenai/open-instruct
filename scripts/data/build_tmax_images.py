@@ -27,6 +27,21 @@ from datasets import load_dataset
 logger = logging.getLogger(__name__)
 
 
+def _consume_classic_build_logs(build_logs, *, verbose: bool, image_tag: str) -> None:
+    """docker.images.build returns a log iterator; must be consumed for reliable completion."""
+    for chunk in build_logs:
+        if not isinstance(chunk, dict):
+            continue
+        if verbose and chunk.get("stream"):
+            line = chunk["stream"].rstrip()
+            if line:
+                logger.info("%s | %s", image_tag, line)
+        err = chunk.get("errorDetail") or chunk.get("error")
+        if err:
+            msg = err if isinstance(err, str) else err.get("message", str(err))
+            raise RuntimeError(f"Docker build error for {image_tag}: {msg}")
+
+
 def _ensure_buildx_builder(builder_name: str) -> None:
     """Ensure a docker-container buildx builder exists and is selected."""
     inspect = subprocess.run(
@@ -110,6 +125,11 @@ def main():
         default="swerl-multiarch",
         help="Buildx builder name to use when --use-buildx is enabled.",
     )
+    parser.add_argument(
+        "--verbose-build",
+        action="store_true",
+        help="Stream docker build output (classic build: log lines; buildx: --progress=plain).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -150,6 +170,11 @@ def main():
             hash_to_dockerfile[content_hash] = (dockerfile_content, setup_script)
 
     logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
+    if not args.dry_run and not args.verbose_build:
+        logger.info(
+            "Pass --verbose-build to stream docker output during builds "
+            "(classic: decoded logs; buildx: --progress=plain)."
+        )
 
     # Build and push images (parallel)
     lock = threading.Lock()
@@ -197,22 +222,22 @@ def main():
                     f.write(setup_script)
 
                 if use_buildx:
-                    subprocess.run(
-                        [
-                            "docker",
-                            "buildx",
-                            "build",
-                            "--platform",
-                            args.platform,
-                            "--builder",
-                            args.buildx_builder,
-                            "--tag",
-                            image_tag,
-                            "--push",
-                            tmpdir,
-                        ],
-                        check=True,
-                    )
+                    cmd = [
+                        "docker",
+                        "buildx",
+                        "build",
+                        "--platform",
+                        args.platform,
+                        "--builder",
+                        args.buildx_builder,
+                        "--tag",
+                        image_tag,
+                        "--push",
+                    ]
+                    if args.verbose_build:
+                        cmd.extend(["--progress", "plain"])
+                    cmd.append(tmpdir)
+                    subprocess.run(cmd, check=True)
                     image = None
                 else:
                     image, build_logs = worker_client.images.build(
@@ -220,6 +245,10 @@ def main():
                         tag=image_tag,
                         rm=True,
                         platform=args.platform,
+                        decode=True,
+                    )
+                    _consume_classic_build_logs(
+                        build_logs, verbose=args.verbose_build, image_tag=image_tag
                     )
             logger.info(f"Built {image_tag}")
 
