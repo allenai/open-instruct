@@ -194,37 +194,36 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
     def setup_model_update_group(self, vllm_engines: list) -> None:
         """Set up the process group for weight synchronization with vLLM engines."""
         self.vllm_engines = vllm_engines
+        self.model_update_group = None
 
         if not vllm_engines or self.rank != 0:
             return
 
-        master_address = self.get_current_node_ip()
-        master_port = utils.find_free_port()
-
-        vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
+        if self.grpo_config.single_gpu_mode:
+            init_infos: list[dict] = [{} for _ in vllm_engines]
+            master_info: dict | None = None
+        else:
+            master_address = self.get_current_node_ip()
+            master_port = utils.find_free_port()
+            vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
+            master_info = {"master_address": master_address, "master_port": master_port, "world_size": vllm_world_size}
+            init_infos = [
+                master_info | {"rank_offset": i * self.vllm_config.vllm_tensor_parallel_size + 1}
+                for i, _ in enumerate(vllm_engines)
+            ]
 
         refs = [
-            engine.init_weight_transfer_engine.remote(
-                WeightTransferInitRequest(
-                    init_info={
-                        "master_address": master_address,
-                        "master_port": master_port,
-                        "rank_offset": i * self.vllm_config.vllm_tensor_parallel_size + 1,
-                        "world_size": vllm_world_size,
-                    }
-                )
-            )
-            for i, engine in enumerate(vllm_engines)
+            engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info=info))
+            for engine, info in zip(vllm_engines, init_infos)
         ]
 
-        # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
-        torch.cuda.set_device(0)
-        self.model_update_group = NCCLWeightTransferEngine.trainer_init(
-            {"master_address": master_address, "master_port": master_port, "world_size": vllm_world_size}
-        )
+        if master_info is not None:
+            # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
+            torch.cuda.set_device(0)
+            self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
 
         ray.get(refs)
-        logger.info(f"[Rank {self.rank}] vLLM model update group initialized")
+        logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
 
     def setup_callbacks(
         self,
