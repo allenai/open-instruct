@@ -110,10 +110,69 @@ def _ensure_buildx_builder(builder_name: str) -> None:
     subprocess.run(["docker", "buildx", "inspect", "--bootstrap"], check=True)
 
 
-def container_def_to_dockerfile(container_def: str) -> str:
-    """Convert a Singularity/Apptainer def to a Dockerfile."""
+# Matches simple apt installs that we can safely hoist into a shared layer.
+# Allows an optional leading `apt-get update &&` and known benign flags.
+_APT_INSTALL_RE = re.compile(
+    r"^\s*(?:apt-get\s+update\s*&&\s*)?"
+    r"apt-get\s+install\s+-y(?:\s+--no-install-recommends)?\s+"
+    r"(?P<pkgs>[A-Za-z0-9][A-Za-z0-9._+\-\s=:]*?)"
+    r"\s*(?:&&\s*rm\s+-rf\s+/var/lib/apt/lists/\*)?\s*$"
+)
+
+# Matches simple pip installs: `pip install ...` or `pip3 install ...`, packages only.
+# Any flag (--index-url, --extra-index-url, -e, --no-cache-dir, etc.) is left in the
+# residual script so we don't mishandle non-trivial installs.
+_PIP_INSTALL_RE = re.compile(
+    r"^\s*(?P<exe>pip3?)\s+install\s+(?:--no-cache-dir\s+)?"
+    r"(?P<pkgs>[A-Za-z0-9][A-Za-z0-9._+\-\s\[\]=<>!~]*?)\s*$"
+)
+
+
+def _is_valid_pip_package(token: str) -> bool:
+    """Reject anything that looks like a flag, URL, or VCS ref."""
+    if not token or token.startswith("-"):
+        return False
+    if "://" in token or token.startswith(("git+", "http", "https", "file:", "/")):
+        return False
+    return True
+
+
+def split_package_installs(post_script: str) -> tuple[list[str], list[str], str]:
+    """Extract simple apt/pip install commands from a Singularity %post script.
+
+    Returns:
+        (apt_packages_sorted_unique, pip_packages_sorted_unique, residual_script)
+
+    Lines that look like ``apt-get install -y a b c`` or ``pip install x y`` are
+    removed from the returned residual. Anything with unusual flags, URLs, or
+    version pinning that is not purely ``pkg==x.y`` syntax stays in residual so
+    that its semantics is preserved verbatim.
+    """
+    apt: list[str] = []
+    pip: list[str] = []
+    residual_lines: list[str] = []
+    for line in post_script.splitlines():
+        m_apt = _APT_INSTALL_RE.match(line)
+        if m_apt:
+            apt.extend(tok for tok in m_apt.group("pkgs").split() if tok and not tok.startswith("-"))
+            continue
+        m_pip = _PIP_INSTALL_RE.match(line)
+        if m_pip:
+            pkgs = m_pip.group("pkgs").split()
+            if pkgs and all(_is_valid_pip_package(p) for p in pkgs):
+                pip.extend(pkgs)
+                continue
+        residual_lines.append(line)
+    apt = sorted(set(apt))
+    pip = sorted(set(pip))
+    residual = "\n".join(residual_lines).strip()
+    return apt, pip, residual
+
+
+def _parse_post(container_def: str) -> tuple[str, str]:
+    """Return (base_image, post_script_text) from a Singularity def file."""
     base_image = "ubuntu:22.04"
-    post_commands = []
+    post_commands: list[str] = []
 
     for line in container_def.splitlines():
         stripped = line.strip()
@@ -130,16 +189,51 @@ def container_def_to_dockerfile(container_def: str) -> str:
         if in_post:
             post_commands.append(line)
 
-    post_script = "\n".join(post_commands).strip()
+    return base_image, "\n".join(post_commands).strip()
 
-    # Write post commands as a script and execute it, since multi-line RUN
-    # with raw shell commands breaks Dockerfile parsing.
-    return (
-        f"FROM {base_image}\n"
-        f"ENV DEBIAN_FRONTEND=noninteractive\n"
-        f"COPY setup.sh /tmp/setup.sh\n"
-        f"RUN bash /tmp/setup.sh && rm -f /tmp/setup.sh\n"
-    ), post_script
+
+def container_def_to_dockerfile(
+    container_def: str, *, split_pkg_layers: bool = False
+) -> tuple[str, str]:
+    """Convert a Singularity/Apptainer def to a Dockerfile + setup.sh pair.
+
+    When ``split_pkg_layers`` is True, simple apt and pip install commands are
+    hoisted into their own RUN layers (sorted + deduped) so Docker Hub can
+    share them across tasks with the same install sets. The remaining `%post`
+    body is written into setup.sh and executed in a separate layer.
+    """
+    base_image, post_script = _parse_post(container_def)
+
+    if not split_pkg_layers:
+        return (
+            f"FROM {base_image}\n"
+            f"ENV DEBIAN_FRONTEND=noninteractive\n"
+            f"COPY setup.sh /tmp/setup.sh\n"
+            f"RUN bash /tmp/setup.sh && rm -f /tmp/setup.sh\n"
+        ), post_script
+
+    apt_pkgs, pip_pkgs, residual = split_package_installs(post_script)
+
+    lines = [
+        f"FROM {base_image}",
+        "ENV DEBIAN_FRONTEND=noninteractive",
+    ]
+    if apt_pkgs:
+        pkg_str = " ".join(apt_pkgs)
+        lines.append(
+            "RUN apt-get update "
+            "&& apt-get install -y --no-install-recommends "
+            f"{pkg_str} "
+            "&& rm -rf /var/lib/apt/lists/*"
+        )
+    if pip_pkgs:
+        pkg_str = " ".join(pip_pkgs)
+        lines.append(f"RUN pip3 install --no-cache-dir {pkg_str}")
+    if residual:
+        lines.append("COPY setup.sh /tmp/setup.sh")
+        lines.append("RUN bash /tmp/setup.sh && rm -f /tmp/setup.sh")
+    dockerfile = "\n".join(lines) + "\n"
+    return dockerfile, residual
 
 
 def main():
@@ -188,6 +282,15 @@ def main():
             "Rebuild only tasks whose image in the output dataset is currently "
             "a fallback (ubuntu:22.04) from a prior failed build. Leaves other "
             "tasks untouched."
+        ),
+    )
+    parser.add_argument(
+        "--split-pkg-layers",
+        action="store_true",
+        help=(
+            "Hoist simple apt-get / pip install commands into their own RUN "
+            "layers so Docker Hub can dedupe them across tasks. Changes the "
+            "per-task content hash (expect a one-time full rebuild)."
         ),
     )
     args = parser.parse_args()
@@ -251,7 +354,9 @@ def main():
                 f"Missing container_def for task {task_id}. "
                 "Use a source dataset that includes container_def (for example osieosie/tmax-tasks-*)."
             )
-        dockerfile_content, setup_script = container_def_to_dockerfile(container_def)
+        dockerfile_content, setup_script = container_def_to_dockerfile(
+            container_def, split_pkg_layers=args.split_pkg_layers
+        )
         combined = dockerfile_content + setup_script
         content_hash = hashlib.sha256(combined.encode()).hexdigest()[:12]
 
