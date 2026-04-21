@@ -14,10 +14,11 @@ Usage:
 import argparse
 import concurrent.futures
 import hashlib
-import io
 import logging
 import os
+import re
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -27,19 +28,65 @@ from datasets import load_dataset
 logger = logging.getLogger(__name__)
 
 
-def _consume_classic_build_logs(build_logs, *, verbose: bool, image_tag: str) -> None:
-    """docker.images.build returns a log iterator; must be consumed for reliable completion."""
-    for chunk in build_logs:
+_BUILT_IMAGE_ID_RE = re.compile(r"(?:Successfully built |sha256:)([0-9a-f]+)")
+
+
+def _format_build_chunk_line(chunk: dict) -> str | None:
+    """Best-effort human line from a Docker engine JSON build message."""
+    stream = chunk.get("stream")
+    if stream is not None:
+        if isinstance(stream, bytes):
+            stream = stream.decode("utf-8", "replace")
+        line = str(stream).rstrip()
+        if line:
+            return line
+    status = chunk.get("status")
+    if not status:
+        return None
+    parts = [str(status)]
+    if chunk.get("id"):
+        parts.append(str(chunk["id"]))
+    prog = chunk.get("progressDetail") or {}
+    if isinstance(prog, dict) and prog.get("current") is not None and prog.get("total"):
+        parts.append(f"{prog['current']}/{prog['total']}")
+    return " ".join(parts)
+
+
+def _stream_classic_build(worker_client, tmpdir, *, image_tag, platform, quiet):
+    """Build using the low-level API so logs stream in real time.
+
+    docker.DockerClient.images.build() fully consumes the build stream
+    before returning (to locate the image id), so you see no output
+    until the build finishes. Using api.build(decode=True) yields JSON
+    chunks as the daemon emits them.
+    """
+    api = worker_client.api
+    image_id: str | None = None
+    for chunk in api.build(
+        path=tmpdir, tag=image_tag, rm=True, platform=platform, decode=True
+    ):
         if not isinstance(chunk, dict):
             continue
-        if verbose and chunk.get("stream"):
-            line = chunk["stream"].rstrip()
-            if line:
-                logger.info("%s | %s", image_tag, line)
         err = chunk.get("errorDetail") or chunk.get("error")
         if err:
             msg = err if isinstance(err, str) else err.get("message", str(err))
             raise RuntimeError(f"Docker build error for {image_tag}: {msg}")
+        stream = chunk.get("stream")
+        if stream:
+            if isinstance(stream, bytes):
+                stream = stream.decode("utf-8", "replace")
+            match = _BUILT_IMAGE_ID_RE.search(stream)
+            if match:
+                image_id = match.group(1)
+        if quiet:
+            continue
+        line = _format_build_chunk_line(chunk)
+        if line:
+            sys.stdout.write(f"{image_tag} | {line}\n")
+            sys.stdout.flush()
+    if image_id is None:
+        raise RuntimeError(f"Docker build for {image_tag} did not report an image id")
+    return worker_client.images.get(image_id)
 
 
 def _ensure_buildx_builder(builder_name: str) -> None:
@@ -126,13 +173,22 @@ def main():
         help="Buildx builder name to use when --use-buildx is enabled.",
     )
     parser.add_argument(
+        "--quiet-build",
+        action="store_true",
+        help="Suppress streaming docker build output (default: print build logs).",
+    )
+    parser.add_argument(
         "--verbose-build",
         action="store_true",
-        help="Stream docker build output (classic build: log lines; buildx: --progress=plain).",
+        help="Alias for default behavior (logs on); kept for backward compatibility.",
     )
     args = parser.parse_args()
-
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    stream_build_logs = not args.quiet_build
+    if args.verbose_build and args.quiet_build:
+        logger.warning("--verbose-build overrides --quiet-build: build logs will be printed.")
+        stream_build_logs = True
 
     ds = load_dataset(args.input, split="train")
     logger.info(f"Loaded {len(ds)} tasks")
@@ -170,11 +226,6 @@ def main():
             hash_to_dockerfile[content_hash] = (dockerfile_content, setup_script)
 
     logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
-    if not args.dry_run and not args.verbose_build:
-        logger.info(
-            "Pass --verbose-build to stream docker output during builds "
-            "(classic: decoded logs; buildx: --progress=plain)."
-        )
 
     # Build and push images (parallel)
     lock = threading.Lock()
@@ -234,23 +285,18 @@ def main():
                         image_tag,
                         "--push",
                     ]
-                    if args.verbose_build:
+                    if stream_build_logs:
                         cmd.extend(["--progress", "plain"])
                     cmd.append(tmpdir)
                     subprocess.run(cmd, check=True)
                     image = None
                 else:
-                    # High-level images.build() always runs json_stream() on the API
-                    # stream; it must receive bytes (decode=False). Passing decode=True
-                    # yields dicts and breaks stream_as_text → .decode().
-                    image, build_logs = worker_client.images.build(
-                        path=tmpdir,
-                        tag=image_tag,
-                        rm=True,
+                    image = _stream_classic_build(
+                        worker_client,
+                        tmpdir,
+                        image_tag=image_tag,
                         platform=args.platform,
-                    )
-                    _consume_classic_build_logs(
-                        build_logs, verbose=args.verbose_build, image_tag=image_tag
+                        quiet=not stream_build_logs,
                     )
             logger.info(f"Built {image_tag}")
 
