@@ -805,7 +805,6 @@ class PolicyTrainerRayProcess(RayProcess):
         score_min: float = getattr(args, "gen_value_score_min", 0.0)
         score_max: float = getattr(args, "gen_value_score_max", 10.0)
         conditioning: str = getattr(args, "gen_value_conditioning", "none")
-        allow_cot: bool = getattr(args, "gen_value_allow_cot", False)
         max_new_tokens: int = getattr(args, "gen_value_max_new_tokens", 8)
         temperature: float = getattr(args, "gen_value_temperature", 1.0)
 
@@ -826,7 +825,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 ground_truth=ground_truth_str if conditioning != "none" else "",
                 score_min=score_min,
                 score_max=score_max,
-                allow_cot=allow_cot,
             )
             prompts.append(prompt)
 
@@ -842,7 +840,7 @@ class PolicyTrainerRayProcess(RayProcess):
         for output in outputs:
             text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
             generated_texts.append(text)
-            raw = value_model_utils.parse_generative_value_score(text, score_min, score_max, allow_cot)
+            raw = value_model_utils.parse_generative_value_score(text, score_min, score_max)
             scores.append(value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.5)
 
         # Vectorised piecewise-constant values: each token index maps to its segment score.

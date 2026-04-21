@@ -1,6 +1,5 @@
 #!/bin/bash
-# Score a scalar value model with GT conditioning (answer_prefix / boxed_answer / cot_spoiler /
-# expected_accuracy).
+# Score a scalar value model with GT conditioning (answer_prefix / expected_accuracy).
 set -euo pipefail
 
 VALUE_MODEL_PATH="${1:?Value model path required}"

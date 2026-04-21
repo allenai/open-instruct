@@ -175,7 +175,7 @@ class GRPOExperimentConfig(
     value_model_ground_truth_conditioning: bool = False
     """If True, splice a conditioning string built from the ground truth into the value forward."""
     gt_conditioning_template: str = "answer_prefix"
-    """Template name. One of: answer_prefix, boxed_answer, cot_spoiler, expected_accuracy, rollout_context, correct_demo."""
+    """Template name. One of: answer_prefix, expected_accuracy, rollout_context, correct_demo."""
     rollout_context_num_siblings: int = 4
     """Number of sibling rollouts to include when using the rollout_context / correct_demo templates."""
 

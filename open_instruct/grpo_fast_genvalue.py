@@ -92,12 +92,10 @@ class GenValueTrainerActor:
         learning_rate: float,
         score_min: float,
         score_max: float,
-        allow_cot: bool,
     ) -> None:
         self._lr = learning_rate
         self._score_min = score_min
         self._score_max = score_max
-        self._allow_cot = allow_cot
         self._step_count = 0
 
         self._model = AutoModelForCausalLM.from_pretrained(
@@ -190,7 +188,6 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
     # Score schema.
     gen_value_score_min: float = 0.0
     gen_value_score_max: float = 10.0
-    gen_value_allow_cot: bool = False
     # Training coefficients.
     gen_value_learning_rate: float | None = None
     gen_value_reinforce_coef: float = 0.1
@@ -273,7 +270,6 @@ def score_partial_rollout_batch(
     temperature: float,
     score_min: float,
     score_max: float,
-    allow_cot: bool,
 ) -> tuple[list[float | None], list[str]]:
     """Send a batch of partial-rollout scoring prompts to the gen-value vLLM pool.
 
@@ -290,7 +286,7 @@ def score_partial_rollout_batch(
         output = await asyncio.to_thread(__import__("ray").get, ref)
         text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
         parsed = value_model_utils.parse_generative_value_score(
-            text, score_min=score_min, score_max=score_max, allow_cot=allow_cot
+            text, score_min=score_min, score_max=score_max
         )
         return text, parsed
 
@@ -326,7 +322,6 @@ def _build_sample_scoring_prompts(
             ground_truth=ground_truth,
             score_min=args.gen_value_score_min,
             score_max=args.gen_value_score_max,
-            allow_cot=args.gen_value_allow_cot,
         )
         prompts.append(scoring_prompt)
     return prompts
@@ -364,7 +359,6 @@ def _gen_value_scoring_loop(
                 temperature=args.gen_value_temperature,
                 score_min=args.gen_value_score_min,
                 score_max=args.gen_value_score_max,
-                allow_cot=args.gen_value_allow_cot,
             )
             valid = [s for s in scores if s is not None]
             if with_tracking:
@@ -721,7 +715,6 @@ def main():
             gv_lr,
             args.gen_value_score_min,
             args.gen_value_score_max,
-            args.gen_value_allow_cot,
         )
         ray.get(gen_value_trainer.ready.remote())
         logger.info("======== ✅ Gen-value trainer actor ready (lr=%.2e) =========", gv_lr)

@@ -27,7 +27,7 @@ _POSTFIX_TEMPLATES = {
     "rollout_context",
     "correct_demo",
 }
-_PREFIX_TEMPLATES = {"answer_prefix", "boxed_answer", "cot_spoiler"}
+_PREFIX_TEMPLATES = {"answer_prefix"}
 
 # Templates that need a ground-truth string to be meaningful.
 TEMPLATES_REQUIRING_GT: frozenset[str] = frozenset({"rollout_context", "correct_demo"})
@@ -64,14 +64,7 @@ def build_conditioning_text(
     string and extend position ids accordingly.
     """
     if template == "answer_prefix":
-        return f"Answer: {ground_truth}\n"
-    if template == "boxed_answer":
-        return f"The correct answer is \\boxed{{{ground_truth}}}.\n"
-    if template == "cot_spoiler":
-        return (
-            f"Therefore, the final answer is \\boxed{{{ground_truth}}}.\n"
-            "Now let me show my working for this problem:\n"
-        )
+        return f"Note the correct answer is: {ground_truth}\n"
     if template == "expected_accuracy":
         return f"Given the answer is {ground_truth}, Let me compute the expected accuracy of the partial rollout: "
     if template == "rollout_context":
@@ -130,18 +123,14 @@ def build_generative_value_prompt(
     conditioning: str,  # one of: "none", "gt", "correct_demo", "rollout_context"
     ground_truth: str = "",
     siblings: Sequence[dict] | None = None,
-    allow_cot: bool = False,
     score_min: float = 0.0,
     score_max: float = 10.0,
 ) -> str:
-    """Build the gen-value prompt described in the plan.
+    """Build the gen-value prompt.
 
-    Default form (no CoT, score 0..score_max):
-        "<conditioning_prefix>Here is a given partial response. Please predict the expected
-         value of the response, scoring between 0 and 10. <rollout>{partial}</rollout>
-         Thus, the score is: "
-
-    With `allow_cot=True`, switches to a `{score: X}` suffix.
+    Format: "<conditioning_prefix>Here is a given partial response. Please predict the expected
+    value of the response, scoring between 0 and 10. Reason briefly, then output exactly
+    {score: X}. <rollout>{partial}</rollout>\nThus, the score is "
     """
     conditioning_text = ""
     if conditioning == "gt" and ground_truth:
@@ -149,9 +138,7 @@ def build_generative_value_prompt(
     elif conditioning == "correct_demo" and siblings:
         chosen = next((s for s in siblings if s.get("is_correct")), siblings[0])
         tag = "CORRECT" if chosen.get("is_correct") else "INCORRECT"
-        conditioning_text = (
-            f"Here is a reference attempt ({tag}):\n{str(chosen.get('text', ''))}\n"
-        )
+        conditioning_text = f"Here is a reference attempt ({tag}):\n{str(chosen.get('text', ''))}\n"
     elif conditioning == "rollout_context" and siblings:
         lines = []
         budget = 4096
@@ -165,24 +152,13 @@ def build_generative_value_prompt(
             lines.append(line)
         conditioning_text = "Here are some other attempts at this question:\n" + "".join(lines)
 
-    if allow_cot:
-        instruction = (
-            f"Here is a given partial response. Please predict the expected value of the response, "
-            f"scoring between {int(score_min)} and {int(score_max)}. "
-            f"Reason briefly, then output exactly {{score: X}} where X is a number in "
-            f"[{int(score_min)}, {int(score_max)}]."
-        )
-        suffix = (
-            f"<rollout>{partial_response}</rollout>\nThus, the score is "
-        )
-    else:
-        instruction = (
-            f"Here is a given partial response. Please predict the expected value of the response, "
-            f"scoring between {int(score_min)} and {int(score_max)}."
-        )
-        suffix = (
-            f"<rollout>{partial_response}</rollout> Thus, the score is: "
-        )
+    instruction = (
+        f"Here is a given partial response. Please predict the expected value of the response, "
+        f"scoring between {int(score_min)} and {int(score_max)}. "
+        f"Reason briefly, then output exactly {{score: X}} where X is a number in "
+        f"[{int(score_min)}, {int(score_max)}]."
+    )
+    suffix = f"<rollout>{partial_response}</rollout>\nThus, the score is "
     return f"{conditioning_text}{instruction} {suffix}"
 
 
@@ -190,26 +166,16 @@ def parse_generative_value_score(
     text: str,
     score_min: float = 0.0,
     score_max: float = 10.0,
-    allow_cot: bool = False,
 ) -> float | None:
-    """Extract the score. With CoT, look for `{score: X}`; otherwise take the leading number."""
-    if allow_cot:
-        m = _SCORE_RE.search(text)
-        if m:
-            try:
-                v = float(m.group(1))
-                return max(score_min, min(score_max, v))
-            except ValueError:
-                return None
-        return None
-    m = _LEADING_DIGIT_RE.search(text)
-    if not m:
-        return None
-    try:
-        v = float(m.group(1))
-        return max(score_min, min(score_max, v))
-    except ValueError:
-        return None
+    """Extract the score from a `{score: X}` pattern."""
+    m = _SCORE_RE.search(text)
+    if m:
+        try:
+            v = float(m.group(1))
+            return max(score_min, min(score_max, v))
+        except ValueError:
+            return None
+    return None
 
 
 def value_clipped_mse_loss(

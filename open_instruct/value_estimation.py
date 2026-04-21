@@ -21,6 +21,7 @@ consolidated comparison table.
 
 All three are CLI-addressable. Shell wrappers live in ``scripts/eval/value_estimation/``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,7 +77,6 @@ class ScoreDatasetConfig:
     gt_conditioning_template: str = "answer_prefix"
     rollout_context_num_siblings: int = 4
     gen_value_conditioning: str = "none"
-    gen_value_allow_cot: bool = False
     gen_value_score_min: float = 0.0
     gen_value_score_max: float = 10.0
     gen_value_max_new_tokens: int = 8
@@ -94,6 +94,14 @@ class CompareRunsConfig:
     score_dataset_paths: list[str] = field(default_factory=list)
     output_markdown_path: str | None = None
     output_csv_path: str | None = None
+
+
+@dataclass
+class ConvertCheckpointConfig:
+    checkpoint_dir: str  # directory containing value_model.bin
+    output_dir: str
+    # Path to a full HF model dir for config + tokenizer. Defaults to the parent of checkpoint_dir.
+    base_model_path: str | None = None
 
 
 # --------------------------------------------------------------------------------------------
@@ -122,11 +130,7 @@ def _run_rollouts(
         gpu_memory_utilization=gpu_memory_utilization,
     )
     sampling = SamplingParams(
-        n=n,
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        logprobs=1 if logprobs else None,
+        n=n, temperature=temperature, top_p=top_p, max_tokens=max_tokens, logprobs=1 if logprobs else None
     )
     raw = llm.generate(prompts, sampling)
     result: list[list[dict[str, Any]]] = []
@@ -135,17 +139,8 @@ def _run_rollouts(
         for c in out.outputs:
             lp = None
             if logprobs and getattr(c, "logprobs", None) is not None:
-                lp = [
-                    next(iter(p.values())).logprob if p else 0.0
-                    for p in c.logprobs
-                ]
-            cands.append(
-                {
-                    "token_ids": list(c.token_ids),
-                    "text": c.text,
-                    "logprobs": lp,
-                }
-            )
+                lp = [next(iter(p.values())).logprob if p else 0.0 for p in c.logprobs]
+            cands.append({"token_ids": list(c.token_ids), "text": c.text, "logprobs": lp})
         result.append(cands)
     # Cleanly shut down the LLM engine so the next call can re-init without leaks.
     with contextlib.suppress(Exception):
@@ -234,14 +229,13 @@ def make_dataset(cfg: MakeDatasetConfig) -> str:
         for rollout_idx in (first_correct, first_incorrect):
             main = cands[rollout_idx]
             siblings = [
-                {"text": cands[k]["text"], "is_correct": verdicts[k]}
-                for k in range(len(cands))
-                if k != rollout_idx
+                {"text": cands[k]["text"], "is_correct": verdicts[k]} for k in range(len(cands)) if k != rollout_idx
             ]
             tokens = main["token_ids"]
             length = len(tokens)
             probe_positions = [
-                t for t in range(cfg.probe_interval, length, cfg.probe_interval)
+                t
+                for t in range(cfg.probe_interval, length, cfg.probe_interval)
                 if (length - t) >= cfg.min_probe_remaining_tokens
             ]
             row = {
@@ -347,16 +341,35 @@ def score_dataset(cfg: ScoreDatasetConfig) -> str:
     else:
         raise ValueError(f"Unknown value_model_type: {cfg.value_model_type}")
 
+    correct_preds: list[float] = []
+    incorrect_preds: list[float] = []
+    probe_rows = []
     for i, row in df.iterrows():
-        for p, mc in zip(preds_per_row[i], row["mc_values"]):
+        is_correct = bool(row.get("rollout_is_correct"))
+        for pos, p, mc in zip(row["probe_positions"], preds_per_row[i], row["mc_values"]):
             all_preds.append(float(p))
             all_mc.append(float(mc))
+            if is_correct:
+                correct_preds.append(float(p))
+            else:
+                incorrect_preds.append(float(p))
+            probe_rows.append(
+                {
+                    "run_name": cfg.run_name,
+                    "rollout_idx": i,
+                    "rollout_is_correct": is_correct,
+                    "probe_position": int(pos),
+                    "predicted_value": float(p),
+                    "mc_value": float(mc),
+                }
+            )
 
     # Metrics
     metrics: dict[str, float] = {}
     if all_preds:
-        mae = float(np.mean([abs(a - b) for a, b in zip(all_preds, all_mc)]))
-        metrics["mae"] = mae
+        diffs = [a - b for a, b in zip(all_preds, all_mc)]
+        metrics["mae"] = float(np.mean([abs(d) for d in diffs]))
+        metrics["mse"] = float(np.mean([d**2 for d in diffs]))
         if len(all_preds) > 1:
             try:
                 metrics["pearson"] = float(pearsonr(all_preds, all_mc)[0])
@@ -373,25 +386,20 @@ def score_dataset(cfg: ScoreDatasetConfig) -> str:
             metrics[f"calib_bin_{b}_pred_mean"] = float(np.mean([all_preds[j] for j in chunk]))
             metrics[f"calib_bin_{b}_mc_mean"] = float(np.mean([all_mc[j] for j in chunk]))
 
-    # Correct vs incorrect breakdown
-    correct_preds: list[float] = []
-    incorrect_preds: list[float] = []
-    for i, row in df.iterrows():
-        if bool(row.get("rollout_is_correct")):
-            correct_preds.extend(float(x) for x in preds_per_row[i])
-        else:
-            incorrect_preds.extend(float(x) for x in preds_per_row[i])
     if correct_preds:
         metrics["correct_pred_mean"] = float(np.mean(correct_preds))
     if incorrect_preds:
         metrics["incorrect_pred_mean"] = float(np.mean(incorrect_preds))
 
     # Write output parquet.
+    import pandas as pd  # noqa: PLC0415
+
     df_out = df.copy()
     df_out["predicted_values"] = preds_per_row
     df_out["run_config"] = [json.dumps(dataclasses.asdict(cfg))] * len(df_out)
     pathlib.Path(os.path.dirname(cfg.output_path) or ".").mkdir(parents=True, exist_ok=True)
     df_out.to_parquet(cfg.output_path, index=False)
+    pd.DataFrame(probe_rows).to_csv(cfg.output_path + ".probes.csv", index=False)
     # Write a small JSON summary next to the parquet.
     summary_path = cfg.output_path + ".summary.json"
     summary = {"run_name": cfg.run_name, "value_model_type": cfg.value_model_type, "metrics": metrics}
@@ -420,22 +428,20 @@ def _score_with_scalar_value(df, cfg: ScoreDatasetConfig) -> list[list[float]]:
         for _, row in df.iterrows():
             prompt = row["prompt"]
             rollout_tokens = list(row["rollout_tokens"])
+            prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+            cond_ids: list[int] = []
+            if cfg.value_model_ground_truth_conditioning:
+                cond_text = value_model_utils.build_conditioning_text(
+                    cfg.gt_conditioning_template, row["ground_truth"], siblings=row.get("sibling_rollouts") or []
+                )
+                cond_ids = tokenizer.encode(cond_text, add_special_tokens=False)
+            is_postfix = value_model_utils.is_postfix_template(cfg.gt_conditioning_template)
             preds: list[float] = []
             for t in row["probe_positions"]:
-                partial = tokenizer.decode(rollout_tokens[:t], skip_special_tokens=False)
-                cond_text = ""
-                if cfg.value_model_ground_truth_conditioning:
-                    cond_text = value_model_utils.build_conditioning_text(
-                        cfg.gt_conditioning_template,
-                        row["ground_truth"],
-                        siblings=row.get("sibling_rollouts") or [],
-                    )
-                if value_model_utils.is_postfix_template(cfg.gt_conditioning_template):
-                    input_text = prompt + partial + cond_text
-                else:
-                    input_text = cond_text + prompt + partial
-                ids = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=16384).to(cfg.device)
-                out = value_model(**ids)
+                partial_ids = rollout_tokens[:t]
+                all_ids = prompt_ids + cond_ids + partial_ids if is_postfix else cond_ids + prompt_ids + partial_ids
+                input_ids = torch.tensor([all_ids[-16384:]], dtype=torch.long).to(cfg.device)
+                out = value_model(input_ids=input_ids)
                 logits = getattr(out, "logits", out)[:, -1]  # last-token logit
                 v = float(logits.squeeze(-1).item())
                 preds.append(v)
@@ -470,7 +476,6 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
                 conditioning=cfg.gen_value_conditioning,
                 ground_truth=row["ground_truth"],
                 siblings=row.get("sibling_rollouts") or [],
-                allow_cot=cfg.gen_value_allow_cot,
                 score_min=cfg.gen_value_score_min,
                 score_max=cfg.gen_value_score_max,
             )
@@ -486,7 +491,6 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
             txt,
             score_min=cfg.gen_value_score_min,
             score_max=cfg.gen_value_score_max,
-            allow_cot=cfg.gen_value_allow_cot,
         )
         if parsed is None:
             parsed = 0.5 * (cfg.gen_value_score_min + cfg.gen_value_score_max)
@@ -532,6 +536,61 @@ def compare_runs(cfg: CompareRunsConfig) -> str | None:
 
 
 # --------------------------------------------------------------------------------------------
+# convert_checkpoint
+# --------------------------------------------------------------------------------------------
+def convert_checkpoint(cfg: ConvertCheckpointConfig) -> str:
+    """Convert a ``value_model.bin`` checkpoint into a HF-loadable directory.
+
+    The value model's ``lm_head`` has shape ``[1, hidden_size]`` rather than
+    ``[vocab_size, hidden_size]``.  We set ``vocab_size=1`` and truncate
+    ``embed_tokens.weight`` so that ``AutoModelForCausalLM.from_pretrained``
+    can load the converted directory directly.
+    """
+    import shutil  # noqa: PLC0415
+
+    import torch  # noqa: PLC0415
+    from safetensors.torch import save_file  # noqa: PLC0415
+
+    ckpt_dir = pathlib.Path(cfg.checkpoint_dir)
+    out_dir = pathlib.Path(cfg.output_dir)
+    base_dir = pathlib.Path(cfg.base_model_path) if cfg.base_model_path else ckpt_dir.parent
+
+    value_bin = ckpt_dir / "value_model.bin"
+    if not value_bin.exists():
+        raise FileNotFoundError(f"value_model.bin not found in {ckpt_dir}")
+
+    config_src = base_dir / "config.json"
+    if not config_src.exists():
+        raise FileNotFoundError(f"config.json not found in {base_dir}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(config_src) as f:
+        cfg_json = json.load(f)
+    cfg_json["vocab_size"] = 1
+    cfg_json["tie_word_embeddings"] = False
+    with open(out_dir / "config.json", "w") as f:
+        json.dump(cfg_json, f, indent=2)
+
+    sd = torch.load(value_bin, map_location="cpu", weights_only=True)
+    sd_mod = {k: (v[:1].bfloat16() if k == "model.embed_tokens.weight" else v.bfloat16()) for k, v in sd.items()}
+    save_file(sd_mod, out_dir / "model.safetensors")
+    weight_map = {k: "model.safetensors" for k in sd_mod}
+    total_size = sum(v.numel() * 2 for v in sd_mod.values())
+    index = {"metadata": {"total_size": total_size}, "weight_map": weight_map}
+    with open(out_dir / "model.safetensors.index.json", "w") as f:
+        json.dump(index, f)
+
+    for fname in ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "generation_config.json"]:
+        src = base_dir / fname
+        if src.exists():
+            shutil.copy(src, out_dir / fname)
+
+    logger.info(f"Converted value checkpoint to {out_dir}")
+    return str(out_dir)
+
+
+# --------------------------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------------------------
 def _cfg_from_args(cfg_cls, args_ns) -> Any:
@@ -562,6 +621,10 @@ def main() -> None:
     p_cmp.add_argument("--output_markdown_path", default=None)
     p_cmp.add_argument("--output_csv_path", default=None)
 
+    p_conv = sub.add_parser("convert_checkpoint", help="Convert value_model.bin to a HF-loadable directory.")
+    for f in dataclasses.fields(ConvertCheckpointConfig):
+        _add_field(p_conv, f)
+
     args = parser.parse_args()
     if args.cmd == "make_dataset":
         cfg = _cfg_from_args(MakeDatasetConfig, args)
@@ -576,6 +639,9 @@ def main() -> None:
             output_csv_path=args.output_csv_path,
         )
         compare_runs(cfg)
+    elif args.cmd == "convert_checkpoint":
+        cfg = _cfg_from_args(ConvertCheckpointConfig, args)
+        convert_checkpoint(cfg)
 
 
 def _add_field(parser, f) -> None:

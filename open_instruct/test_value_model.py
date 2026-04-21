@@ -159,8 +159,6 @@ class TestConditioningBuilders(unittest.TestCase):
         ]
         for t in [
             "answer_prefix",
-            "boxed_answer",
-            "cot_spoiler",
             "expected_accuracy",
             "rollout_context",
             "correct_demo",
@@ -186,30 +184,28 @@ class TestScoreParsing(unittest.TestCase):
     def test_direct_parsing(self):
         from open_instruct.value_model_utils import parse_generative_value_score
 
-        self.assertEqual(parse_generative_value_score("7"), 7.0)
-        self.assertEqual(parse_generative_value_score(" 10 foo"), 10.0)
-        self.assertEqual(parse_generative_value_score("5.5"), 5.5)
+        self.assertEqual(parse_generative_value_score("{score: 7}"), 7.0)
+        self.assertEqual(parse_generative_value_score("some reasoning... {score: 10}"), 10.0)
+        self.assertEqual(parse_generative_value_score("{score: 5.5}"), 5.5)
         self.assertIsNone(parse_generative_value_score("no digits here"))
 
     def test_cot_parsing(self):
         from open_instruct.value_model_utils import parse_generative_value_score
 
-        self.assertEqual(
-            parse_generative_value_score("The approach is good... {score: 7.5}", allow_cot=True), 7.5
-        )
-        self.assertIsNone(parse_generative_value_score("no json", allow_cot=True))
+        self.assertEqual(parse_generative_value_score("The approach is good... {score: 7.5}"), 7.5)
+        self.assertIsNone(parse_generative_value_score("no json"))
 
     def test_clamping(self):
         from open_instruct.value_model_utils import parse_generative_value_score
 
-        self.assertEqual(parse_generative_value_score("42", score_min=0, score_max=10), 10.0)
-        self.assertEqual(parse_generative_value_score("-5", score_min=0, score_max=10), 0.0)
+        self.assertEqual(parse_generative_value_score("{score: 42}", score_min=0, score_max=10), 10.0)
+        self.assertEqual(parse_generative_value_score("{score: -5}", score_min=0, score_max=10), 0.0)
 
     def test_prompt_has_conditioning(self):
         from open_instruct.value_model_utils import build_generative_value_prompt
 
         p = build_generative_value_prompt(
-            "partial", conditioning="gt", ground_truth="42", allow_cot=False
+            "partial", conditioning="gt", ground_truth="42"
         )
         self.assertIn("The correct answer is 42", p)
         self.assertIn("<rollout>", p)
