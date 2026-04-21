@@ -97,8 +97,20 @@ def main():
     task_to_image: dict[str, str] = {}
 
     for row in ds:
-        task_id = row["task_id"]
-        dockerfile_content, setup_script = container_def_to_dockerfile(row["container_def"])
+        env_config = row.get("env_config") if isinstance(row, dict) else None
+        task_id = row.get("task_id") or row.get("ground_truth")
+        if not task_id and isinstance(env_config, dict):
+            task_id = env_config.get("task_id")
+        if not task_id:
+            raise KeyError("Missing task identifier: expected task_id, ground_truth, or env_config.task_id")
+
+        container_def = row.get("container_def")
+        if not container_def:
+            raise KeyError(
+                f"Missing container_def for task {task_id}. "
+                "Use a source dataset that includes container_def (for example osieosie/tmax-tasks-*)."
+            )
+        dockerfile_content, setup_script = container_def_to_dockerfile(container_def)
         combined = dockerfile_content + setup_script
         content_hash = hashlib.sha256(combined.encode()).hexdigest()[:12]
 
