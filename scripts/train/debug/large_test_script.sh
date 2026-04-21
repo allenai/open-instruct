@@ -70,4 +70,5 @@ uv run python mason.py \
         --use_delight true \
         --use_kondo_gate true \
         --kondo_gate_rate 0.5 \
+        --kondo_gate_warmup 16 \
 	--push_to_hub False
