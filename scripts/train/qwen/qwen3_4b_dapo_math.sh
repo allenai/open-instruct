@@ -9,12 +9,13 @@ shift || true
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
+WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace ${WORKSPACE} \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --no_auto_dataset_cache \
