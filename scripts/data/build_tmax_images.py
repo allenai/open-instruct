@@ -7,6 +7,7 @@ Deduplicates by content hash to avoid rebuilding identical images.
 Usage:
     python scripts/data/build_tmax_images.py --registry hamishivi
     python scripts/data/build_tmax_images.py --registry hamishivi --dry-run
+    python scripts/data/build_tmax_images.py --registry hamishivi --platform linux/amd64
 """
 
 import argparse
@@ -67,6 +68,11 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=None)
     parser.add_argument("--workers", type=int, default=8, help="Parallel build+push workers")
+    parser.add_argument(
+        "--platform",
+        default="linux/amd64",
+        help="Docker platform to build for (for example linux/amd64 or linux/arm64).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -133,6 +139,7 @@ def main():
                     path=tmpdir,
                     tag=image_tag,
                     rm=True,
+                    platform=args.platform,
                 )
             logger.info(f"Built {image_tag}")
 
