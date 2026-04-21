@@ -1,7 +1,7 @@
 #!/bin/bash
-# Pure value pretraining: SAE + rollout_context conditioning, policy frozen for all 500 steps.
+# Pure value pretraining: SAE scalar + generative value model, policy frozen for all 1000 steps.
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain_sae_rc_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain_sae_gv_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -19,7 +19,7 @@ uv run python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
-    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast_genvalue.py \
     --exp_name ${exp_name} \
     --beta 0.0 \
     --async_steps 8 \
@@ -46,7 +46,7 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 4 \
+    --vllm_num_engines 2 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --lr_scheduler_type constant \
@@ -66,7 +66,15 @@ uv run python mason.py \
     --vf_clip_range 0.2 \
     --use_sae \
     --sae_threshold 0.2 \
-    --value_model_ground_truth_conditioning \
-    --gt_conditioning_template rollout_context \
-    --rollout_context_num_siblings 4 \
+    --use_generative_value_model \
+    --gen_value_model_name_or_path Qwen/Qwen3-4B-Instruct \
+    --gen_value_vllm_num_engines 2 \
+    --gen_value_vllm_tensor_parallel_size 1 \
+    --gen_value_segmentation sae \
+    --gen_value_max_segments 16 \
+    --gen_value_score_min 0 \
+    --gen_value_score_max 10 \
+    --gen_value_max_new_tokens 2048 \
+    --gen_value_conditioning gt \
+    --gen_value_reinforce_coef 1.0 \
     --value_warmup_steps 9999

@@ -1,7 +1,7 @@
 #!/bin/bash
-# Pure value pretraining: SAE + expected_accuracy GT conditioning, policy frozen for all 500 steps.
+# Pure value pretraining: SAE + answer_prefix GT conditioning, policy frozen for all 1000 steps.
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain_sae_ea_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain_sae_ap_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -67,5 +67,5 @@ uv run python mason.py \
     --use_sae \
     --sae_threshold 0.2 \
     --value_model_ground_truth_conditioning \
-    --gt_conditioning_template expected_accuracy \
+    --gt_conditioning_template answer_prefix \
     --value_warmup_steps 9999

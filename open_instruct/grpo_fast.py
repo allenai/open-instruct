@@ -781,8 +781,12 @@ class PolicyTrainerRayProcess(RayProcess):
         query_responses: torch.Tensor,
         response_mask: torch.Tensor,
         ground_truth_str: str,
+        response_logprobs: "list[float] | None" = None,
     ) -> tuple[torch.Tensor, list[dict]]:
-        """Score a rollout at fixed-chunk segment boundaries using the gen-value vLLM pool.
+        """Score a rollout at segment boundaries using the gen-value vLLM pool.
+
+        ``response_logprobs`` is a pre-extracted list of log-probs for response tokens only
+        (length == number of response tokens). Required when gen_value_segmentation='sae'.
 
         Returns (values_BT, training_pairs) where values_BT has shape (1, seq_len-1) and
         training_pairs is a list of {prompt, generated, outcome} dicts (outcome filled by caller).
@@ -801,20 +805,24 @@ class PolicyTrainerRayProcess(RayProcess):
         if n_resp == 0:
             return empty_values, []
 
-        chunk_size: int = getattr(args, "gen_value_chunk_size", 256)
+        segmentation: str = getattr(args, "gen_value_segmentation", "fixed")
+        chunk_size: int = getattr(args, "gen_value_chunk_size", 512)
+        max_segments: int | None = getattr(args, "gen_value_max_segments", None)
+        sae_threshold: float = getattr(args, "sae_threshold", 0.2)
         score_min: float = getattr(args, "gen_value_score_min", 0.0)
         score_max: float = getattr(args, "gen_value_score_max", 10.0)
         conditioning: str = getattr(args, "gen_value_conditioning", "none")
         max_new_tokens: int = getattr(args, "gen_value_max_new_tokens", 8)
         temperature: float = getattr(args, "gen_value_temperature", 1.0)
 
-        boundaries: list[int] = []
-        t = chunk_size
-        while t < n_resp:
-            boundaries.append(t)
-            t += chunk_size
-        if not boundaries or boundaries[-1] != n_resp - 1:
-            boundaries.append(n_resp - 1)
+        boundaries = value_model_utils.segment_rollout(
+            resp_token_ids,
+            response_logprobs,
+            mode=segmentation,
+            sae_threshold=sae_threshold,
+            fixed_chunk_size=chunk_size,
+            max_segments=max_segments,
+        )
 
         prompts: list[str] = []
         for bdry in boundaries:
@@ -828,7 +836,14 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             prompts.append(prompt)
 
-        sampling_params = VLLMSamplingParams(n=1, temperature=temperature, max_tokens=max_new_tokens, top_p=1.0)
+        sampling_params = VLLMSamplingParams(
+            n=1,
+            temperature=temperature,
+            max_tokens=max_new_tokens,
+            top_p=1.0,
+            stop=["</answer>"],
+            include_stop_str_in_output=True,
+        )
         refs = [
             self._gen_value_engines[k % len(self._gen_value_engines)].add_request.remote(prompt, sampling_params)
             for k, prompt in enumerate(prompts)
@@ -841,7 +856,9 @@ class PolicyTrainerRayProcess(RayProcess):
             text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
             generated_texts.append(text)
             raw = value_model_utils.parse_generative_value_score(text, score_min, score_max)
-            scores.append(value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.5)
+            scores.append(
+                value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.5
+            )
 
         # Vectorised piecewise-constant values: each token index maps to its segment score.
         # values_BT[:, t] corresponds to sequence position t+1 (shifted layout).
@@ -854,10 +871,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if resp_indices_shifted.numel() > 0:
             values_BT[0, resp_indices_shifted] = values_flat[: resp_indices_shifted.numel()]
 
-        training_pairs = [
-            {"prompt": p, "generated": g, "outcome": None}
-            for p, g in zip(prompts, generated_texts)
-        ]
+        training_pairs = [{"prompt": p, "generated": g, "outcome": None} for p, g in zip(prompts, generated_texts)]
         return values_BT, training_pairs
 
     def _forward_value_with_conditioning(
@@ -867,6 +881,7 @@ class PolicyTrainerRayProcess(RayProcess):
         response_mask: torch.Tensor,
         ground_truths_for_pack: list[str],
         siblings_for_pack: list[list[dict]] | None,
+        hints_for_pack: list[str | None] | None = None,
     ) -> torch.Tensor:
         """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
 
@@ -886,7 +901,8 @@ class PolicyTrainerRayProcess(RayProcess):
             mask = sub["response_is_resp"]
             gt = ground_truths_for_pack[i] if i < len(ground_truths_for_pack) else ""
             siblings = siblings_for_pack[i] if (siblings_for_pack is not None and i < len(siblings_for_pack)) else None
-            cond_text = value_model_utils.build_conditioning_text(template, gt, siblings)
+            hint = hints_for_pack[i] if (hints_for_pack is not None and i < len(hints_for_pack)) else None
+            cond_text = value_model_utils.build_conditioning_text(template, gt, siblings, hint=hint)
             cond_ids = self.tokenizer.encode(cond_text, add_special_tokens=False)
             if len(cond_ids) == 0:
                 cond_ids = [self.tokenizer.pad_token_id]
@@ -1139,9 +1155,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # When use_generative_value_model=True and gen-value engines are wired up, we score
         # each rollout at fixed-chunk boundaries and use those piecewise-constant estimates as
         # the value function for GAE instead of the scalar value head.
-        _use_gen_value = (
-            getattr(self.args, "use_generative_value_model", False) and bool(self._gen_value_engines)
-        )
+        _use_gen_value = getattr(self.args, "use_generative_value_model", False) and bool(self._gen_value_engines)
         _gen_value_training_pairs: list[dict] = []
 
         if self.args.use_value_model:
@@ -1159,20 +1173,33 @@ class PolicyTrainerRayProcess(RayProcess):
                     if _use_gen_value:
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
                         gt_str = gts_pack[0] if gts_pack else ""
+                        gv_resp_logprobs: list[float] | None = None
+                        if (
+                            getattr(self.args, "gen_value_segmentation", "fixed") == "sae"
+                            and self.args.use_sae
+                            and data_BT.vllm_logprobs is not None
+                        ):
+                            # Both tensors have shape (1, seq_len); slice [0, 1:] gives (seq_len-1,).
+                            lp = data_BT.vllm_logprobs[i][0, 1:].float()
+                            resp_shifted = data_BT.response_masks[i][0, 1:].bool()
+                            gv_resp_logprobs = lp[resp_shifted[: lp.shape[0]]].tolist()
                         values_BT, gv_pairs = self._score_rollout_with_gen_value(
                             data_BT.query_responses[i],
                             data_BT.response_masks[i],
                             gt_str,
+                            response_logprobs=gv_resp_logprobs,
                         )
                     elif self.args.value_model_ground_truth_conditioning:
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
                         sibs_pack = data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
+                        hints_pack = data_BT.hints[i][0] if data_BT.hints is not None else None
                         values_BT = self._forward_value_with_conditioning(
                             data_BT.query_responses[i],
                             data_BT.position_ids[i],
                             data_BT.response_masks[i].bool(),
                             gts_pack,
                             sibs_pack,
+                            hints_for_pack=hints_pack,
                         )
                     else:
                         values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)

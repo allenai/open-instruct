@@ -463,7 +463,13 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
         tensor_parallel_size=cfg.vllm_tensor_parallel_size,
         gpu_memory_utilization=cfg.vllm_gpu_memory_utilization,
     )
-    sp = SamplingParams(n=1, temperature=0.0, max_tokens=cfg.gen_value_max_new_tokens)
+    sp = SamplingParams(
+        n=1,
+        temperature=0.0,
+        max_tokens=cfg.gen_value_max_new_tokens,
+        stop=["</answer>"],
+        include_stop_str_in_output=True,
+    )
 
     prompts: list[str] = []
     positions: list[tuple[int, int]] = []
@@ -488,9 +494,7 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
     for out, (row_idx, p_idx) in zip(raw, positions):
         txt = out.outputs[0].text if hasattr(out, "outputs") else ""
         parsed = value_model_utils.parse_generative_value_score(
-            txt,
-            score_min=cfg.gen_value_score_min,
-            score_max=cfg.gen_value_score_max,
+            txt, score_min=cfg.gen_value_score_min, score_max=cfg.gen_value_score_max
         )
         if parsed is None:
             parsed = 0.5 * (cfg.gen_value_score_min + cfg.gen_value_score_max)

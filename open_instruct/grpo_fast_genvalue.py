@@ -44,7 +44,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import math
 import os
 import random
 import tempfile
@@ -86,13 +85,7 @@ class GenValueTrainerActor:
     ``reinforce_step`` and applies REINFORCE with the raw outcome as reward.
     """
 
-    def __init__(
-        self,
-        model_path: str,
-        learning_rate: float,
-        score_min: float,
-        score_max: float,
-    ) -> None:
+    def __init__(self, model_path: str, learning_rate: float, score_min: float, score_max: float) -> None:
         self._lr = learning_rate
         self._score_min = score_min
         self._score_max = score_max
@@ -182,6 +175,8 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
     # 'fixed' queries the gen value model every `gen_value_chunk_size` response tokens.
     gen_value_segmentation: str = "sae"
     gen_value_chunk_size: int = 512
+    # Cap on the number of gen-value queries per rollout (evenly downsampled when exceeded).
+    gen_value_max_segments: int = 16
     # Generation params for the gen value model's vLLM engine.
     gen_value_max_new_tokens: int = 8
     gen_value_temperature: float = 1.0
@@ -224,43 +219,6 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
             )
 
 
-def segment_rollout(
-    response_tokens: list[int],
-    response_logprobs: list[float] | None,
-    *,
-    mode: str,
-    sae_threshold: float = 0.2,
-    fixed_chunk_size: int = 512,
-) -> list[int]:
-    """Return the list of boundary positions (response-token indices) at which the generative value
-    model should be queried.
-
-    In ``sae`` mode, a boundary is any response token whose probability (exp(logprob)) is below
-    ``sae_threshold``. In ``fixed`` mode, boundaries are emitted every ``fixed_chunk_size`` tokens.
-    Boundary indices are returned in ascending order and always include a final boundary at the
-    end of the rollout so the terminal outcome is scored.
-    """
-    length = len(response_tokens)
-    if length == 0:
-        return []
-    boundaries: list[int] = []
-    if mode == "sae":
-        if response_logprobs is None:
-            raise ValueError("SAE segmentation requires response_logprobs.")
-        log_threshold = math.log(max(sae_threshold, 1e-12))
-        for t, lp in enumerate(response_logprobs):
-            if lp < log_threshold:
-                boundaries.append(t)
-    else:  # fixed
-        t = fixed_chunk_size
-        while t < length:
-            boundaries.append(t)
-            t += fixed_chunk_size
-    if not boundaries or boundaries[-1] != length - 1:
-        boundaries.append(length - 1)
-    return boundaries
-
-
 def score_partial_rollout_batch(
     vllm_engines,
     tokenizer,
@@ -276,7 +234,15 @@ def score_partial_rollout_batch(
     Returns (parsed_scores_in_0_1, raw_generations). ``None`` scores indicate parse failures; the
     caller is free to substitute a default (e.g. 0.5) and track ``parse_rate`` as a metric.
     """
-    sampling_params = SamplingParams(n=1, temperature=temperature, max_tokens=max_new_tokens, top_p=1.0, logprobs=1)
+    sampling_params = SamplingParams(
+        n=1,
+        temperature=temperature,
+        max_tokens=max_new_tokens,
+        top_p=1.0,
+        logprobs=1,
+        stop=["</answer>"],
+        include_stop_str_in_output=True,
+    )
 
     async def _score_one(engine_idx: int, prompt: str) -> tuple[str, float | None]:
         engine = vllm_engines[engine_idx % len(vllm_engines)]
@@ -285,9 +251,7 @@ def score_partial_rollout_batch(
         ref = engine.add_request.remote(prompt, sampling_params)
         output = await asyncio.to_thread(__import__("ray").get, ref)
         text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
-        parsed = value_model_utils.parse_generative_value_score(
-            text, score_min=score_min, score_max=score_max
-        )
+        parsed = value_model_utils.parse_generative_value_score(text, score_min=score_min, score_max=score_max)
         return text, parsed
 
     async def _runner():
@@ -380,10 +344,7 @@ def _gen_value_scoring_loop(
 
 
 def _gen_value_reinforce_loop(
-    trainer_actor: Any,
-    training_queue: Any,
-    stop_event: threading.Event,
-    with_tracking: bool,
+    trainer_actor: Any, training_queue: Any, stop_event: threading.Event, with_tracking: bool
 ) -> None:
     """Background thread: drain the training-pairs queue and call ``GenValueTrainerActor.reinforce_step``.
 
@@ -711,10 +672,7 @@ def main():
     if gen_value_vllm_engines:
         gv_lr = args.gen_value_learning_rate or 1e-6
         gen_value_trainer = GenValueTrainerActor.remote(
-            gen_value_model_path,
-            gv_lr,
-            args.gen_value_score_min,
-            args.gen_value_score_max,
+            gen_value_model_path, gv_lr, args.gen_value_score_min, args.gen_value_score_max
         )
         ray.get(gen_value_trainer.ready.remote())
         logger.info("======== ✅ Gen-value trainer actor ready (lr=%.2e) =========", gv_lr)
@@ -773,11 +731,7 @@ def main():
         _gv_policy_step_count[0] += 1
         # Periodic weight sync: save PyTorch gen-value model → recreate vLLM engines.
         sync_freq = args.gen_value_sync_freq
-        if (
-            sync_freq > 0
-            and gen_value_trainer is not None
-            and _gv_policy_step_count[0] % sync_freq == 0
-        ):
+        if sync_freq > 0 and gen_value_trainer is not None and _gv_policy_step_count[0] % sync_freq == 0:
             _sync_gen_value_weights(
                 gen_value_trainer,
                 gen_value_vllm_engines,

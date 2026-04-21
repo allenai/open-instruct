@@ -217,6 +217,9 @@ class PackedSequences(Generic[T]):
     """per-pack list of per-sub-sequence list of sibling rollouts ({text, is_correct}).
     Populated only when rollout_context / correct_demo conditioning is used.
     """
+    hints: list[list[str | None]] | None = None
+    """per-pack list of per-sub-sequence hint strings. Populated when the dataset has a hint column
+    and answer_prefix conditioning is used."""
     segment_boundaries: list[torch.Tensor] | None = None
     """packed SAE segment boundary mask (batch_size, pack_length); 1 at a boundary token."""
 

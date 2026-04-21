@@ -14,19 +14,17 @@ The value model itself is built, optimized, and DeepSpeed-managed inside
 - running the value forward with or without between-prompt-and-response conditioning;
 - extracting per-token values for the scalar regression head.
 """
+
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
 
 import torch
 
 _ROLLOUT_CONTEXT_MAX_TOKENS = 4096
-_POSTFIX_TEMPLATES = {
-    "expected_accuracy",
-    "rollout_context",
-    "correct_demo",
-}
+_POSTFIX_TEMPLATES = {"expected_accuracy", "rollout_context", "correct_demo"}
 _PREFIX_TEMPLATES = {"answer_prefix"}
 
 # Templates that need a ground-truth string to be meaningful.
@@ -37,6 +35,57 @@ TEMPLATES_REQUIRING_SIBLINGS: frozenset[str] = frozenset({"rollout_context", "co
 ALL_GT_CONDITIONING_TEMPLATES: frozenset[str] = frozenset(_POSTFIX_TEMPLATES | _PREFIX_TEMPLATES)
 # Valid values for --gen_value_conditioning.
 GEN_VALUE_CONDITIONING_TYPES: frozenset[str] = frozenset({"none", "gt", "correct_demo", "rollout_context"})
+TEMPLATES_USING_HINTS: frozenset[str] = frozenset({"answer_prefix"})
+
+
+def segment_rollout(
+    response_tokens: list[int],
+    response_logprobs: list[float] | None,
+    *,
+    mode: str,
+    sae_threshold: float = 0.2,
+    fixed_chunk_size: int = 512,
+    max_segments: int | None = None,
+) -> list[int]:
+    """Return boundary positions (response-token indices) at which the gen-value model is queried.
+
+    In ``sae`` mode boundaries are tokens whose probability is below ``sae_threshold``.
+    In ``fixed`` mode boundaries are emitted every ``fixed_chunk_size`` tokens.
+    The final token is always a boundary.
+
+    When ``max_segments`` is set and the raw boundary count exceeds it, boundaries are
+    downsampled to ``max_segments`` by picking evenly spaced entries from the full list.
+    """
+    length = len(response_tokens)
+    if length == 0:
+        return []
+    boundaries: list[int] = []
+    if mode == "sae":
+        if response_logprobs is None:
+            raise ValueError("SAE segmentation requires response_logprobs.")
+        log_threshold = math.log(max(sae_threshold, 1e-12))
+        for t, lp in enumerate(response_logprobs):
+            if lp < log_threshold:
+                boundaries.append(t)
+    else:  # fixed
+        t = fixed_chunk_size
+        while t < length:
+            boundaries.append(t)
+            t += fixed_chunk_size
+    if not boundaries or boundaries[-1] != length - 1:
+        boundaries.append(length - 1)
+    if max_segments is not None and len(boundaries) > max_segments:
+        if max_segments < 1:
+            raise ValueError(f"max_segments must be >= 1, got {max_segments}")
+        if max_segments == 1:
+            boundaries = [length - 1]
+        else:
+            n = len(boundaries)
+            step = (n - 1) / (max_segments - 1)
+            kept = [boundaries[round(i * step)] for i in range(max_segments)]
+            kept[-1] = length - 1
+            boundaries = kept
+    return boundaries
 
 
 def rescale_gen_value_score(parsed: float, score_min: float, score_max: float) -> float:
@@ -53,9 +102,7 @@ def is_postfix_template(template: str) -> bool:
 
 
 def build_conditioning_text(
-    template: str,
-    ground_truth: str,
-    siblings: Sequence[dict] | None = None,
+    template: str, ground_truth: str, siblings: Sequence[dict] | None = None, hint: str | None = None
 ) -> str:
     """Return the conditioning text to splice for a single sub-sequence.
 
@@ -64,7 +111,9 @@ def build_conditioning_text(
     string and extend position ids accordingly.
     """
     if template == "answer_prefix":
-        return f"Note the correct answer is: {ground_truth}\n"
+        if hint is not None:
+            return f"Here is a hint: {hint}.\n"
+        return f"The correct answer is: {ground_truth}\n"
     if template == "expected_accuracy":
         return f"Given the answer is {ground_truth}, Let me compute the expected accuracy of the partial rollout: "
     if template == "rollout_context":
@@ -76,9 +125,7 @@ def build_conditioning_text(
 
 def _build_rollout_context(ground_truth: str, siblings: Sequence[dict]) -> str:
     header = "Here are some other attempts at this question:\n"
-    suffix = (
-        f"Given the answer is {ground_truth}, compute the expected accuracy of the current attempt: "
-    )
+    suffix = f"Given the answer is {ground_truth}, compute the expected accuracy of the current attempt: "
     if not siblings:
         return header + suffix
     lines: list[str] = []
@@ -108,14 +155,10 @@ def _build_correct_demo_context(ground_truth: str, siblings: Sequence[dict]) -> 
     tag = "CORRECT" if (chosen and chosen.get("is_correct")) else "INCORRECT"
     text = str(chosen.get("text", "")) if chosen else ""
     reference = f"Here is a reference attempt ({tag}):\n{text}\n" if chosen else ""
-    return (
-        reference
-        + f"Given the answer is {ground_truth}, compute the expected accuracy of the current attempt: "
-    )
+    return reference + f"Given the answer is {ground_truth}, compute the expected accuracy of the current attempt: "
 
 
-_SCORE_RE = re.compile(r"\{\s*score\s*:\s*([-+]?[0-9]*\.?[0-9]+)\s*\}")
-_LEADING_DIGIT_RE = re.compile(r"^\s*(-?[0-9]+(?:\.[0-9]+)?)")
+_SCORE_RE = re.compile(r"<answer>\s*([-+]?[0-9]*\.?[0-9]+)\s*</answer>")
 
 
 def build_generative_value_prompt(
@@ -128,9 +171,8 @@ def build_generative_value_prompt(
 ) -> str:
     """Build the gen-value prompt.
 
-    Format: "<conditioning_prefix>Here is a given partial response. Please predict the expected
-    value of the response, scoring between 0 and 10. Reason briefly, then output exactly
-    {score: X}. <rollout>{partial}</rollout>\nThus, the score is "
+    The model should reason briefly then output <answer>X</answer> where X is in
+    [score_min, score_max]. Generation stops on </answer>; scores are later rescaled to [0, 1].
     """
     conditioning_text = ""
     if conditioning == "gt" and ground_truth:
@@ -155,18 +197,14 @@ def build_generative_value_prompt(
     instruction = (
         f"Here is a given partial response. Please predict the expected value of the response, "
         f"scoring between {int(score_min)} and {int(score_max)}. "
-        f"Reason briefly, then output exactly {{score: X}} where X is a number in "
-        f"[{int(score_min)}, {int(score_max)}]."
+        f"Reason briefly, then wrap your final score in <answer>...</answer> where the score is "
+        f"a number in [{int(score_min)}, {int(score_max)}]."
     )
-    suffix = f"<rollout>{partial_response}</rollout>\nThus, the score is "
+    suffix = f"<rollout>{partial_response}</rollout>\nAnswer:"
     return f"{conditioning_text}{instruction} {suffix}"
 
 
-def parse_generative_value_score(
-    text: str,
-    score_min: float = 0.0,
-    score_max: float = 10.0,
-) -> float | None:
+def parse_generative_value_score(text: str, score_min: float = 0.0, score_max: float = 10.0) -> float | None:
     """Extract the score from a `{score: X}` pattern."""
     m = _SCORE_RE.search(text)
     if m:

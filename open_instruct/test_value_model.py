@@ -15,11 +15,30 @@ laptop and in CI. They focus on:
 (c) the conditioning text builders in value_model_utils.py;
 (d) score parsing for the generative value model.
 """
+
 from __future__ import annotations
 
 import unittest
 
 import numpy as np
+import torch
+
+from open_instruct.rl_utils import (
+    PackedSequences,
+    calculate_advantages_packed,
+    calculate_advantages_packed_sae,
+    calculate_advantages_packed_sae_vapo,
+    calculate_advantages_packed_vapo,
+    calculate_length_adaptive_lambda,
+)
+from open_instruct.value_model_utils import (
+    build_conditioning_text,
+    build_generative_value_prompt,
+    is_postfix_template,
+    parse_generative_value_score,
+    segment_rollout,
+    value_clipped_mse_loss,
+)
 
 
 class TestGAEVariants(unittest.TestCase):
@@ -38,8 +57,6 @@ class TestGAEVariants(unittest.TestCase):
         return values, rewards, dones, response_masks, logprobs
 
     def test_standard_gae_runs(self):
-        from open_instruct.rl_utils import calculate_advantages_packed
-
         v, r, d, m, _ = self._inputs()
         adv, returns = calculate_advantages_packed(v, r, gamma=1.0, lam=0.95, dones=d, response_masks=m)
         self.assertEqual(adv.shape, v.shape)
@@ -48,8 +65,6 @@ class TestGAEVariants(unittest.TestCase):
         self.assertGreater(adv[0, 7], 0)
 
     def test_vapo_has_two_outputs(self):
-        from open_instruct.rl_utils import calculate_advantages_packed_vapo
-
         v, r, d, m, _ = self._inputs()
         pa, cr, avg_lam = calculate_advantages_packed_vapo(v, r, gamma=1.0, dones=d, response_masks=m)
         self.assertEqual(pa.shape, v.shape)
@@ -57,8 +72,6 @@ class TestGAEVariants(unittest.TestCase):
         self.assertEqual(avg_lam, 0.95)
 
     def test_sae_marks_boundary(self):
-        from open_instruct.rl_utils import calculate_advantages_packed_sae
-
         v, r, d, m, logp = self._inputs()
         adv, returns, bf = calculate_advantages_packed_sae(
             v, r, gamma=1.0, lam=0.2, dones=d, response_masks=m, logprobs=logp, sae_threshold=0.2
@@ -69,8 +82,6 @@ class TestGAEVariants(unittest.TestCase):
         self.assertEqual(adv.shape, v.shape)
 
     def test_sae_vapo_combines_variants(self):
-        from open_instruct.rl_utils import calculate_advantages_packed_sae_vapo
-
         v, r, d, m, logp = self._inputs()
         pa, cr, bf = calculate_advantages_packed_sae_vapo(
             v, r, gamma=1.0, dones=d, response_masks=m, logprobs=logp, sae_threshold=0.2, lam_policy=0.5
@@ -80,8 +91,6 @@ class TestGAEVariants(unittest.TestCase):
         self.assertGreater(bf, 0)
 
     def test_length_adaptive_lambda(self):
-        from open_instruct.rl_utils import calculate_length_adaptive_lambda
-
         # alpha*length = 1 -> lambda = 0
         self.assertEqual(calculate_length_adaptive_lambda(1, alpha=1.0), 0.0)
         # alpha*length = 100 -> lambda close to 1
@@ -90,7 +99,7 @@ class TestGAEVariants(unittest.TestCase):
 
 def _data_loader_available() -> bool:
     try:
-        import vllm  # noqa: F401
+        import vllm  # noqa: F401, PLC0415
     except Exception:
         return False
     return True
@@ -99,9 +108,7 @@ def _data_loader_available() -> bool:
 @unittest.skipUnless(_data_loader_available(), "data_loader requires vllm")
 class TestSiblingAssembly(unittest.TestCase):
     def test_extract_subseq_indices_per_pack(self):
-        import torch
-
-        from open_instruct.data_loader import _extract_subseq_indices_per_pack
+        from open_instruct.data_loader import _extract_subseq_indices_per_pack  # noqa: PLC0415
 
         # pack 1: [1,1,1,0,2,2,2], pack 2: [3,3,0,0]
         rm = [torch.tensor([[1, 1, 1, 0, 2, 2, 2]]), torch.tensor([[3, 3, 0, 0]])]
@@ -109,10 +116,7 @@ class TestSiblingAssembly(unittest.TestCase):
         self.assertEqual(got, [[1, 2], [3]])
 
     def test_populate_value_model_fields_minimal(self):
-        import torch
-
-        from open_instruct.data_loader import populate_value_model_fields
-        from open_instruct.rl_utils import PackedSequences
+        from open_instruct.data_loader import populate_value_model_fields  # noqa: PLC0415
 
         # Fake packed sequences with one sub-seq per pack.
         ps = PackedSequences(
@@ -151,73 +155,45 @@ class TestSiblingAssembly(unittest.TestCase):
 
 class TestConditioningBuilders(unittest.TestCase):
     def test_every_template_builds(self):
-        from open_instruct.value_model_utils import build_conditioning_text
-
-        siblings = [
-            {"text": "abc", "is_correct": True},
-            {"text": "def", "is_correct": False},
-        ]
-        for t in [
-            "answer_prefix",
-            "expected_accuracy",
-            "rollout_context",
-            "correct_demo",
-        ]:
+        siblings = [{"text": "abc", "is_correct": True}, {"text": "def", "is_correct": False}]
+        for t in ["answer_prefix", "expected_accuracy", "rollout_context", "correct_demo"]:
             txt = build_conditioning_text(t, ground_truth="42", siblings=siblings)
             self.assertIsInstance(txt, str)
             self.assertGreater(len(txt), 0)
 
     def test_unknown_template_raises(self):
-        from open_instruct.value_model_utils import build_conditioning_text
-
         with self.assertRaises(ValueError):
             build_conditioning_text("bogus", "42", [])
 
     def test_is_postfix_template(self):
-        from open_instruct.value_model_utils import is_postfix_template
-
         self.assertFalse(is_postfix_template("answer_prefix"))
         self.assertTrue(is_postfix_template("expected_accuracy"))
 
 
 class TestScoreParsing(unittest.TestCase):
     def test_direct_parsing(self):
-        from open_instruct.value_model_utils import parse_generative_value_score
-
-        self.assertEqual(parse_generative_value_score("{score: 7}"), 7.0)
-        self.assertEqual(parse_generative_value_score("some reasoning... {score: 10}"), 10.0)
-        self.assertEqual(parse_generative_value_score("{score: 5.5}"), 5.5)
+        self.assertEqual(parse_generative_value_score("<answer>7</answer>"), 7.0)
+        self.assertEqual(parse_generative_value_score("some reasoning... <answer>10</answer>"), 10.0)
+        self.assertEqual(parse_generative_value_score("<answer>5.5</answer>"), 5.5)
         self.assertIsNone(parse_generative_value_score("no digits here"))
 
     def test_cot_parsing(self):
-        from open_instruct.value_model_utils import parse_generative_value_score
-
-        self.assertEqual(parse_generative_value_score("The approach is good... {score: 7.5}"), 7.5)
-        self.assertIsNone(parse_generative_value_score("no json"))
+        self.assertEqual(parse_generative_value_score("The approach is good... <answer>7.5</answer>"), 7.5)
+        self.assertIsNone(parse_generative_value_score("no answer tags"))
 
     def test_clamping(self):
-        from open_instruct.value_model_utils import parse_generative_value_score
-
-        self.assertEqual(parse_generative_value_score("{score: 42}", score_min=0, score_max=10), 10.0)
-        self.assertEqual(parse_generative_value_score("{score: -5}", score_min=0, score_max=10), 0.0)
+        self.assertEqual(parse_generative_value_score("<answer>42</answer>", score_min=0, score_max=10), 10.0)
+        self.assertEqual(parse_generative_value_score("<answer>-5</answer>", score_min=0, score_max=10), 0.0)
 
     def test_prompt_has_conditioning(self):
-        from open_instruct.value_model_utils import build_generative_value_prompt
-
-        p = build_generative_value_prompt(
-            "partial", conditioning="gt", ground_truth="42"
-        )
+        p = build_generative_value_prompt("partial", conditioning="gt", ground_truth="42")
         self.assertIn("The correct answer is 42", p)
         self.assertIn("<rollout>", p)
-        self.assertIn("Thus, the score is", p)
+        self.assertIn("Answer:", p)
 
 
 class TestValueLoss(unittest.TestCase):
     def test_mse_loss_no_clip(self):
-        import torch
-
-        from open_instruct.value_model_utils import value_clipped_mse_loss
-
         new_v = torch.tensor([[1.0, 2.0, 3.0]])
         ret = torch.tensor([[1.0, 1.0, 1.0]])
         mask = torch.tensor([[True, True, True]])
@@ -226,10 +202,6 @@ class TestValueLoss(unittest.TestCase):
         self.assertEqual(float(clipfrac), 0.0)
 
     def test_mse_loss_with_clip(self):
-        import torch
-
-        from open_instruct.value_model_utils import value_clipped_mse_loss
-
         new_v = torch.tensor([[10.0, 2.0]])
         old_v = torch.tensor([[0.0, 0.0]])
         ret = torch.tensor([[0.0, 0.0]])
@@ -245,19 +217,28 @@ class TestValueLoss(unittest.TestCase):
 
 class TestGenValueSegmentation(unittest.TestCase):
     def test_fixed_segmentation(self):
-        from open_instruct.grpo_fast_genvalue import segment_rollout
-
         boundaries = segment_rollout(list(range(1500)), None, mode="fixed", fixed_chunk_size=500)
         # Boundaries at 500 and 1000, plus a final boundary at L-1.
         self.assertEqual(boundaries, [500, 1000, 1499])
 
     def test_sae_segmentation(self):
-        from open_instruct.grpo_fast_genvalue import segment_rollout
-
         logps = [-0.1] * 10 + [-3.0] + [-0.1] * 10  # one boundary at t=10
         boundaries = segment_rollout([0] * 21, logps, mode="sae", sae_threshold=0.2)
         self.assertIn(10, boundaries)
         self.assertEqual(boundaries[-1], 20)
+
+    def test_max_segments_cap(self):
+        # 100 SAE boundaries (every token is low-prob), cap to 4.
+        logps = [-3.0] * 100
+        boundaries = segment_rollout([0] * 100, logps, mode="sae", sae_threshold=0.2, max_segments=4)
+        self.assertEqual(len(boundaries), 4)
+        self.assertEqual(boundaries[-1], 99)
+
+    def test_fixed_with_max_segments(self):
+        # Fixed chunks every 100 tokens over 1000 tokens = 10 boundaries, cap to 5.
+        boundaries = segment_rollout(list(range(1000)), None, mode="fixed", fixed_chunk_size=100, max_segments=5)
+        self.assertEqual(len(boundaries), 5)
+        self.assertEqual(boundaries[-1], 999)
 
 
 if __name__ == "__main__":

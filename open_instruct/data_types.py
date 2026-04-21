@@ -126,6 +126,9 @@ class CollatedBatchData:
     """Per-pack list of per-sub-sequence list of sibling rollouts
     (each sibling is a dict: ``{"text": str, "is_correct": bool}``). Used by the
     rollout_context / correct_demo value conditioning templates."""
+    hints: list[list[str | None]] | None = None
+    """Per-pack list of per-sub-sequence hint strings from the dataset's hint column. Used by
+    the answer_prefix conditioning template when the dataset provides hints."""
     segment_boundaries: list[torch.Tensor] | None = None
     """Per-token boolean mask (1 where a SAE segment starts, 0 elsewhere). None when SAE is off."""
 

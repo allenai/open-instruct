@@ -38,6 +38,7 @@ from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
+    HINTS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
@@ -782,6 +783,7 @@ def accumulate_inference_batches(
     results = []
     all_queries = []
     all_ground_truths = []
+    all_hints = []
     all_datasets = []
     all_raw_queries = []
     all_decoded_responses = []
@@ -838,6 +840,7 @@ def accumulate_inference_batches(
         example = dataset[result.index]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
+        hint = example.get(HINTS_KEY)
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
@@ -866,6 +869,7 @@ def accumulate_inference_batches(
 
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
+        k_hints = repeat_each([hint], generation_config.n)
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
@@ -903,6 +907,7 @@ def accumulate_inference_batches(
         results.append(result)
         all_queries.extend(k_queries)
         all_ground_truths.extend(k_ground_truths)
+        all_hints.extend(k_hints)
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
@@ -1003,6 +1008,7 @@ def accumulate_inference_batches(
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
+        hints=all_hints if any(h is not None for h in all_hints) else None,
         datasets=all_datasets,
         raw_queries=all_raw_queries,
         decoded_responses=all_decoded_responses,
@@ -1057,6 +1063,7 @@ def populate_value_model_fields(
     need_siblings: bool,
     num_siblings_to_sample: int,
     rng: np.random.Generator,
+    batch_hints: list[Any] | None = None,
 ) -> None:
     """Populate value-model-related fields on the packed_sequences in-place.
 
@@ -1090,25 +1097,34 @@ def populate_value_model_fields(
             segments.append(is_boundary.to(dtype=torch.bool))
         packed_sequences.segment_boundaries = segments
 
+    need_hints = batch_hints is not None and need_ground_truths
     subseq_indices_per_pack = (
         _extract_subseq_indices_per_pack(packed_sequences.response_masks)
         if (need_ground_truths or need_siblings)
         else []
     )
 
-    gt_per_pack: list[list[str]] | None = None
-    if need_ground_truths:
-        gt_per_pack = []
+    if need_ground_truths or need_hints:
+        gt_per_pack: list[list[str]] | None = [] if need_ground_truths else None
+        hints_per_pack: list[list[str | None]] | None = [] if need_hints else None
         for pack_subseqs in subseq_indices_per_pack:
             pack_gts: list[str] = []
+            pack_hints: list[str | None] = []
             for one_based_idx in pack_subseqs:
                 sample_idx = one_based_idx - 1
                 gt = batch_ground_truths[sample_idx]
                 if isinstance(gt, list):
                     gt = gt[0] if gt else ""
                 pack_gts.append(str(gt) if gt is not None else "")
-            gt_per_pack.append(pack_gts)
+                if need_hints:
+                    h = batch_hints[sample_idx]  # type: ignore[index]
+                    pack_hints.append(str(h) if h is not None else None)
+            if gt_per_pack is not None:
+                gt_per_pack.append(pack_gts)
+            if hints_per_pack is not None:
+                hints_per_pack.append(pack_hints)
         packed_sequences.ground_truths = gt_per_pack
+        packed_sequences.hints = hints_per_pack
 
     if need_siblings:
         siblings_per_pack: list[list[list[dict]]] = []
@@ -1182,6 +1198,7 @@ def prepare_collated_data_for_workers(
     has_segments = packed_sequences.segment_boundaries is not None
     has_gt = packed_sequences.ground_truths is not None
     has_siblings = packed_sequences.sibling_rollouts is not None
+    has_hints = packed_sequences.hints is not None
 
     for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
@@ -1192,13 +1209,10 @@ def prepare_collated_data_for_workers(
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
         per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)] if has_rewards else None
         per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)] if has_dones else None
-        per_device_packed_segments = (
-            packed_sequences.segment_boundaries[B * i : B * (i + 1)] if has_segments else None
-        )
+        per_device_packed_segments = packed_sequences.segment_boundaries[B * i : B * (i + 1)] if has_segments else None
         per_device_packed_gt = packed_sequences.ground_truths[B * i : B * (i + 1)] if has_gt else None
-        per_device_packed_siblings = (
-            packed_sequences.sibling_rollouts[B * i : B * (i + 1)] if has_siblings else None
-        )
+        per_device_packed_siblings = packed_sequences.sibling_rollouts[B * i : B * (i + 1)] if has_siblings else None
+        per_device_packed_hints = packed_sequences.hints[B * i : B * (i + 1)] if has_hints else None
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1213,6 +1227,7 @@ def prepare_collated_data_for_workers(
         collated_segments: list[torch.Tensor] | None = [] if has_segments else None
         collated_gt: list[list[str]] | None = [] if has_gt else None
         collated_siblings: list[list[list[dict]]] | None = [] if has_siblings else None
+        collated_hints: list[list[str | None]] | None = [] if has_hints else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1240,9 +1255,7 @@ def prepare_collated_data_for_workers(
                 )
             if collated_dones is not None:
                 assert per_device_packed_dones is not None
-                collated_dones.append(
-                    collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory)
-                )
+                collated_dones.append(collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory))
             if collated_segments is not None:
                 assert per_device_packed_segments is not None
                 collated_segments.append(
@@ -1255,6 +1268,9 @@ def prepare_collated_data_for_workers(
             if collated_siblings is not None:
                 assert per_device_packed_siblings is not None
                 collated_siblings.append([per_device_packed_siblings[idx] for idx in micro_range])
+            if collated_hints is not None:
+                assert per_device_packed_hints is not None
+                collated_hints.append([per_device_packed_hints[idx] for idx in micro_range])
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1268,6 +1284,7 @@ def prepare_collated_data_for_workers(
                 segment_boundaries=collated_segments,
                 ground_truths=collated_gt,
                 sibling_rollouts=collated_siblings,
+                hints=collated_hints,
             )
         )
     return collated_data
@@ -1538,6 +1555,7 @@ class DataPreparationActor:
                     need_siblings=need_siblings,
                     num_siblings_to_sample=self.config.rollout_context_num_siblings,
                     rng=np.random.default_rng(seed=(step * 97 + 1)),
+                    batch_hints=batch.hints,
                 )
 
             collated_data = prepare_collated_data_for_workers(
