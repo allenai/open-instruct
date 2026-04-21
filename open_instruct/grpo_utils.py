@@ -438,7 +438,6 @@ class KondoGateState:
         self._write_idx = 0
         self._generator = torch.Generator(device=device)
         self._generator.manual_seed(int(seed))
-        self._log_calls = 0
 
     def _reduced_chi(self, delight: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
         """Reduce (sum_delight, sum_tokens) across the process group and return sum/count.
@@ -466,39 +465,32 @@ class KondoGateState:
         """
         chi = self._reduced_chi(delight, response_mask)
         self._append(chi)
-        self._log_calls += 1
-        should_log = self._log_calls <= 5 or self._log_calls % 50 == 0
         if self._count < self.warmup or self.rate >= 1.0:
-            if should_log:
-                logger.info(
-                    "[kondo] call=%d count=%d warmup=%d rate=%.3f chi=%.6g -> WARMUP (pass-through)",
-                    self._log_calls,
-                    self._count,
-                    self.warmup,
-                    self.rate,
-                    float(chi.item()),
-                )
+            logger.info(
+                "[kondo] count=%d warmup=%d rate=%.3f chi=%.6g -> WARMUP (pass-through)",
+                self._count,
+                self.warmup,
+                self.rate,
+                float(chi.item()),
+            )
             return KondoGateDecision(True, 1.0, float("-inf"))
         lam = torch.quantile(self._buffer[: self._count], 1.0 - self.rate)
         prob = torch.sigmoid((chi - lam) / self.temperature)
         gate = torch.bernoulli(prob, generator=self._generator)
         decision = KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
-        if should_log:
-            buf = self._buffer[: self._count]
-            logger.info(
-                "[kondo] call=%d count=%d chi=%.6g lam=%.6g prob=%.4f gate=%d temp=%.3g "
-                "buf[min/med/max]=%.6g/%.6g/%.6g",
-                self._log_calls,
-                self._count,
-                float(chi.item()),
-                decision.lam,
-                decision.prob,
-                int(decision.should_backward),
-                self.temperature,
-                float(buf.min()),
-                float(buf.median()),
-                float(buf.max()),
-            )
+        buf = self._buffer[: self._count]
+        logger.info(
+            "[kondo] count=%d chi=%.6g lam=%.6g prob=%.4f gate=%d temp=%.3g buf[min/med/max]=%.6g/%.6g/%.6g",
+            self._count,
+            float(chi.item()),
+            decision.lam,
+            decision.prob,
+            int(decision.should_backward),
+            self.temperature,
+            float(buf.min()),
+            float(buf.median()),
+            float(buf.max()),
+        )
         return decision
 
 

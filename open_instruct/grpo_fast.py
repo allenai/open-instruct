@@ -756,16 +756,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     decision = grpo_utils.KondoGateDecision(True, 1.0, float("-inf"))
                     if self._kondo_gate is not None:
                         decision = self._kondo_gate.decide(delight_BT, response_mask_BT)
-                        if self.rank == 0 and i < 3:
-                            logger.info(
-                                "[kondo] grpo_fast rank=0 i=%d delight_shape=%s mask_shape=%s "
-                                "mask_sum=%.0f delight_sum=%.4g",
-                                i,
-                                tuple(delight_BT.shape),
-                                tuple(response_mask_BT.shape),
-                                float(response_mask_BT.sum()),
-                                float((delight_BT * response_mask_BT).sum()),
-                            )
+                        logger.info(
+                            "[kondo] grpo_fast rank=%d i=%d delight_shape=%s mask_shape=%s "
+                            "mask_sum=%.0f delight_sum=%.4g",
+                            self.rank,
+                            i,
+                            tuple(delight_BT.shape),
+                            tuple(response_mask_BT.shape),
+                            float(response_mask_BT.sum()),
+                            float((delight_BT * response_mask_BT).sum()),
+                        )
                     kondo_gate_stats.append(decision)
 
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
