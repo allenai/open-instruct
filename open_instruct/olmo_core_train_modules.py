@@ -459,7 +459,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
                 )
 
-                pg_losses, pg_losses2, pg_loss, kl, delight = grpo_utils.compute_grpo_loss(
+                loss_terms = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
@@ -467,6 +467,11 @@ class GRPOTrainModule(TransformerTrainModule):
                     config=self.grpo_config,
                     tis_weights=tis_clamped,
                 )
+                pg_losses = loss_terms["pg_losses"]
+                pg_losses2 = loss_terms["pg_losses2"]
+                pg_loss = loss_terms["pg_loss_max"]
+                kl = loss_terms["kl"]
+                delight = loss_terms["delight"]
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
                 loss_denominator = accumulation_token_counts[batch_start]
@@ -474,7 +479,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 loss = loss * dp_world_size
 
-                decision = grpo_utils.KondoGateDecision(True, 1.0, float("-inf"))
+                decision = grpo_utils.KONDO_GATE_PASSTHROUGH
                 if self._kondo_gate is not None:
                     decision = self._kondo_gate.decide(delight, response_mask)
                 kondo_gate_stats.append(decision)

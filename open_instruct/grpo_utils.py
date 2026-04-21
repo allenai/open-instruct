@@ -368,7 +368,7 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     delight = -advantages * new_logprobs.detach()
     if config.use_delight:
         # Delightful Policy Gradient gate; temperature eta is fixed to 1 per the paper.
@@ -401,13 +401,16 @@ def compute_grpo_loss(
     else:
         kl = torch.zeros_like(pg_loss_max)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl, delight
+    return {"pg_losses": pg_losses, "pg_losses2": pg_losses2, "pg_loss_max": pg_loss_max, "kl": kl, "delight": delight}
 
 
 class KondoGateDecision(NamedTuple):
     should_backward: bool
     prob: float
     lam: float
+
+
+KONDO_GATE_PASSTHROUGH = KondoGateDecision(True, 1.0, float("-inf"))
 
 
 class KondoGateState:
@@ -466,37 +469,12 @@ class KondoGateState:
         chi = self._reduced_chi(delight, response_mask)
         self._append(chi)
         if self._count < self.warmup or self.rate >= 1.0:
-            logger.info(
-                "[kondo] count=%d warmup=%d rate=%.3f chi=%.6g -> WARMUP (pass-through)",
-                self._count,
-                self.warmup,
-                self.rate,
-                float(chi.item()),
-            )
-            return KondoGateDecision(True, 1.0, float("-inf"))
+            return KONDO_GATE_PASSTHROUGH
         buf = self._buffer[: self._count]
-        q = 1.0 - self.rate
-        lam = torch.quantile(buf, q)
+        lam = torch.quantile(buf, 1.0 - self.rate)
         prob = torch.sigmoid((chi - lam) / self.temperature)
         gate = torch.bernoulli(prob, generator=self._generator)
-        decision = KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
-        probe_qs = torch.tensor([0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0], device=buf.device, dtype=buf.dtype)
-        probes = torch.quantile(buf, probe_qs)
-        frac_above = float((buf > lam).float().mean())
-        logger.info(
-            "[kondo] count=%d chi=%.6g q=%.3f lam=%.6g prob=%.4f gate=%d temp=%.3g "
-            "frac_buf>lam=%.3f buf_quantiles[0/.1/.25/.5/.75/.9/1]=%s",
-            self._count,
-            float(chi.item()),
-            q,
-            decision.lam,
-            decision.prob,
-            int(decision.should_backward),
-            self.temperature,
-            frac_above,
-            [f"{float(v):.6g}" for v in probes],
-        )
-        return decision
+        return KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
 
 
 def summarize_kondo_gate_stats(stats: list[KondoGateDecision]) -> dict[str, float]:

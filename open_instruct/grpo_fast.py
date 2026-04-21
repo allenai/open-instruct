@@ -736,7 +736,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.truncated_importance_sampling_ratio_cap,
                     )
 
-                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT, delight_BT = grpo_utils.compute_grpo_loss(
+                    loss_terms = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=data_BT.advantages[i][:, 1:],
@@ -744,6 +744,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         config=self.args,
                         tis_weights=tis_clamped_BT,
                     )
+                    pg_losses_BT = loss_terms["pg_losses"]
+                    pg_losses2_BT = loss_terms["pg_losses2"]
+                    pg_loss_max_BT = loss_terms["pg_loss_max"]
+                    kl_BT = loss_terms["kl"]
+                    delight_BT = loss_terms["delight"]
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
@@ -753,19 +758,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
                     loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    decision = grpo_utils.KondoGateDecision(True, 1.0, float("-inf"))
+                    decision = grpo_utils.KONDO_GATE_PASSTHROUGH
                     if self._kondo_gate is not None:
                         decision = self._kondo_gate.decide(delight_BT, response_mask_BT)
-                        logger.info(
-                            "[kondo] grpo_fast rank=%d i=%d delight_shape=%s mask_shape=%s "
-                            "mask_sum=%.0f delight_sum=%.4g",
-                            self.rank,
-                            i,
-                            tuple(delight_BT.shape),
-                            tuple(response_mask_BT.shape),
-                            float(response_mask_BT.sum()),
-                            float((delight_BT * response_mask_BT).sum()),
-                        )
                     kondo_gate_stats.append(decision)
 
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
@@ -776,8 +771,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.backward(loss)
                         group_had_backward = True
                     elif is_accumulation_boundary and group_had_backward:
-                        # The last sample in the group was gated but earlier ungated samples left
-                        # un-reduce-scattered grads. Trigger the reduce-scatter with a zero-contribution backward.
+                        # DeepSpeed defers the accumulation-group reduce-scatter to the boundary
+                        # backward; if the boundary sample is gated, we still need a backward here
+                        # (zeroed so it contributes no gradient) to flush earlier micro-steps' grads.
                         torch.cuda.empty_cache()
                         self.model.set_gradient_accumulation_boundary(True)
                         self.model.backward(loss * 0.0)
