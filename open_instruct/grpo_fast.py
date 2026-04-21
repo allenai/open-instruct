@@ -684,10 +684,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model_update_group = None
         if self.rank == 0:
             if self.args.single_gpu_mode:
-                refs = [
-                    engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info={}))
-                    for engine in vllm_engines
-                ]
+                init_infos: list[dict] = [{} for _ in vllm_engines]
+                master_info: dict | None = None
             else:
                 master_address = self.get_current_node_ip()
                 master_port = utils.find_free_port()
@@ -696,21 +694,36 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.vllm_config.vllm_tensor_parallel_size,
                 )
                 world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-                init_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
-                refs = [
-                    engine.init_weight_transfer_engine.remote(
-                        WeightTransferInitRequest(
-                            init_info=init_info | {"rank_offset": i * vllm_tensor_parallel_size + 1}
-                        )
-                    )
-                    for i, engine in enumerate(vllm_engines)
+                master_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
+                init_infos = [
+                    master_info | {"rank_offset": i * vllm_tensor_parallel_size + 1}
+                    for i, _ in enumerate(vllm_engines)
                 ]
+
+            refs = [
+                engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info=info))
+                for engine, info in zip(vllm_engines, init_infos)
+            ]
+
+            if master_info is not None:
                 torch.cuda.set_device(self.local_rank)
-                self.model_update_group = NCCLWeightTransferEngine.trainer_init(init_info)
+                self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
+
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
-    def broadcast_to_vllm(self):
+    def warmup_for_weight_sync(self):
+        """Run a dummy forward so DeepSpeed Stage 3 materializes sharded params.
+
+        Without this, the first broadcast after ``deepspeed.initialize`` can send
+        uninitialized storage to vLLM -- producing NaN logprobs on the first rollout.
+        """
+        torch.cuda.set_device(self.local_rank)
+        input_ids = torch.tensor([[self.pad_token_id]], device=self.device, dtype=torch.long)
+        with torch.no_grad():
+            self.model(input_ids=input_ids)
+
+    def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
         torch.cuda.empty_cache()
         # Ensure CUDA device is set before broadcast operations.
@@ -720,6 +733,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
+            model_step=model_step,
             gather_whole_model=self.args.gather_whole_model,
             name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
         )
@@ -2123,13 +2137,7 @@ def create_model_and_optimizer(
             "Restored data prep actor state from checkpoint "
             f"with training_step={data_prep_actor_state['training_step']}"
         )
-
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
-
-    logger.info(
-        "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
-    )
-
     return (
         policy_group,
         vllm_engines,
@@ -2166,21 +2174,20 @@ def create_generation_configs(
 class WeightSyncTrigger:
     """Event-like trigger that also carries the latest target model step."""
 
-    def __init__(self) -> None:
+    def __init__(self, step: int) -> None:
         self._event = threading.Event()
         self._lock = threading.Lock()
-        self._step: int | None = None
+        self._step: int = step
 
-    def notify(self, step: int | None = None) -> None:
+    def notify(self, step: int) -> None:
         with self._lock:
-            if step is not None:
-                self._step = step
+            self._step = step
         self._event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
         return self._event.wait(timeout=timeout)
 
-    def get_step_and_clear(self) -> int | None:
+    def get_step_and_clear(self) -> int:
         """Atomically gets the step and clears the event."""
         with self._lock:
             step = self._step
@@ -2196,13 +2203,10 @@ def weight_sync_thread(
     vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    resume_training_step: int = 1,
     inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
-    if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
@@ -2219,10 +2223,10 @@ def weight_sync_thread(
                 ray.get(actor_manager.set_should_stop.remote(True))
                 logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-                # Broadcast weights to vLLM engines
-                # First get the futures
+                # Broadcast weights to vLLM engines. model_step is stamped onto vLLM
+                # engines as part of the update_weights RPC — no separate set_model_step RPC.
                 weight_broadcast_futures: list[ray.ObjectRef] = [
-                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                    m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models
                 ]
 
                 # Wait for all trainer-side broadcasts to finish and collect timing stats.
@@ -2255,13 +2259,6 @@ def weight_sync_thread(
         finally:
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -2501,6 +2498,7 @@ def maybe_evaluate(
             filter_zero_std_samples=False,
             replenish_prompts=False,
             max_possible_score=max_possible_score,
+            training_step=training_step,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2748,7 +2746,7 @@ def run_training(
             enable=False,
         )
 
-    def initialize_weight_sync() -> tuple[futures.Future, WeightSyncTrigger]:
+    def initialize_weight_sync(initial_step: int) -> tuple[futures.Future, WeightSyncTrigger]:
         logger.info("[Main Thread] Initializing native vLLM weight sync.")
 
         ray_get_with_progress(
@@ -2758,10 +2756,8 @@ def run_training(
         logger.info("======== ✅ model update group setup successfully =========")
 
         logger.info("======== ✅ weight sync thread starts =========")
-        trigger = WeightSyncTrigger()
-        ray_get_with_progress(
-            [engine.set_model_step.remote(0) for engine in vllm_engines], desc="Initializing vLLM model step to 0"
-        )
+        initial_step = resume_training_step - 1
+        trigger = WeightSyncTrigger(step=initial_step)
         future = executor.submit(
             weight_sync_thread,
             args,
@@ -2771,12 +2767,11 @@ def run_training(
             vllm_engines,
             actor_manager,
             weight_sync_metrics_Q,
-            1,
             streaming_config.inflight_updates,
         )
 
-        logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=1)
+        logger.info(f"[Main Thread] Triggering initial native vLLM weight sync at step {initial_step}.")
+        trigger.notify(step=initial_step)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
 
@@ -2807,6 +2802,13 @@ def run_training(
         wandb_url=wandb_url,
     )
     last_eval_collected = True
+
+    ray_get_with_progress(
+        [m.warmup_for_weight_sync.remote() for m in policy_group.models],
+        desc="Warming up learner for first weight sync",
+    )
+    weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(resume_training_step)
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -2904,9 +2906,7 @@ def run_training(
         # we don't need to broadcast new weights to vLLM (and broadcasting them would waste time).
         in_warmup = _is_in_warmup_window(args, training_step)
 
-        if training_step == 1:
-            weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
-        elif weight_sync_trigger is not None and not in_warmup:
+        if training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif in_warmup:

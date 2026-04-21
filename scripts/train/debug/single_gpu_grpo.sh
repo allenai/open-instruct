@@ -9,7 +9,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
-       --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU OLMo-core GRPO test script." \
        --pure_docker_mode \
@@ -59,4 +58,5 @@ uv run python mason.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
+    --async_steps 1 \
     --single_gpu_mode

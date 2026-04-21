@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Remove `--use_lm_value_model` option and all LM-yesno value head code (`get_yes_no_token_ids`, `extract_yes_no_value`, `lm_yesno_bce_loss`, `lm_yesno*` conditioning templates). The scalar PPO critic is the only remaining value head (https://github.com/allenai/open-instruct/pull/TODO).
 
 ### Changed
+- Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
 - Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
 - Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).
 - Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/1613).
@@ -32,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Fix `--use_lm_value_model` CLI test: add required `--gt_conditioning_template lm_yesno` in the local smoke-test script (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `value_estimation make_dataset` CLI args in smoke-test: use correct arg names (`--dataset_split`, `--max_prompt_length`, `--gpu_memory_utilization`) and remove unsupported flags (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `value_estimation compare_runs` CLI: use `--score_dataset_paths` instead of positional args and `--output_markdown_path` instead of `--output_prefix` (https://github.com/allenai/open-instruct/pull/TODO).
+- Fix weight sync on resume by initializing vLLM weight sync before the training loop and warming up the learner with a dummy forward so DeepSpeed Stage 3 params materialize before the first broadcast; accept IPC `update_info` dict in `LLMRayActor.update_weights`; replace toothless weight-sync tests with a real divergent-weight broadcast test (https://github.com/allenai/open-instruct/pull/1627).
 - Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
 - Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
