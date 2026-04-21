@@ -1343,6 +1343,7 @@ def accumulate_inference_batches(
     prompt_test_index_map: dict[int, list[int]] | None = None,
     prompt_test_difficulty_map: dict[int, list[int]] | None = None,
     base_env_config: EnvConfig | None = None,
+    training_step: int = 0,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -1354,7 +1355,6 @@ def accumulate_inference_batches(
     no_resampling_persist: bool = True,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
-    training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
@@ -1791,8 +1791,7 @@ def accumulate_inference_batches(
         all_prompt_baseline_reward_sums.append(baseline_reward_sum)
         all_prompt_datasets.append(prompt_dataset_key)
         accepted_prompt_lengths.append(len(query))
-        if result.model_step is not None:
-            all_model_steps.append(result.model_step)
+        all_model_steps.extend([result.model_step] * len(result.responses))
 
     if num_tokens_sampled < target_total if target_is_tokens else num_prompts_sampled < target_total:
         cap = max_prompts_to_sample if max_prompts_to_sample is not None else "no cap"
@@ -1904,6 +1903,7 @@ def accumulate_inference_batches(
         indices=None,
         scores=all_scores,
         active_tools=all_active_tools if all_active_tools else None,
+        model_steps=all_model_steps,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
@@ -1914,6 +1914,7 @@ def accumulate_inference_batches(
         combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
         combined_reward_metrics["model_step_span"] = float(model_steps_array.max() - model_steps_array.min())
         combined_reward_metrics["model_step_values"] = model_steps_array.tolist()
+        combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
@@ -2472,7 +2473,7 @@ class DataPreparationActor:
     def get_state(self) -> dict:
         state = {
             "training_step": self.current_prepared_step + 1,
-            "last_consumed_step": self._last_consumed_step,
+            "last_consumed_step": getattr(self, "_last_consumed_step", -1),
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
         with self.never_give_up_state_lock:

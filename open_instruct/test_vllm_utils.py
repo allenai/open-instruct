@@ -106,6 +106,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
+                "model_step": 0,
             }
         }
 
@@ -177,6 +178,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
+                "model_step": 0,
             }
         }
 
@@ -245,7 +247,7 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        result, is_eval = vllm_utils.process_completed_request(
+        result, is_eval, example = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=101.5,
@@ -254,6 +256,7 @@ class TestVllmUtils3(unittest.TestCase):
         )
 
         self.assertFalse(is_eval)
+        self.assertIsNone(example)
         self.assertEqual(result.responses, [[7, 8]])
         self.assertEqual(result.token_statistics.generation_time, 1.5)
 

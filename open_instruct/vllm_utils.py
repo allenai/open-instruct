@@ -127,6 +127,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
 class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
+    top_k: int | None = None
     max_tokens: int = 256
     min_tokens: int = 0
     n: int = 1
@@ -812,6 +813,7 @@ class LLMRayActor:
         dtype_names: list[str] | None = None,
         shapes: list[list[int]] | None = None,
         packed: bool = True,
+        model_step: int = 0,
     ) -> None:
         """Apply a weight update from the trainer.
 
@@ -826,7 +828,9 @@ class LLMRayActor:
                     "update_weights dict payload must contain 'update_info' (vLLM IPC weight transfer format)."
                 )
             request = WeightTransferUpdateRequest(update_info=names["update_info"])
-            return self._run_async(self.llm_engine.update_weights(request))
+            ret = self._run_async(self.llm_engine.update_weights(request))
+            self.current_model_step = model_step
+            return ret
 
         if dtype_names is None or shapes is None:
             raise TypeError("update_weights requires dtype_names and shapes when names is a list (NCCL format).")
@@ -834,10 +838,9 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        request = WeightTransferUpdateRequest(
-            update_info={"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        )
-        return self._run_async(self.llm_engine.update_weights(request))
+        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
+        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
+        self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1044,17 +1047,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            top_k = params_dict.pop("top_k", None)
+            extra_body: dict[str, Any] = {
+                "return_token_ids": True,
+                "cache_salt": base_request_id,
+                "include_stop_str_in_output": True,
+                "skip_special_tokens": False,
+                "min_tokens": min_tokens,
+            }
+            if top_k is not None:
+                extra_body["top_k"] = top_k
             api_response = await actor.client.completions.create(
-                model=actor.model_name,
-                prompt=current_prompt,
-                extra_body={
-                    "return_token_ids": True,
-                    "cache_salt": base_request_id,
-                    "include_stop_str_in_output": True,
-                    "skip_special_tokens": False,
-                    "min_tokens": min_tokens,
-                },
-                **params_dict,
+                model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **params_dict
             )
 
             output = api_response.choices[0]
@@ -1416,6 +1420,7 @@ def _broadcast_weights_ipc(
     vllm_engines: list[ray.actor.ActorHandle],
     name_mapper: Callable[[str], str] | None,
     gather_whole_model: bool,
+    model_step: int,
 ) -> list[ray.ObjectRef]:
     """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
     is_rank_0 = torch.distributed.get_rank() == 0
@@ -1433,6 +1438,7 @@ def _broadcast_weights_ipc(
             for engine in vllm_engines:
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
 
 
@@ -1440,6 +1446,7 @@ def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: Any | None,
+    model_step: int,
     name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
@@ -1450,6 +1457,9 @@ def broadcast_weights_to_vllm(
 
     When model_update_group is None, uses IPC backend (single GPU mode).
     Otherwise uses NCCL backend.
+
+    `model_step` is stamped onto each vLLM engine as part of the weight-update RPC,
+    so no separate `set_model_step` call is needed.
     """
     if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
@@ -1459,14 +1469,16 @@ def broadcast_weights_to_vllm(
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
     if model_update_group is None:
-        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model)
+        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
     use_packed = False
 
     if is_rank_0:
-        refs = [engine.update_weights.remote(names, dtype_names, shapes, packed=use_packed) for engine in vllm_engines]
+        refs = [
+            engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
+        ]
     else:
         refs = []
 
@@ -1508,4 +1520,5 @@ def broadcast_weights_to_vllm(
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+
     return refs
