@@ -885,6 +885,11 @@ class PolicyTrainerRayProcess(RayProcess):
     ) -> torch.Tensor:
         """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
 
+        All sub-sequences are expanded (conditioning text inserted) and padded to the same
+        length, then forwarded through the value model in a single batched call. This produces
+        one ZeRO-3 allgather cycle regardless of how many sub-sequences are in the pack,
+        preventing cross-PG NCCL deadlocks when weight sync runs concurrently.
+
         Returns a values tensor of shape (batch=1, seq_len-1) matching `query_responses[:, 1:]`.
         """
         args = self.args
@@ -892,10 +897,17 @@ class PolicyTrainerRayProcess(RayProcess):
         is_postfix = value_model_utils.is_postfix_template(template)
         subseqs = self._unpack_subseqs(query_responses, position_ids, response_mask)
         full_len = query_responses.shape[1]
-        # Value tensor aligned to seq_len-1 (the shifted layout the rest of step uses).
-        out_values = torch.zeros(1, full_len - 1, dtype=torch.float32, device=query_responses.device)
+        device = query_responses.device
+        out_values = torch.zeros(1, full_len - 1, dtype=torch.float32, device=device)
 
-        value_model_wrapped = self.value_model
+        if not subseqs:
+            return out_values
+
+        # Build all expanded sequences (conditioning text spliced in) with CPU tensor ops only.
+        # No model calls here — we batch everything below into a single forward.
+        expanded_ids_list: list[torch.Tensor] = []
+        orig_masks_list: list[torch.Tensor] = []
+
         for i, sub in enumerate(subseqs):
             ids = sub["input_ids"]
             mask = sub["response_is_resp"]
@@ -906,42 +918,50 @@ class PolicyTrainerRayProcess(RayProcess):
             cond_ids = self.tokenizer.encode(cond_text, add_special_tokens=False)
             if len(cond_ids) == 0:
                 cond_ids = [self.tokenizer.pad_token_id]
-            cond_tensor = torch.tensor(cond_ids, dtype=ids.dtype, device=ids.device)
+            cond_tensor = torch.tensor(cond_ids, dtype=ids.dtype, device=device)
 
-            # Find the first response position within the sub-seq; splice conditioning there (postfix)
-            # or prepend it (prefix).
             first_resp = int(mask.long().argmax().item()) if bool(mask.any().item()) else ids.numel()
             if is_postfix:
-                prompt_part = ids[:first_resp]
-                response_part = ids[first_resp:]
-                new_ids = torch.cat([prompt_part, cond_tensor, response_part], dim=0)
-                new_pos = torch.arange(new_ids.numel(), device=ids.device)
-                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
+                new_ids = torch.cat([ids[:first_resp], cond_tensor, ids[first_resp:]], dim=0)
+                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=device)
                 orig_mask[:first_resp] = mask[:first_resp]
                 orig_mask[first_resp + cond_tensor.numel() :] = mask[first_resp:]
             else:
                 new_ids = torch.cat([cond_tensor, ids], dim=0)
-                new_pos = torch.arange(new_ids.numel(), device=ids.device)
-                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=ids.device)
+                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=device)
                 orig_mask[cond_tensor.numel() :] = mask
 
-            new_ids_2d = new_ids.unsqueeze(0)
-            new_pos_2d = new_pos.unsqueeze(0)
-            output = value_model_wrapped(input_ids=new_ids_2d, position_ids=new_pos_2d)
-            logits = getattr(output, "logits", output)
-            shifted = logits[:, :-1]
-            values = shifted.squeeze(-1).float()
-            # Extract values at ORIGINAL response positions and scatter back into out_values.
-            # `orig_mask` is aligned to new_ids; shifted values align to new_ids[:, 1:], so pull
-            # positions where `orig_mask[1:]` is True.
-            orig_mask_shifted = orig_mask[1:]
-            new_resp_values = values[0][orig_mask_shifted]
+            expanded_ids_list.append(new_ids)
+            orig_masks_list.append(orig_mask)
+
+        # Pad all expanded sequences to the same length for a single batched forward.
+        n_subs = len(expanded_ids_list)
+        max_len = max(t.shape[0] for t in expanded_ids_list)
+        padded_ids = torch.zeros(n_subs, max_len, dtype=query_responses.dtype, device=device)
+        padded_pos = torch.zeros(n_subs, max_len, dtype=position_ids.dtype, device=device)
+        padded_attn = torch.zeros(n_subs, max_len, dtype=torch.long, device=device)
+        for i, new_ids in enumerate(expanded_ids_list):
+            L = new_ids.shape[0]
+            padded_ids[i, :L] = new_ids
+            padded_pos[i, :L] = torch.arange(L, dtype=position_ids.dtype, device=device)
+            padded_attn[i, :L] = 1
+
+        # Single model call — one ZeRO-3 allgather cycle regardless of sub-sequence count.
+        output = self.value_model(input_ids=padded_ids, attention_mask=padded_attn, position_ids=padded_pos)
+        logits = getattr(output, "logits", output)
+        all_values = logits[:, :-1].squeeze(-1).float()  # (n_subs, max_len - 1)
+
+        # Scatter values back into out_values at original response positions.
+        for i, sub in enumerate(subseqs):
+            L = expanded_ids_list[i].shape[0]
+            orig_mask_shifted = orig_masks_list[i][1:]  # length L-1; aligns with shifted logits
+            new_resp_values = all_values[i, : L - 1][orig_mask_shifted]
             base = sub["offset_in_pack"]
-            # mask[1:] selects t=1..end; indices are (t-1) so abs position = base + (t-1).
-            # `t > 0` because values live in shifted coordinates; t=0 has no shifted predecessor.
+            mask = sub["response_is_resp"]
             resp_positions = mask[1:].nonzero(as_tuple=True)[0] + base
             n = min(resp_positions.numel(), new_resp_values.numel())
             out_values[0, resp_positions[:n]] = new_resp_values[:n]
+
         return out_values
 
     def forward_value(
@@ -1166,6 +1186,12 @@ class PolicyTrainerRayProcess(RayProcess):
             value_loss_inputs = []
             per_sample_bf: list[float] = []
             per_sample_lam: list[float] = []
+            # Per-token value diagnostics accumulators (correct vs incorrect rollouts, percentile bins).
+            _NUM_PCT_BINS = 20
+            _vdiag_correct: list[list[float]] = [[] for _ in range(_NUM_PCT_BINS)]
+            _vdiag_incorrect: list[list[float]] = [[] for _ in range(_NUM_PCT_BINS)]
+            _vdiag_returns_all: list[float] = []
+            _vdiag_preds_all: list[float] = []
             with Timer("Value forward (no-grad)", noop=self.rank != 0), torch.no_grad():
                 for i in range(num_samples):
                     resp_mask = data_BT.response_masks[i][:, 1:].bool()
@@ -1226,25 +1252,45 @@ class PolicyTrainerRayProcess(RayProcess):
                         per_sample_bf.append(step_metrics["value/sae_boundary_frac"])
                     if "value/avg_lambda" in step_metrics:
                         per_sample_lam.append(step_metrics["value/avg_lambda"])
-                    # Optionally whiten advantages.
-                    if self.args.whiten_advantages and resp_masks_np.sum() > 0:
-                        mask_f = resp_masks_np.astype("float32")
-                        m = (adv_np * mask_f).sum() / mask_f.sum()
-                        v = (((adv_np - m) ** 2) * mask_f).sum() / mask_f.sum()
-                        adv_np = (adv_np - m) / (float(v) ** 0.5 + 1e-8)
-                        adv_np = adv_np * mask_f
                     # Override data_BT.advantages (shape (batch, seq_len)); the downstream slice
                     # `advantages[i][:, 1:]` will align with values.
                     new_adv = torch.zeros_like(data_BT.advantages[i])
                     new_adv[:, 1:] = torch.from_numpy(adv_np.astype("float32")).to(device)
                     data_BT.advantages[i] = new_adv
+                    # value_mask uses [:, :-1] so V(s_t) is supervised at the correct response
+                    # positions (not shifted left like response_masks[:, 1:] would do).
+                    value_mask = data_BT.response_masks[i][:, :-1].bool()
                     value_loss_inputs.append(
                         {
                             "returns": torch.from_numpy(returns_np.astype("float32")).to(device),
                             "old_values": values_BT.detach(),
                             "response_mask": resp_mask,
+                            "value_mask": value_mask,
                         }
                     )
+                    # Accumulate per-token value diagnostics split by correct/incorrect.
+                    # A pack is "correct" if any terminal reward is positive.
+                    term_rewards = (rewards * dones.astype("float32"))
+                    is_correct = bool(term_rewards.sum() > 0)
+                    vm_np = value_mask.cpu().numpy()  # shape (B, T-1), True at value positions
+                    vals_np = values_BT.float().cpu().numpy()  # (B, T-1)
+                    rets_np_v = returns_np * vm_np  # zero non-value positions
+                    for b in range(vm_np.shape[0]):
+                        resp_pos = vm_np[b].nonzero()[0]  # indices in T-1 space
+                        if len(resp_pos) == 0:
+                            continue
+                        n = len(resp_pos)
+                        v_tokens = vals_np[b][resp_pos]
+                        r_tokens = rets_np_v[b][resp_pos]
+                        _vdiag_returns_all.extend(r_tokens.tolist())
+                        _vdiag_preds_all.extend(v_tokens.tolist())
+                        # Bucket by percentile position within this response.
+                        bins = np.minimum(
+                            (np.arange(n) * _NUM_PCT_BINS / n).astype(int), _NUM_PCT_BINS - 1
+                        )
+                        target = _vdiag_correct if is_correct else _vdiag_incorrect
+                        for pos_idx, bin_idx in enumerate(bins):
+                            target[bin_idx].append(float(v_tokens[pos_idx]))
             if per_sample_bf:
                 sae_step_metrics["value/sae_boundary_frac"] = float(np.mean(per_sample_bf))
             if per_sample_lam:
@@ -1253,6 +1299,50 @@ class PolicyTrainerRayProcess(RayProcess):
             if _gen_value_training_pairs and self._gen_value_training_queue is not None:
                 with contextlib.suppress(Exception):
                     self._gen_value_training_queue.put_nowait.remote(_gen_value_training_pairs)
+            # Global advantage whitening across all samples and ranks (replaces per-sample whitening).
+            if self.args.whiten_advantages and value_loss_inputs is not None:
+                adv_parts = [data_BT.advantages[i][:, 1:].float() for i in range(num_samples)]
+                mask_parts = [data_BT.response_masks[i][:, 1:].bool() for i in range(num_samples)]
+                adv_flat = torch.cat([a[m] for a, m in zip(adv_parts, mask_parts)])
+                count = torch.tensor(float(adv_flat.numel()), device=device)
+                s1 = adv_flat.sum()
+                s2 = (adv_flat**2).sum()
+                dist.all_reduce(count, op=dist.ReduceOp.SUM)
+                dist.all_reduce(s1, op=dist.ReduceOp.SUM)
+                dist.all_reduce(s2, op=dist.ReduceOp.SUM)
+                mean = s1 / count.clamp(min=1)
+                std = ((s2 / count.clamp(min=1) - mean**2).clamp(min=0) + 1e-8).sqrt()
+                for i in range(num_samples):
+                    mask_i = data_BT.response_masks[i][:, 1:].bool()
+                    adv_i = data_BT.advantages[i][:, 1:]
+                    adv_normed = torch.where(mask_i, (adv_i - mean) / std, torch.zeros_like(adv_i))
+                    new_adv = data_BT.advantages[i].clone()
+                    new_adv[:, 1:] = adv_normed
+                    data_BT.advantages[i] = new_adv
+            # Compute and stash value diagnostics metrics.
+            with torch.no_grad():
+                for bin_idx in range(_NUM_PCT_BINS):
+                    tag = f"{bin_idx:03d}"
+                    if _vdiag_correct[bin_idx]:
+                        sae_step_metrics[f"value/correct_pct_{tag}"] = float(
+                            np.mean(_vdiag_correct[bin_idx])
+                        )
+                    if _vdiag_incorrect[bin_idx]:
+                        sae_step_metrics[f"value/incorrect_pct_{tag}"] = float(
+                            np.mean(_vdiag_incorrect[bin_idx])
+                        )
+                if _vdiag_returns_all and _vdiag_preds_all:
+                    rets = np.array(_vdiag_returns_all, dtype="float32")
+                    preds = np.array(_vdiag_preds_all, dtype="float32")
+                    residuals = rets - preds
+                    ret_var = float(np.var(rets))
+                    sae_step_metrics["value/returns_mean"] = float(np.mean(rets))
+                    sae_step_metrics["value/returns_std"] = float(np.std(rets))
+                    sae_step_metrics["value/predictions_mean"] = float(np.mean(preds))
+                    sae_step_metrics["value/predictions_std"] = float(np.std(preds))
+                    sae_step_metrics["value/explained_variance"] = (
+                        1.0 - float(np.var(residuals)) / (ret_var + 1e-8)
+                    )
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -1393,6 +1483,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     for i in range(num_samples):
                         ctx = value_loss_inputs[i]
                         resp_mask = ctx["response_mask"]
+                        value_mask = ctx["value_mask"]
                         returns = ctx["returns"]
                         old_values = ctx["old_values"]
                         # Re-forward with grad on the value model (with conditioning if enabled).
@@ -1413,9 +1504,9 @@ class PolicyTrainerRayProcess(RayProcess):
                                 data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
                             )
                         per_tok, v_clipfrac = value_model_utils.value_clipped_mse_loss(
-                            new_values, returns, old_values, resp_mask, self.args.vf_clip_range
+                            new_values, returns, old_values, value_mask, self.args.vf_clip_range
                         )
-                        denom = resp_mask.sum().clamp(min=1).float()
+                        denom = value_mask.sum().clamp(min=1).float()
                         v_loss = (per_tok.sum() / denom) * self.args.value_loss_coef
                         v_loss = v_loss * (self.args.world_size // self.args.sequence_parallel_size)
                         is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
@@ -1458,6 +1549,9 @@ class PolicyTrainerRayProcess(RayProcess):
         value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
         out_path = pathlib.Path(output_dir)
         if self.args.deepspeed_stage == 3:
+            # Clear any stale ZeRO-3 sub-module tracking that could block GatheredParameters.
+            if hasattr(value_to_save, "ds_active_sub_modules"):
+                value_to_save.ds_active_sub_modules.clear()
             gathered: dict[str, torch.Tensor] = {}
             for k, v in value_to_save.named_parameters():
                 params_to_fetch = _z3_params_to_fetch([v])
@@ -1513,10 +1607,13 @@ class PolicyTrainerRayProcess(RayProcess):
         # Save value model checkpoint (model only, no optimizer) alongside the policy.
         if self.args.use_value_model and self.value_model is not None:
             value_dir = os.path.join(checkpoint_state_dir, "value_model")
-            self._save_value_model(value_dir)
-            if self.rank == 0:
-                logger.info(f"Saved value model to {value_dir}")
-            client_state["value_model_saved"] = True
+            try:
+                self._save_value_model(value_dir)
+                if self.rank == 0:
+                    logger.info(f"Saved value model to {value_dir}")
+                client_state["value_model_saved"] = True
+            except Exception as e:
+                logger.warning(f"Failed to save value model checkpoint: {e}")
 
         # Save the main model checkpoint with enhanced client state
         # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
@@ -2938,11 +3035,11 @@ def run_training(
         # we don't need to broadcast new weights to vLLM (and broadcasting them would waste time).
         in_warmup = _is_in_warmup_window(args, training_step)
 
-        if training_step > resume_training_step:
+        if in_warmup:
+            logger.debug(f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup")
+        elif training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
-        elif in_warmup:
-            logger.debug(f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup")
 
         last_eval_collected = maybe_evaluate(
             args,

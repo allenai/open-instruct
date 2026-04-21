@@ -229,9 +229,9 @@ def value_clipped_mse_loss(
     if clip_range > 0 and old_values is not None:
         values_clipped = old_values + torch.clamp(new_values - old_values, -clip_range, clip_range)
         vf_losses2 = (values_clipped - returns).pow(2)
-        per_token = 0.5 * torch.maximum(vf_losses1, vf_losses2)
+        per_token = torch.maximum(vf_losses1, vf_losses2)
         clipfrac = ((vf_losses2 > vf_losses1).float() * mask_f).sum() / mask_f.sum().clamp(min=1)
     else:
-        per_token = 0.5 * vf_losses1
+        per_token = vf_losses1
         clipfrac = torch.zeros((), dtype=torch.float32, device=new_values.device)
     return per_token * mask_f, clipfrac
