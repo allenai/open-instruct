@@ -2161,14 +2161,18 @@ class DataPreparationActor:
                 return
 
             generation_idle_wait_start_time: float | None = None
+            wait_for_consumer_log_last_time: float | None = None
             while step - self._last_consumed_step > self.config.async_steps:
                 if generation_idle_wait_start_time is None:
                     generation_idle_wait_start_time = time.perf_counter()
                 if self.shutdown_requested:
                     return
-                logger.info(
-                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
-                )
+                now = time.perf_counter()
+                if wait_for_consumer_log_last_time is None or now - wait_for_consumer_log_last_time >= 1.0:
+                    logger.info(
+                        f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                    )
+                    wait_for_consumer_log_last_time = now
                 time.sleep(0.1)
             generation_idle_wait_time = (
                 0.0
