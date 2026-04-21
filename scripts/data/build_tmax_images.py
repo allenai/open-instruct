@@ -156,6 +156,13 @@ def main():
     use_buildx = args.use_buildx or "," in args.platform
     if use_buildx and not args.dry_run:
         _ensure_buildx_builder(args.buildx_builder)
+    effective_workers = args.workers
+    if use_buildx and args.workers != 1:
+        logger.warning(
+            "Buildx mode is forced to workers=1 to avoid shared builder lifecycle races (requested=%s).",
+            args.workers,
+        )
+        effective_workers = 1
 
     def build_one(content_hash: str, dockerfile_content: str, setup_script: str) -> None:
         image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
@@ -248,7 +255,7 @@ def main():
                 task_to_image[t] = image_tag
     else:
         items = list(hash_to_dockerfile.items())
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
             futures = [
                 executor.submit(build_one, ch, df, ss)
                 for ch, (df, ss) in items
