@@ -8,6 +8,7 @@ Usage:
     python scripts/data/build_tmax_images.py --registry hamishivi
     python scripts/data/build_tmax_images.py --registry hamishivi --dry-run
     python scripts/data/build_tmax_images.py --registry hamishivi --platform linux/amd64
+    python scripts/data/build_tmax_images.py --registry hamishivi --platform linux/amd64,linux/arm64 --use-buildx
 """
 
 import argparse
@@ -73,6 +74,11 @@ def main():
         default="linux/amd64",
         help="Docker platform to build for (for example linux/amd64 or linux/arm64).",
     )
+    parser.add_argument(
+        "--use-buildx",
+        action="store_true",
+        help="Build and push with docker buildx (required for multi-platform tags).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -104,6 +110,7 @@ def main():
 
     # Build and push images (parallel)
     lock = threading.Lock()
+    use_buildx = args.use_buildx or "," in args.platform
 
     def build_one(content_hash: str, dockerfile_content: str, setup_script: str) -> None:
         image_tag = f"{args.registry}/{args.repo_prefix}:{content_hash}"
@@ -135,22 +142,43 @@ def main():
                 with open(os.path.join(tmpdir, "setup.sh"), "w") as f:
                     f.write(setup_script)
 
-                image, build_logs = worker_client.images.build(
-                    path=tmpdir,
-                    tag=image_tag,
-                    rm=True,
-                    platform=args.platform,
-                )
+                if use_buildx:
+                    subprocess.run(
+                        [
+                            "docker",
+                            "buildx",
+                            "build",
+                            "--platform",
+                            args.platform,
+                            "--tag",
+                            image_tag,
+                            "--push",
+                            tmpdir,
+                        ],
+                        check=True,
+                    )
+                    image = None
+                else:
+                    image, build_logs = worker_client.images.build(
+                        path=tmpdir,
+                        tag=image_tag,
+                        rm=True,
+                        platform=args.platform,
+                    )
             logger.info(f"Built {image_tag}")
 
-            worker_client.images.push(args.registry + "/" + args.repo_prefix, tag=content_hash)
-            logger.info(f"Pushed {image_tag}")
+            if not use_buildx:
+                worker_client.images.push(args.registry + "/" + args.repo_prefix, tag=content_hash)
+                logger.info(f"Pushed {image_tag}")
+            else:
+                logger.info(f"Pushed multi-platform image {image_tag}")
 
             # Clean up local image to save disk
-            try:
-                worker_client.images.remove(image_tag, force=True)
-            except Exception:
-                pass
+            if not use_buildx:
+                try:
+                    worker_client.images.remove(image_tag, force=True)
+                except Exception:
+                    pass
 
             with lock:
                 for t in tasks:
