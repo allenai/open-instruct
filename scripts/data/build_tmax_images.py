@@ -293,6 +293,18 @@ def main():
             "per-task content hash (expect a one-time full rebuild)."
         ),
     )
+    parser.add_argument(
+        "--cache-registry",
+        default=None,
+        help=(
+            "Optional registry ref to use as a BuildKit shared cache (e.g. "
+            "'hamishi740/swerl-tmax-buildcache'). Enables "
+            "--cache-to type=registry,mode=max,ref=<ref> and matching "
+            "--cache-from, so repeated RUN instructions (like shared apt/pip "
+            "layers) are reused across builds without re-executing them. "
+            "Implies --use-buildx."
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -374,7 +386,12 @@ def main():
 
     # Build and push images (parallel)
     lock = threading.Lock()
-    use_buildx = args.use_buildx or "," in args.platform
+    use_buildx = args.use_buildx or "," in args.platform or bool(args.cache_registry)
+    if args.cache_registry:
+        logger.info(
+            "BuildKit registry cache enabled: ref=%s (cache-to mode=max, cache-from).",
+            args.cache_registry,
+        )
     if use_buildx and not args.dry_run:
         _ensure_buildx_builder(args.buildx_builder)
     effective_workers = args.workers
@@ -430,6 +447,13 @@ def main():
                         image_tag,
                         "--push",
                     ]
+                    if args.cache_registry:
+                        cmd.extend([
+                            "--cache-to",
+                            f"type=registry,ref={args.cache_registry},mode=max",
+                            "--cache-from",
+                            f"type=registry,ref={args.cache_registry}",
+                        ])
                     if stream_build_logs:
                         cmd.extend(["--progress", "plain"])
                     cmd.append(tmpdir)
