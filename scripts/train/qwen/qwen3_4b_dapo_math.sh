@@ -4,7 +4,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-high}"
@@ -28,9 +28,7 @@ uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
-    --eval_top_p 0.95 \
     --vllm_top_p 1.0 \
-    --local_eval_every 100 \
     --beta 0.0 \
     --async_steps 4 \
     --active_sampling \
@@ -70,6 +68,6 @@ uv run open_instruct/grpo_fast.py \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
-    --load_ref_policy True \
+    --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False "$@"
