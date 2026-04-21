@@ -9,7 +9,7 @@ uv run python mason.py \
     --cluster ai2/jupiter \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
-    --workspace ai2/dr-tulu-ablations \
+    --workspace ai2/olmo-instruct \
     --priority urgent \
     --preemptible \
     --num_nodes 1 \
