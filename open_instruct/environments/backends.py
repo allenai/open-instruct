@@ -4,6 +4,7 @@ import io
 import os
 import shlex
 import tarfile
+import contextlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -102,6 +103,7 @@ class DockerBackend(SandboxBackend):
         try:
             exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
         except docker_sdk.errors.NotFound:
+            self._log_container_state("exec_not_found", container_id)
             # The container can disappear between reset/start and exec (e.g. daemon cleanup
             # or external removal). Recreate it once and retry this command.
             logger.warning(
@@ -119,6 +121,16 @@ class DockerBackend(SandboxBackend):
                 self._container.short_id,
             )
             exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
+        except docker_sdk.errors.APIError as e:
+            # Capture state for conflicts like "container is not running" before bubbling up.
+            self._log_container_state("exec_api_error", container_id)
+            logger.warning(
+                "Docker exec APIError (container=%s, image=%s): %s",
+                container_id,
+                self._image,
+                e,
+            )
+            raise
         stdout_raw = (output[0] or b"") if output else b""
         stderr_raw = (output[1] or b"") if output else b""
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
@@ -126,6 +138,53 @@ class DockerBackend(SandboxBackend):
         if exit_code == 124:
             stderr = f"Command timed out after {self._timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    def _log_container_state(self, reason: str, container_id: str) -> None:
+        """Best-effort container state diagnostics for flaky lifecycle issues."""
+        if self._client is None:
+            logger.warning(
+                "Container state unavailable during %s (container=%s, image=%s): docker client is None",
+                reason,
+                container_id,
+                self._image,
+            )
+            return
+
+        try:
+            container = self._client.containers.get(container_id)
+        except docker_sdk.errors.NotFound:
+            logger.warning(
+                "Container state during %s (container=%s, image=%s): container not found in daemon",
+                reason,
+                container_id,
+                self._image,
+            )
+            return
+        except Exception as e:
+            logger.warning(
+                "Container state lookup failed during %s (container=%s, image=%s): %s",
+                reason,
+                container_id,
+                self._image,
+                e,
+            )
+            return
+
+        with contextlib.suppress(Exception):
+            container.reload()
+        state = container.attrs.get("State", {})
+        logger.warning(
+            "Container state during %s (container=%s, image=%s): status=%s running=%s exit_code=%s "
+            "oom_killed=%s error=%s",
+            reason,
+            container_id,
+            self._image,
+            state.get("Status"),
+            state.get("Running"),
+            state.get("ExitCode"),
+            state.get("OOMKilled"),
+            state.get("Error"),
+        )
 
     def write_file(self, path: str, content: str | bytes) -> None:
         if self._container is None:
