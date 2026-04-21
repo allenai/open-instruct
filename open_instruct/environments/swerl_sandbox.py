@@ -156,6 +156,18 @@ class SWERLSandboxEnv(RLEnvironment):
                 if image_tag:
                     resolved_image = image_tag
         if not resolved_image:
+            instance_details = {
+                "task_id": task_id,
+                "backend_type": self._backend_type,
+                "env_name": per_sample_config.get("env_name"),
+                "instance_name": kwargs.get("instance_name") or per_sample_config.get("instance_name"),
+                "instance_id": kwargs.get("instance_id") or per_sample_config.get("instance_id"),
+                "episode_id": kwargs.get("episode_id") or per_sample_config.get("episode_id"),
+            }
+            logger.error(
+                "Missing explicit image for SWERLSandboxEnv reset: %s",
+                {k: v for k, v in instance_details.items() if v is not None},
+            )
             raise ValueError(
                 "SWERLSandboxEnv requires an explicit image per task. "
                 "Set env_config.image or provide image.txt in task data."
