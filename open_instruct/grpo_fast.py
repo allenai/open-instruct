@@ -140,6 +140,12 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
+def _ensure_writable_bool_mask(mask: np.ndarray) -> np.ndarray:
+    """Return a bool ndarray we can mutate in place (e.g. mmap/checkpoint loads can be read-only)."""
+    out = np.asarray(mask, dtype=bool)
+    return out if out.flags.writeable else out.copy()
+
+
 def update_dataset_solve_rate(
     solved_prompt_mask: np.ndarray,
     prompt_indices: np.ndarray | list[int] | None,
@@ -1739,8 +1745,8 @@ def one_training_step(
     wandb_url: str,
     chat_template_name: str,
     model_dims: utils.ModelDims,
+    solved_prompt_mask: np.ndarray,
     actor_manager: ActorManager | None = None,
-    solved_prompt_mask: np.ndarray | None = None,
 ) -> tuple[int, int, int]:
     """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
@@ -1851,12 +1857,11 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
-    if solved_prompt_mask is not None:
-        metrics["val/dataset_solve_rate"] = update_dataset_solve_rate(
-            solved_prompt_mask,
-            prompt_indices=prompt_indices,
-            prompt_solve_rates=average_metrics.get("val/solve_rate_hist"),
-        )
+    metrics["val/dataset_solve_rate"] = update_dataset_solve_rate(
+        solved_prompt_mask,
+        prompt_indices=prompt_indices,
+        prompt_solve_rates=average_metrics.get("val/solve_rate_hist"),
+    )
 
     # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
@@ -2421,6 +2426,9 @@ def run_training(
     else:
         solved_prompt_mask = np.zeros(len(train_dataset), dtype=bool)
 
+    # update_dataset_solve_rate mutates in place; arrays from checkpoints / serialization may be read-only.
+    solved_prompt_mask = _ensure_writable_bool_mask(solved_prompt_mask)
+
     if eval_dataset is not None:
         eval_data_loader = data_loader_lib.HFDataLoader(
             dataset=eval_dataset,
@@ -2505,8 +2513,8 @@ def run_training(
             wandb_url,
             tc.chat_template_name,
             model_dims,
-            actor_manager,
             solved_prompt_mask,
+            actor_manager,
         )
         num_total_tokens += num_step_tokens
 
