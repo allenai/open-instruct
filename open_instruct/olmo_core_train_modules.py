@@ -416,7 +416,7 @@ class GRPOTrainModule(TransformerTrainModule):
         num_steps = 0
         local_step = 0
         group_had_backward = False
-        kondo_gate_stats: list[tuple[int, float, float]] = []
+        kondo_gate_stats: list[grpo_utils.KondoGateDecision] = []
 
         if self.grpo_config.use_kondo_gate and self._kondo_gate is None:
             self._kondo_gate = grpo_utils.KondoGateState(
@@ -474,15 +474,14 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 loss = loss * dp_world_size
 
-                should_backward = True
-                gate_prob = 1.0
-                gate_lambda = float("-inf")
+                decision = grpo_utils.KondoGateDecision(True, 1.0, float("-inf"))
                 if self._kondo_gate is not None:
-                    sample_delight = masked_mean(delight, response_mask, None, None)
-                    should_backward, gate_prob, gate_lambda = self._kondo_gate.decide(sample_delight)
-                kondo_gate_stats.append((int(should_backward), gate_prob, gate_lambda))
+                    delight_sum = (delight * response_mask).sum()
+                    token_count = response_mask.sum().float()
+                    decision = self._kondo_gate.decide(delight_sum, token_count)
+                kondo_gate_stats.append(decision)
 
-                if should_backward:
+                if decision.should_backward:
                     loss.backward()
                     group_had_backward = True
 
@@ -538,14 +537,6 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
             self.record_metric("_token_count", global_tokens, reduce_type=None)
-            if self._kondo_gate is not None and kondo_gate_stats:
-                n = len(kondo_gate_stats)
-                self.record_metric(
-                    "val/kondo_gate_backward_frac", sum(s[0] for s in kondo_gate_stats) / n, reduce_type=None
-                )
-                self.record_metric(
-                    "val/kondo_gate_prob_avg", sum(s[1] for s in kondo_gate_stats) / n, reduce_type=None
-                )
-                finite_lams = [s[2] for s in kondo_gate_stats if math.isfinite(s[2])]
-                if finite_lams:
-                    self.record_metric("val/kondo_lambda", sum(finite_lams) / len(finite_lams), reduce_type=None)
+            if self._kondo_gate is not None:
+                for k, v in grpo_utils.summarize_kondo_gate_stats(kondo_gate_stats).items():
+                    self.record_metric(k, v, reduce_type=None)

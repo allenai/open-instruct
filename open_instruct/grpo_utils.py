@@ -2,7 +2,7 @@ import enum
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import numpy as np
 import torch
@@ -404,6 +404,17 @@ def compute_grpo_loss(
     return pg_losses, pg_losses2, pg_loss_max, kl, delight
 
 
+class KondoGateDecision(NamedTuple):
+    should_backward: bool
+    prob: float
+    lam: float
+
+
+# Refresh the quantile lambda every N decide() calls; stale lambda is fine because the
+# delight distribution shifts slowly relative to ring-buffer writes.
+_KONDO_QUANTILE_REFRESH = 32
+
+
 class KondoGateState:
     """Per-sample Kondo gate over delight (https://arxiv.org/abs/2603.20526).
 
@@ -421,7 +432,6 @@ class KondoGateState:
         process_group: dist.ProcessGroup | None = None,
         seed: int = 0,
     ) -> None:
-        self.config = config
         self.device = device
         self.process_group = process_group
         self.history_size = config.kondo_gate_history_size
@@ -433,34 +443,63 @@ class KondoGateState:
         self._write_idx = 0
         self._generator = torch.Generator(device=device)
         self._generator.manual_seed(int(seed))
+        self._cached_lam: torch.Tensor | None = None
+        self._calls_since_refresh = 0
 
-    def _reduced_delight(self, sample_delight: torch.Tensor) -> torch.Tensor:
-        if not dist.is_available() or not dist.is_initialized():
-            return sample_delight
-        value = sample_delight.detach().clone().to(self.device)
-        dist.all_reduce(value, op=dist.ReduceOp.SUM, group=self.process_group)
-        world_size = dist.get_world_size(group=self.process_group)
-        return value / world_size
+    def _reduced_chi(self, delight_sum: torch.Tensor, token_count: torch.Tensor) -> torch.Tensor:
+        """Reduce (sum_delight, sum_tokens) across the process group and return sum/count.
+
+        With Ulysses SP, each rank holds a sequence-slice of its sample, so per-rank
+        slice-means differ across SP-mates. Reducing the numerator and denominator
+        separately gives the correct token-weighted mean regardless of slice lengths,
+        and the result is identical on every rank in the group (required to keep
+        DeepSpeed / FSDP collectives in sync).
+        """
+        packed = torch.stack([delight_sum.detach(), token_count.detach()]).to(self.device)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(packed, op=dist.ReduceOp.SUM, group=self.process_group)
+        return packed[0] / packed[1].clamp_min(1.0)
 
     def _append(self, value: torch.Tensor) -> None:
         self._buffer[self._write_idx] = value
         self._write_idx = (self._write_idx + 1) % self.history_size
         self._count = min(self._count + 1, self.history_size)
 
-    def decide(self, sample_delight: torch.Tensor) -> tuple[bool, float, float]:
-        """All-reduces the scalar delight, appends to history, returns (should_backward, gate_prob, lambda).
+    def _quantile(self) -> torch.Tensor:
+        if self._cached_lam is None or self._calls_since_refresh >= _KONDO_QUANTILE_REFRESH:
+            self._cached_lam = torch.quantile(self._buffer[: self._count], 1.0 - self.rate)
+            self._calls_since_refresh = 0
+        self._calls_since_refresh += 1
+        return self._cached_lam
 
-        Identical return values on every rank in the process group.
+    def decide(self, delight_sum: torch.Tensor, token_count: torch.Tensor) -> KondoGateDecision:
+        """All-reduces (delight_sum, token_count), computes chi = sum/count, and gates.
+
+        Returns identical values on every rank in the process group.
         """
-        chi = self._reduced_delight(sample_delight).reshape(())
+        chi = self._reduced_chi(delight_sum, token_count)
         self._append(chi)
         if self._count < self.warmup or self.rate >= 1.0:
-            return True, 1.0, float("-inf")
-        history = self._buffer[: self._count]
-        lam = torch.quantile(history, 1.0 - self.rate)
+            return KondoGateDecision(True, 1.0, float("-inf"))
+        lam = self._quantile()
         prob = torch.sigmoid((chi - lam) / self.temperature)
         gate = torch.bernoulli(prob, generator=self._generator)
-        return bool(gate.item()), float(prob.item()), float(lam.item())
+        return KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
+
+
+def summarize_kondo_gate_stats(stats: list[KondoGateDecision]) -> dict[str, float]:
+    """Aggregate per-sample gate decisions into scalar metrics."""
+    if not stats:
+        return {}
+    n = len(stats)
+    out = {
+        "val/kondo_gate_backward_frac": sum(int(s.should_backward) for s in stats) / n,
+        "val/kondo_gate_prob_avg": sum(s.prob for s in stats) / n,
+    }
+    finite_lams = [s.lam for s in stats if math.isfinite(s.lam)]
+    if finite_lams:
+        out["val/kondo_lambda"] = sum(finite_lams) / len(finite_lams)
+    return out
 
 
 def forward_for_logprobs(

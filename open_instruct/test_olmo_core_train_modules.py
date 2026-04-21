@@ -294,7 +294,7 @@ class TestKondoGateState(unittest.TestCase):
         )
         gate = grpo_utils.KondoGateState(config, device=torch.device("cpu"), process_group=None, seed=0)
         for _ in range(3):
-            should_backward, prob, lam = gate.decide(torch.tensor(0.0))
+            should_backward, prob, lam = gate.decide(torch.tensor(0.0), torch.tensor(1.0))
             self.assertTrue(should_backward)
             self.assertEqual(prob, 1.0)
             self.assertEqual(lam, float("-inf"))
@@ -305,7 +305,7 @@ class TestKondoGateState(unittest.TestCase):
         )
         gate = grpo_utils.KondoGateState(config, device=torch.device("cpu"), process_group=None, seed=0)
         for _ in range(16):
-            should_backward, _, _ = gate.decide(torch.tensor(torch.randn(1).item()))
+            should_backward, _, _ = gate.decide(torch.tensor(torch.randn(1).item()), torch.tensor(1.0))
             self.assertTrue(should_backward)
 
     def test_gate_rate_matches_target_in_expectation(self):
@@ -324,7 +324,7 @@ class TestKondoGateState(unittest.TestCase):
         values = torch.randn(n)
         passes = 0
         for v in values:
-            should_backward, _, _ = gate.decide(v)
+            should_backward, _, _ = gate.decide(v, torch.tensor(1.0))
             passes += int(should_backward)
         # After warmup (64), remaining samples should pass at roughly `rate`.
         observed = passes / n
