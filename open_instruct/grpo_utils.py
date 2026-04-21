@@ -361,6 +361,15 @@ def resolve_old_logprob(
     return result
 
 
+@dataclass
+class LossOutput:
+    pg_losses: torch.Tensor
+    pg_losses2: torch.Tensor
+    pg_loss_max: torch.Tensor
+    kl: torch.Tensor
+    delight: torch.Tensor
+
+
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
@@ -368,7 +377,7 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
-) -> dict[str, torch.Tensor]:
+) -> LossOutput:
     delight = -advantages * new_logprobs.detach()
     if config.use_delight:
         # Delightful Policy Gradient gate; temperature eta is fixed to 1 per the paper.
@@ -401,7 +410,7 @@ def compute_grpo_loss(
     else:
         kl = torch.zeros_like(pg_loss_max)
 
-    return {"pg_losses": pg_losses, "pg_losses2": pg_losses2, "pg_loss_max": pg_loss_max, "kl": kl, "delight": delight}
+    return LossOutput(pg_losses=pg_losses, pg_losses2=pg_losses2, pg_loss_max=pg_loss_max, kl=kl, delight=delight)
 
 
 class KondoGateDecision(NamedTuple):

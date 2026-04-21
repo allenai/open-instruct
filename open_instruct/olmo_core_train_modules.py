@@ -459,7 +459,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
                 )
 
-                loss_terms = grpo_utils.compute_grpo_loss(
+                loss_output = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
@@ -467,21 +467,21 @@ class GRPOTrainModule(TransformerTrainModule):
                     config=self.grpo_config,
                     tis_weights=tis_clamped,
                 )
-                pg_losses = loss_terms["pg_losses"]
-                pg_losses2 = loss_terms["pg_losses2"]
-                pg_loss = loss_terms["pg_loss_max"]
-                kl = loss_terms["kl"]
-                delight = loss_terms["delight"]
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
                 loss_denominator = accumulation_token_counts[batch_start]
-                loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
+                loss = masked_mean(
+                    loss_output.pg_loss_max + self.grpo_config.beta * loss_output.kl,
+                    response_mask,
+                    None,
+                    loss_denominator,
+                )
 
                 loss = loss * dp_world_size
 
                 decision = grpo_utils.KONDO_GATE_PASSTHROUGH
                 if self._kondo_gate is not None:
-                    decision = self._kondo_gate.decide(delight, response_mask)
+                    decision = self._kondo_gate.decide(loss_output.delight, response_mask)
                 kondo_gate_stats.append(decision)
 
                 if decision.should_backward:
@@ -491,9 +491,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
                     sample_idx,
-                    pg_losses,
-                    pg_losses2,
-                    pg_loss,
+                    loss_output.pg_losses,
+                    loss_output.pg_losses2,
+                    loss_output.pg_loss_max,
                     ratio,
                     loss,
                     response_mask,

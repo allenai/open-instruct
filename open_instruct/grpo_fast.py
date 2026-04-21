@@ -736,7 +736,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.truncated_importance_sampling_ratio_cap,
                     )
 
-                    loss_terms = grpo_utils.compute_grpo_loss(
+                    loss_output = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=data_BT.advantages[i][:, 1:],
@@ -744,13 +744,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         config=self.args,
                         tis_weights=tis_clamped_BT,
                     )
-                    pg_losses_BT = loss_terms["pg_losses"]
-                    pg_losses2_BT = loss_terms["pg_losses2"]
-                    pg_loss_max_BT = loss_terms["pg_loss_max"]
-                    kl_BT = loss_terms["kl"]
-                    delight_BT = loss_terms["delight"]
 
-                    per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
+                    per_token_loss_BT = loss_output.pg_loss_max + self.args.beta * loss_output.kl
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
@@ -760,7 +755,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     decision = grpo_utils.KONDO_GATE_PASSTHROUGH
                     if self._kondo_gate is not None:
-                        decision = self._kondo_gate.decide(delight_BT, response_mask_BT)
+                        decision = self._kondo_gate.decide(loss_output.delight, response_mask_BT)
                     kondo_gate_stats.append(decision)
 
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
@@ -786,9 +781,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
                         i,
-                        pg_losses_BT,
-                        pg_losses2_BT,
-                        pg_loss_max_BT,
+                        loss_output.pg_losses,
+                        loss_output.pg_losses2,
+                        loss_output.pg_loss_max,
                         ratio_BT,
                         loss,
                         response_mask_BT,
