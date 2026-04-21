@@ -387,6 +387,7 @@ def main():
     # Build and push images (parallel)
     lock = threading.Lock()
     use_buildx = args.use_buildx or "," in args.platform or bool(args.cache_registry)
+    multi_platform = "," in args.platform
     if args.cache_registry:
         logger.info(
             "BuildKit registry cache enabled: ref=%s (cache-to mode=max, cache-from).",
@@ -395,9 +396,12 @@ def main():
     if use_buildx and not args.dry_run:
         _ensure_buildx_builder(args.buildx_builder)
     effective_workers = args.workers
-    if use_buildx and args.workers != 1:
+    if multi_platform and args.workers != 1:
+        # Multi-arch buildx builds thrash the shared docker-container builder when
+        # multiple workers drive it in parallel. Keep that path serialized.
         logger.warning(
-            "Buildx mode is forced to workers=1 to avoid shared builder lifecycle races (requested=%s).",
+            "Multi-platform buildx is forced to workers=1 to avoid shared builder "
+            "lifecycle races (requested=%s).",
             args.workers,
         )
         effective_workers = 1
