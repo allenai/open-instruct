@@ -327,7 +327,10 @@ class GRPOTrainModule(TransformerTrainModule):
         # GRPO batches are prompt-grouped and do their own accumulation/token normalization
         # inside train_batch(), so the base TransformerTrainModule global-batch validation
         # does not apply here.
-        pass
+        if self.grpo_config.use_kondo_gate:
+            self._kondo_gate = grpo_utils.KondoGateState(
+                self.grpo_config, self.device, process_group=self.trainer.dp_process_group, seed=self.grpo_config.seed
+            )
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
@@ -418,11 +421,6 @@ class GRPOTrainModule(TransformerTrainModule):
         group_had_backward = False
         kondo_gate_stats: list[grpo_utils.KondoGateDecision] = []
 
-        if self.grpo_config.use_kondo_gate and self._kondo_gate is None:
-            self._kondo_gate = grpo_utils.KondoGateState(
-                self.grpo_config, self.device, process_group=self.trainer.dp_process_group, seed=self.grpo_config.seed
-            )
-
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
@@ -479,12 +477,14 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 loss = loss * dp_world_size
 
-                decision = grpo_utils.KONDO_GATE_PASSTHROUGH
                 if self._kondo_gate is not None:
                     decision = self._kondo_gate.decide(loss_output.delight, response_mask)
-                kondo_gate_stats.append(decision)
+                    kondo_gate_stats.append(decision)
+                    should_backward = decision.should_backward
+                else:
+                    should_backward = True
 
-                if decision.should_backward:
+                if should_backward:
                     loss.backward()
                     group_had_backward = True
 

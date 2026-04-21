@@ -753,13 +753,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
                     loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    decision = grpo_utils.KONDO_GATE_PASSTHROUGH
                     if self._kondo_gate is not None:
                         decision = self._kondo_gate.decide(loss_output.delight, response_mask_BT)
-                    kondo_gate_stats.append(decision)
+                        kondo_gate_stats.append(decision)
+                        should_backward = decision.should_backward
+                    else:
+                        should_backward = True
 
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    if decision.should_backward:
+                    if should_backward:
                         # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                         torch.cuda.empty_cache()
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)

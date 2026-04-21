@@ -248,18 +248,6 @@ class GRPOExperimentConfig(
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
-        if self.use_kondo_gate:
-            if not (0.0 < self.kondo_gate_rate <= 1.0):
-                raise ValueError(f"`kondo_gate_rate` must be in (0, 1], got {self.kondo_gate_rate}")
-            if self.kondo_gate_temperature <= 0.0:
-                raise ValueError(f"`kondo_gate_temperature` must be > 0, got {self.kondo_gate_temperature}")
-            if self.kondo_gate_warmup <= 0:
-                raise ValueError(f"`kondo_gate_warmup` must be > 0, got {self.kondo_gate_warmup}")
-            if self.kondo_gate_history_size < self.kondo_gate_warmup:
-                raise ValueError(
-                    f"`kondo_gate_history_size` ({self.kondo_gate_history_size}) must be >= "
-                    f"`kondo_gate_warmup` ({self.kondo_gate_warmup})."
-                )
 
         total_learner_gpus = sum(self.num_learners_per_node)
         if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
@@ -419,9 +407,6 @@ class KondoGateDecision(NamedTuple):
     lam: float
 
 
-KONDO_GATE_PASSTHROUGH = KondoGateDecision(True, 1.0, float("-inf"))
-
-
 class KondoGateState:
     """Per-sample Kondo gate over delight (https://arxiv.org/abs/2603.20526).
 
@@ -461,9 +446,9 @@ class KondoGateState:
         DeepSpeed / FSDP collectives in sync).
         """
         packed = torch.stack([(delight * response_mask).sum().detach(), response_mask.sum().float().detach()])
-        if dist.is_available() and dist.is_initialized():
+        if dist.is_initialized():
             dist.all_reduce(packed, op=dist.ReduceOp.SUM, group=self.process_group)
-        return packed[0] / packed[1].clamp_min(1.0)
+        return packed[0] / packed[1]
 
     def _append(self, value: torch.Tensor) -> None:
         self._buffer[self._write_idx] = value
@@ -477,8 +462,8 @@ class KondoGateState:
         """
         chi = self._reduced_chi(delight, response_mask)
         self._append(chi)
-        if self._count < self.warmup or self.rate >= 1.0:
-            return KONDO_GATE_PASSTHROUGH
+        if self._count < self.warmup:
+            return KondoGateDecision(True, 1.0, float("nan"))
         buf = self._buffer[: self._count]
         lam = torch.quantile(buf, 1.0 - self.rate)
         prob = torch.sigmoid((chi - lam) / self.temperature)
@@ -488,17 +473,12 @@ class KondoGateState:
 
 def summarize_kondo_gate_stats(stats: list[KondoGateDecision]) -> dict[str, float]:
     """Aggregate per-sample gate decisions into scalar metrics."""
-    if not stats:
-        return {}
     n = len(stats)
-    out = {
+    return {
         "val/kondo_gate_backward_frac": sum(int(s.should_backward) for s in stats) / n,
         "val/kondo_gate_prob_avg": sum(s.prob for s in stats) / n,
+        "val/kondo_lambda": sum(s.lam for s in stats) / n,
     }
-    finite_lams = [s.lam for s in stats if math.isfinite(s.lam)]
-    if finite_lams:
-        out["val/kondo_lambda"] = sum(finite_lams) / len(finite_lams)
-    return out
 
 
 def forward_for_logprobs(

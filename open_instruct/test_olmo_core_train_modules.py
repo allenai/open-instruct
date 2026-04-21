@@ -1,3 +1,4 @@
+import math
 import unittest
 from unittest.mock import MagicMock
 
@@ -297,16 +298,7 @@ class TestKondoGateState(unittest.TestCase):
             should_backward, prob, lam = gate.decide(torch.tensor(0.0), torch.tensor(1.0))
             self.assertTrue(should_backward)
             self.assertEqual(prob, 1.0)
-            self.assertEqual(lam, float("-inf"))
-
-    def test_rate_one_always_passes(self):
-        config = _make_grpo_config(
-            use_kondo_gate=True, kondo_gate_rate=1.0, kondo_gate_warmup=2, kondo_gate_history_size=8
-        )
-        gate = grpo_utils.KondoGateState(config, device=torch.device("cpu"), process_group=None, seed=0)
-        for _ in range(16):
-            should_backward, _, _ = gate.decide(torch.randn(()), torch.tensor(1.0))
-            self.assertTrue(should_backward)
+            self.assertTrue(math.isnan(lam))
 
     def test_gate_rate_matches_target_in_expectation(self):
         rate = 0.3
