@@ -182,6 +182,15 @@ def main():
         action="store_true",
         help="Alias for default behavior (logs on); kept for backward compatibility.",
     )
+    parser.add_argument(
+        "--repair-missing",
+        action="store_true",
+        help=(
+            "Rebuild only tasks whose image in the output dataset is currently "
+            "a fallback (ubuntu:22.04) from a prior failed build. Leaves other "
+            "tasks untouched."
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -195,6 +204,29 @@ def main():
 
     if args.max_tasks:
         ds = ds.select(range(min(args.max_tasks, len(ds))))
+
+    repair_task_ids: set[str] | None = None
+    if args.repair_missing:
+        if args.dry_run:
+            logger.info("--repair-missing is a no-op under --dry-run (dataset is not written).")
+        logger.info(
+            f"--repair-missing: scanning {args.output_dataset} for tasks with image=='ubuntu:22.04'..."
+        )
+        out_ds_probe = load_dataset(args.output_dataset, split="train")
+        repair_task_ids = set()
+        for row in out_ds_probe:
+            env_config = row.get("env_config") or {}
+            image = env_config.get("image")
+            tid = env_config.get("task_id")
+            if image == "ubuntu:22.04" and tid:
+                repair_task_ids.add(tid)
+        logger.info(
+            f"--repair-missing: {len(repair_task_ids)} task(s) in {args.output_dataset} "
+            "are fallbacks and will be rebuilt."
+        )
+        if not repair_task_ids:
+            logger.info("Nothing to repair. Exiting.")
+            return
 
     client = None if args.dry_run else docker_sdk.from_env()
 
@@ -211,6 +243,9 @@ def main():
         if not task_id:
             raise KeyError("Missing task identifier: expected task_id, ground_truth, or env_config.task_id")
 
+        if repair_task_ids is not None and task_id not in repair_task_ids:
+            continue
+
         container_def = row.get("container_def")
         if not container_def:
             raise KeyError(
@@ -225,7 +260,13 @@ def main():
         if content_hash not in hash_to_dockerfile:
             hash_to_dockerfile[content_hash] = (dockerfile_content, setup_script)
 
-    logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
+    if repair_task_ids is not None:
+        logger.info(
+            f"{len(hash_to_dockerfile)} unique images to rebuild for {len(repair_task_ids)} "
+            "fallback tasks."
+        )
+    else:
+        logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
 
     # Build and push images (parallel)
     lock = threading.Lock()
@@ -340,12 +381,17 @@ def main():
             for f in concurrent.futures.as_completed(futures):
                 f.result()  # raise exceptions
 
-    # Update the HF dataset with image tags
+    # Update the HF dataset with image tags.
+    # Under --repair-missing we only overwrite the tasks we rebuilt and keep the
+    # existing image for every other row.
     logger.info(f"Updating dataset {args.output_dataset} with image tags...")
     out_ds = load_dataset(args.output_dataset, split="train")
+    allowed_overrides = repair_task_ids if repair_task_ids is not None else None
 
     def update_image(example):
         tid = example["env_config"]["task_id"]
+        if allowed_overrides is not None and tid not in allowed_overrides:
+            return example
         if tid in task_to_image:
             example["env_config"]["image"] = task_to_image[tid]
         return example
