@@ -150,6 +150,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             model_name=tokenizer_name,
             base_env_config=data_types.EnvConfig(),
         )
+        ray.get(_actor.start.remote())
         loader = data_loader.StreamingDataLoader(
             tokenizer=tokenizer,
             work_dir="/tmp",
@@ -261,6 +262,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             model_name=tokenizer_name,
             base_env_config=data_types.EnvConfig(),
         )
+        ray.get(_actor.start.remote())
         loader = data_loader.StreamingDataLoader(
             tokenizer=tokenizer,
             work_dir="/tmp",

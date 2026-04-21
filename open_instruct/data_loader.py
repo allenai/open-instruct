@@ -2043,6 +2043,9 @@ class DataPreparationActor:
     This actor runs a background thread that continuously prepares training data,
     ensuring all ranks receive the same number of micro-batches (preventing deadlock
     from uneven filtering).
+
+    The preparation loop is started explicitly via ``start()`` so initialization can
+    finish after vLLM engines are ready to serve requests.
     """
 
     def __init__(
@@ -2114,6 +2117,8 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
+        self._executor: ThreadPoolExecutor | None = None
+        self._prep_future = None
         self.never_give_up_state = NeverGiveUpAccumulationState()
 
         if initial_state is not None:
@@ -2124,8 +2129,13 @@ class DataPreparationActor:
                     self.never_give_up_state = copy.deepcopy(initial_state["never_give_up_state"])
             logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
 
+    def start(self) -> None:
+        """Begin the background data preparation loop (after inference can consume prompts)."""
+        if self._prep_future is not None:
+            return
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
         self._prep_future = self._executor.submit(self._data_preparation_loop)
+        logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
@@ -2443,7 +2453,7 @@ class DataPreparationActor:
         )
         wait_count = 0
         while True:
-            if self._prep_future.done():
+            if self._prep_future is not None and self._prep_future.done():
                 self._prep_future.result()
             with self.lock:
                 if step <= self.current_prepared_step:

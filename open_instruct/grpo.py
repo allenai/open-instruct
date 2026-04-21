@@ -294,6 +294,8 @@ def main(
     )
     logger.info("======== Model update group setup successfully =========")
 
+    utils.ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
+
     json_config = dataclasses.asdict(args)
     if beaker_config is not None:
         json_config.update(dataclasses.asdict(beaker_config))

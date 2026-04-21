@@ -122,6 +122,7 @@ class TestRlUtilsGPU(TestGrpoFastBase):
                 model_name=tokenizer_name,
                 base_env_config=data_types.EnvConfig(),
             )
+            ray.get(_actor.start.remote())
 
             loader = data_loader.StreamingDataLoader(
                 data_prep_actor_name="test_rollout_save",
