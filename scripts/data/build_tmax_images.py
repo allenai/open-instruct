@@ -240,12 +240,14 @@ def main():
                     subprocess.run(cmd, check=True)
                     image = None
                 else:
+                    # High-level images.build() always runs json_stream() on the API
+                    # stream; it must receive bytes (decode=False). Passing decode=True
+                    # yields dicts and breaks stream_as_text → .decode().
                     image, build_logs = worker_client.images.build(
                         path=tmpdir,
                         tag=image_tag,
                         rm=True,
                         platform=args.platform,
-                        decode=True,
                     )
                     _consume_classic_build_logs(
                         build_logs, verbose=args.verbose_build, image_tag=image_tag
