@@ -13,7 +13,7 @@ Two entry points:
   from DAPO math. 100 prompts each contribute one correct + one incorrect rollout; for each rollout,
   we probe at every 1000-th token and estimate the Monte-Carlo value as ``fraction_correct`` across
   32 continuations.
-- ``score_dataset``: load a trained value model (scalar PPO, LM-yesno, or generative) and score the
+- ``score_dataset``: load a trained value model (scalar PPO or generative) and score the
   probes using whatever conditioning flags match its training-time conditioning.
 
 A third helper, ``compare_runs``, ingests several ``score_dataset`` parquet outputs and emits a
@@ -402,7 +402,7 @@ def score_dataset(cfg: ScoreDatasetConfig) -> str:
 
 
 def _score_with_scalar_value(df, cfg: ScoreDatasetConfig) -> list[list[float]]:
-    """Score probes using a scalar or LM-yesno value model loaded via HF."""
+    """Score probes using a scalar value model loaded via HF."""
     import torch  # noqa: PLC0415
     from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 

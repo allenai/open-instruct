@@ -83,7 +83,7 @@ class GenValueTrainerActor:
 
     Lives on the same GPU as the gen-value vLLM engine so that IPC-based weight sync
     (trainer → vLLM) can be used when needed.  The actor receives training pairs via
-    ``reinforce_step`` and maintains a running EMA baseline for variance reduction.
+    ``reinforce_step`` and applies REINFORCE with the raw outcome as reward.
     """
 
     def __init__(
@@ -99,7 +99,6 @@ class GenValueTrainerActor:
         self._score_max = score_max
         self._allow_cot = allow_cot
         self._step_count = 0
-        self._baseline = 0.5
 
         self._model = AutoModelForCausalLM.from_pretrained(
             model_path, torch_dtype=torch.bfloat16, use_cache=False
@@ -118,18 +117,16 @@ class GenValueTrainerActor:
         if not training_pairs:
             return {}
 
-        total_loss = 0.0
-        outcomes = [p["outcome"] for p in training_pairs if p["outcome"] is not None]
-        if not outcomes:
-            return {}
-
         self._optimizer.zero_grad()
+        total_loss = 0.0
+        valid_outcomes: list[float] = []
+
         for pair in training_pairs:
             if pair["outcome"] is None:
                 continue
+            outcome = float(pair["outcome"])
             prompt = pair["prompt"]
             generated = pair["generated"]
-            outcome = float(pair["outcome"])
 
             combined = prompt + generated
             enc = self._tokenizer(combined, return_tensors="pt", truncation=True, max_length=2048)
@@ -141,21 +138,21 @@ class GenValueTrainerActor:
             outputs = self._model(input_ids=input_ids, labels=labels)
             log_prob = -outputs.loss  # mean log-prob of generated tokens
 
-            advantage = outcome - self._baseline
-            loss = -log_prob * advantage
+            loss = -log_prob * outcome
             loss.backward()
             total_loss += float(loss.detach())
+            valid_outcomes.append(outcome)
 
-            # EMA baseline update
-            self._baseline = 0.95 * self._baseline + 0.05 * outcome
+        if not valid_outcomes:
+            return {}
 
         torch.nn.utils.clip_grad_norm_(self._model.parameters(), 1.0)
         self._optimizer.step()
         self._step_count += 1
 
         return {
-            "gen_value/reinforce_loss": total_loss / len(outcomes),
-            "gen_value/outcome_mean": sum(outcomes) / len(outcomes),
+            "gen_value/reinforce_loss": total_loss / len(valid_outcomes),
+            "gen_value/outcome_mean": sum(valid_outcomes) / len(valid_outcomes),
             "gen_value/reinforce_steps": self._step_count,
         }
 

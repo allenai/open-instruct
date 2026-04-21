@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 - Fix `PolicyTrainerRayProcess.from_pretrained` to use `self.streaming_config` instead of the module-level global `streaming_config`, which caused a `NameError` when `grpo_fast` was imported as a module rather than run as `__main__` (https://github.com/allenai/open-instruct/pull/TODO).
 
 ### Removed
-- Remove `--use_lm_value_model` option and all LM-yesno value head code (`get_yes_no_token_ids`, `extract_yes_no_value`, `lm_yesno_bce_loss`, `lm_yesno*` conditioning templates). The scalar PPO critic is the only remaining value head (https://github.com/allenai/open-instruct/pull/TODO).
+- Remove `--use_lm_value_model` option and its associated value head code. The scalar PPO critic is the only remaining value head (https://github.com/allenai/open-instruct/pull/TODO).
 
 ### Changed
 - Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
@@ -30,7 +30,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fix sibling rollouts nesting in `grpo_fast.py`: `sibling_rollouts[i]` and `ground_truths[i]` are indexed by micro-batch and contain a list-of-packs; forward passes now correctly index `[i][0]` for the single-pack case used by GT conditioning templates `rollout_context` and `correct_demo` (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `dict.update()` duplicate-kwarg error in `grpo_fast.py` when `StreamingDataLoaderConfig` mirrors `use_value_model` from `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/TODO).
-- Fix `--use_lm_value_model` CLI test: add required `--gt_conditioning_template lm_yesno` in the local smoke-test script (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `value_estimation make_dataset` CLI args in smoke-test: use correct arg names (`--dataset_split`, `--max_prompt_length`, `--gpu_memory_utilization`) and remove unsupported flags (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `value_estimation compare_runs` CLI: use `--score_dataset_paths` instead of positional args and `--output_markdown_path` instead of `--output_prefix` (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix weight sync on resume by initializing vLLM weight sync before the training loop and warming up the learner with a dummy forward so DeepSpeed Stage 3 params materialize before the first broadcast; accept IPC `update_info` dict in `LLMRayActor.update_weights`; replace toothless weight-sync tests with a real divergent-weight broadcast test (https://github.com/allenai/open-instruct/pull/1627).

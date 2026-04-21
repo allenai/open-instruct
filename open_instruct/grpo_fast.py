@@ -1123,6 +1123,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
+                        torch.cuda.empty_cache()
+
         local_step = 0
         num_samples = len(data_BT.query_responses)
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)

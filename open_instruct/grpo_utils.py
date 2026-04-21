@@ -123,7 +123,7 @@ class GRPOExperimentConfig(
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
-    # Value model (PPO / LM-yesno / SAE). When use_value_model=True, the trainer trains an explicit
+    # Value model (PPO / SAE). When use_value_model=True, the trainer trains an explicit
     # value function V(s) and computes advantages via GAE instead of the group-relative scheme.
     use_value_model: bool = False
     """Whether to train and use a scalar PPO value model alongside the policy."""
