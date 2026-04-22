@@ -369,11 +369,20 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
+    response_mask: torch.Tensor | None = None,
 ) -> LossOutput:
     delight = -advantages * new_logprobs.detach()
     if config.use_delight:
-        # Delightful Policy Gradient gate; temperature eta is fixed to 1 per the paper.
-        advantages = advantages * torch.sigmoid(delight)
+        # Delightful Policy Gradient gate applied at sample level: one sigmoid per rollout,
+        # broadcast across tokens. GRPO's advantage is constant across a response, so a
+        # per-token gate would zero out the exact "blunder" tokens whose negative signal
+        # we need to learn from; a sample-level chi = mean_t(-A * surprisal_t) preserves
+        # that signal while keeping the paper's breakthrough/blunder interpretation.
+        mask = response_mask.to(delight.dtype)
+        denom = mask.sum(dim=-1).clamp(min=1.0)
+        sample_chi = (delight * mask).sum(dim=-1) / denom
+        sample_gate = torch.sigmoid(sample_chi).unsqueeze(-1)
+        advantages = advantages * sample_gate
 
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio

@@ -464,6 +464,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
                     tis_weights=tis_clamped,
+                    response_mask=response_mask,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps

@@ -195,6 +195,34 @@ class TestComputeGRPOLoss(unittest.TestCase):
         self.assertEqual(result.delight.shape, (batch_size, seq_len))
         torch.testing.assert_close(result.delight, -advantages * new_logprobs.detach())
 
+    def test_use_delight_applies_sample_level_gate(self):
+        config = _make_grpo_config(use_delight=True, loss_fn=grpo_utils.GRPOLossType.dapo)
+        batch_size, seq_len = 3, 5
+        new_logprobs = torch.randn(batch_size, seq_len)
+        ratio = torch.ones(batch_size, seq_len)
+        advantages = torch.randn(batch_size, seq_len)
+        response_mask = torch.tensor([[1, 1, 1, 0, 0], [1, 1, 1, 1, 1], [1, 1, 0, 0, 0]], dtype=torch.bool)
+
+        result = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            response_mask=response_mask,
+        )
+
+        delight = -advantages * new_logprobs.detach()
+        mask_f = response_mask.float()
+        sample_chi = (delight * mask_f).sum(-1) / mask_f.sum(-1).clamp(min=1.0)
+        sample_gate = torch.sigmoid(sample_chi).unsqueeze(-1)
+        expected_pg = -(advantages * sample_gate) * ratio
+        torch.testing.assert_close(result.pg_losses, expected_pg)
+        # Gate is constant across the sequence for each sample.
+        gate_col0 = result.pg_losses[:, 0] / (-advantages[:, 0] * ratio[:, 0])
+        gate_col1 = result.pg_losses[:, 1] / (-advantages[:, 1] * ratio[:, 1])
+        torch.testing.assert_close(gate_col0, gate_col1)
+
     def test_dapo_clipping(self):
         config = _make_grpo_config(clip_lower=0.2, clip_higher=0.2)
         ratio = torch.tensor([[1.5, 0.5, 1.0]])

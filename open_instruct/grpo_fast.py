@@ -757,6 +757,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         tis_weights=tis_clamped_BT,
+                        response_mask=response_mask_BT,
                     )
 
                     per_token_loss_BT = loss_output.pg_loss_max + self.args.beta * loss_output.kl
