@@ -67,8 +67,8 @@ uv run python mason.py \
     --use_sae \
     --sae_threshold 0.2 \
     --use_generative_value_model \
-    --gen_value_model_name_or_path Qwen/Qwen3-4B-Instruct \
-    --gen_value_vllm_num_engines 2 \
+    --gen_value_model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
+    --gen_value_vllm_num_engines 1 \
     --gen_value_vllm_tensor_parallel_size 1 \
     --gen_value_segmentation sae \
     --gen_value_max_segments 16 \
