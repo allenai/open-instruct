@@ -937,24 +937,35 @@ class PolicyTrainerRayProcess(RayProcess):
             orig_masks_list.append(orig_mask)
 
         if sequential:
-            # Process each sub-sequence independently to bound peak activation memory during
-            # the gradient backward. Used for the loss pass (with gradients).
-            for i, sub in enumerate(subseqs):
-                ids = expanded_ids_list[i]
-                L = ids.shape[0]
-                orig_mask = orig_masks_list[i]
-                attn = torch.ones(1, L, dtype=torch.long, device=device)
-                pos = torch.arange(L, dtype=position_ids.dtype, device=device).unsqueeze(0)
-                output = self.value_model(input_ids=ids.unsqueeze(0), attention_mask=attn, position_ids=pos)
-                logits = getattr(output, "logits", output)
-                sub_values = logits[0, :-1].squeeze(-1).float()  # (L-1,)
-                orig_mask_shifted = orig_mask[1:]  # length L-1; aligns with shifted logits
-                new_resp_values = sub_values[orig_mask_shifted]
-                base = sub["offset_in_pack"]
-                mask = sub["response_is_resp"]
-                resp_positions = mask[1:].nonzero(as_tuple=True)[0] + base
-                n = min(resp_positions.numel(), new_resp_values.numel())
-                out_values[0, resp_positions[:n]] = new_resp_values[:n]
+            # ZeRO-3 requires all DP ranks to call the value model the same number of times
+            # (each call triggers an ALLGATHER). Different packs may have different n_subs, so
+            # we sync the max and run dummy forwards on ranks that finish early.
+            local_n = torch.tensor(len(subseqs), dtype=torch.long, device=device)
+            dist.all_reduce(local_n, op=dist.ReduceOp.MAX)
+            max_n_subs = int(local_n.item())
+
+            for i in range(max_n_subs):
+                if i < len(subseqs):
+                    ids = expanded_ids_list[i]
+                    L = ids.shape[0]
+                    orig_mask = orig_masks_list[i]
+                    attn = torch.ones(1, L, dtype=torch.long, device=device)
+                    pos = torch.arange(L, dtype=position_ids.dtype, device=device).unsqueeze(0)
+                    output = self.value_model(input_ids=ids.unsqueeze(0), attention_mask=attn, position_ids=pos)
+                    logits = getattr(output, "logits", output)
+                    sub_values = logits[0, :-1].squeeze(-1).float()  # (L-1,)
+                    orig_mask_shifted = orig_mask[1:]
+                    new_resp_values = sub_values[orig_mask_shifted]
+                    sub = subseqs[i]
+                    base = sub["offset_in_pack"]
+                    resp_mask = sub["response_is_resp"]
+                    resp_positions = resp_mask[1:].nonzero(as_tuple=True)[0] + base
+                    n = min(resp_positions.numel(), new_resp_values.numel())
+                    out_values[0, resp_positions[:n]] = new_resp_values[:n]
+                else:
+                    # Dummy forward to keep ZeRO-3 ALLGATHER in sync across ranks.
+                    dummy = torch.zeros(1, 1, dtype=query_responses.dtype, device=device)
+                    _ = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
             return out_values
 
         # Pad all expanded sequences to the same length for a single batched forward.
