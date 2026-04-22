@@ -2637,9 +2637,13 @@ class UlyssesSPSplitter:
         start_idx = chunk_len * self.sp_rank
         end_idx = chunk_len * (self.sp_rank + 1)
 
-        # slice and pad tensors for this sp rank
+        # slice and pad tensors for this sp rank; pass non-tensor fields through unchanged
         kwargs = {}
         for field in dataclasses.fields(data):
+            value = getattr(data, field.name)
+            if field.name not in data_types.CollatedBatchData._TENSOR_LIST_FIELDS or value is None:
+                kwargs[field.name] = value
+                continue
             if field.name == "query_responses":
                 pad_value = self.pad_token_id
             elif field.name == "vllm_logprobs":
@@ -2647,7 +2651,7 @@ class UlyssesSPSplitter:
             else:
                 pad_value = 0
             sharded = []
-            for t in getattr(data, field.name):
+            for t in value:
                 # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
                 padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
                 sharded.append(padded_sliced)
