@@ -883,6 +883,7 @@ class PolicyTrainerRayProcess(RayProcess):
         siblings_for_pack: list[list[dict]] | None,
         hints_for_pack: list[str | None] | None = None,
         sequential: bool = False,
+        dummy_grad_outputs: list | None = None,
     ) -> torch.Tensor:
         """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
 
@@ -964,8 +965,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     out_values[0, resp_positions[:n]] = new_resp_values[:n]
                 else:
                     # Dummy forward to keep ZeRO-3 ALLGATHER in sync across ranks.
+                    # During the loss pass, the caller collects dummy_grad_outputs and folds
+                    # them into v_loss with a 0 weight so that backward also traverses the
+                    # same number of layers on all ranks (ZeRO-3 backward allgather parity).
                     dummy = torch.zeros(1, 1, dtype=query_responses.dtype, device=device)
-                    _ = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
+                    dummy_out = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
+                    if dummy_grad_outputs is not None:
+                        logits = getattr(dummy_out, "logits", dummy_out)
+                        dummy_grad_outputs.append(logits.reshape(-1)[0])
             return out_values
 
         # Pad all expanded sequences to the same length for a single batched forward.
@@ -1527,6 +1534,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             sibs_pack = (
                                 data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
                             )
+                            dummy_grad_outputs: list = []
                             new_values = self._forward_value_with_conditioning(
                                 data_BT.query_responses[i],
                                 data_BT.position_ids[i],
@@ -1534,8 +1542,10 @@ class PolicyTrainerRayProcess(RayProcess):
                                 gts_pack,
                                 sibs_pack,
                                 sequential=True,
+                                dummy_grad_outputs=dummy_grad_outputs,
                             )
                         else:
+                            dummy_grad_outputs = []
                             new_values = self.forward_value(
                                 data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
                             )
@@ -1545,6 +1555,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         denom = value_mask.sum().clamp(min=1).float()
                         v_loss = (per_tok.sum() / denom) * self.args.value_loss_coef
                         v_loss = v_loss * (self.args.world_size // self.args.sequence_parallel_size)
+                        # Fold dummy outputs into v_loss with zero weight so that backward
+                        # traverses the same number of ZeRO-3 allgather layers on all DP ranks.
+                        # Ranks with fewer real sub-sequences ran dummy forwards; without this,
+                        # their backward would have fewer allgathers than ranks with more subs.
+                        if dummy_grad_outputs:
+                            v_loss = v_loss + sum(0.0 * d for d in dummy_grad_outputs)
                         is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
                         self.value_model.set_gradient_accumulation_boundary(is_value_boundary)
                         self.value_model.backward(v_loss)
