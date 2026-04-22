@@ -63,12 +63,12 @@ uv run python mason.py \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
     --backend_timeout 1200 \
-    --checkpoint_state_freq 20 \
+    --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name swerl_qwen35_9b_base_agent_task_openthoughts_grpo \
     --local_eval_every 10 \
-    --save_freq 100 \
+    --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
