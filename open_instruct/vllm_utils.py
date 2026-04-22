@@ -775,7 +775,10 @@ class LLMRayActor:
         return future.result()
 
     def sleep(self) -> None:
-        return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
+        logger.info(f"[DIAG C] LLMRayActor.sleep ENTER active_tasks={len(self.active_tasks)}")
+        result = self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
+        logger.info(f"[DIAG C] LLMRayActor.sleep EXIT active_tasks={len(self.active_tasks)}")
+        return result
 
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
@@ -1412,7 +1415,11 @@ def broadcast_weights_to_vllm(
 
     is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     if is_rank_0:
+        logger.info(
+            f"[DIAG C] broadcast_weights_to_vllm calling sleep on {len(vllm_engines)} engines, model_step={model_step}"
+        )
         ray.get([engine.sleep.remote() for engine in vllm_engines])
+        logger.info("[DIAG C] broadcast_weights_to_vllm sleep returned from all engines")
 
     if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
