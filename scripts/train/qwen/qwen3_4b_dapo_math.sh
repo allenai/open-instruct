@@ -47,7 +47,6 @@ uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits "train" \
     --dataset_mixer_eval_list mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \
-    --remap_verifier math_aime_2025=math,math_brumo_2025=math \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \

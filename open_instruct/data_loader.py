@@ -451,7 +451,6 @@ class StreamingDataLoaderConfig:
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
     remap_verifier: str | None = None
-    """One or more old=new remap pairs, comma-separated (e.g. `math_aime_2025=math,math_brumo_2025=math`)."""
 
     # Reward aggregation
     reward_aggregator: Literal["last", "sum"] = "last"
