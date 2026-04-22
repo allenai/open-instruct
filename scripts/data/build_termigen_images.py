@@ -217,10 +217,17 @@ def main():
                 cmd.append(build_ctx)
                 subprocess.run(cmd, check=True)
             else:
-                cmd = ["docker", "build", "--platform", args.platform, "-t", image_tag, build_ctx]
-                subprocess.run(cmd, check=True)
-                subprocess.run(["docker", "push", image_tag], check=True)
-                subprocess.run(["docker", "rmi", image_tag], check=False)
+                build_cmd = ["docker", "build", "--platform", args.platform, "-t", image_tag]
+                if not stream_build_logs:
+                    build_cmd.append("--quiet")
+                build_cmd.append(build_ctx)
+                push_cmd = ["docker", "push", image_tag]
+                if not stream_build_logs:
+                    push_cmd.insert(2, "--quiet")
+                stdout = subprocess.DEVNULL if not stream_build_logs else None
+                subprocess.run(build_cmd, check=True, stdout=stdout)
+                subprocess.run(push_cmd, check=True, stdout=stdout)
+                subprocess.run(["docker", "rmi", image_tag], check=False, stdout=stdout, stderr=stdout)
             logger.info(f"Pushed {image_tag}")
             return "pushed"
         except subprocess.CalledProcessError as e:
