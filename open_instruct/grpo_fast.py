@@ -886,12 +886,11 @@ class PolicyTrainerRayProcess(RayProcess):
     ) -> torch.Tensor:
         """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
 
-        When ``sequential=False`` (default), all sub-sequences are padded to the same length
-        and forwarded in a single batched call, producing one ZeRO-3 allgather cycle. Use this
-        for the no-grad scoring pass to prevent cross-PG NCCL deadlocks.
+        When ``sequential=True`` (recommended), sub-sequences are forwarded one at a time,
+        bounding peak activation memory and avoiding cross-PG NCCL deadlocks with Ulysses SP.
 
-        When ``sequential=True``, sub-sequences are forwarded one at a time. Use this for the
-        gradient (loss) pass to avoid OOM from large batched activations during backward.
+        When ``sequential=False``, all sub-sequences are padded and forwarded in a single
+        batched call. Only safe without SP and with small n_subs.
 
         Returns a values tensor of shape (batch=1, seq_len-1) matching `query_responses[:, 1:]`.
         """
@@ -1250,9 +1249,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             gts_pack,
                             sibs_pack,
                             hints_for_pack=hints_pack,
-                            # Ulysses SP registers with micro_batch_size=1; batching n_subs>1
-                            # violates its shape constraint, so fall back to sequential.
-                            sequential=self.mpu is not None,
+                            sequential=True,
                         )
                     else:
                         values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
