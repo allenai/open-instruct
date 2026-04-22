@@ -386,7 +386,7 @@ def _sync_gen_value_weights(
             with contextlib.suppress(Exception):
                 ray.kill(engine)
 
-        gen_value_max_model_len = streaming_config.max_prompt_token_length + args.gen_value_max_new_tokens
+        gen_value_max_model_len = streaming_config.pack_length * 2
         new_engines = vllm_utils.create_vllm_engines(
             len(gen_value_vllm_engines),
             args.gen_value_vllm_tensor_parallel_size,
@@ -606,7 +606,7 @@ def main():
         # The gen-value engines are queried directly via score_partial_rollout_batch(); they do
         # not participate in the queue-driven rollout loop.  We pass sentinel Ray queues so the
         # LLMRayActor's internal prefetch thread doesn't crash (it blocks on an empty queue).
-        gen_value_max_model_len = streaming_config.max_prompt_token_length + args.gen_value_max_new_tokens
+        gen_value_max_model_len = streaming_config.pack_length * 2
         gen_value_prompt_Q: ray_queue.Queue = ray_queue.Queue()
         gen_value_results_Q: ray_queue.Queue = ray_queue.Queue()
         gen_value_eval_Q: ray_queue.Queue = ray_queue.Queue()
