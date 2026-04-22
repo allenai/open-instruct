@@ -47,7 +47,7 @@ uv run python mason.py \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
-    --truncated_importance_sampling_ratio_cap 2.0 \
+    --use_vllm_logprobs true \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enforce_eager \
@@ -66,7 +66,6 @@ uv run python mason.py \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
-    --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name swerl_qwen35_9b_base_agent_task_r2e_gym_grpo \
