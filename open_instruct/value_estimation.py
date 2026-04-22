@@ -60,6 +60,10 @@ class MakeDatasetConfig:
     probe_mode: str = "fixed"
     sae_threshold: float = 0.2
     max_probes: int = 16
+    # Chat template applied to each prompt before rollout. If set and registered in
+    # dataset_transformation.CHAT_TEMPLATES, that template is used; otherwise the model's
+    # built-in template is used. None skips templating (raw-string completion).
+    chat_template_name: str | None = None
     max_prompt_length: int = 2048
     max_response_length: int = 8192
     temperature: float = 1.0
@@ -194,6 +198,34 @@ def make_dataset(cfg: MakeDatasetConfig) -> str:
 
     prompts = [_extract_prompt(r) for r in records]
     ground_truths = [_extract_gt(r) for r in records]
+
+    if cfg.chat_template_name is not None:
+        from transformers import AutoTokenizer  # noqa: PLC0415
+
+        from open_instruct.dataset_transformation import CHAT_TEMPLATES  # noqa: PLC0415
+
+        tokenizer = AutoTokenizer.from_pretrained(cfg.model_name_or_path)
+        if cfg.chat_template_name == "builtin":
+            if not getattr(tokenizer, "chat_template", None):
+                raise ValueError(
+                    f"--chat_template_name=builtin but {cfg.model_name_or_path} has no built-in chat template."
+                )
+            source = "built-in"
+        elif cfg.chat_template_name in CHAT_TEMPLATES:
+            tokenizer.chat_template = CHAT_TEMPLATES[cfg.chat_template_name]
+            source = "registered"
+        else:
+            raise ValueError(
+                f"--chat_template_name={cfg.chat_template_name!r} is not registered in CHAT_TEMPLATES "
+                f"and is not the 'builtin' sentinel. Known: {sorted(CHAT_TEMPLATES.keys())}."
+            )
+        logger.info(f"Applying chat template {cfg.chat_template_name!r} ({source})")
+        prompts = [
+            tokenizer.apply_chat_template(
+                [{"role": "user", "content": p}], tokenize=False, add_generation_prompt=True
+            )
+            for p in prompts
+        ]
 
     logger.info(f"Running {cfg.rollouts_per_prompt} rollouts/prompt for {len(prompts)} prompts")
     rollouts = _run_rollouts(

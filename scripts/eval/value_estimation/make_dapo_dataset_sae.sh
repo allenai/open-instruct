@@ -6,6 +6,9 @@ set -euo pipefail
 
 MODEL_NAME_OR_PATH="${1:-Qwen/Qwen3-4B-Base}"
 OUTPUT_PATH="${2:-./value_estimation_data/dapo_math_100pairs_sae.parquet}"
+# Default matches training-time chat template for Base models. Pass "builtin" to use the
+# model's own chat template (for Instruct models like Qwen3-4B-Instruct-2507).
+CHAT_TEMPLATE_NAME="${3:-qwen_instruct_user_boxed_math}"
 
 uv run python -m open_instruct.value_estimation make_dataset \
     --model_name_or_path "${MODEL_NAME_OR_PATH}" \
@@ -17,4 +20,5 @@ uv run python -m open_instruct.value_estimation make_dataset \
     --probe_mode sae \
     --sae_threshold 0.2 \
     --max_probes 16 \
-    --max_response_length 8192
+    --max_response_length 8192 \
+    --chat_template_name "${CHAT_TEMPLATE_NAME}"
