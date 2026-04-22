@@ -71,4 +71,5 @@ uv run open_instruct/grpo_fast.py \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
+    --use_delight true \
     --push_to_hub False "$@"
