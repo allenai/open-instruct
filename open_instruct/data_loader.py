@@ -904,16 +904,28 @@ def compute_prompt_solve_rate_metrics(
     prompt_index_to_solve_rates: dict[int, list[float]] = {}
     for prompt_index, prompt_solve_rate in zip(batch_stats.prompt_indices, solve_rates):
         prompt_index_to_solve_rates.setdefault(prompt_index, []).append(float(prompt_solve_rate))
+    # Manufactoria: `train_prompt_solve_rate_by_index` is one row per unique prompt, value = mean of all
+    # per-test pass floats in the batch (same micro-average as `val/prompt_test_pass_rate_hist` per prompt).
+    # Other verifiers: keep fraction of rollouts that hit max score (`percent_solved_hist` per result row).
+    manufactoria_mean_by_prompt: dict[int, float] = {}
+    if len(batch_stats.test_passes) > 0 and len(batch_stats.test_prompt_indices) == len(batch_stats.test_passes):
+        per_prompt_test_passes: dict[int, list[float]] = {}
+        for prompt_index, test_pass in zip(batch_stats.test_prompt_indices, batch_stats.test_passes):
+            per_prompt_test_passes.setdefault(int(prompt_index), []).append(float(test_pass))
+        manufactoria_mean_by_prompt = {p: float(np.mean(passes)) for p, passes in per_prompt_test_passes.items()}
+
     prompt_solve_rate_by_index = [
-        (int(prompt_index), float(np.mean(rates)))
-        for prompt_index, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
+        (int(p), float(manufactoria_mean_by_prompt[p] if p in manufactoria_mean_by_prompt else np.mean(rates)))
+        for p, rates in sorted(prompt_index_to_solve_rates.items(), key=lambda item: item[0])
     ]
     metrics[by_index_key] = prompt_solve_rate_by_index
     metrics[by_index_count_key] = len(prompt_solve_rate_by_index)
 
+    merged_solve_by_prompt: dict[int, float] = dict(prompt_solve_rate_by_index)
+    merged_solve_by_row: list[float] = [merged_solve_by_prompt[int(p)] for p in batch_stats.prompt_indices]
     dataset_to_solve_rates: dict[str, list[float]] = {}
-    for dataset_name, prompt_solve_rate in zip(batch_stats.prompt_datasets, solve_rates):
-        dataset_to_solve_rates.setdefault(dataset_name, []).append(float(prompt_solve_rate))
+    for dataset_name, row_solve in zip(batch_stats.prompt_datasets, merged_solve_by_row):
+        dataset_to_solve_rates.setdefault(dataset_name, []).append(float(row_solve))
     for dataset_name, rates in dataset_to_solve_rates.items():
         metrics[f"{dataset_mean_prefix}_{dataset_name}"] = float(np.mean(rates))
 
