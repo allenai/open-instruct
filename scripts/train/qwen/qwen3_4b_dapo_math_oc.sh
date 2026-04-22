@@ -52,7 +52,7 @@ uv run open_instruct/grpo.py \
     --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
-    --pack_length 10240 \
+    --pack_length 4096 \
     --model_name_or_path "Qwen/Qwen3-4B-Base" \
     --non_stop_penalty False \
     --temperature 1.0 \
@@ -60,7 +60,7 @@ uv run open_instruct/grpo.py \
     --deepspeed_stage 2 \
     --fsdp_shard_degree 4 \
     --fsdp_num_replicas 1 \
-    --activation_memory_budget 0.5 \
+    --compile_model False \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
