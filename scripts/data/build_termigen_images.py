@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and push per-task Docker images for agent-task-terminal-bench.
+"""Build and push per-task Docker images for agent-task-termigen.
 
 Reads task-data from the HF dataset repo (download + extract
 ``task-data.tar.gz``), which contains one directory per task with the
@@ -12,10 +12,10 @@ creation time from the same content hash, so nothing in the dataset
 needs to be rewritten after the build.
 
 Usage:
-    python scripts/data/build_tbench_images.py
-    python scripts/data/build_tbench_images.py --dry-run
-    python scripts/data/build_tbench_images.py --use-buildx --platform linux/amd64
-    python scripts/data/build_tbench_images.py --cache-registry hamishivi/tbench-harbor-buildcache
+    python scripts/data/build_termigen_images.py
+    python scripts/data/build_termigen_images.py --dry-run
+    python scripts/data/build_termigen_images.py --use-buildx --platform linux/amd64
+    python scripts/data/build_termigen_images.py --cache-registry hamishivi/termigen-buildcache
 """
 
 import argparse
@@ -66,11 +66,11 @@ def resolve_task_data_dir(repo_id: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build per-task Docker images for agent-task-terminal-bench"
+        description="Build per-task Docker images for agent-task-termigen"
     )
     parser.add_argument(
         "--dataset",
-        default="hamishivi/agent-task-terminal-bench",
+        default="hamishivi/agent-task-termigen",
         help="HF dataset repo containing task-data.tar.gz with per-task image.txt.",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -95,7 +95,7 @@ def main():
     )
     parser.add_argument(
         "--buildx-builder",
-        default="tbench-builder",
+        default="termigen-builder",
         help="Buildx builder name to use when --use-buildx is enabled.",
     )
     parser.add_argument(
@@ -108,7 +108,7 @@ def main():
         default=None,
         help=(
             "Optional registry ref to use as a BuildKit shared cache "
-            "(e.g. 'hamishivi/tbench-harbor-buildcache'). Implies --use-buildx."
+            "(e.g. 'hamishivi/termigen-buildcache'). Implies --use-buildx."
         ),
     )
     args = parser.parse_args()

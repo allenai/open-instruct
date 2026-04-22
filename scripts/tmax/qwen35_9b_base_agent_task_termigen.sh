@@ -1,5 +1,5 @@
 #!/bin/bash
-# RL on Qwen/Qwen3.5-9B + hamishivi/agent-task-terminal-bench
+# RL on Qwen/Qwen3.5-9B + hamishivi/agent-task-termigen
 # 4 nodes x 8 GPUs (32 GPUs total)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -7,7 +7,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL agent-task-terminal-bench GRPO with Qwen3.5-9B" \
+       --description "SWERL agent-task-termigen GRPO with Qwen3.5-9B" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -26,7 +26,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/agent-task-terminal-bench 1.0 \
+    --dataset_mixer_list hamishivi/agent-task-termigen 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 32768 \
@@ -55,7 +55,7 @@ uv run python mason.py \
     --with_tracking \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-terminal-bench", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-termigen", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
     --max_steps 500 \
     --verification_reward 1.0 \
@@ -69,7 +69,7 @@ uv run python mason.py \
     --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_9b_base_agent_task_terminal_bench_grpo \
+    --exp_name swerl_qwen35_9b_base_agent_task_termigen_grpo \
     --local_eval_every 10 \
     --save_freq 100 \
     --try_launch_beaker_eval_jobs_on_weka False
