@@ -20,11 +20,14 @@ Usage:
 
 import argparse
 import concurrent.futures
+import json
 import logging
 import os
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 
 from huggingface_hub import snapshot_download
 from tqdm import tqdm
@@ -48,6 +51,38 @@ def _ensure_buildx_builder(builder_name: str) -> None:
     else:
         subprocess.run(["docker", "buildx", "use", builder_name], check=True)
     subprocess.run(["docker", "buildx", "inspect", "--bootstrap"], check=True)
+
+
+def list_dockerhub_tags(namespace_repo: str) -> set:
+    """Return every tag of ``<namespace>/<repo>`` from DockerHub in one paginated
+    call sequence (anonymous; works for public repos).
+
+    Falls back to an empty set on error; the caller should then rely on
+    per-tag ``docker manifest inspect`` checks instead.
+    """
+    tags: set = set()
+    base = f"https://hub.docker.com/v2/repositories/{namespace_repo}/tags"
+    url = f"{base}?page_size=100"
+    while url:
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                logger.warning(f"DockerHub repo {namespace_repo} not found (404); assuming empty.")
+                return tags
+            logger.warning(f"DockerHub tag listing failed for {namespace_repo}: {e}")
+            return set()
+        except Exception as e:
+            logger.warning(f"DockerHub tag listing failed for {namespace_repo}: {e}")
+            return set()
+        for result in data.get("results", []):
+            name = result.get("name")
+            if name:
+                tags.add(name)
+        url = data.get("next")
+    logger.info(f"Found {len(tags)} existing tag(s) under {namespace_repo}")
+    return tags
 
 
 def resolve_task_data_dir(repo_id: str) -> str:
@@ -154,6 +189,20 @@ def main():
     )
 
     items = list(tag_to_context.items())
+
+    existing_tags: set = set()
+    if not args.force_rebuild:
+        repos = {tag.split(":", 1)[0] for tag, _ in items}
+        for repo in sorted(repos):
+            existing_tags |= {f"{repo}:{t}" for t in list_dockerhub_tags(repo)}
+        if existing_tags:
+            before = len(items)
+            items = [(tag, ctx) for tag, ctx in items if tag not in existing_tags]
+            logger.info(
+                f"Skipping {before - len(items)} image(s) already on DockerHub; "
+                f"{len(items)} remaining to build."
+            )
+
     if args.max_tasks is not None:
         items = items[: args.max_tasks]
         logger.info(f"Limiting to first {len(items)} unique images due to --max-tasks.")
@@ -176,20 +225,11 @@ def main():
     failed_tags: list[str] = []
 
     def build_one(image_tag: str, build_ctx: str) -> str:
-        """Return one of 'pushed' | 'skipped' | 'failed'."""
-        if not args.force_rebuild:
-            try:
-                check = subprocess.run(
-                    ["docker", "manifest", "inspect", image_tag],
-                    capture_output=True,
-                    timeout=15,
-                )
-                if check.returncode == 0:
-                    logger.info(f"Skipping {image_tag} (exists on registry)")
-                    return "skipped"
-            except Exception:
-                pass
+        """Return one of 'pushed' | 'skipped' | 'failed'.
 
+        Existence on DockerHub is already filtered upstream via the tag
+        listing, so anything reaching here needs a build.
+        """
         logger.info(f"Building {image_tag} from {build_ctx}...")
         try:
             if use_buildx:
