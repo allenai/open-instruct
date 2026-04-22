@@ -41,7 +41,6 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import os
@@ -59,7 +58,6 @@ import torch.distributed as dist
 import wandb
 from ray.util import queue as ray_queue
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from vllm import SamplingParams
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast_resource_plan, grpo_utils, utils, value_model_utils, vllm_utils
@@ -234,35 +232,31 @@ def score_partial_rollout_batch(
     Returns (parsed_scores_in_0_1, raw_generations). ``None`` scores indicate parse failures; the
     caller is free to substitute a default (e.g. 0.5) and track ``parse_rate`` as a metric.
     """
-    sampling_params = SamplingParams(
-        n=1,
-        temperature=temperature,
-        max_tokens=max_new_tokens,
-        top_p=1.0,
-        logprobs=1,
-        stop=["</answer>"],
-        include_stop_str_in_output=True,
-    )
+    n_eng = len(vllm_engines)
+    buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_eng)]
+    for k, prompt in enumerate(prompts):
+        buckets[k % n_eng].append((k, prompt))
+    non_empty = [(e, b) for e, b in enumerate(buckets) if b]
+    refs = [
+        vllm_engines[e].generate_completions.remote(
+            [p for _, p in bucket],
+            temperature=temperature,
+            max_tokens=max_new_tokens,
+            top_p=1.0,
+            stop=["</answer>"],
+            include_stop_str_in_output=True,
+        )
+        for e, bucket in non_empty
+    ]
+    engine_results = ray.get(refs)
+    raw: list[str] = [""] * len(prompts)
+    for (_, bucket), bucket_texts in zip(non_empty, engine_results):
+        for (k, _), text in zip(bucket, bucket_texts):
+            raw[k] = text
 
-    async def _score_one(engine_idx: int, prompt: str) -> tuple[str, float | None]:
-        engine = vllm_engines[engine_idx % len(vllm_engines)]
-        # The LLMRayActor's add_request interface varies; here we go through its OpenAI server when
-        # available. Callers should wire this to match their vllm_utils API version.
-        ref = engine.add_request.remote(prompt, sampling_params)
-        output = await asyncio.to_thread(__import__("ray").get, ref)
-        text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
+    scores: list[float | None] = []
+    for text in raw:
         parsed = value_model_utils.parse_generative_value_score(text, score_min=score_min, score_max=score_max)
-        return text, parsed
-
-    async def _runner():
-        tasks = [_score_one(i, p) for i, p in enumerate(prompts)]
-        return await asyncio.gather(*tasks)
-
-    results = asyncio.run(_runner())
-    raw = [r[0] for r in results]
-    scores = []
-    for r in results:
-        parsed = r[1]
         if parsed is None:
             scores.append(None)
         else:

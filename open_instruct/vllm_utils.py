@@ -796,6 +796,41 @@ class LLMRayActor:
     def ready(self) -> bool:
         return True
 
+    def generate_completions(
+        self,
+        prompts: list[str],
+        *,
+        temperature: float = 1.0,
+        max_tokens: int = 8,
+        top_p: float = 1.0,
+        stop: list[str] | None = None,
+        include_stop_str_in_output: bool = False,
+    ) -> list[str]:
+        """Batch completions via the actor's internal OpenAI server. Returns texts in prompt order."""
+
+        async def _run():
+            extra_body = {"include_stop_str_in_output": True} if include_stop_str_in_output else None
+
+            async def _one(prompt: str) -> str:
+                kwargs: dict[str, Any] = {
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "top_p": top_p,
+                    "n": 1,
+                }
+                if stop:
+                    kwargs["stop"] = stop
+                if extra_body:
+                    kwargs["extra_body"] = extra_body
+                resp = await self.client.completions.create(**kwargs)
+                return resp.choices[0].text
+
+            return list(await asyncio.gather(*[_one(p) for p in prompts]))
+
+        return self._run_async(_run())
+
     def set_model_step(self, model_step: int) -> None:
         self.current_model_step = model_step
 

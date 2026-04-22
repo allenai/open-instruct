@@ -78,7 +78,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams as VLLMSamplingParams
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
@@ -836,25 +835,30 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             prompts.append(prompt)
 
-        sampling_params = VLLMSamplingParams(
-            n=1,
-            temperature=temperature,
-            max_tokens=max_new_tokens,
-            top_p=1.0,
-            stop=["</answer>"],
-            include_stop_str_in_output=True,
-        )
+        n_eng = len(self._gen_value_engines)
+        buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_eng)]
+        for k, prompt in enumerate(prompts):
+            buckets[k % n_eng].append((k, prompt))
+        non_empty = [(e, b) for e, b in enumerate(buckets) if b]
         refs = [
-            self._gen_value_engines[k % len(self._gen_value_engines)].add_request.remote(prompt, sampling_params)
-            for k, prompt in enumerate(prompts)
+            self._gen_value_engines[e].generate_completions.remote(
+                [p for _, p in bucket],
+                temperature=temperature,
+                max_tokens=max_new_tokens,
+                top_p=1.0,
+                stop=["</answer>"],
+                include_stop_str_in_output=True,
+            )
+            for e, bucket in non_empty
         ]
-        outputs = ray.get(refs)
+        results = ray.get(refs)
+        generated_texts: list[str] = [""] * len(prompts)
+        for (_, bucket), bucket_texts in zip(non_empty, results):
+            for (k, _), text in zip(bucket, bucket_texts):
+                generated_texts[k] = text
 
         scores: list[float] = []
-        generated_texts: list[str] = []
-        for output in outputs:
-            text = output.outputs[0].text if hasattr(output, "outputs") else str(output)
-            generated_texts.append(text)
+        for text in generated_texts:
             raw = value_model_utils.parse_generative_value_score(text, score_min, score_max)
             scores.append(
                 value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.5
