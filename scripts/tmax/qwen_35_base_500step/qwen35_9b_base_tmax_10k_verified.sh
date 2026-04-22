@@ -7,7 +7,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-9B" \
+       --description "SWERL tmax-10k-verified GRPO with Qwen3.5-9B" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -25,9 +25,9 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 hamishivi/agent-task-combined 1.0 \
-    --dataset_mixer_list_splits train train \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=0 \&\& python open_instruct/grpo_fast.py \
+    --dataset_mixer_list hamishivi/swerl-tmax-10k-verified 1.0 \
+    --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 32768 \
     --pack_length 35840 \
@@ -38,7 +38,7 @@ uv run python mason.py \
     --model_name_or_path Qwen/Qwen3.5-9B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --total_episodes 100000000 \
+    --total_episodes 128000 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
@@ -47,6 +47,8 @@ uv run python mason.py \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
+    --use_vllm_logprobs true \
+    --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enforce_eager \
@@ -54,7 +56,7 @@ uv run python mason.py \
     --with_tracking \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-combined-10k", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k-verified", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
     --max_steps 100 \
     --verification_reward 1.0 \
@@ -65,11 +67,9 @@ uv run python mason.py \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
-    --truncated_importance_sampling_ratio_cap 2.0 \
-    --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo \
+    --exp_name swerl_qwen35_9b_base_tmax_10k_verified_grpo \
     --local_eval_every 10 \
-    --save_freq 100 \
+    --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
