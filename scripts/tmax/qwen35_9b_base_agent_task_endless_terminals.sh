@@ -38,7 +38,7 @@ uv run python mason.py \
     --model_name_or_path Qwen/Qwen3.5-9B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --total_episodes 100000000 \
+    --total_episodes 128000 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
@@ -58,7 +58,7 @@ uv run python mason.py \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/agent-task-endless-terminals", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
-    --max_steps 500 \
+    --max_steps 100 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
