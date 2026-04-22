@@ -543,3 +543,8 @@ class GRPOTrainModule(TransformerTrainModule):
             if self._kondo_gate is not None:
                 for k, v in grpo_utils.summarize_kondo_gate_stats(kondo_gate_stats).items():
                     self.record_metric(k, v, reduce_type=None)
+
+            data_prep_metrics = batch.get("metrics") or {}
+            for metric_key, metric_value in data_prep_metrics.items():
+                if isinstance(metric_value, (int, float)):
+                    self.record_metric(metric_key, float(metric_value), reduce_type=None)

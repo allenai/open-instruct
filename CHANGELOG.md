@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Add `--use_kondo_gate` flag to GRPO that skips backward passes on low-delight samples via the Kondo gate (https://arxiv.org/abs/2603.20526), with `--kondo_gate_rate`, `--kondo_gate_temperature`, `--kondo_gate_history_size`, and `--kondo_gate_warmup` controls.
 - Add `--use_delight` flag to GRPO loss that gates per-token policy-gradient terms with the Delightful Policy Gradient sigmoid (https://github.com/allenai/open-instruct/pull/1628).
+- Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
 - Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
 - Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).
 - Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/1613).
@@ -22,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix weight sync on resume by initializing vLLM weight sync before the training loop and warming up the learner with a dummy forward so DeepSpeed Stage 3 params materialize before the first broadcast; accept IPC `update_info` dict in `LLMRayActor.update_weights`; replace toothless weight-sync tests with a real divergent-weight broadcast test (https://github.com/allenai/open-instruct/pull/1627).
 - Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
 - Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
