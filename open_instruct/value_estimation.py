@@ -55,6 +55,11 @@ class MakeDatasetConfig:
     continuations_per_probe: int = 32
     probe_interval: int = 1000
     min_probe_remaining_tokens: int = 64
+    # Probe selection mode: "fixed" (every probe_interval tokens) or "sae" (SAE boundaries
+    # from segment_rollout — tokens with prob < sae_threshold, downsampled to max_probes).
+    probe_mode: str = "fixed"
+    sae_threshold: float = 0.2
+    max_probes: int = 16
     max_prompt_length: int = 2048
     max_response_length: int = 8192
     temperature: float = 1.0
@@ -200,7 +205,7 @@ def make_dataset(cfg: MakeDatasetConfig) -> str:
         max_tokens=cfg.max_response_length,
         tensor_parallel_size=cfg.tensor_parallel_size,
         gpu_memory_utilization=cfg.gpu_memory_utilization,
-        logprobs=False,
+        logprobs=cfg.probe_mode == "sae",
     )
 
     # Filter to prompts with at least one correct and one incorrect rollout.
@@ -233,11 +238,25 @@ def make_dataset(cfg: MakeDatasetConfig) -> str:
             ]
             tokens = main["token_ids"]
             length = len(tokens)
-            probe_positions = [
-                t
-                for t in range(cfg.probe_interval, length, cfg.probe_interval)
-                if (length - t) >= cfg.min_probe_remaining_tokens
-            ]
+            if cfg.probe_mode == "sae":
+                from open_instruct import value_model_utils  # noqa: PLC0415
+
+                raw_boundaries = value_model_utils.segment_rollout(
+                    response_tokens=tokens,
+                    response_logprobs=main.get("logprobs"),
+                    mode="sae",
+                    sae_threshold=cfg.sae_threshold,
+                    max_segments=cfg.max_probes,
+                )
+                probe_positions = [
+                    t for t in raw_boundaries if (length - t) >= cfg.min_probe_remaining_tokens
+                ]
+            else:
+                probe_positions = [
+                    t
+                    for t in range(cfg.probe_interval, length, cfg.probe_interval)
+                    if (length - t) >= cfg.min_probe_remaining_tokens
+                ]
             row = {
                 "prompt": prompt,
                 "ground_truth": gt,
@@ -310,7 +329,15 @@ def score_dataset(cfg: ScoreDatasetConfig) -> str:
     import pandas as pd  # noqa: PLC0415
     from scipy.stats import pearsonr, spearmanr  # noqa: PLC0415
 
-    df = pd.read_parquet(cfg.input_dataset_path)
+    # Accept either a local parquet path or a HuggingFace dataset name (org/repo).
+    if os.path.exists(cfg.input_dataset_path):
+        df = pd.read_parquet(cfg.input_dataset_path)
+    else:
+        from datasets import load_dataset as _load_dataset  # noqa: PLC0415
+
+        logger.info(f"Local path not found; loading from HuggingFace: {cfg.input_dataset_path}")
+        hf_ds = _load_dataset(cfg.input_dataset_path, split="test")
+        df = hf_ds.to_pandas()
     logger.info(f"Loaded {len(df)} rows from {cfg.input_dataset_path}")
 
     # Conditioning warning: compare training_args.json if present.
@@ -414,12 +441,25 @@ def _score_with_scalar_value(df, cfg: ScoreDatasetConfig) -> list[list[float]]:
     import torch  # noqa: PLC0415
     from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 
+    import torch.nn as nn  # noqa: PLC0415
+    from safetensors.torch import load_file as _load_sf  # noqa: PLC0415
+
     tok_path = cfg.tokenizer_name_or_path or cfg.value_model_path
     tokenizer = AutoTokenizer.from_pretrained(tok_path)
-    value_model = AutoModelForCausalLM.from_pretrained(cfg.value_model_path, dtype=torch.bfloat16).to(cfg.device)
-    # If the checkpoint saved a scalar value head as `Linear(hidden, 1)`, replace lm_head.
-    # (This only matters when loading from a plain HF checkpoint; our custom `value_model.bin` will
-    # already have the right shape.)
+    # lm_head.weight has shape (1, hidden_size) but config.vocab_size is the full vocabulary.
+    # Load with ignore_mismatched_sizes so the embedding table loads correctly, then
+    # replace lm_head and load its weight manually from the safetensors file.
+    value_model = AutoModelForCausalLM.from_pretrained(
+        cfg.value_model_path, torch_dtype=torch.bfloat16, ignore_mismatched_sizes=True
+    )
+    hidden_size = value_model.config.hidden_size
+    value_model.lm_head = nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+    sf_path = os.path.join(cfg.value_model_path, "model.safetensors")
+    if os.path.exists(sf_path):
+        sd = _load_sf(sf_path)
+        if "lm_head.weight" in sd:
+            value_model.lm_head.weight.data.copy_(sd["lm_head.weight"].to(torch.bfloat16))
+    value_model = value_model.to(cfg.device)
     value_model.eval()
     from open_instruct import value_model_utils  # noqa: PLC0415
 
@@ -431,8 +471,10 @@ def _score_with_scalar_value(df, cfg: ScoreDatasetConfig) -> list[list[float]]:
             prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
             cond_ids: list[int] = []
             if cfg.value_model_ground_truth_conditioning:
+                sibs = row.get("sibling_rollouts")
+                sibs = list(sibs) if sibs is not None else []
                 cond_text = value_model_utils.build_conditioning_text(
-                    cfg.gt_conditioning_template, row["ground_truth"], siblings=row.get("sibling_rollouts") or []
+                    cfg.gt_conditioning_template, row["ground_truth"], siblings=sibs
                 )
                 cond_ids = tokenizer.encode(cond_text, add_special_tokens=False)
             is_postfix = value_model_utils.is_postfix_template(cfg.gt_conditioning_template)
@@ -571,13 +613,15 @@ def convert_checkpoint(cfg: ConvertCheckpointConfig) -> str:
 
     with open(config_src) as f:
         cfg_json = json.load(f)
-    cfg_json["vocab_size"] = 1
+    # Keep vocab_size intact so embed_tokens stays full-size at inference.
+    # lm_head.weight has shape (1, hidden) in the checkpoint; the loader handles
+    # the mismatch with ignore_mismatched_sizes and loads it manually.
     cfg_json["tie_word_embeddings"] = False
     with open(out_dir / "config.json", "w") as f:
         json.dump(cfg_json, f, indent=2)
 
     sd = torch.load(value_bin, map_location="cpu", weights_only=True)
-    sd_mod = {k: (v[:1].bfloat16() if k == "model.embed_tokens.weight" else v.bfloat16()) for k, v in sd.items()}
+    sd_mod = {k: v.bfloat16() for k, v in sd.items()}
     save_file(sd_mod, out_dir / "model.safetensors")
     weight_map = {k: "model.safetensors" for k in sd_mod}
     total_size = sum(v.numel() * 2 for v in sd_mod.values())
