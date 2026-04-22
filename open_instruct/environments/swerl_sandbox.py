@@ -255,8 +255,7 @@ class SWERLSandboxEnv(RLEnvironment):
                     rel_file = os.path.join(rel_root, fname) if rel_root != "." else fname
                     tar.add(src_path, arcname=f"{prefix}/{rel_file}")
 
-        tar_stream.seek(0)
-        self._backend._container.put_archive("/", tar_stream)
+        self._backend.put_archive("/", tar_stream.getvalue())
 
     # ------------------------------------------------------------------
     # Step

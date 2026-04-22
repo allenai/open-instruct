@@ -1,10 +1,14 @@
 """Sandbox backend abstraction for code/command execution."""
 
+import atexit
+import contextlib
 import io
 import os
 import shlex
+import shutil
+import subprocess
 import tarfile
-import contextlib
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -49,6 +53,14 @@ class SandboxBackend(ABC):
     @abstractmethod
     def read_file(self, path: str, binary: bool = False) -> str | bytes:
         """Read a file from the sandbox filesystem."""
+
+    @abstractmethod
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        """Extract a tar archive inside the sandbox, rooted at ``root``.
+
+        ``tar_bytes`` is the raw bytes of a tar archive whose entries are
+        interpreted as paths relative to ``root`` inside the sandbox.
+        """
 
     @abstractmethod
     def close(self) -> None:
@@ -237,6 +249,11 @@ class DockerBackend(SandboxBackend):
             return content_raw
         return content_raw.decode("utf-8", errors="replace")
 
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        if self._container is None:
+            raise RuntimeError("Container not started. Call start() first.")
+        self._container.put_archive(root, tar_bytes)
+
     def close(self) -> None:
         if self._container is not None:
             cid = self._container.short_id
@@ -253,11 +270,275 @@ class DockerBackend(SandboxBackend):
             self._container = None
 
 
+# ---------------------------------------------------------------------------
+# Apptainer
+# ---------------------------------------------------------------------------
+
+
+# Track live Apptainer instance names so we can stop them if the Python process
+# exits abruptly. Apptainer instances do not auto-reap on parent death (unlike
+# Docker --rm), so without this the tmpfs overlay lingers until reboot.
+_APPTAINER_LIVE_INSTANCES: set[str] = set()
+
+
+def _apptainer_cleanup_all() -> None:
+    for name in list(_APPTAINER_LIVE_INSTANCES):
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                ["apptainer", "instance", "stop", name],
+                capture_output=True,
+                timeout=10,
+            )
+    _APPTAINER_LIVE_INSTANCES.clear()
+
+
+atexit.register(_apptainer_cleanup_all)
+
+
+def _normalize_apptainer_image(image: str) -> str:
+    """Return an Apptainer-compatible image reference.
+
+    - URIs with a scheme (``docker://``, ``oras://``, ``shub://``) pass through.
+    - Absolute/relative paths and ``*.sif`` strings pass through as filesystem
+      paths.
+    - Plain Docker tags like ``repo:tag`` get ``docker://`` prepended.
+    """
+    if "://" in image:
+        return image
+    if image.startswith(("/", "./")) or image.endswith(".sif"):
+        return image
+    return f"docker://{image}"
+
+
+class ApptainerBackend(SandboxBackend):
+    """Apptainer backend using ``apptainer instance start/exec/stop``.
+
+    Uses a tmpfs overlay for per-rollout container state (``--writable-tmpfs``)
+    and ``--fakeroot`` so commands inside see uid 0 regardless of the host uid.
+    All file I/O goes through ``apptainer exec`` with stdin/stdout piping — no
+    bind mounts — so the container's filesystem is fully isolated from the
+    host. Instances are stopped (and their tmpfs reclaimed) on ``close()`` or
+    at process exit via ``atexit``.
+    """
+
+    _MAX_OUTPUT_BYTES = 1_000_000
+
+    # Flags that define the sandbox's isolation posture. Kept as a class
+    # attribute so tests / subclasses can tune them in one place.
+    _DEFAULT_START_FLAGS: tuple[str, ...] = (
+        "--fakeroot",
+        "--writable-tmpfs",
+        "--containall",
+        "--no-home",
+        "--cleanenv",
+    )
+
+    def __init__(
+        self,
+        image: str = "docker://ubuntu:22.04",
+        timeout: int = 1800,
+        mem_limit: str | None = None,
+        pwd: str = "/workspace",
+        cache_dir: str | None = None,
+        tmp_dir: str | None = None,
+        extra_start_flags: tuple[str, ...] = (),
+        apptainer_binary: str = "apptainer",
+    ):
+        """
+        Args:
+            image: Image reference. Accepts ``docker://repo:tag``, a plain
+                ``repo:tag`` (``docker://`` is prepended), or a path to a
+                ``.sif`` file.
+            timeout: Per-command timeout in seconds (default: 1800 / 30 min).
+            mem_limit: Ignored in fakeroot-fallback mode (no rootless cgroups).
+                Present for API symmetry with ``DockerBackend`` so callers can
+                pass the same kwargs. Slurm job-level ``--mem`` should be used
+                as the real enforcement mechanism.
+            pwd: Default cwd inside the container for ``run_command``. Exposed
+                via ``APPTAINER_PWD`` so we don't have to pass ``--pwd`` on
+                every exec.
+            cache_dir: If set, exported as ``APPTAINER_CACHEDIR``. Keep this on
+                fast shared storage; the default ``$HOME/.apptainer`` is
+                usually quota-limited on HPC.
+            tmp_dir: If set, exported as ``APPTAINER_TMPDIR``.
+            extra_start_flags: Additional flags appended to
+                ``apptainer instance start``.
+            apptainer_binary: Name or path of the apptainer CLI. Override for
+                testing or to use ``singularity``.
+        """
+        self._image = _normalize_apptainer_image(image)
+        self._timeout = timeout
+        self._mem_limit = mem_limit  # noqa: documented limitation
+        self._pwd = pwd
+        self._cache_dir = cache_dir
+        self._tmp_dir = tmp_dir
+        self._start_flags = tuple(self._DEFAULT_START_FLAGS) + tuple(extra_start_flags)
+        self._apptainer = apptainer_binary
+        self._name: str | None = None
+
+    # ---- env helpers ------------------------------------------------------
+
+    def _exec_env(self) -> dict:
+        env = dict(os.environ)
+        env["APPTAINER_PWD"] = self._pwd
+        if self._cache_dir:
+            env["APPTAINER_CACHEDIR"] = self._cache_dir
+        if self._tmp_dir:
+            env["APPTAINER_TMPDIR"] = self._tmp_dir
+        return env
+
+    def _ensure_binary(self) -> None:
+        if shutil.which(self._apptainer) is None:
+            raise RuntimeError(
+                f"Apptainer binary {self._apptainer!r} not found on PATH. "
+                "Install Apptainer >= 1.1 or adjust 'apptainer_binary'."
+            )
+
+    def _ensure_started(self) -> None:
+        if self._name is None:
+            raise RuntimeError("Instance not started. Call start() first.")
+
+    # ---- lifecycle --------------------------------------------------------
+
+    def start(self) -> None:
+        self._ensure_binary()
+        # Stop any previous instance before starting a new one (supports the
+        # "close then start" pattern used in SWERLSandboxEnv._do_reset).
+        if self._name is not None:
+            self.close()
+
+        name = f"swerl-{os.getpid()}-{uuid.uuid4().hex[:10]}"
+        cmd = [self._apptainer, "instance", "start", *self._start_flags, self._image, name]
+        logger.info(
+            "Starting Apptainer instance (name=%s, image=%s, flags=%s)",
+            name,
+            self._image,
+            " ".join(self._start_flags),
+        )
+        proc = subprocess.run(cmd, capture_output=True, env=self._exec_env())
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "apptainer instance start failed "
+                f"(image={self._image}, exit={proc.returncode}): "
+                f"{proc.stderr.decode('utf-8', 'replace').strip()}"
+            )
+        self._name = name
+        _APPTAINER_LIVE_INSTANCES.add(name)
+        logger.info(f"Apptainer instance started: {name}")
+
+    def close(self) -> None:
+        if self._name is None:
+            return
+        name = self._name
+        logger.info(f"Closing Apptainer instance: {name}")
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [self._apptainer, "instance", "stop", name],
+                capture_output=True,
+                timeout=30,
+            )
+        _APPTAINER_LIVE_INSTANCES.discard(name)
+        self._name = None
+
+    # ---- exec -------------------------------------------------------------
+
+    def _exec(
+        self,
+        argv: list[str],
+        *,
+        stdin: bytes | None = None,
+        check: bool = False,
+    ) -> subprocess.CompletedProcess:
+        """Run ``apptainer exec instance://<name> <argv>``.
+
+        Pass-through for stdin/capture. Does not wrap in ``timeout`` — callers
+        that need a time budget should compose one themselves (see
+        ``run_command``).
+        """
+        self._ensure_started()
+        cmd = [self._apptainer, "exec", f"instance://{self._name}", *argv]
+        return subprocess.run(
+            cmd,
+            input=stdin,
+            capture_output=True,
+            env=self._exec_env(),
+            check=check,
+        )
+
+    def run_command(self, command: str) -> ExecutionResult:
+        self._ensure_started()
+        wrapped = (
+            f"timeout --signal=TERM --kill-after=10 "
+            f"{shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
+        )
+        logger.debug(
+            "Apptainer exec start (instance=%s, image=%s, timeout=%ss, command=%r)",
+            self._name,
+            self._image,
+            self._timeout,
+            command,
+        )
+        proc = self._exec(["bash", "-c", wrapped])
+        stdout = proc.stdout[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+        stderr = proc.stderr[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+        if proc.returncode == 124:
+            stderr = f"Command timed out after {self._timeout}s.\n" + stderr
+        return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
+
+    # ---- file I/O (exec-piped, no bind mounts) ----------------------------
+
+    def write_file(self, path: str, content: str | bytes) -> None:
+        self._ensure_started()
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        dir_part = os.path.dirname(path) or "/"
+        sh_cmd = (
+            f"mkdir -p {shlex.quote(dir_part)} && cat > {shlex.quote(path)}"
+        )
+        proc = self._exec(["sh", "-c", sh_cmd], stdin=content)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"write_file failed for {path!r} (exit={proc.returncode}): "
+                f"{proc.stderr.decode('utf-8', 'replace').strip()}"
+            )
+
+    def read_file(self, path: str, binary: bool = False) -> str | bytes:
+        self._ensure_started()
+        # Use `test -f` to distinguish "missing" from "is a directory" so the
+        # caller gets the same exceptions DockerBackend raises.
+        check = self._exec(["sh", "-c", f"test -e {shlex.quote(path)}"])
+        if check.returncode != 0:
+            raise FileNotFoundError(f"File not found in instance: '{path}'")
+        is_dir = self._exec(["sh", "-c", f"test -d {shlex.quote(path)}"])
+        if is_dir.returncode == 0:
+            raise IsADirectoryError(f"Path '{path}' is a directory, not a file.")
+
+        proc = self._exec(["cat", path])
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"read_file failed for {path!r}: "
+                f"{proc.stderr.decode('utf-8', 'replace').strip()}"
+            )
+        if binary:
+            return proc.stdout
+        return proc.stdout.decode("utf-8", errors="replace")
+
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        self._ensure_started()
+        proc = self._exec(["tar", "-xf", "-", "-C", root], stdin=tar_bytes)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"put_archive failed at root={root!r} "
+                f"(exit={proc.returncode}): "
+                f"{proc.stderr.decode('utf-8', 'replace').strip()}"
+            )
+
+
 def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
     """Factory function to create a sandbox backend.
 
     Args:
-        backend_type: Currently only "docker" is supported.
+        backend_type: ``"docker"`` or ``"apptainer"``.
         **kwargs: Backend-specific arguments.
 
     Returns:
@@ -265,5 +546,9 @@ def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
     """
     if backend_type == "docker":
         return DockerBackend(**kwargs)
-    else:
-        raise ValueError(f"Unknown backend type: {backend_type}. Currently only 'docker' is supported.")
+    if backend_type == "apptainer":
+        return ApptainerBackend(**kwargs)
+    raise ValueError(
+        f"Unknown backend type: {backend_type}. "
+        "Supported: 'docker', 'apptainer'."
+    )

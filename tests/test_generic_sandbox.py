@@ -1,6 +1,7 @@
 """Unit tests for GenericSandboxEnv with a mock Docker backend."""
 
 import asyncio
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -75,6 +76,24 @@ class MockBackend(SandboxBackend):
         if binary:
             return content if isinstance(content, bytes) else content.encode("utf-8")
         return content if isinstance(content, str) else content.decode("utf-8", errors="replace")
+
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        import io
+        import tarfile
+
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tar:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    continue
+                full_path = (
+                    member.name
+                    if member.name.startswith("/")
+                    else os.path.join(root, member.name)
+                )
+                self._files[full_path] = extracted.read()
 
     def close(self) -> None:
         self._started = False
