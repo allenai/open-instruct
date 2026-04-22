@@ -1250,6 +1250,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             gts_pack,
                             sibs_pack,
                             hints_for_pack=hints_pack,
+                            # Ulysses SP registers with micro_batch_size=1; batching n_subs>1
+                            # violates its shape constraint, so fall back to sequential.
+                            sequential=self.mpu is not None,
                         )
                     else:
                         values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
