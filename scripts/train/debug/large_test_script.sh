@@ -67,4 +67,8 @@ uv run python mason.py \
         --checkpoint_state_dir /tmp/checkpoint_test \
         --active_sampling \
         --async_steps 4 \
+        --use_delight true \
+        --use_kondo_gate true \
+        --kondo_gate_rate 0.5 \
+        --kondo_gate_warmup 16 \
 	--push_to_hub False

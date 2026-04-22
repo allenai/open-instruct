@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Add `--use_kondo_gate` flag to GRPO that skips backward passes on low-delight samples via the Kondo gate (https://arxiv.org/abs/2603.20526), with `--kondo_gate_rate`, `--kondo_gate_temperature`, `--kondo_gate_history_size`, and `--kondo_gate_warmup` controls.
+- Add `--use_delight` flag to GRPO loss that gates per-token policy-gradient terms with the Delightful Policy Gradient sigmoid (https://github.com/allenai/open-instruct/pull/1628).
 - Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
 - Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
 - Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).

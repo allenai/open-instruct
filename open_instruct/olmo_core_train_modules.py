@@ -321,11 +321,16 @@ class GRPOTrainModule(TransformerTrainModule):
         if ref_policy is not None:
             self.ref_policy = ref_policy.to(device=self.device).eval().requires_grad_(False)
 
+        self._kondo_gate: grpo_utils.KondoGateState | None = None
+
     def pre_train(self):
         # GRPO batches are prompt-grouped and do their own accumulation/token normalization
         # inside train_batch(), so the base TransformerTrainModule global-batch validation
         # does not apply here.
-        pass
+        if self.grpo_config.use_kondo_gate:
+            self._kondo_gate = grpo_utils.KondoGateState(
+                self.grpo_config, self.device, process_group=self.trainer.dp_process_group, seed=self.grpo_config.seed
+            )
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
@@ -413,6 +418,8 @@ class GRPOTrainModule(TransformerTrainModule):
 
         num_steps = 0
         local_step = 0
+        group_had_backward = False
+        kondo_gate_stats: list[grpo_utils.KondoGateDecision] = []
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
@@ -450,7 +457,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
                 )
 
-                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                loss_output = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
@@ -461,17 +468,32 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
                 loss_denominator = accumulation_token_counts[batch_start]
-                loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
+                loss = masked_mean(
+                    loss_output.pg_loss_max + self.grpo_config.beta * loss_output.kl,
+                    response_mask,
+                    None,
+                    loss_denominator,
+                )
 
                 loss = loss * dp_world_size
-                loss.backward()
+
+                if self._kondo_gate is not None:
+                    decision = self._kondo_gate.decide(loss_output.delight, response_mask)
+                    kondo_gate_stats.append(decision)
+                    should_backward = decision.should_backward
+                else:
+                    should_backward = True
+
+                if should_backward:
+                    loss.backward()
+                    group_had_backward = True
 
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
                     sample_idx,
-                    pg_losses,
-                    pg_losses2,
-                    pg_loss,
+                    loss_output.pg_losses,
+                    loss_output.pg_losses2,
+                    loss_output.pg_loss_max,
                     ratio,
                     loss,
                     response_mask,
@@ -487,14 +509,16 @@ class GRPOTrainModule(TransformerTrainModule):
                 local_step += 1
 
                 if local_step % accumulation_steps == 0:
-                    if not dry_run:
+                    if not dry_run and group_had_backward:
                         self.optim_step()
                     self.zero_grads()
+                    group_had_backward = False
 
         if local_step % accumulation_steps != 0:
-            if not dry_run:
+            if not dry_run and group_had_backward:
                 self.optim_step()
             self.zero_grads()
+            group_had_backward = False
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
@@ -516,6 +540,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
             self.record_metric("_token_count", global_tokens, reduce_type=None)
+            if self._kondo_gate is not None:
+                for k, v in grpo_utils.summarize_kondo_gate_stats(kondo_gate_stats).items():
+                    self.record_metric(k, v, reduce_type=None)
 
             data_prep_metrics = batch.get("metrics") or {}
             for metric_key, metric_value in data_prep_metrics.items():

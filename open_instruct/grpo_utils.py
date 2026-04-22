@@ -2,7 +2,7 @@ import enum
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import numpy as np
 import torch
@@ -118,6 +118,21 @@ class GRPOExperimentConfig(
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
     """Whether to use DAPO or CISPO loss function."""
+    use_delight: bool = False
+    """Whether to gate per-token policy-gradient terms with the Delightful Policy Gradient sigmoid
+    of delight = advantage * surprisal (https://arxiv.org/abs/2603.14608)."""
+    use_kondo_gate: bool = False
+    """Whether to enable the Kondo gate (https://arxiv.org/abs/2603.20526): per-sample Bernoulli gate
+    on whether to run the backward pass, driven by sample-level delight against an adaptive threshold."""
+    kondo_gate_rate: float = 1.0
+    """Target fraction rho of samples that receive a backward pass. 1.0 is a no-op even when the gate
+    is enabled (always backward). Smaller values keep only the highest-delight samples."""
+    kondo_gate_temperature: float = 1.0
+    """Temperature eta in the Kondo gate Bernoulli probability sigma((chi - lambda) / eta)."""
+    kondo_gate_history_size: int = 1024
+    """Size of the ring buffer of past sample delights used to compute lambda = quantile_{1-rho}."""
+    kondo_gate_warmup: int = 128
+    """Never gate until the history contains at least this many sample delights."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -338,6 +353,15 @@ def resolve_old_logprob(
     return result
 
 
+@dataclass
+class LossOutput:
+    pg_losses: torch.Tensor
+    pg_losses2: torch.Tensor
+    pg_loss_max: torch.Tensor
+    kl: torch.Tensor
+    delight: torch.Tensor
+
+
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
@@ -345,7 +369,12 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> LossOutput:
+    delight = -advantages * new_logprobs.detach()
+    if config.use_delight:
+        # Delightful Policy Gradient gate; temperature eta is fixed to 1 per the paper.
+        advantages = advantages * torch.sigmoid(delight)
+
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
@@ -373,7 +402,87 @@ def compute_grpo_loss(
     else:
         kl = torch.zeros_like(pg_loss_max)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
+    return LossOutput(pg_losses=pg_losses, pg_losses2=pg_losses2, pg_loss_max=pg_loss_max, kl=kl, delight=delight)
+
+
+class KondoGateDecision(NamedTuple):
+    should_backward: bool
+    prob: float
+    lam: float
+
+
+class KondoGateState:
+    """Per-sample Kondo gate over delight (https://arxiv.org/abs/2603.20526).
+
+    Maintains a ring buffer of past sample-level delight values, computes an adaptive
+    threshold lambda = quantile_{1-rho}(history), and draws a Bernoulli gate with
+    probability sigma((chi - lambda) / eta). All-reduces the sample delight across DP
+    ranks and uses an identically-seeded generator so every rank produces the same
+    gate decision -- required to keep DeepSpeed / FSDP collectives in sync.
+    """
+
+    def __init__(
+        self,
+        config: GRPOExperimentConfig,
+        device: torch.device,
+        process_group: dist.ProcessGroup | None = None,
+        seed: int = 0,
+    ) -> None:
+        self.device = device
+        self.process_group = process_group
+        self.history_size = config.kondo_gate_history_size
+        self.warmup = config.kondo_gate_warmup
+        self.rate = config.kondo_gate_rate
+        self.temperature = config.kondo_gate_temperature
+        self._buffer = torch.zeros(self.history_size, device=device)
+        self._count = 0
+        self._write_idx = 0
+        self._generator = torch.Generator(device=device)
+        self._generator.manual_seed(int(seed))
+
+    def _reduced_chi(self, delight: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+        """Reduce (sum_delight, sum_tokens) across the process group and return sum/count.
+
+        With Ulysses SP, each rank holds a sequence-slice of its sample, so per-rank
+        slice-means differ across SP-mates. Reducing the numerator and denominator
+        separately gives the correct token-weighted mean regardless of slice lengths,
+        and the result is identical on every rank in the group (required to keep
+        DeepSpeed / FSDP collectives in sync).
+        """
+        packed = torch.stack([(delight * response_mask).sum().detach(), response_mask.sum().float().detach()])
+        if dist.is_initialized():
+            dist.all_reduce(packed, op=dist.ReduceOp.SUM, group=self.process_group)
+        return packed[0] / packed[1]
+
+    def _append(self, value: torch.Tensor) -> None:
+        self._buffer[self._write_idx] = value
+        self._write_idx = (self._write_idx + 1) % self.history_size
+        self._count = min(self._count + 1, self.history_size)
+
+    def decide(self, delight: torch.Tensor, response_mask: torch.Tensor) -> KondoGateDecision:
+        """Computes token-weighted chi over the response, all-reduces across ranks, and gates.
+
+        Returns identical values on every rank in the process group.
+        """
+        chi = self._reduced_chi(delight, response_mask)
+        self._append(chi)
+        if self._count < self.warmup:
+            return KondoGateDecision(True, 1.0, float("nan"))
+        buf = self._buffer[: self._count]
+        lam = torch.quantile(buf, 1.0 - self.rate)
+        prob = torch.sigmoid((chi - lam) / self.temperature)
+        gate = torch.bernoulli(prob, generator=self._generator)
+        return KondoGateDecision(bool(gate.item()), float(prob.item()), float(lam.item()))
+
+
+def summarize_kondo_gate_stats(stats: list[KondoGateDecision]) -> dict[str, float]:
+    """Aggregate per-sample gate decisions into scalar metrics."""
+    n = len(stats)
+    return {
+        "val/kondo_gate_backward_frac": sum(int(s.should_backward) for s in stats) / n,
+        "val/kondo_gate_prob_avg": sum(s.prob for s in stats) / n,
+        "val/kondo_lambda": sum(s.lam for s in stats) / n,
+    }
 
 
 def forward_for_logprobs(
