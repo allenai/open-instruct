@@ -2519,17 +2519,19 @@ def one_training_step(
         "val/ratio_var",
     }
     average_metrics = {}
-    # Average scalar metrics from each worker
-    for k in metrics[0]:
+    # Average scalar metrics from each worker (union of keys — some metrics are sparse,
+    # e.g. value diagnostic bins that only exist when the bin is non-empty on a given rank).
+    all_metric_keys = set().union(*(m.keys() for m in metrics))
+    for k in all_metric_keys:
         if k == "_token_count":
             # Don't include internal token count in final metrics
             continue
         if k in token_weighted_metrics:
             # Token-weighted average
-            average_metrics[k] = sum(m[k] * w for m, w in zip(metrics, weights))
+            average_metrics[k] = sum(m.get(k, 0.0) * w for m, w in zip(metrics, weights))
         else:
             # Simple average for other metrics
-            average_metrics[k] = sum(m[k] for m in metrics) / len(metrics)
+            average_metrics[k] = sum(m.get(k, 0.0) for m in metrics) / len(metrics)
     # Pass through array metrics from the first worker (these are the same across workers)
     for k, v in array_metrics[0].items():
         average_metrics[k] = v
