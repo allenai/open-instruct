@@ -172,6 +172,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ref_policy=self.ref_policy,
             dp_config=dp_config,
             ac_config=ac_config,
+            compile_model=self.grpo_config.compile_model,
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
