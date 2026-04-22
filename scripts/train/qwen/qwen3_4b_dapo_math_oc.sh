@@ -51,7 +51,7 @@ uv run open_instruct/grpo.py \
     --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 allenai/brumo_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
-    --response_length 8192 \
+    --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path "Qwen/Qwen3-4B-Base" \
     --non_stop_penalty False \
