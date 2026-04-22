@@ -83,21 +83,14 @@ class VLLMWeightSyncCallback(Callback):
         return cast(TransformerTrainModule, self.trainer.train_module)
 
     def post_step(self) -> None:
-        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
         step = self.trainer.global_step
         if step % self.sync_interval != 0:
             return
 
-        logger.info(f"[DIAG D rank={rank} step={step}] post_step ENTER")
         torch.cuda.empty_cache()
-        logger.info(f"[DIAG D rank={rank} step={step}] after empty_cache")
-
         ray.get(self.actor_manager.set_should_stop.remote(True))
-        logger.info(f"[DIAG D rank={rank} step={step}] after set_should_stop(True)")
 
         model = self.train_module.model
-
-        logger.info(f"[DIAG D rank={rank} step={step}] calling broadcast_weights_to_vllm")
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=model,
             vllm_engines=self.vllm_engines,
@@ -105,16 +98,12 @@ class VLLMWeightSyncCallback(Callback):
             model_step=step,
             name_mapper=self.name_mapper,
         )
-        logger.info(f"[DIAG D rank={rank} step={step}] broadcast_weights_to_vllm returned, waiting on refs")
         utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
-        logger.info(f"[DIAG D rank={rank} step={step}] ray_get_with_progress done, calling wake_up")
 
         utils.ray_get_with_progress(
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
-        logger.info(f"[DIAG D rank={rank} step={step}] after wake_up")
         ray.get(self.actor_manager.set_should_stop.remote(False))
-        logger.info(f"[DIAG D rank={rank} step={step}] post_step EXIT")
 
 
 @dataclass

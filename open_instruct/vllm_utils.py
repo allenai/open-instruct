@@ -775,31 +775,20 @@ class LLMRayActor:
         return future.result()
 
     def sleep(self) -> None:
-        logger.info(f"[DIAG D] LLMRayActor.sleep ENTER active_tasks={len(self.active_tasks)}")
-        result = self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
-        logger.info(f"[DIAG D] LLMRayActor.sleep EXIT active_tasks={len(self.active_tasks)}")
-        return result
+        return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
 
     def wake_up(self) -> None:
-        logger.info(f"[DIAG D] LLMRayActor.wake_up ENTER active_tasks={len(self.active_tasks)}")
-        result = self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
-        logger.info(f"[DIAG D] LLMRayActor.wake_up EXIT active_tasks={len(self.active_tasks)}")
-        return result
+        return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
     def update_weights(
         self, names: list[str], dtype_names: list[str], shapes: list[tuple[int, ...]], packed: bool, model_step: int
     ) -> None:
-        logger.info(
-            f"[DIAG D] LLMRayActor.update_weights ENTER step={model_step} active_tasks={len(self.active_tasks)} inflight_updates={self.inflight_updates}"
-        )
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        logger.info(f"[DIAG D] LLMRayActor.update_weights calling llm_engine.update_weights step={model_step}")
         self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
         self.current_model_step = model_step
-        logger.info(f"[DIAG D] LLMRayActor.update_weights EXIT step={model_step}")
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1338,9 +1327,7 @@ def _prepare_params_for_sync(
 
 
 def _collect_weight_metadata(
-    model: torch.nn.Module,
-    name_mapper: Callable[[str], str] | None,
-    fsdp_submodules: list[tuple[str, FSDPModule]] | None = None,
+    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
 ) -> tuple[list[str], list[str], list[list[int]]]:
     """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
 
@@ -1350,25 +1337,12 @@ def _collect_weight_metadata(
     names: list[str] = []
     dtype_names: list[str] = []
     shapes: list[list[int]] = []
-
-    if isinstance(model, FSDPModule):
-        if fsdp_submodules is None:
-            fsdp_submodules = _get_fsdp2_submodules(model)
-        for block_name, block in fsdp_submodules:
-            for name, param in block.named_parameters():
-                full_name = f"{block_name}.{name}" if block_name else name
-                mapped_name = name_mapper(full_name) if name_mapper else full_name
-                names.append(mapped_name)
-                dtype_names.append(str(param.dtype).split(".")[-1])
-                shapes.append(list(param.shape))
-    else:
-        for name, param in model.named_parameters():
-            mapped_name = name_mapper(name) if name_mapper else name
-            names.append(mapped_name)
-            dtype_names.append(str(param.dtype).split(".")[-1])
-            shape = getattr(param, "ds_shape", param.shape)
-            shapes.append(list(shape))
-
+    for name, param in model.named_parameters():
+        mapped_name = name_mapper(name) if name_mapper else name
+        names.append(mapped_name)
+        dtype_names.append(str(param.dtype).split(".")[-1])
+        shape = getattr(param, "ds_shape", param.shape)
+        shapes.append(list(shape))
     return names, dtype_names, shapes
 
 
@@ -1422,38 +1396,20 @@ def broadcast_weights_to_vllm(
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
 
     is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    logger.info(f"[DIAG D rank={rank} step={model_step}] broadcast_weights_to_vllm ENTER is_rank_0={is_rank_0}")
     if is_rank_0:
-        sleep_refs = {i: engine.sleep.remote() for i, engine in enumerate(vllm_engines)}
-        logger.info(f"[DIAG D rank=0 step={model_step}] kicked off sleep on {len(sleep_refs)} engines")
-        pending = dict(sleep_refs)
-        while pending:
-            ready, _ = ray.wait(list(pending.values()), num_returns=1, timeout=30.0)
-            if not ready:
-                logger.info(
-                    f"[DIAG D rank=0 step={model_step}] still waiting on sleep from engines: {list(pending.keys())}"
-                )
-                continue
-            for r in ready:
-                done_idx = next(i for i, rr in pending.items() if rr == r)
-                logger.info(f"[DIAG D rank=0 step={model_step}] sleep returned from engine {done_idx}")
-                del pending[done_idx]
-        logger.info(f"[DIAG D rank=0 step={model_step}] all sleep calls returned")
+        ray.get([engine.sleep.remote() for engine in vllm_engines])
 
     if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
-    logger.info(f"[DIAG D rank={rank} step={model_step}] collected {len(names)} weight metadata entries")
+    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
     use_packed = False
 
     if is_rank_0:
         refs = [
             engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
         ]
-        logger.info(f"[DIAG D rank=0 step={model_step}] kicked off update_weights on {len(refs)} engines")
     else:
         refs = []
 
@@ -1462,31 +1418,21 @@ def broadcast_weights_to_vllm(
     if isinstance(model, FSDPModule):
         if not fsdp_submodules:
             raise ValueError("FSDP2 model has no FSDP submodules.")
-        logger.info(
-            f"[DIAG D rank={rank} step={model_step}] entering FSDP2 unshard loop for {len(fsdp_submodules)} blocks"
-        )
-        for block_idx, (block_name, block) in enumerate(fsdp_submodules):
-            logger.info(f"[DIAG D rank={rank} step={model_step}] block {block_idx} {block_name}: unshard START")
+        if not gather_whole_model:
+            raise ValueError(
+                "FSDP2 weight sync requires gather_whole_model=True. "
+                "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
+                "collectives interleave with the trainer->vLLM NCCL sends."
+            )
+        for _, block in fsdp_submodules:
             block.unshard()
-            logger.info(f"[DIAG D rank={rank} step={model_step}] block {block_idx} {block_name}: unshard DONE")
-            try:
-                if is_rank_0:
-                    block_params = [
-                        (name_mapper(f"{block_name}.{n}") if name_mapper else f"{block_name}.{n}", p.data)
-                        for n, p in block.named_parameters()
-                    ]
-                    logger.info(
-                        f"[DIAG D rank=0 step={model_step}] block {block_idx} {block_name}: NCCL send START ({len(block_params)} params)"
-                    )
-                    NCCLWeightTransferEngine.trainer_send_weights(
-                        iterator=iter(block_params), trainer_args=trainer_args
-                    )
-                    logger.info(f"[DIAG D rank=0 step={model_step}] block {block_idx} {block_name}: NCCL send DONE")
-            finally:
-                logger.info(f"[DIAG D rank={rank} step={model_step}] block {block_idx} {block_name}: reshard START")
+        try:
+            if is_rank_0:
+                mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
+                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+        finally:
+            for _, block in fsdp_submodules:
                 block.reshard()
-                logger.info(f"[DIAG D rank={rank} step={model_step}] block {block_idx} {block_name}: reshard DONE")
-        logger.info(f"[DIAG D rank={rank} step={model_step}] FSDP2 unshard loop COMPLETE")
         return refs
 
     params = list(model.named_parameters())
