@@ -55,6 +55,8 @@ uv run open_instruct/grpo.py \
     --temperature 1.0 \
     --total_episodes 128000 \
     --deepspeed_stage 2 \
+    --fsdp_shard_degree 4 \
+    --fsdp_num_replicas 1 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
