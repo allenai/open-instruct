@@ -22,9 +22,6 @@ from tqdm import tqdm
 
 from open_instruct import dataset_transformation, logger_utils, utils
 
-_COLLECT_BATCH_SIZE = 1000
-_BEAKER_DESCRIPTION_INTERVAL_SECONDS = 30.0
-
 logger = logger_utils.setup_logger(__name__)
 
 
@@ -49,8 +46,8 @@ def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
     return None
 
 
-def _remove_partial_files(output_dir: str) -> None:
-    for name in (_TOKENS_PARTIAL_FILENAME, _LABELS_PARTIAL_FILENAME):
+def remove_checkpoint(output_dir: str) -> None:
+    for name in (_CHECKPOINT_FILENAME, _TOKENS_PARTIAL_FILENAME, _LABELS_PARTIAL_FILENAME):
         pathlib.Path(output_dir, name).unlink(missing_ok=True)
 
 
@@ -84,35 +81,18 @@ def _write_memmap_chunked_from_file(
     return chunk_boundaries
 
 
-def _write_labels_memmap_from_file(output_dir: str, source_path: str, chunk_boundaries: list[tuple[int, int]]) -> None:
-    src = np.memmap(source_path, mode="r", dtype=np.uint8, shape=(sum(e - s for s, e in chunk_boundaries),))
-    for i, (start, end) in enumerate(chunk_boundaries):
-        filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
-        dst = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(end - start,))
-        dst[:] = src[start:end].astype(np.bool_)
-        dst.flush()
-        logger.info(f"Written {filename} ({(end - start) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
-
-
 def _write_metadata_for_chunks(
     base_filename: str, document_boundaries: list[tuple[int, int]], chunk_boundaries: list[tuple[int, int]]
 ) -> None:
-    doc_idx = 0
-    num_docs = len(document_boundaries)
     for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
         metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
-        while doc_idx < num_docs and document_boundaries[doc_idx][1] <= chunk_start:
-            doc_idx += 1
         with gzip.open(metadata_filename, "wt") as f:
-            scan_idx = doc_idx
-            while scan_idx < num_docs and document_boundaries[scan_idx][0] < chunk_end:
-                doc_start, doc_end = document_boundaries[scan_idx]
+            for doc_start, doc_end in document_boundaries:
                 if doc_end > chunk_start and doc_start < chunk_end:
                     adjusted_start = max(0, doc_start - chunk_start)
                     adjusted_end = min(chunk_end - chunk_start, doc_end - chunk_start)
                     if adjusted_end > adjusted_start:
                         f.write(f"{adjusted_start},{adjusted_end}\n")
-                scan_idx += 1
         logger.info(f"Written metadata {metadata_filename}")
 
 
@@ -244,7 +224,7 @@ def convert_hf_to_numpy_sft(
     else:
         if resume:
             logger.info("No checkpoint found, starting from beginning...")
-        _remove_partial_files(output_dir)
+        remove_checkpoint(output_dir)
         start_idx = 0
         document_boundaries = []
         current_position = 0
@@ -289,7 +269,7 @@ def convert_hf_to_numpy_sft(
     with open(tokens_partial_path, "ab") as tokens_fh, open(labels_partial_path, "ab") as labels_fh:
         idx = start_idx - 1
         last_checkpoint_idx = start_idx
-        for batch in train_dataset_iter.iter(batch_size=_COLLECT_BATCH_SIZE):
+        for batch in train_dataset_iter.iter(batch_size=1000):
             batch_input_ids = batch[input_ids_key]
             batch_labels = batch[labels_key]
             batch_attention = batch[attention_mask_key]
@@ -340,7 +320,7 @@ def convert_hf_to_numpy_sft(
             progress.update(len(batch_input_ids))
 
             now = time.perf_counter()
-            if now - last_description_update >= _BEAKER_DESCRIPTION_INTERVAL_SECONDS:
+            if now - last_description_update >= 30.0:
                 utils.maybe_update_beaker_description(
                     current_step=idx + 1, total_steps=total_samples, start_time=collect_start
                 )
@@ -382,8 +362,6 @@ def convert_hf_to_numpy_sft(
     rate = samples_processed / collect_elapsed if collect_elapsed > 0 else 0.0
     logger.info(f"Collect loop: {samples_processed:,} samples in {collect_elapsed:.2f}s ({rate:.1f} samples/s)")
 
-    train_dataset = dataset_transformation.remove_dataset_source_field(train_dataset)
-
     total_instances = len(train_dataset)
 
     logger.info(f"Total sequences: {total_instances}")
@@ -398,11 +376,19 @@ def convert_hf_to_numpy_sft(
         f"{output_dir}/token_ids", tokens_partial_path, total_tokens, token_dtype
     )
     _write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
-    _write_labels_memmap_from_file(output_dir, labels_partial_path, token_chunk_boundaries)
+
+    labels_src = (
+        np.memmap(labels_partial_path, mode="r", dtype=np.uint8, shape=(total_tokens,)) if total_tokens else None
+    )
+    for i, (start, end) in enumerate(token_chunk_boundaries):
+        filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
+        mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(end - start,))
+        mmap[:] = labels_src[start:end].astype(np.bool_)
+        mmap.flush()
+        logger.info(f"Written {filename} ({(end - start) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
     logger.info("Data conversion completed successfully!")
-    pathlib.Path(output_dir, _CHECKPOINT_FILENAME).unlink(missing_ok=True)
-    _remove_partial_files(output_dir)
+    remove_checkpoint(output_dir)
 
     write_dataset_statistics(
         output_dir=output_dir,
