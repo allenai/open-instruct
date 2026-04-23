@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
-- Stream SFT tokenization tokens/labels directly to disk and iterate the dataset in batched numpy format, removing in-memory accumulation and speeding up the collect loop; posts periodic Beaker description updates during tokenization.
+- Speed up SFT tokenization collect loop with batched numpy iteration and vectorized per-sample label/attention ops.
 - Use incremental binary checkpoint for SFT tokenization resume, eliminating O(N²) re-serialization (https://github.com/allenai/open-instruct/pull/1633).
 - Extract numpy SFT conversion helpers into `open_instruct.numpy_dataset_conversion` (https://github.com/allenai/open-instruct/pull/1622).
 - Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
