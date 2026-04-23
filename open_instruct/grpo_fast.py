@@ -1853,7 +1853,7 @@ def one_training_step(
         "time/total": step_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
-        **data_thread_metrics,
+        **data_thread_metrics,  # batch/given_up_prompts_resamples, batch/prompts_resamples (NGU), etc.
         **average_metrics,
         **utilization_metrics,
     }

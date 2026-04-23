@@ -245,6 +245,8 @@ class TestNeverGiveUpPendingAge(unittest.TestCase):
         self.assertEqual(batch_stats.prompt_sample_counts, [4])
         self.assertEqual(batch_stats.prompt_baseline_sample_counts, [4])
         self.assertEqual(batch_stats.prompt_baseline_reward_sums, [2.0])
+        self.assertEqual(batch_stats.prompts_resamples, [2])
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [])
         self.assertEqual(never_give_up_state.pending_response_counts, {})
         self.assertEqual(never_give_up_state.pending_reward_sums, {})
 

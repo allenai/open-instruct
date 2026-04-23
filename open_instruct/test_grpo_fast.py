@@ -18,6 +18,7 @@ from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast, grpo_utils, rl_utils, utils
+from open_instruct.data_loader_utils import expand_grouped_scores
 from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -1045,8 +1046,10 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(batch_stats.prompt_sample_counts, [4])
         self.assertEqual(batch_stats.prompt_baseline_sample_counts, [8])
         self.assertEqual(batch_stats.prompt_baseline_reward_sums, [2.0])
+        self.assertEqual(batch_stats.prompts_resamples, [2])
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [])
         self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
-        mean_grouped_rewards, _ = data_loader_lib.expand_grouped_scores(
+        mean_grouped_rewards, _ = expand_grouped_scores(
             np.array(batch.scores),
             batch_stats.prompt_sample_counts,
             batch_stats.prompt_baseline_sample_counts,
@@ -1123,6 +1126,8 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
 
         self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
         self.assertEqual(batch_stats.given_up_prompts_by_dataset, {"dataset_0": 8})
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [2])
+        self.assertEqual(batch_stats.prompts_resamples, [1])
         self.assertEqual(never_give_up_state.pending_results, {})
         self.assertEqual(never_give_up_state.pending_metrics, {})
         self.assertEqual(never_give_up_state.pending_best_reward, {})
@@ -1399,7 +1404,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
     def test_expand_grouped_scores_uses_effective_baseline_counts(self):
         scores = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
 
-        mean_grouped_rewards, std_grouped_rewards = data_loader_lib.expand_grouped_scores(
+        mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
             scores, prompt_sample_counts=[4], prompt_baseline_sample_counts=[8], prompt_baseline_reward_sums=[2.0]
         )
 

@@ -768,6 +768,9 @@ class BatchStatistics:
     `prompt_datasets` is aligned with prompts (length = num_prompts), matching
     `percent_solved_hist` and `prompt_indices`. Values are sanitized metric-safe
     dataset keys.
+
+    `given_up_prompts_resamples` / `prompts_resamples` are 1-based never-give-up attempt
+    indices (histogram values; 1=first try, 2=first requeue, ...).
     """
 
     prompt_lengths: list[int]
@@ -790,6 +793,8 @@ class BatchStatistics:
     filtered_prompt_datasets_nonzero: list[str]
     completions_used_by_dataset: dict[str, int]
     given_up_prompts_by_dataset: dict[str, int]
+    given_up_prompts_resamples: list[int]
+    prompts_resamples: list[int]
     test_prompt_indices: list[int]
     test_indices: list[int]
     test_passes: list[float]
@@ -864,6 +869,15 @@ def compute_filtered_batch_metrics(
         metrics[f"{filtered_metric_prefix}/completions_used/{dataset_name}"] = count
     for dataset_name, count in batch_stats.given_up_prompts_by_dataset.items():
         metrics[f"{filtered_metric_prefix}/given_up_prompts/{dataset_name}"] = count
+
+    if batch_stats.given_up_prompts_resamples:
+        metrics[f"{filtered_metric_prefix}/given_up_prompts_resamples"] = np.asarray(
+            batch_stats.given_up_prompts_resamples, dtype=np.int32
+        )
+    if batch_stats.prompts_resamples:
+        metrics[f"{filtered_metric_prefix}/prompts_resamples"] = np.asarray(
+            batch_stats.prompts_resamples, dtype=np.int32
+        )
 
     if completions_per_prompt_prefix is None:
         return metrics
@@ -1166,6 +1180,16 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
     raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
 
 
+def never_give_up_chain_attempt_index(prompt_id: str) -> int:
+    """1-based NGU attempt index for a prompt_id (1 = first generation, 2 = first requeue, ...)."""
+    prompt_id_parts = prompt_id.split("_")
+    if len(prompt_id_parts) == 2:
+        return 1
+    if len(prompt_id_parts) == 3:
+        return int(prompt_id_parts[2]) + 1
+    return 1
+
+
 def merge_generation_results(
     results: list[data_types.GenerationResult], reward_metrics: list[dict[str, Any] | None]
 ) -> tuple[data_types.GenerationResult, dict[str, Any]]:
@@ -1336,6 +1360,8 @@ def accumulate_inference_batches(
     filtered_prompt_datasets_nonzero = []
     completions_used_by_dataset: dict[str, int] = {}
     given_up_prompts_by_dataset: dict[str, int] = {}
+    given_up_prompts_resamples: list[int] = []
+    prompts_resamples: list[int] = []
     target_is_tokens = num_tokens is not None
     target_total = num_tokens if num_tokens is not None else num_prompts
     target_label = "response tokens" if target_is_tokens else "prompts"
@@ -1582,6 +1608,7 @@ def accumulate_inference_batches(
                 given_up_prompts_by_dataset[prompt_dataset_key] = (
                     given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
                 )
+                given_up_prompts_resamples.append(never_give_up_chain_attempt_index(result.prompt_id))
             for pending_result in pending_results:
                 record_filtered_prompt(pending_result, prompt_dataset_key)
             record_filtered_prompt(result, prompt_dataset_key)
@@ -1709,6 +1736,8 @@ def accumulate_inference_batches(
         all_prompt_baseline_sample_counts.append(baseline_sample_count)
         all_prompt_baseline_reward_sums.append(baseline_reward_sum)
         all_prompt_datasets.append(prompt_dataset_key)
+        assert result.prompt_id is not None
+        prompts_resamples.append(never_give_up_chain_attempt_index(result.prompt_id))
         accepted_prompt_lengths.append(len(query))
         all_model_steps.extend([result.model_step] * len(result.responses))
 
@@ -1857,6 +1886,8 @@ def accumulate_inference_batches(
         filtered_prompt_datasets_nonzero=filtered_prompt_datasets_nonzero,
         completions_used_by_dataset=completions_used_by_dataset,
         given_up_prompts_by_dataset=given_up_prompts_by_dataset,
+        given_up_prompts_resamples=given_up_prompts_resamples,
+        prompts_resamples=prompts_resamples,
         test_prompt_indices=all_test_prompt_indices,
         test_indices=all_test_indices,
         test_passes=all_test_passes,
@@ -2166,6 +2197,8 @@ class DataPreparationActor:
                         "batch/prompt_lengths": np.array([], dtype=np.int32),
                         "batch/response_lengths": np.array([], dtype=np.int32),
                         "batch/prompt_sample_counts": np.array([], dtype=np.int32),
+                        "batch/given_up_prompts_resamples": np.array([], dtype=np.int32),
+                        "batch/prompts_resamples": np.array([], dtype=np.int32),
                     }
                     self.current_prepared_step = step
                 continue
@@ -2243,6 +2276,10 @@ class DataPreparationActor:
                     "batch/prompt_lengths": np.array(batch_stats.prompt_lengths, dtype=np.int32),
                     "batch/response_lengths": np.array(batch_stats.response_lengths, dtype=np.int32),
                     "batch/prompt_sample_counts": np.array(batch_stats.prompt_sample_counts, dtype=np.int32),
+                    "batch/given_up_prompts_resamples": np.array(
+                        batch_stats.given_up_prompts_resamples, dtype=np.int32
+                    ),
+                    "batch/prompts_resamples": np.array(batch_stats.prompts_resamples, dtype=np.int32),
                 }
             else:
                 real_num_responses = len(result.responses)
@@ -2277,6 +2314,8 @@ class DataPreparationActor:
                     "filtered_prompt_datasets_nonzero",
                     "completions_used_by_dataset",
                     "given_up_prompts_by_dataset",
+                    "given_up_prompts_resamples",
+                    "prompts_resamples",
                     "test_prompt_indices",
                     "test_indices",
                     "test_passes",
