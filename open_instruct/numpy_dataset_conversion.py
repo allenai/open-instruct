@@ -380,6 +380,7 @@ def convert_hf_to_numpy_sft(
         initial=start_idx,
         total=total_samples,
     )
+    last_description_update = loop_start_time
     idx = start_idx - 1
     for batch in train_dataset_iter.iter(batch_size=1000):
         batch_input_ids = batch[input_ids_key]
@@ -448,8 +449,16 @@ def convert_hf_to_numpy_sft(
                 utils.maybe_update_beaker_description(
                     current_step=idx + 1, total_steps=total_samples, start_time=loop_start_time
                 )
+                last_description_update = time.perf_counter()
 
         progress.update(len(batch_input_ids))
+
+        now = time.perf_counter()
+        if now - last_description_update >= 30.0:
+            utils.maybe_update_beaker_description(
+                current_step=idx + 1, total_steps=total_samples, start_time=loop_start_time
+            )
+            last_description_update = now
     progress.close()
 
     total_instances = len(train_dataset)
