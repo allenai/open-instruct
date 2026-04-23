@@ -75,7 +75,7 @@ class TestWriteMemmapChunked(unittest.TestCase):
         return list(np.memmap(filename, mode="r", dtype=dtype, shape=(length,)))
 
     def test_empty_data(self):
-        open(self.source_path, "wb").close()
+        self.source_path.touch()
         result = numpy_dataset_conversion._write_memmap_chunked_from_file(
             self.base, self.source_path, 0, np.uint16, max_size_gb=1
         )
@@ -237,30 +237,22 @@ class TestWriteDatasetStatistics(unittest.TestCase):
         self.assertEqual(loaded["per_dataset_statistics"][0]["avg_tokens_per_instance"], 0)
 
 
-class TestConvertHfToNumpySft(unittest.TestCase):
+class _NumpySftTestBase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
+        self.addCleanup(gc.collect)
 
-        self.original_hf_home = os.environ.get("HF_HOME")
-        self.original_hf_datasets_cache = os.environ.get("HF_DATASETS_CACHE")
-        self.original_transformers_cache = os.environ.get("TRANSFORMERS_CACHE")
-
-        os.environ["HF_HOME"] = self.temp_dir.name
-        os.environ["HF_DATASETS_CACHE"] = os.path.join(self.temp_dir.name, "datasets")
-        os.environ["TRANSFORMERS_CACHE"] = os.path.join(self.temp_dir.name, "transformers")
-
-    def tearDown(self):
-        for key, original in [
-            ("HF_HOME", self.original_hf_home),
-            ("HF_DATASETS_CACHE", self.original_hf_datasets_cache),
-            ("TRANSFORMERS_CACHE", self.original_transformers_cache),
-        ]:
-            if original is not None:
-                os.environ[key] = original
-            else:
-                os.environ.pop(key, None)
-        gc.collect()
+        patcher = unittest.mock.patch.dict(
+            os.environ,
+            {
+                "HF_HOME": self.temp_dir.name,
+                "HF_DATASETS_CACHE": os.path.join(self.temp_dir.name, "datasets"),
+                "TRANSFORMERS_CACHE": os.path.join(self.temp_dir.name, "transformers"),
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _make_tc(self):
         return dataset_transformation.TokenizerConfig(
@@ -271,6 +263,8 @@ class TestConvertHfToNumpySft(unittest.TestCase):
             add_bos=False,
         )
 
+
+class TestConvertHfToNumpySft(_NumpySftTestBase):
     def test_end_to_end_small(self):
         output_dir = pathlib.Path(self.temp_dir.name) / "out_e2e"
         numpy_dataset_conversion.convert_hf_to_numpy_sft(
@@ -298,10 +292,8 @@ class TestConvertHfToNumpySft(unittest.TestCase):
         for partial in ("_tokens.partial.bin", "_labels.partial.bin", "_boundaries.partial.bin"):
             self.assertFalse((output_dir / partial).exists())
 
-        token_size = token_file.stat().st_size
-        labels_size = labels_file.stat().st_size
-        self.assertGreater(token_size, 0)
-        self.assertGreater(labels_size, 0)
+        self.assertGreater(token_file.stat().st_size, 0)
+        self.assertGreater(labels_file.stat().st_size, 0)
 
         with open(stats_json) as f:
             stats = json.load(f)
@@ -309,40 +301,7 @@ class TestConvertHfToNumpySft(unittest.TestCase):
         self.assertGreater(stats["overall_statistics"]["total_tokens"], 0)
 
 
-class TestResumeEquivalence(unittest.TestCase):
-    def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp_dir.cleanup)
-
-        self.original_hf_home = os.environ.get("HF_HOME")
-        self.original_hf_datasets_cache = os.environ.get("HF_DATASETS_CACHE")
-        self.original_transformers_cache = os.environ.get("TRANSFORMERS_CACHE")
-
-        os.environ["HF_HOME"] = self.temp_dir.name
-        os.environ["HF_DATASETS_CACHE"] = os.path.join(self.temp_dir.name, "datasets")
-        os.environ["TRANSFORMERS_CACHE"] = os.path.join(self.temp_dir.name, "transformers")
-
-    def tearDown(self):
-        for key, original in [
-            ("HF_HOME", self.original_hf_home),
-            ("HF_DATASETS_CACHE", self.original_hf_datasets_cache),
-            ("TRANSFORMERS_CACHE", self.original_transformers_cache),
-        ]:
-            if original is not None:
-                os.environ[key] = original
-            else:
-                os.environ.pop(key, None)
-        gc.collect()
-
-    def _make_tc(self):
-        return dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path=TOKENIZER_PATH,
-            tokenizer_revision="main",
-            use_fast=True,
-            chat_template_name="tulu",
-            add_bos=False,
-        )
-
+class TestResumeEquivalence(_NumpySftTestBase):
     def _run(self, output_dir, resume, batch_size=10):
         numpy_dataset_conversion.convert_hf_to_numpy_sft(
             output_dir=output_dir,
@@ -393,13 +352,11 @@ class TestResumeEquivalence(unittest.TestCase):
         )
         self.assertGreater(len(artifacts), 0, "golden run produced no artifacts")
         for name in artifacts:
-            golden_path = golden / name
-            interrupted_path = interrupted / name
             if name.endswith(".gz"):
-                with gzip.open(golden_path, "rb") as f1, gzip.open(interrupted_path, "rb") as f2:
+                with gzip.open(golden / name, "rb") as f1, gzip.open(interrupted / name, "rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
             else:
-                with golden_path.open("rb") as f1, interrupted_path.open("rb") as f2:
+                with (golden / name).open("rb") as f1, (interrupted / name).open("rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
 
 
