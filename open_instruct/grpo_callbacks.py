@@ -15,6 +15,7 @@ from typing import Any, cast
 import ray
 import ray.exceptions
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
@@ -87,6 +88,9 @@ class VLLMWeightSyncCallback(Callback):
         if step % self.sync_interval != 0:
             return
 
+        if dist.is_initialized():
+            dist.barrier()
+
         torch.cuda.empty_cache()
         ray.get(self.actor_manager.set_should_stop.remote(True))
 
@@ -104,6 +108,9 @@ class VLLMWeightSyncCallback(Callback):
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
         ray.get(self.actor_manager.set_should_stop.remote(False))
+
+        if dist.is_initialized():
+            dist.barrier()
 
 
 @dataclass

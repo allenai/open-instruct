@@ -26,6 +26,8 @@ uv run mason.py \
     --env TORCH_LOGS=+dynamo,+inductor,+recompiles \
     --env NCCL_DEBUG=WARN \
     --env TORCH_NCCL_TRACE_BUFFER_SIZE=1048576 \
+    --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
+    --env TORCH_NCCL_DESYNC_DEBUG=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \
