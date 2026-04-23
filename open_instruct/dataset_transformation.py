@@ -56,7 +56,7 @@ from typing import Any, Literal
 import numpy as np
 import torch
 import transformers
-from datasets import Dataset, concatenate_datasets, load_dataset
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
@@ -899,6 +899,8 @@ class TokenizerConfig:
     """columns name for the ground truth"""
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
     """columns name for the sft messages"""
+    mask_think_tokens: bool = False
+    """Mask <think>...</think> blocks in loss computation so thinking behavior is not supervised."""
 
     @cached_property
     def tokenizer(self):
@@ -917,7 +919,15 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        # Pass mask_think_tokens flag to the tokenizer so transform functions can access it
+        tokenizer.mask_think_tokens = self.mask_think_tokens
+        if self.mask_think_tokens:
+            logger.info(
+                "mask_think_tokens=True: <think>...</think> spans (and trailing newlines) will "
+                "be masked to -100 in labels during SFT."
+            )
+        return tokenizer
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
@@ -1200,6 +1210,52 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     input_ids = input_ids_result
     labels = input_ids.clone()
     mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
+
+    # Optionally mask out <think>...</think> blocks injected by the chat template.
+    # Enable by setting tokenizer.mask_think_tokens = True (TokenizerConfig.mask_think_tokens).
+    mask_think = getattr(tokenizer, "mask_think_tokens", False)
+    think_open_id = tokenizer.convert_tokens_to_ids("<think>") if mask_think else None
+    think_close_id = tokenizer.convert_tokens_to_ids("</think>") if mask_think else None
+    # unk id (what convert_tokens_to_ids returns for unknown tokens) signals the tokenizer
+    # doesn't have these special tokens; fall back to skipping this whole pass in that case.
+    unk_id = tokenizer.unk_token_id
+    if (
+        think_open_id is not None
+        and think_close_id is not None
+        and think_open_id != unk_id
+        and think_close_id != unk_id
+    ):
+        # Trailing-newline token ids vary by tokenizer (Llama3 ~198 for "\n", 271 for "\n\n";
+        # other vocabs differ). Look them up once; empty set if tokenizer has no such tokens.
+        trailing_newline_ids: set[int] = set()
+        for nl_tok in ("\n", "\n\n"):
+            nl_id = tokenizer.convert_tokens_to_ids(nl_tok)
+            if nl_id is not None and nl_id != unk_id:
+                trailing_newline_ids.add(nl_id)
+
+        flat_ids = input_ids.flatten().tolist()
+        flat_labels = labels.flatten().tolist()
+        i = 0
+        while i < len(flat_ids):
+            if flat_ids[i] == think_open_id:
+                # Find matching </think>
+                j = i + 1
+                while j < len(flat_ids) and flat_ids[j] != think_close_id:
+                    j += 1
+                if j < len(flat_ids):
+                    # Mask from <think> through </think> and trailing newlines
+                    end = j + 1
+                    while end < len(flat_ids) and flat_ids[end] in trailing_newline_ids:
+                        end += 1
+                    for k in range(i, end):
+                        flat_labels[k] = -100
+                    i = end
+                else:
+                    i += 1
+            else:
+                i += 1
+        labels = torch.tensor(flat_labels).unsqueeze(0)
+
     attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
@@ -1626,6 +1682,13 @@ class DatasetConfig:
             dataset = load_dataset(
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
+        elif os.path.isdir(self.dataset_name) and (
+            os.path.exists(os.path.join(self.dataset_name, "dataset_info.json"))
+            or os.path.exists(os.path.join(self.dataset_name, "dataset_dict.json"))
+        ):
+            # Local HF dataset saved with save_to_disk()
+            loaded = load_from_disk(self.dataset_name)
+            dataset = loaded[self.dataset_split] if isinstance(loaded, DatasetDict) else loaded
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(

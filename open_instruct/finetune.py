@@ -22,17 +22,21 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 # isort: on
+import heapq
 import json
 import math
 import os
 import shutil
 import time
+from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Literal
 
 import datasets
 import torch
+import torch.nn.functional as F
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
@@ -41,7 +45,7 @@ from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKw
 from huggingface_hub import HfApi, snapshot_download
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
@@ -71,6 +75,268 @@ from open_instruct.utils import (
 )
 
 logger = get_logger(__name__)
+
+
+class DistributedGroupedBatchSampler(Sampler):
+    """Yields batches of row indices grouped by prompt id, one batch per rank per global step.
+
+    Each global step picks ``batch_size * world_size`` prompts from the dataset; within that
+    global step the prompts are sorted by descending group size and round-robin assigned to
+    ranks so per-rank row counts are balanced when group sizes vary. Each rank therefore
+    yields ``batch_size`` whole prompt-groups per batch.
+
+    ``__len__`` reports per-rank batches per epoch (one batch is yielded on each rank per
+    global step). The last incomplete global step is dropped.
+    """
+
+    def __init__(
+        self,
+        prompt_ids: list[int],
+        batch_size: int,
+        shuffle: bool = True,
+        seed: int = 42,
+        rank: int = 0,
+        world_size: int = 1,
+    ):
+        groups: dict[int, list[int]] = defaultdict(list)
+        for idx, pid in enumerate(prompt_ids):
+            groups[pid].append(idx)
+        self.groups: list[list[int]] = list(groups.values())
+        self.group_sizes: list[int] = [len(g) for g in self.groups]
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.seed = seed
+        self.rank = rank
+        self.world_size = world_size
+        self.epoch = 0
+
+        global_batch_size = batch_size * world_size
+        n_prompts = len(self.groups)
+        n_usable_prompts = (n_prompts // global_batch_size) * global_batch_size
+        self._n_dropped = n_prompts - n_usable_prompts
+        self._steps_per_rank_per_epoch = n_usable_prompts // global_batch_size
+
+        if self.rank == 0:
+            g_sizes = self.group_sizes
+            g_min, g_max = min(g_sizes), max(g_sizes)
+            g_mean = sum(g_sizes) / len(g_sizes)
+            logger.info(
+                f"DistributedGroupedBatchSampler: {n_prompts} prompts, "
+                f"{self._n_dropped} dropped for rank divisibility (global_batch_size={global_batch_size}), "
+                f"{self._steps_per_rank_per_epoch} steps/rank/epoch, "
+                f"group-size min/mean/max = {g_min}/{g_mean:.1f}/{g_max}"
+            )
+            if self._steps_per_rank_per_epoch < 4:
+                logger.warning(
+                    f"Only {self._steps_per_rank_per_epoch} steps/rank/epoch; "
+                    f"consider reducing group_prompts_per_batch ({batch_size}) or world_size ({world_size})."
+                )
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __iter__(self):
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+        if self.shuffle:
+            order = torch.randperm(len(self.groups), generator=g).tolist()
+        else:
+            order = list(range(len(self.groups)))
+
+        # Global batch = `batch_size * world_size` prompts. Within each global batch,
+        # partition prompts across ranks via LPT-with-capacity (Longest Processing Time
+        # first, constrained so each rank gets exactly `batch_size` prompts):
+        # sort prompts by descending group size, then greedily assign each to the
+        # currently least-loaded rank that still has capacity. Every rank runs the
+        # same deterministic assignment and extracts its own bin — no cross-rank
+        # communication needed. Keeps the equal-prompt-count invariant the local-
+        # weights math relies on; strictly ≥ snake's load balance; robust to skewed
+        # group-size distributions.
+        global_batch_size = self.batch_size * self.world_size
+        usable = (len(order) // global_batch_size) * global_batch_size
+        for gb_start in range(0, usable, global_batch_size):
+            gb = order[gb_start : gb_start + global_batch_size]
+            gb_sorted = sorted(gb, key=lambda gi: -self.group_sizes[gi])
+            my_prompts = self._lpt_assign(gb_sorted)[self.rank]
+            indices: list[int] = []
+            for gi in my_prompts:
+                indices.extend(self.groups[gi])
+            yield indices
+
+    def _lpt_assign(self, sorted_desc_prompts: list[int]) -> list[list[int]]:
+        """Greedy LPT with per-rank capacity = self.batch_size. Returns a list of
+        `world_size` bins, each holding exactly `self.batch_size` prompts."""
+        heap: list[tuple[int, int]] = [(0, r) for r in range(self.world_size)]
+        # heapq treats the tuple lex order, so (0, r) ties break by rank — deterministic.
+        counts = [0] * self.world_size
+        bins: list[list[int]] = [[] for _ in range(self.world_size)]
+        for p in sorted_desc_prompts:
+            load, rank = heapq.heappop(heap)
+            bins[rank].append(p)
+            counts[rank] += 1
+            if counts[rank] < self.batch_size:
+                heapq.heappush(heap, (load + self.group_sizes[p], rank))
+        return bins
+
+    def __len__(self) -> int:
+        return self._steps_per_rank_per_epoch
+
+
+def _is_deepspeed(accelerator: Accelerator) -> bool:
+    return accelerator.state.deepspeed_plugin is not None
+
+
+def _deepspeed_engine(accelerator: Accelerator):
+    """Return the raw DeepSpeed engine, or raise with a helpful message if the internal
+    attribute chain changes across accelerate versions."""
+    wrapped = getattr(accelerator, "deepspeed_engine_wrapped", None)
+    if wrapped is None or getattr(wrapped, "engine", None) is None:
+        raise RuntimeError(
+            "Expected accelerator.deepspeed_engine_wrapped.engine to exist when running "
+            "under DeepSpeed. The accelerate internal layout may have changed — please "
+            "update chunk_accumulation_scope to match."
+        )
+    return wrapped.engine
+
+
+@contextmanager
+def chunk_accumulation_scope(accelerator: Accelerator, model, *, is_boundary: bool):
+    """Hold off grad sync / all-reduce on non-boundary chunks (DDP/FSDP path only).
+
+    For DeepSpeed, the boundary flag must be communicated through accelerate's
+    ``accelerator.backward(loss, sync_gradients=...)`` kwarg rather than via this
+    context manager — accelerate's DS wrapper unconditionally calls
+    ``engine.set_gradient_accumulation_boundary(sync_gradients)`` inside backward,
+    which would overwrite any flag we set here. See the callsite in compute_grouped_step.
+    """
+    if _is_deepspeed(accelerator):
+        # No-op under DS: the boundary flag is threaded through accelerator.backward kwargs.
+        yield
+    else:
+        if is_boundary:
+            yield
+        else:
+            with accelerator.no_sync(model):
+                yield
+
+
+def _global_max_num_chunks(local: int, accelerator: Accelerator) -> int:
+    """All-reduce MAX of the local chunk count across DP ranks.
+
+    Needed because variable group sizes → variable rows-per-rank → variable
+    ``ceil(rows / M)`` chunks per rank, and DDP/DS require every rank to call
+    backward the same number of times per optimizer step or the reducer
+    deadlocks. Ranks with fewer local chunks run dummy padded chunks to catch up.
+    """
+    if accelerator.num_processes <= 1:
+        return local
+    t = torch.tensor(local, device=accelerator.device, dtype=torch.int64)
+    torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.MAX)
+    return int(t.item())
+
+
+def _make_dummy_chunk(template: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """One-row dummy input whose labels are all -100 → zero loss, zero grad, but
+    backward still runs so DDP/DS reducers get their expected call."""
+    dummy = {}
+    for k, v in template.items():
+        if k == "labels":
+            dummy[k] = torch.full((1, v.shape[1]), -100, dtype=v.dtype, device=v.device)
+        elif k == "attention_mask":
+            dummy[k] = torch.ones((1, v.shape[1]), dtype=v.dtype, device=v.device)
+        else:
+            dummy[k] = torch.zeros((1, v.shape[1]), dtype=v.dtype, device=v.device)
+    return dummy
+
+
+def compute_grouped_step(
+    model,
+    batch: dict[str, torch.Tensor],
+    prompt_group_ids: torch.Tensor,
+    accelerator: Accelerator,
+    *,
+    max_rows_per_forward: int,
+) -> torch.Tensor:
+    """Chunked forward + per-chunk weighted backward for the grouped-loss path.
+
+    The full batch contains rows for ``P = num_prompts`` groups (local to this rank).
+    Per-sample weight is ``1 / (P * group_size_of_this_seq)``, computed once over the
+    full batch so the hierarchical-mean normalization is correct across chunk boundaries.
+
+    Each chunk does its own ``accelerator.backward`` inside chunk_accumulation_scope so
+    (a) peak activation memory is bounded by one chunk's forward and (b) all-reduce /
+    DS reduce-scatter fires exactly once per outer accumulate context, on the last chunk.
+
+    Under distributed training with variable group sizes, ranks naturally have different
+    chunk counts. We all-reduce the max and pad shorter ranks with zero-loss dummy chunks
+    so every rank calls ``accelerator.backward`` the same number of times per outer step
+    — otherwise the reducer deadlocks.
+
+    Returns a detached scalar for logging; gradients have already been accumulated into
+    param.grad as a side effect.
+    """
+    _, inverse, counts = prompt_group_ids.unique(return_inverse=True, return_counts=True)
+    num_prompts = counts.shape[0]
+    weights = 1.0 / (num_prompts * counts[inverse].float())
+
+    total_seqs = batch["input_ids"].shape[0]
+    chunk_starts = list(range(0, total_seqs, max_rows_per_forward))
+    local_num_chunks = len(chunk_starts)
+    global_num_chunks = _global_max_num_chunks(local_num_chunks, accelerator)
+    is_sync_outer = accelerator.sync_gradients
+
+    batch_loss_detached = torch.zeros((), dtype=torch.float32, device=accelerator.device)
+
+    for chunk_idx in range(global_num_chunks):
+        is_last_chunk = chunk_idx == global_num_chunks - 1
+        is_boundary = is_sync_outer and is_last_chunk
+
+        if chunk_idx < local_num_chunks:
+            start = chunk_starts[chunk_idx]
+            end = min(start + max_rows_per_forward, total_seqs)
+            chunk = {k: v[start:end] for k, v in batch.items()}
+            chunk_labels = chunk.pop("labels")
+            chunk_weights = weights[start:end]
+        else:
+            # Pad: dummy 1-row batch with all labels = -100 → chunk_loss == 0 → zero grad
+            # contribution, but backward still participates in the reducer's sync.
+            chunk = _make_dummy_chunk(batch)
+            chunk_labels = chunk.pop("labels")
+            chunk_weights = torch.zeros(1, device=accelerator.device)
+
+        with chunk_accumulation_scope(accelerator, model, is_boundary=is_boundary):
+            outputs = model(**chunk, use_cache=False)
+            shift_logits = outputs.logits[..., :-1, :].contiguous()
+            shift_labels = chunk_labels[..., 1:].contiguous()
+            per_token = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                reduction="none",
+                ignore_index=-100,
+            ).view(shift_labels.shape)
+            mask = (shift_labels != -100).float()
+            per_seq = (per_token * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            chunk_loss = (per_seq * chunk_weights).sum()
+
+            # For DeepSpeed we must bypass accelerator.backward, which unconditionally
+            # hard-codes ``sync_gradients=self.sync_gradients`` (=True inside accumulate())
+            # when calling DeepSpeedEngineWrapper.backward(). That overwrites our boundary
+            # flag and turns every chunk into a boundary step, silently desyncing the
+            # forward loss. Mirror DeepSpeedEngineWrapper.backward() directly instead.
+            # (Diagnosed via cross-M divergence in 4-GPU DS fp32 smoke.)
+            if _is_deepspeed(accelerator):
+                ds_engine = _deepspeed_engine(accelerator)
+                ds_engine.set_gradient_accumulation_boundary(is_boundary)
+                ds_engine.backward(chunk_loss)
+                if is_boundary:
+                    ds_engine.step()
+            else:
+                accelerator.backward(chunk_loss)
+
+        batch_loss_detached = batch_loss_detached + chunk_loss.detach().float()
+        del outputs, shift_logits, per_token, per_seq, chunk_loss
+
+    return batch_loss_detached
 
 
 @dataclass
@@ -199,7 +465,15 @@ class FlatArguments:
         metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
     )
     per_device_train_batch_size: int = field(
-        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
+        default=8,
+        metadata={
+            "help": (
+                "Rows per forward pass per GPU/TPU core/CPU. In standard mode this is the "
+                "training batch size. In grouped mode (group_prompts_by_id set), this is the "
+                "memory-chunk size: a prompt-group's responses are processed in forward-pass "
+                "chunks of this many rows."
+            )
+        },
     )
     use_lora: bool = field(
         default=False,
@@ -308,6 +582,39 @@ class FlatArguments:
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
 
+    group_prompts_by_id: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Column name containing prompt IDs for grouped loss averaging. "
+                "When set, loss is averaged within each prompt group before averaging across "
+                "groups (hierarchical mean). See group_prompts_per_batch for batch sizing."
+            )
+        },
+    )
+    group_prompts_per_batch: int = field(
+        default=1,
+        metadata={
+            "help": (
+                "Number of prompt groups contributing to one outer-accumulate batch on each "
+                "rank. Only used when group_prompts_by_id is set. Default 1. The effective "
+                "global batch (across all ranks) is group_prompts_per_batch * world_size "
+                "prompts."
+            )
+        },
+    )
+    # Deprecated: folded into per_device_train_batch_size. Kept as a field so
+    # __post_init__ can raise a clear migration error if someone still passes it.
+    group_max_rows_per_forward: int | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "DEPRECATED / removed. Use per_device_train_batch_size instead (same meaning: "
+                "max rows per forward pass). Passing this flag will raise at startup."
+            )
+        },
+    )
+
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
     packing: bool = field(
@@ -331,6 +638,22 @@ class FlatArguments:
             self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None)
         ) or (self.dataset_mixer is not None and self.dataset_mixer_list is not None):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
+        if self.group_max_rows_per_forward is not None:
+            raise ValueError(
+                "group_max_rows_per_forward was removed; its role is now played by "
+                "per_device_train_batch_size directly. Migrate "
+                "'--per_device_train_batch_size=<P> --group_max_rows_per_forward=<M>' to "
+                "'--per_device_train_batch_size=<M> --group_prompts_per_batch=<P>'."
+            )
+        if self.group_prompts_by_id is not None:
+            if self.packing:
+                raise ValueError("group_prompts_by_id is not compatible with packing=True")
+            if self.sequence_parallel_size > 1:
+                raise ValueError("group_prompts_by_id is not compatible with sequence_parallel_size > 1")
+            if self.use_liger_kernel:
+                raise ValueError("group_prompts_by_id is not compatible with use_liger_kernel (fused cross-entropy)")
+            if self.group_prompts_per_batch < 1:
+                raise ValueError("group_prompts_per_batch must be >= 1")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
         if self.final_lr_ratio is not None:
@@ -374,7 +697,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         accelerator_log_kwargs["project_dir"] = args.output_dir
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
-    dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+    # split_batches=False / even_batches=False: we have a custom rank-aware BatchSampler
+    # for the grouped path; accelerate would otherwise re-shard it. Harmless in the
+    # standard path, which doesn't use a custom sampler.
+    dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True, split_batches=False, even_batches=False)
 
     parallelism_config = None
     if args.sequence_parallel_size > 1 and not args.cache_dataset_only:
@@ -498,19 +824,42 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        target_columns = list(args.dataset_target_columns)
+        if args.group_prompts_by_id and args.group_prompts_by_id not in target_columns:
+            target_columns.append(args.group_prompts_by_id)
         train_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
             tc=tc,
             dataset_transform_fn=args.dataset_transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
+            target_columns=target_columns,
             dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_hash,
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
+        if args.group_prompts_by_id:
+            col = args.group_prompts_by_id
+            if col not in train_dataset.column_names:
+                raise ValueError(
+                    f"group_prompts_by_id column '{col}' not found in dataset. "
+                    f"Available columns: {train_dataset.column_names}"
+                )
+            raw_ids = train_dataset[col]
+            unique_ids = sorted(set(raw_ids))
+            id_map = {v: i for i, v in enumerate(unique_ids)}
+            train_dataset = train_dataset.map(lambda row: {col: id_map[row[col]]})
+            _counts: dict[int, int] = defaultdict(int)
+            for pid in train_dataset[col]:
+                _counts[pid] += 1
+            group_sizes = list(_counts.values())
+            logger.info(
+                f"Grouped prompts by '{col}': {len(unique_ids)} unique prompts, "
+                f"responses per prompt min={min(group_sizes)} max={max(group_sizes)} "
+                f"mean={sum(group_sizes) / len(group_sizes):.1f}"
+            )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
@@ -660,9 +1009,22 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             collate_fn = base_collate_fn
 
     accelerator.print("Creating dataloader")
-    train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
-    )
+    _use_grouped_dataloader = bool(args.group_prompts_by_id)
+    if _use_grouped_dataloader:
+        grouped_sampler = DistributedGroupedBatchSampler(
+            prompt_ids=[int(x) for x in train_dataset[args.group_prompts_by_id]],
+            batch_size=args.group_prompts_per_batch,
+            shuffle=True,
+            seed=args.seed,
+            rank=accelerator.process_index,
+            world_size=accelerator.num_processes,
+        )
+        train_dataloader = DataLoader(train_dataset, batch_sampler=grouped_sampler, collate_fn=collate_fn)
+    else:
+        grouped_sampler = None
+        train_dataloader = DataLoader(
+            train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        )
 
     # Optimizer
     optimizer_grouped_parameters = get_optimizer_grouped_parameters(model, args.weight_decay)
@@ -703,10 +1065,24 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     )
     lr_scheduler = _create_scheduler(args, optimizer, num_training_steps_for_scheduler)
 
-    # Prepare everything with `accelerator`.
-    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, lr_scheduler
-    )
+    # In grouped mode, the DataLoader uses our rank-aware BatchSampler and must NOT go
+    # through accelerator.prepare() — accelerate's DS integration reshards the sampler
+    # even with split_batches=False, producing uneven batches across ranks and breaking
+    # reducer sync. Prepare model/optimizer/lr_scheduler only; iterate the raw DataLoader.
+    #
+    # DeepSpeed reads train_micro_batch_size_per_gpu from its own config; set it
+    # explicitly before prepare() — the one remaining deepspeed_plugin touch, now
+    # documented rather than buried in a branch.
+    if _use_grouped_dataloader:
+        if accelerator.state.deepspeed_plugin is not None:
+            accelerator.state.deepspeed_plugin.deepspeed_config["train_micro_batch_size_per_gpu"] = (
+                args.per_device_train_batch_size
+            )
+        model, optimizer, lr_scheduler = accelerator.prepare(model, optimizer, lr_scheduler)
+    else:
+        model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+            model, optimizer, train_dataloader, lr_scheduler
+        )
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -777,8 +1153,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
-        # UlyssesSPDataLoaderAdapter wraps the real dataloader but doesn't proxy set_epoch
-        getattr(train_dataloader, "dl", train_dataloader).set_epoch(epoch)
+        # UlyssesSPDataLoaderAdapter wraps the real dataloader but doesn't proxy set_epoch.
+        # For the grouped path, set_epoch on our custom sampler directly so the shuffle
+        # re-seeds per epoch; for the standard path, the prepared DataLoader's default
+        # sampler exposes set_epoch via .dl.
+        if _use_grouped_dataloader:
+            grouped_sampler.set_epoch(epoch)
+        else:
+            getattr(train_dataloader, "dl", train_dataloader).set_epoch(epoch)
         total_loss = 0
         total_aux_loss = 0
         if last_checkpoint_path and resume_batch_idx and not skipped_batches:
@@ -790,6 +1172,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = train_dataloader
         for batch in active_dataloader:
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
+            # Extract prompt group IDs before model forward (not a model input)
+            prompt_group_ids = None
+            if args.group_prompts_by_id and args.group_prompts_by_id in batch:
+                prompt_group_ids = batch.pop(args.group_prompts_by_id)
             if args.sequence_parallel_size > 1 and "shift_labels" not in batch:
                 raise ValueError(
                     "`shift_labels` not found in batch with sequence parallelism enabled. "
@@ -815,34 +1201,48 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
             with accelerator.accumulate(model):
-                if args.load_balancing_loss:
-                    outputs = model(**batch, use_cache=False, output_router_logits=True)
-                    total_aux_loss += outputs.aux_loss.detach().float()
+                if prompt_group_ids is not None:
+                    # Grouped path: chunked forward + per-chunk backward, boundary-aware
+                    # so all-reduce / DS reduce-scatter fires exactly once per sync step.
+                    # compute_grouped_step does its own accelerator.backward internally
+                    # and returns a detached scalar for logging.
+                    loss_detached = compute_grouped_step(
+                        model,
+                        batch,
+                        prompt_group_ids,
+                        accelerator,
+                        max_rows_per_forward=args.per_device_train_batch_size,
+                    )
+                    total_loss += loss_detached
                 else:
-                    outputs = model(**batch, use_cache=False)
+                    if args.load_balancing_loss:
+                        outputs = model(**batch, use_cache=False, output_router_logits=True)
+                        total_aux_loss += outputs.aux_loss.detach().float()
+                    else:
+                        outputs = model(**batch, use_cache=False)
 
-                loss = outputs.loss
-                del outputs
+                    loss = outputs.loss
+                    del outputs
 
-                if args.sequence_parallel_size > 1:
-                    sp_group = accelerator.torch_device_mesh["sp"].get_group()
-                    losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
-                    labels_for_counting = batch["shift_labels"]
-                    good_tokens = (labels_for_counting != -100).view(-1).sum().float()
-                    good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
-                        good_tokens.unsqueeze(0), group=sp_group
-                    )
-                    total_loss_sp = sum(
-                        losses_per_rank[rank] * good_tokens_per_rank[rank]
-                        for rank in range(args.sequence_parallel_size)
-                        if good_tokens_per_rank[rank] > 0
-                    )
-                    total_good_tokens = sum(good_tokens_per_rank)
-                    loss = total_loss_sp / torch.clamp(total_good_tokens, min=1)
+                    if args.sequence_parallel_size > 1:
+                        sp_group = accelerator.torch_device_mesh["sp"].get_group()
+                        losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
+                        labels_for_counting = batch["shift_labels"]
+                        good_tokens = (labels_for_counting != -100).view(-1).sum().float()
+                        good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
+                            good_tokens.unsqueeze(0), group=sp_group
+                        )
+                        total_loss_sp = sum(
+                            losses_per_rank[rank] * good_tokens_per_rank[rank]
+                            for rank in range(args.sequence_parallel_size)
+                            if good_tokens_per_rank[rank] > 0
+                        )
+                        total_good_tokens = sum(good_tokens_per_rank)
+                        loss = total_loss_sp / torch.clamp(total_good_tokens, min=1)
 
-                # We keep track of the loss at each logged step
-                total_loss += loss.detach().float()
-                accelerator.backward(loss)
+                    accelerator.backward(loss)
+                    total_loss += loss.detach().float()
+
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -921,6 +1321,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     #    period.  We want the avg over each optimizer step (which scales with the
                     #    global batch size), and the average loss per token and per prediction
                     #    token (which are roughly independent of global batch size).
+                    #
+                    # 3) Grouped-prompt loss (group_prompts_by_id set): each batch's contribution to
+                    #    `sum_loss` is the hierarchical mean over its prompts (sum of per-sample
+                    #    weighted per-seq losses; weights sum to 1 per batch). The resulting
+                    #    avg_loss is the per-batch hierarchical mean. Numerically comparable across
+                    #    runs with the same group_prompts_per_batch, but NOT directly comparable to
+                    #    standard SFT loss (different normalization).
                     total_fwd_passes = (
                         args.logging_steps * args.gradient_accumulation_steps * accelerator.num_processes
                     )
