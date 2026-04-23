@@ -8,7 +8,7 @@ CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 
-for NUM_EPOCHS in 4; do
+for NUM_EPOCHS in 2 4; do
     EXP_NAME="qwen3_4b_base_dapo_epochs${NUM_EPOCHS}"
     RUN_NAME="${EXP_NAME}_$(date +%Y%m%d_%H%M%S)"
 
