@@ -26,8 +26,11 @@ logger = logger_utils.setup_logger(__name__)
 
 
 _CHECKPOINT_FILENAME = "_checkpoint.json"
-_TOKENS_PARTIAL_FILENAME = "_tokens.partial.bin"
-_LABELS_PARTIAL_FILENAME = "_labels.partial.bin"
+_CHECKPOINT_TOKEN_IDS_FILENAME = "_checkpoint_token_ids.bin"
+_CHECKPOINT_LABELS_MASK_FILENAME = "_checkpoint_labels_mask.bin"
+_CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME = "_checkpoint_document_boundaries.bin"
+
+_CHECKPOINT_BOUNDARIES_DTYPE = np.int64
 
 
 def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
@@ -47,7 +50,12 @@ def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
 
 
 def remove_checkpoint(output_dir: str) -> None:
-    for name in (_CHECKPOINT_FILENAME, _TOKENS_PARTIAL_FILENAME, _LABELS_PARTIAL_FILENAME):
+    for name in (
+        _CHECKPOINT_FILENAME,
+        _CHECKPOINT_TOKEN_IDS_FILENAME,
+        _CHECKPOINT_LABELS_MASK_FILENAME,
+        _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME,
+    ):
         pathlib.Path(output_dir, name).unlink(missing_ok=True)
 
 
@@ -187,8 +195,10 @@ def convert_hf_to_numpy_sft(
     token_item_size = np.dtype(token_dtype).itemsize
     logger.info(f"Using dtype '{token_dtype_name}' for token_ids based on vocab size {vocab_size}")
 
-    tokens_partial_path = os.path.join(output_dir, _TOKENS_PARTIAL_FILENAME)
-    labels_partial_path = os.path.join(output_dir, _LABELS_PARTIAL_FILENAME)
+    tokens_path = os.path.join(output_dir, _CHECKPOINT_TOKEN_IDS_FILENAME)
+    labels_path = os.path.join(output_dir, _CHECKPOINT_LABELS_MASK_FILENAME)
+    boundaries_path = os.path.join(output_dir, _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME)
+    boundary_item_size = np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize
 
     checkpoint = load_checkpoint(output_dir) if resume else None
     if checkpoint:
@@ -197,13 +207,12 @@ def convert_hf_to_numpy_sft(
                 f"Checkpoint token_dtype {checkpoint.get('token_dtype')!r} does not match current "
                 f"{token_dtype_name!r}. Refusing to resume."
             )
-        if not (os.path.exists(tokens_partial_path) and os.path.exists(labels_partial_path)):
+        if not (os.path.exists(tokens_path) and os.path.exists(labels_path) and os.path.exists(boundaries_path)):
             raise FileNotFoundError(
-                f"Checkpoint present but partial token/label files missing in {output_dir}. "
+                f"Checkpoint present but partial token/label/boundary files missing in {output_dir}. "
                 "Delete the checkpoint to restart."
             )
         start_idx = checkpoint["samples_processed"]
-        document_boundaries = [tuple(b) for b in checkpoint["document_boundaries"]]
         current_position = checkpoint["current_position"]
         num_samples_skipped = checkpoint["num_samples_skipped"]
         per_dataset_counts = checkpoint["per_dataset_counts"]
@@ -215,8 +224,12 @@ def convert_hf_to_numpy_sft(
         max_token_id = checkpoint["max_token_id"]
         tokens_bytes = checkpoint["tokens_bytes"]
         labels_bytes = checkpoint["labels_bytes"]
-        os.truncate(tokens_partial_path, tokens_bytes)
-        os.truncate(labels_partial_path, labels_bytes)
+        boundaries_bytes = checkpoint["boundaries_bytes"]
+        os.truncate(tokens_path, tokens_bytes)
+        os.truncate(labels_path, labels_bytes)
+        os.truncate(boundaries_path, boundaries_bytes)
+        boundaries_flat = np.fromfile(boundaries_path, dtype=_CHECKPOINT_BOUNDARIES_DTYPE).reshape(-1, 2)
+        document_boundaries = [(int(s), int(e)) for s, e in boundaries_flat]
         logger.info("=== RESUMING from checkpoint ===")
         logger.info(f"  Samples already processed: {start_idx:,}")
         logger.info(f"  Tokens collected: {total_tokens:,}")
@@ -266,7 +279,11 @@ def convert_hf_to_numpy_sft(
     collect_start = time.perf_counter()
     utils.maybe_update_beaker_description(current_step=start_idx, total_steps=total_samples, start_time=collect_start)
     last_description_update = collect_start
-    with open(tokens_partial_path, "ab") as tokens_fh, open(labels_partial_path, "ab") as labels_fh:
+    with (
+        open(tokens_path, "ab") as tokens_fh,
+        open(labels_path, "ab") as labels_fh,
+        open(boundaries_path, "ab") as boundaries_fh,
+    ):
         idx = start_idx - 1
         last_checkpoint_idx = start_idx
         for batch in train_dataset_iter.iter(batch_size=1000):
@@ -300,6 +317,10 @@ def convert_hf_to_numpy_sft(
                     if sample_max > max_token_id:
                         max_token_id = sample_max
 
+                boundary = np.array(
+                    [current_position, current_position + sample_length], dtype=_CHECKPOINT_BOUNDARIES_DTYPE
+                )
+                boundary.tofile(boundaries_fh)
                 document_boundaries.append((current_position, current_position + sample_length))
                 current_position += sample_length
                 total_tokens += sample_length
@@ -329,13 +350,14 @@ def convert_hf_to_numpy_sft(
             if idx + 1 - last_checkpoint_idx >= checkpoint_interval:
                 tokens_fh.flush()
                 labels_fh.flush()
+                boundaries_fh.flush()
                 os.fsync(tokens_fh.fileno())
                 os.fsync(labels_fh.fileno())
+                os.fsync(boundaries_fh.fileno())
                 save_checkpoint(
                     output_dir,
                     {
                         "samples_processed": idx + 1,
-                        "document_boundaries": document_boundaries,
                         "current_position": current_position,
                         "num_samples_skipped": num_samples_skipped,
                         "per_dataset_counts": per_dataset_counts,
@@ -347,6 +369,7 @@ def convert_hf_to_numpy_sft(
                         "max_token_id": max_token_id,
                         "tokens_bytes": total_tokens * token_item_size,
                         "labels_bytes": total_tokens,
+                        "boundaries_bytes": len(document_boundaries) * 2 * boundary_item_size,
                         "token_dtype": token_dtype_name,
                     },
                 )
@@ -373,13 +396,11 @@ def convert_hf_to_numpy_sft(
 
     logger.info(f"Writing converted data to {output_dir}")
     token_chunk_boundaries = _write_memmap_chunked_from_file(
-        f"{output_dir}/token_ids", tokens_partial_path, total_tokens, token_dtype
+        f"{output_dir}/token_ids", tokens_path, total_tokens, token_dtype
     )
     _write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
 
-    labels_src = (
-        np.memmap(labels_partial_path, mode="r", dtype=np.uint8, shape=(total_tokens,)) if total_tokens else None
-    )
+    labels_src = np.memmap(labels_path, mode="r", dtype=np.uint8, shape=(total_tokens,)) if total_tokens else None
     for i, (start, end) in enumerate(token_chunk_boundaries):
         filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
         mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(end - start,))
