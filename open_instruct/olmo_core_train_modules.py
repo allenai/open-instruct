@@ -329,6 +329,16 @@ class GRPOTrainModule(TransformerTrainModule):
         # does not apply here.
         pass
 
+    def optim_step(self) -> None:
+        # No-op: GRPO steps the optimizer internally inside train_batch per mini-batch.
+        # The trainer's external optim_step would re-record optim/* metrics, causing
+        # check_metrics_consistent to hang on gloo all_gather_object.
+        pass
+
+    def zero_grads(self) -> None:
+        # No-op: grads are zeroed inside train_batch after each internal optim_step.
+        pass
+
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
         if self.ref_policy is not None:
