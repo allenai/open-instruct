@@ -581,8 +581,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         Args:
             training_step: Optional training step index, used for tracing when
-                ``args.save_traces`` is enabled. When not provided we fall back
-                to an internal counter that ticks once per call.
+                ``streaming_config.save_traces`` is enabled. When not provided we
+                fall back to an internal counter that ticks once per call.
 
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
@@ -662,7 +662,11 @@ class PolicyTrainerRayProcess(RayProcess):
         # Save trainer-side logprobs alongside rollouts for offline analysis.
         # Only rank 0 writes; with SP>1 each rank sees a partial sequence, so
         # the saved tensors are best-effort for the local slice only.
-        if self.args.save_traces and self.args.rollouts_save_path and self.rank == 0:
+        if (
+            self.streaming_config.save_traces
+            and self.streaming_config.rollouts_save_path
+            and self.rank == 0
+        ):
             with Timer("Trainer logprobs trace save", noop=False):
                 with torch.no_grad():
                     if all(x is None for x in old_logprobs_BT):
@@ -680,7 +684,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             for i, lp in enumerate(old_logprobs_BT)
                         ]
                     rl_utils.save_trainer_logprobs_to_disk(
-                        save_path=self.args.rollouts_save_path,
+                        save_path=self.streaming_config.rollouts_save_path,
                         run_name=self.args.run_name,
                         step=training_step,
                         trainer_logprobs=trace_logprobs_BT,
