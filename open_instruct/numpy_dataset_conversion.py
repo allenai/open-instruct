@@ -11,6 +11,7 @@ The output layout for each `output_dir` is:
 import gzip
 import json
 import os
+import pathlib
 import sys
 import time
 from datetime import datetime
@@ -24,12 +25,7 @@ from open_instruct import dataset_transformation, logger_utils, utils
 logger = logger_utils.setup_logger(__name__)
 
 
-_PARTIAL_TOKEN_IDS_FILENAME = "_tokens.partial.bin"
-_PARTIAL_LABELS_MASK_FILENAME = "_labels.partial.bin"
-_PARTIAL_BOUNDARIES_FILENAME = "_boundaries.partial.bin"
-
 _BOUNDARIES_DTYPE = np.int64
-_BOUNDARY_PAIR_BYTES = 2 * np.dtype(_BOUNDARIES_DTYPE).itemsize
 
 
 def _select_token_dtype(vocab_size: int):
@@ -47,7 +43,7 @@ def _flush_partial_files(*file_handles) -> None:
 
 
 def _write_memmap_chunked_from_file(
-    base_filename: str, source_path: str, total_items: int, dtype, max_size_gb: int = 1
+    base_filename: pathlib.Path, source_path: pathlib.Path, total_items: int, dtype, max_size_gb: int = 1
 ) -> list[tuple[int, int]]:
     item_size = np.dtype(dtype).itemsize
     chunk_size = int((max_size_gb * 1024**3) // item_size)
@@ -59,7 +55,7 @@ def _write_memmap_chunked_from_file(
     src = np.memmap(source_path, mode="r", dtype=dtype, shape=(total_items,))
     for chunk_idx, i in enumerate(range(0, total_items, chunk_size)):
         end = min(i + chunk_size, total_items)
-        filename = f"{base_filename}_part_{chunk_idx:04d}.npy"
+        filename = base_filename.with_name(f"{base_filename.name}_part_{chunk_idx:04d}.npy")
         dst = np.memmap(filename, mode="w+", dtype=dtype, shape=(end - i,))
         dst[:] = src[i:end]
         dst.flush()
@@ -70,10 +66,10 @@ def _write_memmap_chunked_from_file(
 
 
 def _write_metadata_for_chunks(
-    base_filename: str, document_boundaries: np.ndarray, chunk_boundaries: list[tuple[int, int]]
+    base_filename: pathlib.Path, document_boundaries: np.ndarray, chunk_boundaries: list[tuple[int, int]]
 ) -> None:
     for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
-        metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
+        metadata_filename = base_filename.with_name(f"{base_filename.name}_part_{chunk_idx:04d}.csv.gz")
         with gzip.open(metadata_filename, "wt", encoding="utf-8") as f:
             for doc_start, doc_end in document_boundaries:
                 if doc_end > chunk_start and doc_start < chunk_end:
@@ -84,28 +80,27 @@ def _write_metadata_for_chunks(
         logger.info(f"Written metadata {metadata_filename}")
 
 
-def _save_tokenizer(tc: dataset_transformation.TokenizerConfig, output_dir: str) -> None:
-    tokenizer_output_dir = os.path.join(output_dir, "tokenizer")
-    os.makedirs(tokenizer_output_dir, exist_ok=True)
+def _save_tokenizer(tc: dataset_transformation.TokenizerConfig, output_dir: pathlib.Path) -> None:
+    tokenizer_output_dir = output_dir / "tokenizer"
+    tokenizer_output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving tokenizer to {tokenizer_output_dir}...")
-    tc.tokenizer.save_pretrained(tokenizer_output_dir)
+    tc.tokenizer.save_pretrained(str(tokenizer_output_dir))
 
-    chat_template_path = os.path.join(tokenizer_output_dir, "chat_template.jinja")
-    tokenizer_config_path = os.path.join(tokenizer_output_dir, "tokenizer_config.json")
-    if os.path.exists(chat_template_path) and os.path.exists(tokenizer_config_path):
-        with open(chat_template_path) as f:
-            chat_template_content = f.read()
-        with open(tokenizer_config_path) as f:
+    chat_template_path = tokenizer_output_dir / "chat_template.jinja"
+    tokenizer_config_path = tokenizer_output_dir / "tokenizer_config.json"
+    if chat_template_path.exists() and tokenizer_config_path.exists():
+        chat_template_content = chat_template_path.read_text()
+        with tokenizer_config_path.open() as f:
             tokenizer_config = json.load(f)
         if "chat_template" not in tokenizer_config:
             tokenizer_config["chat_template"] = chat_template_content
-            with open(tokenizer_config_path, "w") as f:
+            with tokenizer_config_path.open("w") as f:
                 json.dump(tokenizer_config, f, indent=2)
             logger.info(f"Added chat_template from {chat_template_path} to tokenizer_config.json")
 
 
 def _recover_partial_state(
-    tokens_path: str, labels_path: str, boundaries_path: str, token_item_size: int
+    tokens_path: pathlib.Path, labels_path: pathlib.Path, boundaries_path: pathlib.Path, token_item_size: int
 ) -> tuple[int, int]:
     """Truncate the three partial files to a consistent state and return (num_samples, current_position).
 
@@ -113,15 +108,16 @@ def _recover_partial_state(
     how many bytes of tokens/labels are valid. Any trailing bytes are truncated off.
     """
     for path in (tokens_path, labels_path, boundaries_path):
-        if not os.path.exists(path):
+        if not path.exists():
             return 0, 0
 
-    boundaries_size = os.path.getsize(boundaries_path)
-    valid_bytes = (boundaries_size // _BOUNDARY_PAIR_BYTES) * _BOUNDARY_PAIR_BYTES
+    pair_bytes = 2 * np.dtype(_BOUNDARIES_DTYPE).itemsize
+    boundaries_size = boundaries_path.stat().st_size
+    valid_bytes = (boundaries_size // pair_bytes) * pair_bytes
     if valid_bytes != boundaries_size:
         os.truncate(boundaries_path, valid_bytes)
 
-    num_samples = valid_bytes // _BOUNDARY_PAIR_BYTES
+    num_samples = valid_bytes // pair_bytes
     if num_samples == 0:
         os.truncate(tokens_path, 0)
         os.truncate(labels_path, 0)
@@ -138,9 +134,9 @@ def _recover_partial_state(
 
 def _aggregate_stats(
     train_dataset,
-    boundaries_path: str,
-    labels_path: str,
-    tokens_path: str,
+    boundaries_path: pathlib.Path,
+    labels_path: pathlib.Path,
+    tokens_path: pathlib.Path,
     num_samples: int,
     total_tokens: int,
     token_dtype,
@@ -214,7 +210,7 @@ def _aggregate_stats(
 
 
 def convert_hf_to_numpy_sft(
-    output_dir: str,
+    output_dir: pathlib.Path,
     dataset_mixer_list: list[str],
     dataset_mixer_list_splits: list[str],
     tc: dataset_transformation.TokenizerConfig,
@@ -239,7 +235,7 @@ def convert_hf_to_numpy_sft(
     If `resume=True` and those files already exist, the run continues from where the
     previous one left off. On successful completion, the partial files are deleted.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Verify these values match the tokenizer config used in Olmo-core:")
     logger.info(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
@@ -285,9 +281,9 @@ def convert_hf_to_numpy_sft(
     token_item_size = np.dtype(token_dtype).itemsize
     logger.info(f"Using dtype '{token_dtype_name}' for token_ids based on vocab size {vocab_size}")
 
-    tokens_path = os.path.join(output_dir, _PARTIAL_TOKEN_IDS_FILENAME)
-    labels_path = os.path.join(output_dir, _PARTIAL_LABELS_MASK_FILENAME)
-    boundaries_path = os.path.join(output_dir, _PARTIAL_BOUNDARIES_FILENAME)
+    tokens_path = output_dir / "_tokens.partial.bin"
+    labels_path = output_dir / "_labels.partial.bin"
+    boundaries_path = output_dir / "_boundaries.partial.bin"
 
     if resume:
         start_idx, current_position = _recover_partial_state(
@@ -299,8 +295,7 @@ def convert_hf_to_numpy_sft(
             logger.info("No recoverable partial files found, starting from beginning...")
     else:
         for path in (tokens_path, labels_path, boundaries_path):
-            if os.path.exists(path):
-                os.remove(path)
+            path.unlink(missing_ok=True)
         start_idx = 0
         current_position = 0
 
@@ -334,9 +329,9 @@ def convert_hf_to_numpy_sft(
     last_description_update = collect_start
     idx = start_idx - 1
     with (
-        open(tokens_path, "ab") as tokens_fh,
-        open(labels_path, "ab") as labels_fh,
-        open(boundaries_path, "ab") as boundaries_fh,
+        tokens_path.open("ab") as tokens_fh,
+        labels_path.open("ab") as labels_fh,
+        boundaries_path.open("ab") as boundaries_fh,
     ):
         for batch in train_dataset_iter.iter(batch_size=batch_size):
             batch_input_ids = batch[input_ids_key]
@@ -402,21 +397,20 @@ def convert_hf_to_numpy_sft(
     logger.info(f"Number of samples that should be skipped: {stats['num_samples_skipped']}")
 
     logger.info(f"Writing converted data to {output_dir}")
-    token_chunk_boundaries = _write_memmap_chunked_from_file(
-        f"{output_dir}/token_ids", tokens_path, total_tokens, token_dtype
-    )
+    token_ids_base = output_dir / "token_ids"
+    token_chunk_boundaries = _write_memmap_chunked_from_file(token_ids_base, tokens_path, total_tokens, token_dtype)
 
     document_boundaries = (
         np.memmap(boundaries_path, mode="r", dtype=_BOUNDARIES_DTYPE, shape=(total_samples, 2))
         if total_samples > 0
         else np.zeros((0, 2), dtype=_BOUNDARIES_DTYPE)
     )
-    _write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
+    _write_metadata_for_chunks(token_ids_base, document_boundaries, token_chunk_boundaries)
     del document_boundaries
 
     labels_src = np.memmap(labels_path, mode="r", dtype=np.uint8, shape=(total_tokens,)) if total_tokens else None
     for i, (start, end) in enumerate(token_chunk_boundaries):
-        filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
+        filename = output_dir / f"labels_mask_part_{i:04d}.npy"
         mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(end - start,))
         mmap[:] = labels_src[start:end].astype(np.bool_)
         mmap.flush()
@@ -424,8 +418,7 @@ def convert_hf_to_numpy_sft(
     del labels_src
 
     for path in (tokens_path, labels_path, boundaries_path):
-        if os.path.exists(path):
-            os.remove(path)
+        path.unlink(missing_ok=True)
 
     logger.info("Data conversion completed successfully!")
 
@@ -447,7 +440,7 @@ def convert_hf_to_numpy_sft(
 
 
 def write_dataset_statistics(
-    output_dir: str,
+    output_dir: pathlib.Path,
     dataset_statistics: dict[str, Any],
     total_instances: int,
     total_tokens: int,
@@ -496,7 +489,7 @@ def write_dataset_statistics(
 
     stats_data = {
         "timestamp": timestamp,
-        "output_directory": output_dir,
+        "output_directory": str(output_dir),
         "configuration": {
             "tokenizer": tokenizer_name,
             "max_sequence_length": max_seq_length,
@@ -514,13 +507,13 @@ def write_dataset_statistics(
         },
     }
 
-    json_path = os.path.join(output_dir, "dataset_statistics.json")
-    with open(json_path, "w") as f:
+    json_path = output_dir / "dataset_statistics.json"
+    with json_path.open("w") as f:
         json.dump(stats_data, f, indent=2)
     logger.info(f"Written dataset statistics to {json_path}")
 
-    text_path = os.path.join(output_dir, "dataset_statistics.txt")
-    with open(text_path, "w") as f:
+    text_path = output_dir / "dataset_statistics.txt"
+    with text_path.open("w") as f:
         f.write("Dataset Statistics Report\n")
         f.write("=" * 80 + "\n")
         f.write(f"Generated: {timestamp}\n")

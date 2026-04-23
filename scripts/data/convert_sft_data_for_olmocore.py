@@ -61,6 +61,7 @@ Recommendations:
 """
 
 import os
+import pathlib
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -144,7 +145,7 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
             transform_fn_args.append({})
 
     numpy_dataset_conversion.convert_hf_to_numpy_sft(
-        output_dir=args.output_dir,
+        output_dir=pathlib.Path(args.output_dir),
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,

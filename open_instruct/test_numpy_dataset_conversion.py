@@ -8,6 +8,7 @@ import gc
 import gzip
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -63,8 +64,8 @@ class TestWriteMemmapChunked(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp_dir.cleanup)
-        self.base = os.path.join(self.tmp_dir.name, "token_ids")
-        self.source_path = os.path.join(self.tmp_dir.name, "source.bin")
+        self.base = pathlib.Path(self.tmp_dir.name) / "token_ids"
+        self.source_path = pathlib.Path(self.tmp_dir.name) / "source.bin"
 
     def _write_source(self, data, dtype):
         np.asarray(data, dtype=dtype).tofile(self.source_path)
@@ -106,7 +107,7 @@ class TestWriteMetadataForChunks(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp_dir.cleanup)
-        self.base = os.path.join(self.tmp_dir.name, "token_ids")
+        self.base = pathlib.Path(self.tmp_dir.name) / "token_ids"
 
     def _read_chunk_rows(self, chunk_idx):
         path = f"{self.base}_part_{chunk_idx:04d}.csv.gz"
@@ -141,7 +142,7 @@ class TestSaveTokenizer(unittest.TestCase):
         )
 
     def test_saves_tokenizer_files(self):
-        numpy_dataset_conversion._save_tokenizer(self.tc, self.tmp_dir.name)
+        numpy_dataset_conversion._save_tokenizer(self.tc, pathlib.Path(self.tmp_dir.name))
         tokenizer_dir = os.path.join(self.tmp_dir.name, "tokenizer")
         self.assertTrue(os.path.isdir(tokenizer_dir))
         self.assertTrue(os.path.exists(os.path.join(tokenizer_dir, "tokenizer_config.json")))
@@ -180,7 +181,7 @@ class TestWriteDatasetStatistics(unittest.TestCase):
             ]
         }
         numpy_dataset_conversion.write_dataset_statistics(
-            output_dir=self.tmp_dir.name,
+            output_dir=pathlib.Path(self.tmp_dir.name),
             dataset_statistics=dataset_stats,
             total_instances=13,
             total_tokens=1000,
@@ -214,7 +215,7 @@ class TestWriteDatasetStatistics(unittest.TestCase):
 
     def test_zero_totals_does_not_divide_by_zero(self):
         numpy_dataset_conversion.write_dataset_statistics(
-            output_dir=self.tmp_dir.name,
+            output_dir=pathlib.Path(self.tmp_dir.name),
             dataset_statistics={"per_dataset_stats": []},
             total_instances=0,
             total_tokens=0,
@@ -271,7 +272,7 @@ class TestConvertHfToNumpySft(unittest.TestCase):
         )
 
     def test_end_to_end_small(self):
-        output_dir = os.path.join(self.temp_dir.name, "out_e2e")
+        output_dir = pathlib.Path(self.temp_dir.name) / "out_e2e"
         numpy_dataset_conversion.convert_hf_to_numpy_sft(
             output_dir=output_dir,
             dataset_mixer_list=[os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
@@ -284,21 +285,21 @@ class TestConvertHfToNumpySft(unittest.TestCase):
             dataset_local_cache_dir=self.temp_dir.name,
             num_examples=2,
         )
-        token_file = os.path.join(output_dir, "token_ids_part_0000.npy")
-        labels_file = os.path.join(output_dir, "labels_mask_part_0000.npy")
-        metadata_file = os.path.join(output_dir, "token_ids_part_0000.csv.gz")
-        stats_json = os.path.join(output_dir, "dataset_statistics.json")
+        token_file = output_dir / "token_ids_part_0000.npy"
+        labels_file = output_dir / "labels_mask_part_0000.npy"
+        metadata_file = output_dir / "token_ids_part_0000.csv.gz"
+        stats_json = output_dir / "dataset_statistics.json"
 
-        self.assertTrue(os.path.exists(token_file))
-        self.assertTrue(os.path.exists(labels_file))
-        self.assertTrue(os.path.exists(metadata_file))
-        self.assertTrue(os.path.exists(stats_json))
-        self.assertTrue(os.path.isdir(os.path.join(output_dir, "tokenizer")))
+        self.assertTrue(token_file.exists())
+        self.assertTrue(labels_file.exists())
+        self.assertTrue(metadata_file.exists())
+        self.assertTrue(stats_json.exists())
+        self.assertTrue((output_dir / "tokenizer").is_dir())
         for partial in ("_tokens.partial.bin", "_labels.partial.bin", "_boundaries.partial.bin"):
-            self.assertFalse(os.path.exists(os.path.join(output_dir, partial)))
+            self.assertFalse((output_dir / partial).exists())
 
-        token_size = os.path.getsize(token_file)
-        labels_size = os.path.getsize(labels_file)
+        token_size = token_file.stat().st_size
+        labels_size = labels_file.stat().st_size
         self.assertGreater(token_size, 0)
         self.assertGreater(labels_size, 0)
 
@@ -359,10 +360,10 @@ class TestResumeEquivalence(unittest.TestCase):
         )
 
     def test_one_shot_matches_interrupt_plus_resume(self):
-        golden = os.path.join(self.temp_dir.name, "golden")
+        golden = pathlib.Path(self.temp_dir.name) / "golden"
         self._run(golden, resume=False)
 
-        interrupted = os.path.join(self.temp_dir.name, "interrupted")
+        interrupted = pathlib.Path(self.temp_dir.name) / "interrupted"
         real_flush = numpy_dataset_conversion._flush_partial_files
         call_count = {"n": 0}
 
@@ -380,26 +381,25 @@ class TestResumeEquivalence(unittest.TestCase):
             self._run(interrupted, resume=False)
 
         self.assertTrue(
-            os.path.exists(os.path.join(interrupted, "_boundaries.partial.bin")),
-            "interrupted run should have left partial files behind",
+            (interrupted / "_boundaries.partial.bin").exists(), "interrupted run should have left partial files behind"
         )
 
         self._run(interrupted, resume=True)
 
         artifacts = sorted(
-            name
-            for name in os.listdir(golden)
-            if name.startswith("token_ids_part_") or name.startswith("labels_mask_part_")
+            p.name
+            for p in golden.iterdir()
+            if p.name.startswith("token_ids_part_") or p.name.startswith("labels_mask_part_")
         )
         self.assertGreater(len(artifacts), 0, "golden run produced no artifacts")
         for name in artifacts:
-            golden_path = os.path.join(golden, name)
-            interrupted_path = os.path.join(interrupted, name)
+            golden_path = golden / name
+            interrupted_path = interrupted / name
             if name.endswith(".gz"):
                 with gzip.open(golden_path, "rb") as f1, gzip.open(interrupted_path, "rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
             else:
-                with open(golden_path, "rb") as f1, open(interrupted_path, "rb") as f2:
+                with golden_path.open("rb") as f1, interrupted_path.open("rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
 
 
