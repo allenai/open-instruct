@@ -74,7 +74,7 @@ def _write_metadata_for_chunks(
 ) -> None:
     for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
         metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
-        with gzip.open(metadata_filename, "wt") as f:
+        with gzip.open(metadata_filename, "wt", encoding="utf-8") as f:
             for doc_start, doc_end in document_boundaries:
                 if doc_end > chunk_start and doc_start < chunk_end:
                     adjusted_start = max(0, int(doc_start) - chunk_start)
