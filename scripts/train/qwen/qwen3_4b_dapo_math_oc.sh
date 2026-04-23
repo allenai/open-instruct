@@ -28,6 +28,8 @@ uv run mason.py \
     --env TORCH_NCCL_TRACE_BUFFER_SIZE=1048576 \
     --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
     --env TORCH_NCCL_DESYNC_DEBUG=1 \
+    --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=180 \
+    --env PYTHONUNBUFFERED=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \

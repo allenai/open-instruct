@@ -88,8 +88,13 @@ class VLLMWeightSyncCallback(Callback):
         if step % self.sync_interval != 0:
             return
 
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        logger.info(f"[post_step step={step} rank={rank}] entering")
+
         torch.cuda.empty_cache()
+        logger.info(f"[post_step step={step} rank={rank}] set_should_stop(True) start")
         ray.get(self.actor_manager.set_should_stop.remote(True))
+        logger.info(f"[post_step step={step} rank={rank}] set_should_stop(True) done")
 
         model = self.train_module.model
         refs = vllm_utils.broadcast_weights_to_vllm(
@@ -99,15 +104,22 @@ class VLLMWeightSyncCallback(Callback):
             model_step=step,
             name_mapper=self.name_mapper,
         )
+        logger.info(f"[post_step step={step} rank={rank}] ray_get(refs) start")
         utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
+        logger.info(f"[post_step step={step} rank={rank}] ray_get(refs) done")
 
+        logger.info(f"[post_step step={step} rank={rank}] wake_up start")
         utils.ray_get_with_progress(
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
+        logger.info(f"[post_step step={step} rank={rank}] wake_up done")
         ray.get(self.actor_manager.set_should_stop.remote(False))
+        logger.info(f"[post_step step={step} rank={rank}] set_should_stop(False) done")
 
         if dist.is_initialized():
+            logger.info(f"[post_step step={step} rank={rank}] exit barrier start")
             dist.barrier()
+            logger.info(f"[post_step step={step} rank={rank}] exit barrier done")
 
 
 @dataclass
