@@ -660,14 +660,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.cuda.empty_cache()
 
         # Save trainer-side logprobs alongside rollouts for offline analysis.
-        # Only rank 0 writes; with SP>1 each rank sees a partial sequence, so
-        # the saved tensors are best-effort for the local slice only.
-        if (
-            self.streaming_config.save_traces
-            and self.streaming_config.rollouts_save_path
-            and self.rank == 0
-        ):
-            with Timer("Trainer logprobs trace save", noop=False):
+        # ``compute_logprobs`` runs a distributed forward (ZeRO-3 all-gathers +
+        # Ulysses SP all-to-alls), so every rank must participate — gating the
+        # whole block on rank 0 would deadlock the collective. Only rank 0
+        # actually writes the resulting tensors to disk; with SP>1 each rank
+        # sees a partial sequence, so the saved tensors are best-effort for
+        # the local slice only.
+        if self.streaming_config.save_traces and self.streaming_config.rollouts_save_path:
+            with Timer("Trainer logprobs trace save", noop=self.rank != 0):
                 with torch.no_grad():
                     if all(x is None for x in old_logprobs_BT):
                         trace_logprobs_BT = grpo_utils.compute_logprobs(
@@ -683,14 +683,15 @@ class PolicyTrainerRayProcess(RayProcess):
                             lp if lp is not None else torch.zeros_like(data_BT.response_masks[i][:, 1:], dtype=torch.float32)
                             for i, lp in enumerate(old_logprobs_BT)
                         ]
-                    rl_utils.save_trainer_logprobs_to_disk(
-                        save_path=self.streaming_config.rollouts_save_path,
-                        run_name=self.args.run_name,
-                        step=training_step,
-                        trainer_logprobs=trace_logprobs_BT,
-                        response_masks=[m[:, 1:] for m in data_BT.response_masks],
-                        sp_size=getattr(self.args, "sequence_parallel_size", 1),
-                    )
+                    if self.rank == 0:
+                        rl_utils.save_trainer_logprobs_to_disk(
+                            save_path=self.streaming_config.rollouts_save_path,
+                            run_name=self.args.run_name,
+                            step=training_step,
+                            trainer_logprobs=trace_logprobs_BT,
+                            response_masks=[m[:, 1:] for m in data_BT.response_masks],
+                            sp_size=getattr(self.args, "sequence_parallel_size", 1),
+                        )
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
