@@ -129,33 +129,34 @@ class DockerBackend(SandboxBackend):
             exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
         except docker_sdk.errors.NotFound:
             self._log_container_state("exec_not_found", container_id)
-            # The container can disappear between reset/start and exec (e.g. daemon cleanup
-            # or external removal). Recreate it once and retry this command.
             logger.warning(
                 "Docker container disappeared before exec (container=%s, image=%s). "
                 "Restarting and retrying command once.",
                 container_id,
                 self._image,
             )
-            self.start()
-            if self._container is None:
-                raise RuntimeError("Failed to restart Docker container after NotFound error.")
-            logger.info(
-                "Retrying command after container restart (old_container=%s, new_container=%s)",
-                container_id,
-                self._container.short_id,
-            )
-            exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
+            exit_code, output = self._restart_and_retry_exec(wrapped, container_id)
         except docker_sdk.errors.APIError as e:
-            # Capture state for conflicts like "container is not running" before bubbling up.
+            # 409 Conflict is typically "container is not running" (OOM, crash,
+            # external stop). Treat it like a lost container: restart + retry.
             self._log_container_state("exec_api_error", container_id)
-            logger.warning(
-                "Docker exec APIError (container=%s, image=%s): %s",
-                container_id,
-                self._image,
-                e,
-            )
-            raise
+            if getattr(e, "status_code", None) == 409:
+                logger.warning(
+                    "Docker exec 409 Conflict (container=%s, image=%s): %s. "
+                    "Restarting and retrying command once.",
+                    container_id,
+                    self._image,
+                    e,
+                )
+                exit_code, output = self._restart_and_retry_exec(wrapped, container_id)
+            else:
+                logger.warning(
+                    "Docker exec APIError (container=%s, image=%s): %s",
+                    container_id,
+                    self._image,
+                    e,
+                )
+                raise
         stdout_raw = (output[0] or b"") if output else b""
         stderr_raw = (output[1] or b"") if output else b""
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
@@ -163,6 +164,22 @@ class DockerBackend(SandboxBackend):
         if exit_code == 124:
             stderr = f"Command timed out after {self._timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    def _restart_and_retry_exec(self, wrapped: str, old_container_id: str):
+        """Recreate the container and re-run a prepared bash command once.
+
+        Shared between the NotFound and 409-Conflict paths. Returns
+        ``(exit_code, output)`` from the retried ``exec_run``.
+        """
+        self.start()
+        if self._container is None:
+            raise RuntimeError("Failed to restart Docker container during exec retry.")
+        logger.info(
+            "Retrying command after container restart (old_container=%s, new_container=%s)",
+            old_container_id,
+            self._container.short_id,
+        )
+        return self._container.exec_run(["bash", "-c", wrapped], demux=True)
 
     def _log_container_state(self, reason: str, container_id: str) -> None:
         """Best-effort container state diagnostics for flaky lifecycle issues."""
