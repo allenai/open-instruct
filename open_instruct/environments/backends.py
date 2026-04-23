@@ -35,6 +35,15 @@ class ExecutionResult:
     exit_code: int
 
 
+class SandboxOOMError(RuntimeError):
+    """Raised when the sandbox container was killed by the OOM reaper.
+
+    Callers should treat this as a terminal condition for the current
+    episode (reward 0, done=True) rather than retrying, because the
+    agent's next command will almost certainly trip the same limit.
+    """
+
+
 class SandboxBackend(ABC):
     """Abstract interface for code/command execution backends."""
 
@@ -138,9 +147,15 @@ class DockerBackend(SandboxBackend):
             exit_code, output = self._restart_and_retry_exec(wrapped, container_id)
         except docker_sdk.errors.APIError as e:
             # 409 Conflict is typically "container is not running" (OOM, crash,
-            # external stop). Treat it like a lost container: restart + retry.
+            # external stop). Raise SandboxOOMError when OOM-killed so the
+            # episode can terminate cleanly; otherwise restart + retry.
             self._log_container_state("exec_api_error", container_id)
             if getattr(e, "status_code", None) == 409:
+                if self._container_was_oom_killed(container_id):
+                    raise SandboxOOMError(
+                        f"Sandbox container {container_id} (image={self._image}) "
+                        f"was OOM-killed. Aborting episode."
+                    ) from e
                 logger.warning(
                     "Docker exec 409 Conflict (container=%s, image=%s): %s. "
                     "Restarting and retrying command once.",
@@ -164,6 +179,18 @@ class DockerBackend(SandboxBackend):
         if exit_code == 124:
             stderr = f"Command timed out after {self._timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    def _container_was_oom_killed(self, container_id: str) -> bool:
+        """Best-effort probe for ``State.OOMKilled``. Returns False on any error."""
+        if self._client is None:
+            return False
+        try:
+            container = self._client.containers.get(container_id)
+            with contextlib.suppress(Exception):
+                container.reload()
+            return bool(container.attrs.get("State", {}).get("OOMKilled"))
+        except Exception:
+            return False
 
     def _restart_and_retry_exec(self, wrapped: str, old_container_id: str):
         """Recreate the container and re-run a prepared bash command once.

@@ -24,7 +24,7 @@ from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 
-from .backends import SandboxBackend, create_backend
+from .backends import SandboxBackend, SandboxOOMError, create_backend
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
 from .tools.utils import coerce_args
 
@@ -268,7 +268,19 @@ class SWERLSandboxEnv(RLEnvironment):
 
         if call.name in ("bash", "execute_bash"):
             args = coerce_args(_BASH_TOOL["function"]["parameters"], call.args)
-            return self._execute_bash(args)
+            try:
+                return self._execute_bash(args)
+            except SandboxOOMError as e:
+                logger.warning(f"[{self._task_id}] sandbox OOM: {e}")
+                return StepResult(
+                    result=(
+                        "Sandbox container was killed by the OOM reaper. "
+                        "Ending episode with reward 0."
+                    ),
+                    reward=0.0,
+                    done=True,
+                    metadata={"oom_killed": True, "task_id": self._task_id},
+                )
         else:
             return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash")
 
