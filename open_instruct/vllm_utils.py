@@ -1408,7 +1408,7 @@ def broadcast_weights_to_vllm(
         ray.get([engine.sleep.remote() for engine in vllm_engines])
         _phase(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() done")
 
-    if model_update_group is None:
+    if model_update_group is None and is_rank_0:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
