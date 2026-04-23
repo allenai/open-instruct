@@ -27,7 +27,7 @@ for NUM_EPOCHS in 2 4; do
         --gpus $NUM_GPUS \
         --budget ai2/oe-adapt \
         -- \
-    uv run open_instruct/grpo.py \
+    uv run open_instruct/grpo_fast.py \
         --run_name "${RUN_NAME}" \
         --exp_name "${EXP_NAME}" \
         --num_epochs ${NUM_EPOCHS} \
