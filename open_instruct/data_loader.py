@@ -67,7 +67,6 @@ class NeverGiveUpAccumulationState:
     pending_best_reward: dict[str, float] = field(default_factory=dict)
     pending_response_counts: dict[str, int] = field(default_factory=dict)
     pending_reward_sums: dict[str, float] = field(default_factory=dict)
-    pending_last_model_step: dict[str, int | None] = field(default_factory=dict)
 
 
 def _sanitize_metric_name(name: str) -> str:
@@ -1387,7 +1386,6 @@ def accumulate_inference_batches(
     pending_never_give_up_best_reward = never_give_up_state.pending_best_reward
     pending_never_give_up_response_counts = never_give_up_state.pending_response_counts
     pending_never_give_up_reward_sums = never_give_up_state.pending_reward_sums
-    pending_never_give_up_last_model_step = never_give_up_state.pending_last_model_step
 
     def pop_pending_state(
         chain_id: str, current_model_step: int | None
@@ -1399,16 +1397,9 @@ def accumulate_inference_batches(
             pending_best_reward = pending_never_give_up_best_reward.pop(chain_id, None)
             pending_response_count = pending_never_give_up_response_counts.pop(chain_id, 0)
             pending_reward_sum = pending_never_give_up_reward_sums.pop(chain_id, 0.0)
-            pending_last_model_step = pending_never_give_up_last_model_step.pop(chain_id, None)
 
         if current_model_step is None:
             return pending_results, pending_metrics, pending_best_reward, pending_response_count, pending_reward_sum
-
-        if (
-            pending_last_model_step is not None
-            and current_model_step - pending_last_model_step > maintain_pending_ngu_age
-        ):
-            return [], [], None, 0, 0.0
 
         filtered_pending: list[tuple[data_types.GenerationResult, dict[str, Any] | None]] = []
         for pending_result, pending_metric in zip(pending_results, pending_metrics, strict=False):
@@ -1435,7 +1426,6 @@ def accumulate_inference_batches(
         best_reward: float,
         pending_response_count: int,
         pending_reward_sum: float,
-        model_step: int | None,
     ) -> None:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
@@ -1449,7 +1439,6 @@ def accumulate_inference_batches(
             pending_never_give_up_best_reward[chain_id] = best_reward
             pending_never_give_up_response_counts[chain_id] = pending_response_count
             pending_never_give_up_reward_sums[chain_id] = pending_reward_sum
-            pending_never_give_up_last_model_step[chain_id] = model_step
 
     def clear_pending_state(chain_id: str) -> None:
         lock = never_give_up_state_lock or contextlib.nullcontext()
@@ -1459,7 +1448,6 @@ def accumulate_inference_batches(
             pending_never_give_up_best_reward.pop(chain_id, None)
             pending_never_give_up_response_counts.pop(chain_id, None)
             pending_never_give_up_reward_sums.pop(chain_id, None)
-            pending_never_give_up_last_model_step.pop(chain_id, None)
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
@@ -1539,6 +1527,8 @@ def accumulate_inference_batches(
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         prompt_dataset_key = _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
         chain_id = get_never_give_up_chain_id(result.prompt_id)
+        # Pull any retry-chain state for this prompt out of the shared NGU cache before we decide
+        # whether this attempt is another zero-std retry, a give-up, or the first accepted attempt.
         (pending_results, pending_metrics, pending_best_reward, pending_response_count, pending_reward_sum) = (
             pop_pending_state(chain_id, result.model_step)
         )
@@ -1582,6 +1572,9 @@ def accumulate_inference_batches(
                     pending_response_count += len(result.responses)
                     pending_reward_sum += float(reward_scores.sum())
                 if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
+                    # Keep the retry-chain state only when we are actually requeueing the same prompt.
+                    # A later accepted attempt will merge these completions and/or use these counts in
+                    # the grouped-advantage baseline.
                     store_pending_state(
                         chain_id,
                         pending_results,
@@ -1589,7 +1582,6 @@ def accumulate_inference_batches(
                         best_reward,
                         pending_response_count,
                         pending_reward_sum,
-                        result.model_step,
                     )
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
@@ -1600,6 +1592,8 @@ def accumulate_inference_batches(
                 if progress_callback is not None:
                     progress_callback(num_prompts_sampled, target_total)
             if chain_id is not None:
+                # We are giving up on this retry chain, so drop anything we loaded from pending NGU state
+                # instead of leaving it around for an unrelated future attempt.
                 clear_pending_state(chain_id)
             give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
                 result.responses

@@ -1,13 +1,12 @@
 import tempfile
 import unittest
-from queue import Queue
 
 import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
-from open_instruct import data_loader, data_types, utils
+from open_instruct import data_loader, data_types
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -210,45 +209,6 @@ class TestNeverGiveUpPendingAge(unittest.TestCase):
         config = data_loader.StreamingDataLoaderConfig()
         self.assertEqual(config.maintain_pending_ngu_age, 2)
         self.assertIsNone(config.maintain_pending_ngu_count_rescale)
-
-    def test_accumulate_inference_batches_drops_stale_pending_counts(self):
-        inference_results_Q = Queue(maxsize=1)
-        inference_results_Q.put(_make_generation_result("0_0_1", [0.0, 1.0, 0.0, 1.0], model_step=3))
-
-        never_give_up_state = data_loader.NeverGiveUpAccumulationState(
-            pending_response_counts={"0_0": 4},
-            pending_reward_sums={"0_0": 0.0},
-            pending_best_reward={"0_0": 0.0},
-            pending_last_model_step={"0_0": 0},
-        )
-
-        _, batch, _, batch_stats = data_loader.accumulate_inference_batches(
-            inference_results_Q=inference_results_Q,
-            generation_config=type("GenerationConfig", (), {"n": 4})(),
-            num_prompts=1,
-            model_dims=utils.ModelDims(
-                num_layers=1, hidden_size=1, intermediate_size=1, vocab_size=1, num_attn_heads=1, head_dim=1
-            ),
-            tokenizer=_FakeTokenizer(),
-            dataset=_make_rlvr_dataset(),
-            base_env_config=data_types.EnvConfig(),
-            active_sampling=True,
-            filter_zero_std_samples=True,
-            never_give_up=1.0,
-            show_progress_bar=False,
-            never_give_up_state=never_give_up_state,
-            maintain_pending_ngu_age=2,
-            maintain_pending_ngu_counts=True,
-        )
-
-        self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
-        self.assertEqual(batch_stats.prompt_sample_counts, [4])
-        self.assertEqual(batch_stats.prompt_baseline_sample_counts, [4])
-        self.assertEqual(batch_stats.prompt_baseline_reward_sums, [2.0])
-        self.assertEqual(batch_stats.prompts_resamples, [2])
-        self.assertEqual(batch_stats.given_up_prompts_resamples, [])
-        self.assertEqual(never_give_up_state.pending_response_counts, {})
-        self.assertEqual(never_give_up_state.pending_reward_sums, {})
 
 
 if __name__ == "__main__":
