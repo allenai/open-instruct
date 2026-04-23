@@ -1330,15 +1330,27 @@ class DataPreparationActor:
                 )
                 self.total_samples_written += len(batch.queries)
 
+            # Truncated-completion stats are computed on the unfiltered batch so
+            # they stay meaningful regardless of whether `mask_truncated_completions`
+            # is actually dropping the rollouts downstream.
+            num_before_filter = len(result.finish_reasons)
+            truncated_idxes = [i for i in range(num_before_filter) if result.finish_reasons[i] != "stop"]
+            num_truncated_completion = len(truncated_idxes)
+            truncated_completion_correct_count = (
+                int(sum(1 for i in truncated_idxes if scores[i] > 0)) if num_truncated_completion else 0
+            )
+            truncated_completion_lengths = np.array(
+                [len(result.responses[i]) for i in truncated_idxes], dtype=np.int64
+            )
+
             if self.config.mask_truncated_completions:
                 stop_idxes = torch.tensor(
-                    [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
+                    [i for i in range(num_before_filter) if result.finish_reasons[i] == "stop"]
                 )
-                num_truncated = len(result.finish_reasons) - len(stop_idxes)
-                if num_truncated > 0:
+                if num_truncated_completion > 0:
                     logger.info(
-                        f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                        f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
+                        f"[DataPreparationActor] Filtered {num_truncated_completion} responses that didn't "
+                        f"finish with 'stop'. Retention rate: {len(stop_idxes) / num_before_filter:.2%}"
                     )
                 scores = scores[stop_idxes]
                 advantages = advantages[stop_idxes]
@@ -1415,6 +1427,17 @@ class DataPreparationActor:
                     "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
                     "val/sequence_lengths_solved_hist": sequence_length_solved,
                     "val/stop_rate": stop_rate,
+                    "val/truncated_completion_count": num_truncated_completion,
+                    "val/truncated_completion_fraction": (
+                        num_truncated_completion / num_before_filter if num_before_filter else 0.0
+                    ),
+                    "val/truncated_completion_correct_count": truncated_completion_correct_count,
+                    "val/truncated_completion_length_mean": (
+                        float(truncated_completion_lengths.mean()) if num_truncated_completion else 0.0
+                    ),
+                    "val/truncated_completion_length_max": (
+                        int(truncated_completion_lengths.max()) if num_truncated_completion else 0
+                    ),
                     "val/advantages_mean": advantages.mean(),
                     "val/advantages_min": advantages.min(),
                     "val/advantages_max": advantages.max(),
