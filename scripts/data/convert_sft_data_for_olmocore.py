@@ -48,6 +48,11 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens and
             --max_seq_length 16384
     ```
 
+    Dependencies for this script when run with `uv` are declared at the top of the file. `uv` will
+    automatically install them *and not the project dependencies*.
+
+    Add `--show-logs` to stream the logs to the terminal. By default `gantry run` will detach the job.
+
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
 
@@ -64,65 +69,67 @@ from open_instruct import dataset_transformation, numpy_dataset_conversion, util
 
 @dataclass
 class ConvertSFTDataArguments:
-    """Arguments for converting SFT data to OLMoCore format."""
+    """
+    Arguments for converting SFT data to OLMoCore format.
+    """
 
-    output_dir: str = field()
     """Output directory"""
+    output_dir: str = field()
 
-    dataset_name: str | None = field(default=None)
     """The name of the dataset to use (via the datasets library)."""
+    dataset_name: str | None = field(default=None)
 
-    dataset_mixer: dict | None = field(default=None)
     """A dictionary of datasets (local or HF) to sample from."""
+    dataset_mixer: dict | None = field(default=None)
 
-    dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"])
     """A list of datasets (local or HF) to sample from."""
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"])
 
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
 
+    """The list of transform functions to apply to the dataset."""
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
-    """The list of transform functions to apply to the dataset."""
 
-    dataset_target_columns: list[str] = field(
-        default_factory=lambda: list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)
-    )
     """The columns to use for the dataset."""
+    dataset_target_columns: list[str] = field(
+        default_factory=lambda: dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE
+    )
 
-    dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
 
-    dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
 
-    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
+    dataset_config_hash: str | None = None
 
-    dataset_skip_cache: bool = False
     """Whether to skip the cache."""
+    dataset_skip_cache: bool = False
 
-    max_seq_length: int | None = field(default=None)
     """Maximum sequence length. If not provided, no truncation will be performed."""
+    max_seq_length: int | None = field(default=None)
 
-    num_examples: int = field(default=0)
     """Number of examples to process for debugging. 0 means process all examples."""
+    num_examples: int = field(default=0)
 
-    visualize: bool = field(default=False)
     """Visualize first token sequence"""
+    visualize: bool = field(default=False)
 
-    tokenizer_config_only: bool = field(default=False)
     """Only write the tokenizer config to the output directory"""
+    tokenizer_config_only: bool = field(default=False)
 
-    resume: bool = field(default=False)
     """Resume from checkpoint if available"""
+    resume: bool = field(default=False)
 
-    checkpoint_interval: int = field(default=100_000)
     """Checkpoint save interval (number of samples)"""
+    checkpoint_interval: int = field(default=100_000)
 
-    shuffle_seed: int = field(default=42)
     """Shuffle seed for reproducible dataset ordering"""
+    shuffle_seed: int = field(default=42)
 
 
 def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConfig) -> None:
