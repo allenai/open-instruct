@@ -795,10 +795,11 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
             is_olmo = "olmo" in config.model_type
     else:
-        is_olmo = False
+        is_olmo = "olmo" in str(tc.tokenizer_name_or_path).lower()
     if is_olmo:
-        assert tc.chat_template_name is not None
-        if "olmo" in tc.chat_template_name:
+        if tc.chat_template_name is None:
+            pass
+        elif "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
         else:
             assert tc.add_bos, "For OLMo, you must run with `--add_bos`."

@@ -9,9 +9,12 @@ The output layout for each `output_dir` is:
 """
 
 import gzip
+import itertools
 import json
 import os
+import pathlib
 import sys
+import time
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
@@ -19,35 +22,180 @@ from typing import Any, Literal
 import numpy as np
 from tqdm import tqdm
 
-from open_instruct import dataset_transformation, logger_utils
+from open_instruct import dataset_transformation, logger_utils, utils
 
 logger = logger_utils.setup_logger(__name__)
 
 
 _CHECKPOINT_FILENAME = "_checkpoint.json"
+_CHECKPOINT_TOKEN_IDS_FILENAME = "_checkpoint_token_ids.bin"
+_CHECKPOINT_LABELS_MASK_FILENAME = "_checkpoint_labels_mask.bin"
+_CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME = "_checkpoint_document_boundaries.bin"
+
+_CHECKPOINT_TOKEN_DTYPE = np.uint32
+_CHECKPOINT_LABELS_DTYPE = np.uint8
+_CHECKPOINT_BOUNDARIES_DTYPE = np.int64
 
 
-def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
-    checkpoint_path = os.path.join(output_dir, _CHECKPOINT_FILENAME)
-    tmp_path = checkpoint_path + ".tmp"
+def _append_bytes(path: pathlib.Path, data: bytes) -> None:
+    with open(path, "ab") as f:
+        f.write(data)
+
+
+def _truncate_to(path: pathlib.Path, size: int) -> None:
+    if not path.exists():
+        raise RuntimeError(f"Checkpoint file {path} does not exist.")
+    current_size = path.stat().st_size
+    if current_size == size:
+        return
+    if current_size < size:
+        raise RuntimeError(
+            f"Checkpoint file {path} is smaller than expected ({current_size} < {size}); data is corrupted."
+        )
+    with open(path, "r+b") as f:
+        f.truncate(size)
+
+
+def save_checkpoint(
+    output_dir: pathlib.Path,
+    samples_processed: int,
+    token_ids: list[int],
+    labels_mask: list[int],
+    document_boundaries: list[tuple[int, int]],
+    scalar_state: dict[str, Any],
+    prev_tokens_written: int,
+    prev_samples_written: int,
+) -> tuple[int, int, int]:
+    """Append new array data to the binary files, then atomically update the JSON
+    metadata. Returns (tokens_written, samples_written, bytes_appended); the first
+    two should be passed back as prev_* on the next call.
+    """
+    tokens_path = output_dir / _CHECKPOINT_TOKEN_IDS_FILENAME
+    labels_path = output_dir / _CHECKPOINT_LABELS_MASK_FILENAME
+    boundaries_path = output_dir / _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME
+    json_path = output_dir / _CHECKPOINT_FILENAME
+
+    # The JSON file is rewritten atomically (write-temp + rename) *after* the binary
+    # appends, so it is the source of truth for how much has been durably committed.
+    # If a previous run crashed between the binary append and the JSON rename, the
+    # binary files may contain trailing bytes beyond `prev_*_written`. Truncate any
+    # such uncommitted bytes before appending this batch so the files stay in
+    # lock-step with the JSON metadata.
+    token_size = np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize
+    labels_size = np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize
+    boundary_size = np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize
+    if prev_tokens_written > 0:
+        _truncate_to(tokens_path, prev_tokens_written * token_size)
+        _truncate_to(labels_path, prev_tokens_written * labels_size)
+    if prev_samples_written > 0:
+        _truncate_to(boundaries_path, prev_samples_written * 2 * boundary_size)
+
+    new_tokens = np.fromiter(
+        itertools.islice(token_ids, prev_tokens_written, None),
+        dtype=_CHECKPOINT_TOKEN_DTYPE,
+        count=len(token_ids) - prev_tokens_written,
+    ).tobytes()
+    new_labels = np.fromiter(
+        itertools.islice(labels_mask, prev_tokens_written, None),
+        dtype=_CHECKPOINT_LABELS_DTYPE,
+        count=len(labels_mask) - prev_tokens_written,
+    ).tobytes()
+    new_boundaries = np.asarray(
+        document_boundaries[prev_samples_written:], dtype=_CHECKPOINT_BOUNDARIES_DTYPE
+    ).tobytes()
+
+    _append_bytes(tokens_path, new_tokens)
+    _append_bytes(labels_path, new_labels)
+    _append_bytes(boundaries_path, new_boundaries)
+    bytes_appended = len(new_tokens) + len(new_labels) + len(new_boundaries)
+
+    tokens_written = len(token_ids)
+    samples_written = len(document_boundaries)
+
+    meta = {
+        **scalar_state,
+        "samples_processed": samples_processed,
+        "tokens_written": tokens_written,
+        "samples_written": samples_written,
+    }
+    tmp_path = json_path.with_suffix(json_path.suffix + ".tmp")
     with open(tmp_path, "w") as f:
-        json.dump(checkpoint_data, f)
-    os.rename(tmp_path, checkpoint_path)
+        json.dump(meta, f)
+    tmp_path.rename(json_path)
+
+    return tokens_written, samples_written, bytes_appended
 
 
-def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
-    checkpoint_path = os.path.join(output_dir, _CHECKPOINT_FILENAME)
-    if os.path.exists(checkpoint_path):
-        with open(checkpoint_path) as f:
-            return json.load(f)
-    return None
+def load_checkpoint(output_dir: pathlib.Path) -> dict[str, Any] | None:
+    json_path = output_dir / _CHECKPOINT_FILENAME
+    if not json_path.exists():
+        return None
+    with open(json_path) as f:
+        meta = json.load(f)
+
+    if "token_ids" in meta:
+        document_boundaries = [tuple(b) for b in meta["document_boundaries"]]
+        return {
+            "samples_processed": meta["samples_processed"],
+            "token_ids": meta["token_ids"],
+            "labels_mask": meta["labels_mask"],
+            "document_boundaries": document_boundaries,
+            "current_position": meta["current_position"],
+            "num_samples_skipped": meta["num_samples_skipped"],
+            "per_dataset_counts": meta["per_dataset_counts"],
+            "per_dataset_tokens": meta["per_dataset_tokens"],
+            "per_dataset_trainable_tokens": meta["per_dataset_trainable_tokens"],
+            "per_dataset_filtered": meta["per_dataset_filtered"],
+            "tokens_written": 0,
+            "samples_written": 0,
+        }
+
+    tokens_written = meta["tokens_written"]
+    samples_written = meta["samples_written"]
+
+    tokens_path = output_dir / _CHECKPOINT_TOKEN_IDS_FILENAME
+    labels_path = output_dir / _CHECKPOINT_LABELS_MASK_FILENAME
+    boundaries_path = output_dir / _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME
+
+    if tokens_written > 0:
+        _truncate_to(tokens_path, tokens_written * np.dtype(_CHECKPOINT_TOKEN_DTYPE).itemsize)
+        _truncate_to(labels_path, tokens_written * np.dtype(_CHECKPOINT_LABELS_DTYPE).itemsize)
+    if samples_written > 0:
+        _truncate_to(boundaries_path, samples_written * 2 * np.dtype(_CHECKPOINT_BOUNDARIES_DTYPE).itemsize)
+
+    token_ids = np.fromfile(tokens_path, dtype=_CHECKPOINT_TOKEN_DTYPE, count=tokens_written).tolist()
+    labels_mask = np.fromfile(labels_path, dtype=_CHECKPOINT_LABELS_DTYPE, count=tokens_written).tolist()
+    boundaries_flat = np.fromfile(boundaries_path, dtype=_CHECKPOINT_BOUNDARIES_DTYPE, count=samples_written * 2)
+    boundaries_flat = boundaries_flat.reshape(-1, 2)
+    document_boundaries = [(int(s), int(e)) for s, e in boundaries_flat]
+
+    return {
+        "samples_processed": meta["samples_processed"],
+        "token_ids": token_ids,
+        "labels_mask": labels_mask,
+        "document_boundaries": document_boundaries,
+        "current_position": meta["current_position"],
+        "num_samples_skipped": meta["num_samples_skipped"],
+        "per_dataset_counts": meta["per_dataset_counts"],
+        "per_dataset_tokens": meta["per_dataset_tokens"],
+        "per_dataset_trainable_tokens": meta["per_dataset_trainable_tokens"],
+        "per_dataset_filtered": meta["per_dataset_filtered"],
+        "tokens_written": tokens_written,
+        "samples_written": samples_written,
+    }
 
 
-def remove_checkpoint(output_dir: str) -> None:
-    checkpoint_path = os.path.join(output_dir, _CHECKPOINT_FILENAME)
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
-        logger.info(f"Removed checkpoint file: {checkpoint_path}")
+def remove_checkpoint(output_dir: pathlib.Path) -> None:
+    for filename in (
+        _CHECKPOINT_FILENAME,
+        _CHECKPOINT_TOKEN_IDS_FILENAME,
+        _CHECKPOINT_LABELS_MASK_FILENAME,
+        _CHECKPOINT_DOCUMENT_BOUNDARIES_FILENAME,
+    ):
+        path = output_dir / filename
+        if path.exists():
+            path.unlink()
+            logger.info(f"Removed checkpoint file: {path}")
 
 
 def _select_token_dtype(vocab_size: int):
@@ -57,9 +205,10 @@ def _select_token_dtype(vocab_size: int):
     raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
 
-def _write_memmap_chunked(base_filename: str, data: list[int], dtype, max_size_gb: int = 1) -> list[tuple[int, int]]:
+def _write_memmap_chunked(
+    base_filename: str, data: list[int], dtype, max_size_bytes: int = 1024**3
+) -> list[tuple[int, int]]:
     item_size = np.dtype(dtype).itemsize
-    max_size_bytes = max_size_gb * 1024**3
     chunk_size = max_size_bytes // item_size
     chunk_boundaries: list[tuple[int, int]] = []
 
@@ -125,7 +274,7 @@ def convert_hf_to_numpy_sft(
     dataset_config_hash: str | None = None,
     shuffle_seed: int = 42,
     checkpoint_interval: int = 100_000,
-    resume: bool = True,
+    resume: bool = False,
     visualize: bool = False,
     tokenizer_config_only: bool = False,
     num_examples: int = 0,
@@ -136,6 +285,7 @@ def convert_hf_to_numpy_sft(
     lets it pick up where it left off.
     """
     os.makedirs(output_dir, exist_ok=True)
+    output_path = pathlib.Path(output_dir)
 
     logger.info("Verify these values match the tokenizer config used in Olmo-core:")
     logger.info(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
@@ -175,18 +325,20 @@ def convert_hf_to_numpy_sft(
         logger.info(f"Selecting {num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(num_examples))
 
-    checkpoint = load_checkpoint(output_dir) if resume else None
+    checkpoint = load_checkpoint(output_path) if resume else None
     if checkpoint:
         start_idx = checkpoint["samples_processed"]
         token_ids = checkpoint["token_ids"]
         labels_mask = checkpoint["labels_mask"]
-        document_boundaries = [tuple(b) for b in checkpoint["document_boundaries"]]
+        document_boundaries = checkpoint["document_boundaries"]
         current_position = checkpoint["current_position"]
         num_samples_skipped = checkpoint["num_samples_skipped"]
         per_dataset_counts = checkpoint["per_dataset_counts"]
         per_dataset_tokens = checkpoint["per_dataset_tokens"]
         per_dataset_trainable_tokens = checkpoint["per_dataset_trainable_tokens"]
         per_dataset_filtered = checkpoint["per_dataset_filtered"]
+        last_tokens_written = checkpoint["tokens_written"]
+        last_samples_written = checkpoint["samples_written"]
         logger.info("=== RESUMING from checkpoint ===")
         logger.info(f"  Samples already processed: {start_idx:,}")
         logger.info(f"  Tokens collected: {len(token_ids):,}")
@@ -204,12 +356,18 @@ def convert_hf_to_numpy_sft(
         per_dataset_tokens = {}
         per_dataset_trainable_tokens = {}
         per_dataset_filtered = {}
+        last_tokens_written = 0
+        last_samples_written = 0
 
     logger.info("Collecting tokens from dataset...")
     sample: Mapping[str, Any]
     total_samples = len(train_dataset)
+    loop_start_time = time.perf_counter()
+    utils.maybe_update_beaker_description(
+        current_step=start_idx, total_steps=total_samples, start_time=loop_start_time
+    )
 
-    train_dataset_iter = train_dataset.select(range(start_idx, total_samples)) if start_idx > 0 else train_dataset
+    train_dataset_iter = train_dataset.select(range(start_idx, total_samples))
 
     for idx, sample in enumerate(
         tqdm(
@@ -253,13 +411,14 @@ def convert_hf_to_numpy_sft(
         )
 
         if (idx + 1) % checkpoint_interval == 0 and idx > start_idx:
-            save_checkpoint(
-                output_dir,
-                {
-                    "samples_processed": idx + 1,
-                    "token_ids": token_ids,
-                    "labels_mask": labels_mask,
-                    "document_boundaries": document_boundaries,
+            checkpoint_start = time.perf_counter()
+            last_tokens_written, last_samples_written, checkpoint_bytes = save_checkpoint(
+                output_path,
+                samples_processed=idx + 1,
+                token_ids=token_ids,
+                labels_mask=labels_mask,
+                document_boundaries=document_boundaries,
+                scalar_state={
                     "current_position": current_position,
                     "num_samples_skipped": num_samples_skipped,
                     "per_dataset_counts": per_dataset_counts,
@@ -267,10 +426,18 @@ def convert_hf_to_numpy_sft(
                     "per_dataset_trainable_tokens": per_dataset_trainable_tokens,
                     "per_dataset_filtered": per_dataset_filtered,
                 },
+                prev_tokens_written=last_tokens_written,
+                prev_samples_written=last_samples_written,
             )
-            logger.info(f"Checkpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens)")
-
-    train_dataset = dataset_transformation.remove_dataset_source_field(train_dataset)
+            elapsed = time.perf_counter() - checkpoint_start
+            logger.info(
+                f"Checkpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens) "
+                f"in {elapsed:.2f}s [{checkpoint_bytes / (1024 * 1024):.1f} MiB, "
+                f"{checkpoint_bytes / (1024 * 1024) / elapsed:.1f} MiB/s]"
+            )
+            utils.maybe_update_beaker_description(
+                current_step=idx + 1, total_steps=total_samples, start_time=loop_start_time
+            )
 
     total_instances = len(train_dataset)
     total_tokens = len(token_ids)
@@ -300,7 +467,7 @@ def convert_hf_to_numpy_sft(
         logger.info(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
     logger.info("Data conversion completed successfully!")
-    remove_checkpoint(output_dir)
+    remove_checkpoint(output_path)
 
     write_dataset_statistics(
         output_dir=output_dir,
