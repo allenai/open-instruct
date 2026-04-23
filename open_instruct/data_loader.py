@@ -1408,16 +1408,14 @@ def accumulate_inference_batches(
                 filtered_pending.append((pending_result, pending_metric))
 
         if not filtered_pending:
-            return [], [], None, pending_response_count, pending_reward_sum
+            # Age filtering only drops stored completions/metrics. Retry-chain aggregates, including the best
+            # reward seen so far, stay live so resampling decisions and grouped-advantage baselines still
+            # reflect all attempts in the chain.
+            return [], [], pending_best_reward, pending_response_count, pending_reward_sum
 
         filtered_results = [pending_result for pending_result, _ in filtered_pending]
         filtered_metrics = [pending_metric for _, pending_metric in filtered_pending]
-        filtered_best_reward = max(
-            max(pending_result.reward_scores)
-            for pending_result in filtered_results
-            if pending_result.reward_scores is not None
-        )
-        return filtered_results, filtered_metrics, filtered_best_reward, pending_response_count, pending_reward_sum
+        return filtered_results, filtered_metrics, pending_best_reward, pending_response_count, pending_reward_sum
 
     def store_pending_state(
         chain_id: str,

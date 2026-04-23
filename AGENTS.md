@@ -11,6 +11,8 @@
 - When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
+- Never run `open_instruct/test_grpo_fast.py` as a full file. Only run isolated tests from it that cover the specific behavior being changed or verified.
+- For cleanup requests tied to one removed check or branch, keep the change surgical: remove only code that exists solely to support that exact check, and do not broaden the cleanup into adjacent mechanisms, config, or tests unless their deadness is directly proven from the specific removal.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - To launch experiment scripts, use the `build_image_and_launch.sh` script, like this: `./scripts/train/build_image_and_launch.sh $SOME_SCRIPT`.
 - For GRPO, we have three test scripts:
