@@ -67,6 +67,7 @@ class NeverGiveUpAccumulationState:
     pending_best_reward: dict[str, float] = field(default_factory=dict)
     pending_response_counts: dict[str, int] = field(default_factory=dict)
     pending_reward_sums: dict[str, float] = field(default_factory=dict)
+    pending_attempt_counts: dict[str, int] = field(default_factory=dict)
 
 
 def _sanitize_metric_name(name: str) -> str:
@@ -1179,16 +1180,6 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
     raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
 
 
-def never_give_up_chain_attempt_index(prompt_id: str) -> int:
-    """1-based NGU attempt index for a prompt_id (1 = first generation, 2 = first requeue, ...)."""
-    prompt_id_parts = prompt_id.split("_")
-    if len(prompt_id_parts) == 2:
-        return 1
-    if len(prompt_id_parts) == 3:
-        return int(prompt_id_parts[2]) + 1
-    return 1
-
-
 def merge_generation_results(
     results: list[data_types.GenerationResult], reward_metrics: list[dict[str, Any] | None]
 ) -> tuple[data_types.GenerationResult, dict[str, Any]]:
@@ -1386,10 +1377,11 @@ def accumulate_inference_batches(
     pending_never_give_up_best_reward = never_give_up_state.pending_best_reward
     pending_never_give_up_response_counts = never_give_up_state.pending_response_counts
     pending_never_give_up_reward_sums = never_give_up_state.pending_reward_sums
+    pending_never_give_up_attempt_counts = never_give_up_state.pending_attempt_counts
 
     def pop_pending_state(
         chain_id: str, current_model_step: int | None
-    ) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None], float | None, int, float]:
+    ) -> tuple[list[data_types.GenerationResult], list[dict[str, Any] | None], float | None, int, float, int]:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
             pending_results = pending_never_give_up_results.pop(chain_id, [])
@@ -1397,9 +1389,17 @@ def accumulate_inference_batches(
             pending_best_reward = pending_never_give_up_best_reward.pop(chain_id, None)
             pending_response_count = pending_never_give_up_response_counts.pop(chain_id, 0)
             pending_reward_sum = pending_never_give_up_reward_sums.pop(chain_id, 0.0)
+            pending_attempt_count = pending_never_give_up_attempt_counts.pop(chain_id, 0)
 
         if current_model_step is None:
-            return pending_results, pending_metrics, pending_best_reward, pending_response_count, pending_reward_sum
+            return (
+                pending_results,
+                pending_metrics,
+                pending_best_reward,
+                pending_response_count,
+                pending_reward_sum,
+                pending_attempt_count,
+            )
 
         filtered_pending: list[tuple[data_types.GenerationResult, dict[str, Any] | None]] = []
         for pending_result, pending_metric in zip(pending_results, pending_metrics, strict=False):
@@ -1411,11 +1411,18 @@ def accumulate_inference_batches(
             # Age filtering only drops stored completions/metrics. Retry-chain aggregates, including the best
             # reward seen so far, stay live so resampling decisions and grouped-advantage baselines still
             # reflect all attempts in the chain.
-            return [], [], pending_best_reward, pending_response_count, pending_reward_sum
+            return [], [], pending_best_reward, pending_response_count, pending_reward_sum, pending_attempt_count
 
         filtered_results = [pending_result for pending_result, _ in filtered_pending]
         filtered_metrics = [pending_metric for _, pending_metric in filtered_pending]
-        return filtered_results, filtered_metrics, pending_best_reward, pending_response_count, pending_reward_sum
+        return (
+            filtered_results,
+            filtered_metrics,
+            pending_best_reward,
+            pending_response_count,
+            pending_reward_sum,
+            pending_attempt_count,
+        )
 
     def store_pending_state(
         chain_id: str,
@@ -1424,6 +1431,7 @@ def accumulate_inference_batches(
         best_reward: float,
         pending_response_count: int,
         pending_reward_sum: float,
+        pending_attempt_count: int,
     ) -> None:
         lock = never_give_up_state_lock or contextlib.nullcontext()
         with lock:
@@ -1437,6 +1445,7 @@ def accumulate_inference_batches(
             pending_never_give_up_best_reward[chain_id] = best_reward
             pending_never_give_up_response_counts[chain_id] = pending_response_count
             pending_never_give_up_reward_sums[chain_id] = pending_reward_sum
+            pending_never_give_up_attempt_counts[chain_id] = pending_attempt_count
 
     def clear_pending_state(chain_id: str) -> None:
         lock = never_give_up_state_lock or contextlib.nullcontext()
@@ -1446,6 +1455,7 @@ def accumulate_inference_batches(
             pending_never_give_up_best_reward.pop(chain_id, None)
             pending_never_give_up_response_counts.pop(chain_id, None)
             pending_never_give_up_reward_sums.pop(chain_id, None)
+            pending_never_give_up_attempt_counts.pop(chain_id, None)
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
@@ -1527,9 +1537,15 @@ def accumulate_inference_batches(
         chain_id = get_never_give_up_chain_id(result.prompt_id)
         # Pull any retry-chain state for this prompt out of the shared NGU cache before we decide
         # whether this attempt is another zero-std retry, a give-up, or the first accepted attempt.
-        (pending_results, pending_metrics, pending_best_reward, pending_response_count, pending_reward_sum) = (
-            pop_pending_state(chain_id, result.model_step)
-        )
+        (
+            pending_results,
+            pending_metrics,
+            pending_best_reward,
+            pending_response_count,
+            pending_reward_sum,
+            pending_attempt_count,
+        ) = pop_pending_state(chain_id, result.model_step)
+        current_attempt_count = pending_attempt_count + 1
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         current_reward = float(reward_scores.max())
@@ -1580,6 +1596,7 @@ def accumulate_inference_batches(
                         best_reward,
                         pending_response_count,
                         pending_reward_sum,
+                        current_attempt_count,
                     )
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
@@ -1600,7 +1617,7 @@ def accumulate_inference_batches(
                 given_up_prompts_by_dataset[prompt_dataset_key] = (
                     given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
                 )
-                given_up_prompts_resamples.append(never_give_up_chain_attempt_index(result.prompt_id))
+                given_up_prompts_resamples.append(current_attempt_count)
             for pending_result in pending_results:
                 record_filtered_prompt(pending_result, prompt_dataset_key)
             record_filtered_prompt(result, prompt_dataset_key)
@@ -1728,8 +1745,7 @@ def accumulate_inference_batches(
         all_prompt_baseline_sample_counts.append(baseline_sample_count)
         all_prompt_baseline_reward_sums.append(baseline_reward_sum)
         all_prompt_datasets.append(prompt_dataset_key)
-        assert result.prompt_id is not None
-        prompts_resamples.append(never_give_up_chain_attempt_index(result.prompt_id))
+        prompts_resamples.append(current_attempt_count)
         accepted_prompt_lengths.append(len(query))
         all_model_steps.extend([result.model_step] * len(result.responses))
 
