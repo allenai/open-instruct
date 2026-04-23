@@ -124,3 +124,13 @@ diverging artifact to find the first mismatching byte range.
 - If you've already produced a full-scale `origin/main` reference on
   weka, point the compare's reference side at it to skip re-running the
   full mixer.
+
+## Golden reference run
+
+There is an existing full-scale `origin/main` tokenization on weka that
+you can compare against without re-running the full mixer:
+
+- Beaker experiment: <https://beaker.org/ex/01KPRDGYEM81EASNNSBZ2HA7KA>
+- Output directory: `/weka/oe-adapt-default/finbarrt/dataset/olmo-hybrid-main-repro`
+
+Point the compare's reference side at that directory.
