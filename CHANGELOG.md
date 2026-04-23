@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Use incremental binary checkpoint for SFT tokenization resume, eliminating O(N²) re-serialization (https://github.com/allenai/open-instruct/pull/1633).
 - Extract numpy SFT conversion helpers into `open_instruct.numpy_dataset_conversion` (https://github.com/allenai/open-instruct/pull/1622).
 - Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
 - Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
