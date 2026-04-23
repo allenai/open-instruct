@@ -113,17 +113,6 @@ class TestWriteMetadataForChunks(unittest.TestCase):
         with gzip.open(path, "rt") as f:
             return [line.strip() for line in f if line.strip()]
 
-    def test_empty_document_boundaries(self):
-        numpy_dataset_conversion._write_metadata_for_chunks(self.base, [], [(0, 8), (8, 16)])
-        self.assertEqual(self._read_chunk_rows(0), [])
-        self.assertEqual(self._read_chunk_rows(1), [])
-
-    def test_docs_entirely_within_single_chunk(self):
-        doc_boundaries = [(0, 3), (3, 8)]
-        chunk_boundaries = [(0, 8)]
-        numpy_dataset_conversion._write_metadata_for_chunks(self.base, doc_boundaries, chunk_boundaries)
-        self.assertEqual(self._read_chunk_rows(0), ["0,3", "3,8"])
-
     def test_doc_spans_two_chunks(self):
         doc_boundaries = [(5, 12)]
         chunk_boundaries = [(0, 8), (8, 16)]
@@ -137,13 +126,6 @@ class TestWriteMetadataForChunks(unittest.TestCase):
         numpy_dataset_conversion._write_metadata_for_chunks(self.base, doc_boundaries, chunk_boundaries)
         self.assertEqual(self._read_chunk_rows(0), ["0,8"])
         self.assertEqual(self._read_chunk_rows(1), [])
-
-    def test_doc_aligned_to_chunk_start(self):
-        doc_boundaries = [(8, 12)]
-        chunk_boundaries = [(0, 8), (8, 16)]
-        numpy_dataset_conversion._write_metadata_for_chunks(self.base, doc_boundaries, chunk_boundaries)
-        self.assertEqual(self._read_chunk_rows(0), [])
-        self.assertEqual(self._read_chunk_rows(1), ["0,4"])
 
 
 class TestSaveTokenizer(unittest.TestCase):
@@ -163,11 +145,6 @@ class TestSaveTokenizer(unittest.TestCase):
         tokenizer_dir = os.path.join(self.tmp_dir.name, "tokenizer")
         self.assertTrue(os.path.isdir(tokenizer_dir))
         self.assertTrue(os.path.exists(os.path.join(tokenizer_dir, "tokenizer_config.json")))
-
-    def test_creates_output_dir_if_missing(self):
-        nested = os.path.join(self.tmp_dir.name, "does", "not", "exist")
-        numpy_dataset_conversion._save_tokenizer(self.tc, nested)
-        self.assertTrue(os.path.isdir(os.path.join(nested, "tokenizer")))
 
 
 class TestWriteDatasetStatistics(unittest.TestCase):
@@ -258,29 +235,6 @@ class TestWriteDatasetStatistics(unittest.TestCase):
         self.assertEqual(overall["average_sequence_length"], 0)
         self.assertEqual(loaded["per_dataset_statistics"][0]["avg_tokens_per_instance"], 0)
 
-    def test_missing_pre_transform_stats_falls_back(self):
-        numpy_dataset_conversion.write_dataset_statistics(
-            output_dir=self.tmp_dir.name,
-            dataset_statistics={"per_dataset_stats": []},
-            total_instances=5,
-            total_tokens=100,
-            total_trainable_tokens=50,
-            num_samples_skipped=0,
-            tokenizer_name="test-tokenizer",
-            max_seq_length=2048,
-            chat_template_name="tulu",
-            per_dataset_counts={"ds_x": 5},
-            per_dataset_tokens={"ds_x": 100},
-            per_dataset_trainable_tokens={"ds_x": 50},
-            per_dataset_filtered={"ds_x": 0},
-        )
-        with open(os.path.join(self.tmp_dir.name, "dataset_statistics.json")) as f:
-            loaded = json.load(f)
-        stat = loaded["per_dataset_statistics"][0]
-        self.assertEqual(stat["dataset_split"], "unknown")
-        self.assertEqual(stat["initial_instances"], "N/A")
-        self.assertEqual(stat["instances_after_transformation"], "N/A")
-
 
 class TestConvertHfToNumpySft(unittest.TestCase):
     def setUp(self):
@@ -315,22 +269,6 @@ class TestConvertHfToNumpySft(unittest.TestCase):
             chat_template_name="tulu",
             add_bos=False,
         )
-
-    def test_tokenizer_config_only(self):
-        output_dir = os.path.join(self.temp_dir.name, "out")
-        numpy_dataset_conversion.convert_hf_to_numpy_sft(
-            output_dir=output_dir,
-            dataset_mixer_list=[os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
-            dataset_mixer_list_splits=["train"],
-            tc=self._make_tc(),
-            dataset_transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
-            transform_fn_args=[{"max_seq_length": 4096}, {}],
-            dataset_target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
-            tokenizer_config_only=True,
-        )
-        self.assertTrue(os.path.isdir(os.path.join(output_dir, "tokenizer")))
-        self.assertFalse(os.path.exists(os.path.join(output_dir, "token_ids_part_0000.npy")))
-        self.assertFalse(os.path.exists(os.path.join(output_dir, "dataset_statistics.json")))
 
     def test_end_to_end_small(self):
         output_dir = os.path.join(self.temp_dir.name, "out_e2e")

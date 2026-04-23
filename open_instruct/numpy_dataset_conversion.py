@@ -11,6 +11,7 @@ The output layout for each `output_dir` is:
 import gzip
 import json
 import os
+import pathlib
 import sys
 import time
 from datetime import datetime
@@ -48,18 +49,9 @@ def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
     return None
 
 
-def remove_checkpoint(output_dir: str) -> None:
-    checkpoint_path = os.path.join(output_dir, _CHECKPOINT_FILENAME)
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
-        logger.info(f"Removed checkpoint file: {checkpoint_path}")
-
-
 def _remove_partial_files(output_dir: str) -> None:
     for name in (_TOKENS_PARTIAL_FILENAME, _LABELS_PARTIAL_FILENAME):
-        path = os.path.join(output_dir, name)
-        if os.path.exists(path):
-            os.remove(path)
+        pathlib.Path(output_dir, name).unlink(missing_ok=True)
 
 
 def _select_token_dtype(vocab_size: int):
@@ -413,7 +405,7 @@ def convert_hf_to_numpy_sft(
     _write_labels_memmap_from_file(output_dir, labels_partial_path, token_chunk_boundaries)
 
     logger.info("Data conversion completed successfully!")
-    remove_checkpoint(output_dir)
+    pathlib.Path(output_dir, _CHECKPOINT_FILENAME).unlink(missing_ok=True)
     _remove_partial_files(output_dir)
 
     write_dataset_statistics(
