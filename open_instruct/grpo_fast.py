@@ -112,6 +112,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.qwen3_5_packing_patch import patch_qwen3_5_packing
+from open_instruct import rl_utils
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -575,12 +576,22 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
-    def step(self):
+    def step(self, training_step: int | None = None):
         """Execute one training step: fetch data from the dataloader and train on it.
+
+        Args:
+            training_step: Optional training step index, used for tracing when
+                ``args.save_traces`` is enabled. When not provided we fall back
+                to an internal counter that ticks once per call.
 
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        if not hasattr(self, "_trace_step_counter"):
+            self._trace_step_counter = 0
+        self._trace_step_counter += 1
+        if training_step is None:
+            training_step = self._trace_step_counter
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
@@ -647,6 +658,35 @@ class PolicyTrainerRayProcess(RayProcess):
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
                         torch.cuda.empty_cache()
+
+        # Save trainer-side logprobs alongside rollouts for offline analysis.
+        # Only rank 0 writes; with SP>1 each rank sees a partial sequence, so
+        # the saved tensors are best-effort for the local slice only.
+        if self.args.save_traces and self.args.rollouts_save_path and self.rank == 0:
+            with Timer("Trainer logprobs trace save", noop=False):
+                with torch.no_grad():
+                    if all(x is None for x in old_logprobs_BT):
+                        trace_logprobs_BT = grpo_utils.compute_logprobs(
+                            self.model,
+                            data_BT,
+                            self.pad_token_id,
+                            self.streaming_config.temperature,
+                            use_grad=False,
+                            cp_contexts=cp_contexts_BT,
+                        )
+                    else:
+                        trace_logprobs_BT = [
+                            lp if lp is not None else torch.zeros_like(data_BT.response_masks[i][:, 1:], dtype=torch.float32)
+                            for i, lp in enumerate(old_logprobs_BT)
+                        ]
+                    rl_utils.save_trainer_logprobs_to_disk(
+                        save_path=self.args.rollouts_save_path,
+                        run_name=self.args.run_name,
+                        step=training_step,
+                        trainer_logprobs=trace_logprobs_BT,
+                        response_masks=[m[:, 1:] for m in data_BT.response_masks],
+                        sp_size=getattr(self.args, "sequence_parallel_size", 1),
+                    )
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
@@ -1639,7 +1679,7 @@ def one_training_step(
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
-            [policy_group.models[i].step.remote() for i in range(args.world_size)],
+            [policy_group.models[i].step.remote(training_step) for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)

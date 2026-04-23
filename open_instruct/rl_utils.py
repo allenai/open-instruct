@@ -128,6 +128,61 @@ def _save_rollouts(
     logger.info(f"Saved {len(records)} rollouts to {filepath}")
 
 
+def _save_trainer_logprobs(
+    save_path: str,
+    run_name: str,
+    step: int,
+    trainer_logprobs,
+    response_masks,
+    sp_size: int,
+) -> None:
+    """Append per-sample trainer logprobs for ``step`` to a step-keyed JSONL."""
+    filename = f"{run_name}_trainer_logprobs_step{step:06d}.jsonl"
+    filepath = os.path.join(save_path, filename)
+    os.makedirs(save_path, exist_ok=True)
+    with open(filepath, "a") as f:
+        for i, (lp, mask) in enumerate(zip(trainer_logprobs, response_masks)):
+            lp_cpu = lp.detach().float().cpu().reshape(-1).tolist()
+            mask_cpu = mask.detach().bool().cpu().reshape(-1).tolist()
+            record = {
+                "step": step,
+                "sample_idx": i,
+                "sp_size": sp_size,
+                "trainer_logprobs": lp_cpu,
+                "response_mask": mask_cpu,
+            }
+            f.write(json.dumps(record) + "\n")
+    logger.info(
+        f"Saved trainer logprobs for step {step} ({len(trainer_logprobs)} samples) to {filepath}"
+    )
+
+
+def save_trainer_logprobs_to_disk(
+    save_path: str,
+    run_name: str,
+    step: int,
+    trainer_logprobs,
+    response_masks,
+    sp_size: int = 1,
+) -> None:
+    """Asynchronously save trainer-side logprobs alongside rollouts for offline
+    analysis (e.g. diagnosing vLLM-vs-trainer logprob divergence).
+
+    With ``sp_size > 1`` each trainer rank sees a partial sequence, so the
+    saved tensors represent only the local SP slice; downstream consumers
+    must gather across ranks themselves.
+    """
+    _rollout_executor.submit(
+        _save_trainer_logprobs,
+        save_path,
+        run_name,
+        step,
+        trainer_logprobs,
+        response_masks,
+        sp_size,
+    )
+
+
 def save_rollouts_to_disk(
     save_path: str,
     run_name: str,
