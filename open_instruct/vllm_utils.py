@@ -69,6 +69,11 @@ from open_instruct.ground_truth_utils import RewardConfig
 
 logger = logger_utils.setup_logger(__name__)
 
+
+def _phase(msg: str) -> None:
+    print(f"[PHASE] {msg}", flush=True, file=sys.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
 #
@@ -1397,11 +1402,11 @@ def broadcast_weights_to_vllm(
 
     is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    logger.warning(f"[weight-sync step={model_step} rank={rank}] entering broadcast_weights_to_vllm")
+    _phase(f"[weight-sync step={model_step} rank={rank}] entering broadcast_weights_to_vllm")
     if is_rank_0:
-        logger.warning(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() start")
+        _phase(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() start")
         ray.get([engine.sleep.remote() for engine in vllm_engines])
-        logger.warning(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() done")
+        _phase(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() done")
 
     if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
@@ -1428,22 +1433,22 @@ def broadcast_weights_to_vllm(
                 "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
                 "collectives interleave with the trainer->vLLM NCCL sends."
             )
-        logger.warning(f"[weight-sync step={model_step} rank={rank}] unshard start ({len(fsdp_submodules)} blocks)")
+        _phase(f"[weight-sync step={model_step} rank={rank}] unshard start ({len(fsdp_submodules)} blocks)")
         for _, block in fsdp_submodules:
             block.unshard()
-        logger.warning(f"[weight-sync step={model_step} rank={rank}] unshard done")
+        _phase(f"[weight-sync step={model_step} rank={rank}] unshard done")
         try:
             if is_rank_0:
-                logger.warning(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
+                _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
                 mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-                logger.warning(f"[weight-sync step={model_step} rank=0] trainer_send_weights done")
+                _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights done")
         finally:
-            logger.warning(f"[weight-sync step={model_step} rank={rank}] reshard start")
+            _phase(f"[weight-sync step={model_step} rank={rank}] reshard start")
             for _, block in fsdp_submodules:
                 block.reshard()
-            logger.warning(f"[weight-sync step={model_step} rank={rank}] reshard done")
-        logger.warning(f"[weight-sync step={model_step} rank={rank}] broadcast_weights_to_vllm returning")
+            _phase(f"[weight-sync step={model_step} rank={rank}] reshard done")
+        _phase(f"[weight-sync step={model_step} rank={rank}] broadcast_weights_to_vllm returning")
         return refs
 
     params = list(model.named_parameters())

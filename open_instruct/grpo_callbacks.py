@@ -8,6 +8,7 @@ These callbacks handle:
 
 import contextlib
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -26,6 +27,11 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def _phase(msg: str) -> None:
+    print(f"[PHASE] {msg}", flush=True, file=sys.stderr)
+
 
 _BLOCK_PATTERN = re.compile(r"blocks\.(\d+)\.(.*)")
 _OLMO_CORE_TO_HF_LAYER_MAPPINGS = {
@@ -89,12 +95,12 @@ class VLLMWeightSyncCallback(Callback):
             return
 
         rank = dist.get_rank() if dist.is_initialized() else 0
-        logger.warning(f"[post_step step={step} rank={rank}] entering")
+        _phase(f"[post_step step={step} rank={rank}] entering")
 
         torch.cuda.empty_cache()
-        logger.warning(f"[post_step step={step} rank={rank}] set_should_stop(True) start")
+        _phase(f"[post_step step={step} rank={rank}] set_should_stop(True) start")
         ray.get(self.actor_manager.set_should_stop.remote(True))
-        logger.warning(f"[post_step step={step} rank={rank}] set_should_stop(True) done")
+        _phase(f"[post_step step={step} rank={rank}] set_should_stop(True) done")
 
         model = self.train_module.model
         refs = vllm_utils.broadcast_weights_to_vllm(
@@ -104,22 +110,22 @@ class VLLMWeightSyncCallback(Callback):
             model_step=step,
             name_mapper=self.name_mapper,
         )
-        logger.warning(f"[post_step step={step} rank={rank}] ray_get(refs) start")
+        _phase(f"[post_step step={step} rank={rank}] ray_get(refs) start")
         utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
-        logger.warning(f"[post_step step={step} rank={rank}] ray_get(refs) done")
+        _phase(f"[post_step step={step} rank={rank}] ray_get(refs) done")
 
-        logger.warning(f"[post_step step={step} rank={rank}] wake_up start")
+        _phase(f"[post_step step={step} rank={rank}] wake_up start")
         utils.ray_get_with_progress(
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
-        logger.warning(f"[post_step step={step} rank={rank}] wake_up done")
+        _phase(f"[post_step step={step} rank={rank}] wake_up done")
         ray.get(self.actor_manager.set_should_stop.remote(False))
-        logger.warning(f"[post_step step={step} rank={rank}] set_should_stop(False) done")
+        _phase(f"[post_step step={step} rank={rank}] set_should_stop(False) done")
 
         if dist.is_initialized():
-            logger.warning(f"[post_step step={step} rank={rank}] exit barrier start")
+            _phase(f"[post_step step={step} rank={rank}] exit barrier start")
             dist.barrier()
-            logger.warning(f"[post_step step={step} rank={rank}] exit barrier done")
+            _phase(f"[post_step step={step} rank={rank}] exit barrier done")
 
 
 @dataclass
