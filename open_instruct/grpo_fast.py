@@ -1109,8 +1109,22 @@ def setup_runtime_variables(
         )
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
+    if args.eval_only and len(streaming_config.dataset_mixer_eval_list) == 0:
+        raise ValueError("`--eval_only` requires `--dataset_mixer_eval_list` to be set.")
     if args.eval_only and streaming_config.eval_response_length > streaming_config.response_length:
         streaming_config.response_length = streaming_config.eval_response_length
+    if args.eval_only:
+        if args.save_freq != -1:
+            logger.info("`--eval_only` detected; disabling checkpoint saves by setting `save_freq=-1`.")
+            args.save_freq = -1
+        if args.checkpoint_state_freq != -1:
+            logger.info(
+                "`--eval_only` detected; disabling checkpoint-state saves by setting `checkpoint_state_freq=-1`."
+            )
+            args.checkpoint_state_freq = -1
+        if args.push_to_hub:
+            logger.info("`--eval_only` detected; disabling `push_to_hub`.")
+            args.push_to_hub = False
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1354,27 +1368,30 @@ def create_model_and_optimizer(
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
+    eval_only: bool = False,
 ) -> tuple[
-    ModelGroup,
+    ModelGroup | None,
     list[vllm_utils.LLMRayActor],
     int,
     int,
     ray.actor.ActorHandle,
     utils.ModelDims,
-    ray.actor.ActorHandle,
+    ray.actor.ActorHandle | None,
     dict[str, Any] | None,
 ]:
     """Create the model, optimizer, and vLLM engines."""
-    resource_requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
-        num_learners_per_node=args.num_learners_per_node,
-        single_gpu_mode=args.single_gpu_mode,
-        vllm_num_engines=vllm_config.vllm_num_engines,
-        vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
-    )
-    wait_for_grpo_fast_minimum_cluster_resources(args, resource_requirements)
+    pg = None
+    if not eval_only:
+        resource_requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+            num_learners_per_node=args.num_learners_per_node,
+            single_gpu_mode=args.single_gpu_mode,
+            vllm_num_engines=vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        )
+        wait_for_grpo_fast_minimum_cluster_resources(args, resource_requirements)
 
-    pg = placement_group(resource_requirements["learner_pg_bundles"], strategy="STRICT_SPREAD")
-    wait_for_grpo_fast_placement_group(args, resource_requirements, pg)
+        pg = placement_group(resource_requirements["learner_pg_bundles"], strategy="STRICT_SPREAD")
+        wait_for_grpo_fast_placement_group(args, resource_requirements, pg)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -1387,51 +1404,58 @@ def create_model_and_optimizer(
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
-    # Create DataPreparationActor FIRST so StreamingDataLoader can find it
-    _data_prep_actor = data_loader_lib.DataPreparationActor.options(
-        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=grpo_fast_resource_plan.DATA_PREPARATION_ACTOR_NUM_CPUS
-    ).remote(  # type: ignore[unresolved-attribute]
-        dataset=train_dataset,
-        inference_results_Q=inference_results_Q,
-        param_prompt_Q=prompt_Q,
-        tokenizer=tokenizer,
-        config=streaming_config,
-        generation_config=generation_config,
-        num_training_steps=args.num_training_steps,
-        seed=args.seed,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        global_batch_size=streaming_config.num_unique_prompts_rollout,
-        dp_world_size=args.world_size // args.sequence_parallel_size,
-        max_possible_score=streaming_config.max_possible_score,
-        actor_manager=actor_manager,
-        model_dims=model_dims,
-        verbose=args.verbose,
-        work_dir=args.output_dir,
-        tool_names=tools_config.tool_call_names if tools_config else [],
-        run_name=args.run_name,
-        model_name=model_config.model_name_or_path,
-        initial_state=None,
-        base_env_config=base_env_config,
-    )
+    policy_group = None
+    inits = []
+    resume_training_step = 1
+    episode = 0
+    checkpoint_state = None
+    _data_prep_actor = None
+    if not eval_only:
+        # Create DataPreparationActor FIRST so StreamingDataLoader can find it
+        _data_prep_actor = data_loader_lib.DataPreparationActor.options(
+            name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=grpo_fast_resource_plan.DATA_PREPARATION_ACTOR_NUM_CPUS
+        ).remote(  # type: ignore[unresolved-attribute]
+            dataset=train_dataset,
+            inference_results_Q=inference_results_Q,
+            param_prompt_Q=prompt_Q,
+            tokenizer=tokenizer,
+            config=streaming_config,
+            generation_config=generation_config,
+            num_training_steps=args.num_training_steps,
+            seed=args.seed,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            global_batch_size=streaming_config.num_unique_prompts_rollout,
+            dp_world_size=args.world_size // args.sequence_parallel_size,
+            max_possible_score=streaming_config.max_possible_score,
+            actor_manager=actor_manager,
+            model_dims=model_dims,
+            verbose=args.verbose,
+            work_dir=args.output_dir,
+            tool_names=tools_config.tool_call_names if tools_config else [],
+            run_name=args.run_name,
+            model_name=model_config.model_name_or_path,
+            initial_state=None,
+            base_env_config=base_env_config,
+        )
 
-    # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
-    # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
-    # the vLLM placement group and prevents port collisions during vLLM initialization.
-    wandb_url = wandb.run.url if args.with_tracking else None
-    policy_group = ModelGroup(
-        pg,
-        PolicyTrainerRayProcess,
-        args.num_learners_per_node,
-        args.single_gpu_mode,
-        args=args,
-        streaming_config=streaming_config,
-        vllm_config=vllm_config,
-        tokenizer=tokenizer,
-    )
-    inits = [
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
-        for model in policy_group.models
-    ]
+        # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
+        # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
+        # the vLLM placement group and prevents port collisions during vLLM initialization.
+        wandb_url = wandb.run.url if args.with_tracking else None
+        policy_group = ModelGroup(
+            pg,
+            PolicyTrainerRayProcess,
+            args.num_learners_per_node,
+            args.single_gpu_mode,
+            args=args,
+            streaming_config=streaming_config,
+            vllm_config=vllm_config,
+            tokenizer=tokenizer,
+        )
+        inits = [
+            model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+            for model in policy_group.models
+        ]
 
     # vLLM context must cover prompt + max(train rollout length, local eval length).
     vllm_max_model_len = streaming_config.max_prompt_token_length + max(
@@ -1450,8 +1474,8 @@ def create_model_and_optimizer(
         vllm_config.vllm_enable_prefix_caching,
         vllm_max_model_len,
         vllm_config.vllm_gpu_memory_utilization,
-        args.single_gpu_mode,
-        pg=pg if args.single_gpu_mode else None,
+        False if eval_only else args.single_gpu_mode,
+        pg=pg if args.single_gpu_mode and not eval_only else None,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         tool_definitions=tool_definitions,
         tool_stop_sequences=tool_stop_sequences,
@@ -1492,32 +1516,33 @@ def create_model_and_optimizer(
             f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
         )
 
-    # Wait for policy models to finish loading
-    results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0]["optimization_steps_done"] + 1
-    checkpoint_state = results[0]["checkpoint_state"]
-    episode = (
-        (resume_training_step - 1)
-        * streaming_config.num_unique_prompts_rollout
-        * streaming_config.num_samples_per_prompt_rollout
-    )
-    logger.info("======== ✅ all models initialized =========")
-
-    data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
-    if data_prep_actor_state is not None:
-        ray_get_with_progress(
-            [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
+    if not eval_only:
+        # Wait for policy models to finish loading
+        results, _ = ray_get_with_progress(inits, desc="Initializing models")
+        resume_training_step = results[0]["optimization_steps_done"] + 1
+        checkpoint_state = results[0]["checkpoint_state"]
+        episode = (
+            (resume_training_step - 1)
+            * streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
         )
+        logger.info("======== ✅ all models initialized =========")
+
+        data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
+        if data_prep_actor_state is not None:
+            ray_get_with_progress(
+                [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
+            )
+            logger.info(
+                "Restored data prep actor state from checkpoint "
+                f"with training_step={data_prep_actor_state['training_step']}"
+            )
+
         logger.info(
-            "Restored data prep actor state from checkpoint "
-            f"with training_step={data_prep_actor_state['training_step']}"
+            "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
         )
 
-    logger.info(
-        "======== ⏸️ lazily initializing native vLLM weight sync on the first required sync after step 1 ========="
-    )
-
-    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
+        ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
     return (
         policy_group,
         vllm_engines,
@@ -1853,7 +1878,7 @@ def one_training_step(
         "time/total": step_time,
         "time/training": train_timer.duration,
         "time/saving": save_time,
-        **data_thread_metrics,  # batch/given_up_prompts_resamples, batch/prompts_resamples (NGU), etc.
+        **data_thread_metrics,
         **average_metrics,
         **utilization_metrics,
     }
@@ -2304,6 +2329,78 @@ def cleanup_training_resources(
         logger.info("Destroying process group...")
         dist.destroy_process_group()
         logger.info("✅ Process group destroyed")
+
+
+def run_eval_only_round(
+    args: grpo_utils.GRPOExperimentConfig,
+    resume_training_step: int,
+    train_episode: int,
+    generation_episode: int,
+    eval_dataset: Dataset | None,
+    eval_prompt_Q: ray_queue.Queue,
+    evaluation_inference_results_Q: ray_queue.Queue,
+    generation_configs: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    model_dims: utils.ModelDims,
+    max_possible_score: float,
+    base_env_config: EnvConfig,
+    training_start_time: float,
+    wandb_url: str,
+    actor_manager: ActorManager,
+    health_check_fn,
+) -> tuple[int, int]:
+    if eval_dataset is None:
+        raise ValueError("`--eval_only` requires a non-empty eval dataset.")
+
+    health_check_fn()
+    eval_step = max(resume_training_step, 1)
+    args.num_training_steps = eval_step
+    logger.info("Eval-only mode enabled: scheduling one local evaluation round and exiting.")
+
+    maybe_update_beaker_description(
+        current_step=0,
+        total_steps=len(eval_dataset),
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+        progress_label="eval",
+    )
+
+    for idx in range(len(eval_dataset)):
+        add_prompt_to_generator(
+            eval_dataset[idx],
+            eval_step,
+            eval_prompt_Q,
+            generation_configs["eval"],
+            is_eval=True,
+            base_env_config=base_env_config,
+        )
+
+    eval_collected = maybe_evaluate(
+        args,
+        eval_step,
+        evaluation_inference_results_Q,
+        tokenizer,
+        train_episode,
+        eval_dataset,
+        generation_configs["eval"],
+        model_dims,
+        max_possible_score,
+        base_env_config=base_env_config,
+        actor_manager=actor_manager,
+        generation_episode=generation_episode,
+        legacy_episode=train_episode,
+    )
+    if not eval_collected:
+        raise RuntimeError("Eval-only mode failed to collect local evaluation results.")
+
+    maybe_update_beaker_description(
+        current_step=len(eval_dataset),
+        total_steps=len(eval_dataset),
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+        progress_label="eval",
+    )
+    return train_episode, generation_episode
 
 
 def run_training(
@@ -2859,11 +2956,14 @@ def main(
         tools_config,
         pools,
         tool_stop_sequences,
+        eval_only=args.eval_only,
     )
 
     train_episode = initial_episode
     generation_episode = initial_episode
-    if checkpoint_state:
+    if args.eval_only:
+        resume_training_step = args.eval_only_set_checkpoint if args.eval_only_set_checkpoint is not None else 1
+    elif checkpoint_state:
         train_episode = int(checkpoint_state.get("train_episode", checkpoint_state.get("episode", initial_episode)))
         generation_episode = int(
             checkpoint_state.get("generation_episode", checkpoint_state.get("episode", initial_episode))
@@ -2872,45 +2972,76 @@ def main(
             "Restored episode counts: train_episode=%s generation_episode=%s", train_episode, generation_episode
         )
 
-    # Create additional queues (main queues already created above)
-    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
-
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
 
     try:
-        train_episode, generation_episode = run_training(
-            args,
-            streaming_config,
-            tokenizer,
-            train_dataset,
-            eval_dataset,
-            policy_group,
-            vllm_engines,
-            generation_configs,
-            resume_training_step,
-            train_episode,
-            generation_episode,
-            wandb_url,
-            tc,
-            stop_event,
-            executor,
-            inference_results_Q,
-            prompt_Q,
-            eval_prompt_Q,
-            evaluation_inference_results_Q,
-            weight_sync_metrics_Q,
-            actor_manager,
-            model_dims,
-            checkpoint_state,
-            base_env_config,
-        )
+        if args.eval_only:
+            ray_get_with_progress(
+                [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
+            )
 
-        if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
-            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+            def eval_health_check_fn():
+                ray_get_with_progress(
+                    [engine.check_background_threads.remote() for engine in vllm_engines],
+                    desc="Checking vLLM engine health",
+                    enable=False,
+                )
+
+            start_time = time.perf_counter()
+            run_eval_only_round(
+                args,
+                resume_training_step,
+                train_episode,
+                generation_episode,
+                eval_dataset,
+                eval_prompt_Q,
+                evaluation_inference_results_Q,
+                generation_configs,
+                tokenizer,
+                model_dims,
+                streaming_config.max_possible_score,
+                base_env_config,
+                start_time,
+                wandb_url,
+                actor_manager,
+                eval_health_check_fn,
+            )
+        else:
+            weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
+            train_episode, generation_episode = run_training(
+                args,
+                streaming_config,
+                tokenizer,
+                train_dataset,
+                eval_dataset,
+                policy_group,
+                vllm_engines,
+                generation_configs,
+                resume_training_step,
+                train_episode,
+                generation_episode,
+                wandb_url,
+                tc,
+                stop_event,
+                executor,
+                inference_results_Q,
+                prompt_Q,
+                eval_prompt_Q,
+                evaluation_inference_results_Q,
+                weight_sync_metrics_Q,
+                actor_manager,
+                model_dims,
+                checkpoint_state,
+                base_env_config,
+            )
+
+            if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+                push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     except Exception as e:
         if args.send_slack_alerts:
-            utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
+            alert_job_type = "eval" if args.eval_only else "RL"
+            utils.send_slack_message(f"<!here> A {alert_job_type} job has died. Error message: {e}.")
         raise
     finally:
         cleanup_training_resources(
