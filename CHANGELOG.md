@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Speed up SFT tokenization collect loop with batched numpy iteration and vectorized per-sample label/attention ops.
+- Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary.
 - Use incremental binary checkpoint for SFT tokenization resume, eliminating O(N²) re-serialization (https://github.com/allenai/open-instruct/pull/1633).
 - Extract numpy SFT conversion helpers into `open_instruct.numpy_dataset_conversion` (https://github.com/allenai/open-instruct/pull/1622).
 - Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).

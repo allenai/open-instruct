@@ -8,13 +8,13 @@ import gc
 import gzip
 import json
 import os
-import pathlib
 import shutil
 import tempfile
 import unittest
 import unittest.mock
 
 import numpy as np
+from parameterized import parameterized
 
 from open_instruct import dataset_transformation, numpy_dataset_conversion
 
@@ -38,106 +38,25 @@ def _get_tokenizer_path():
 TOKENIZER_PATH = _get_tokenizer_path()
 
 
-class TestIncrementalCheckpoint(unittest.TestCase):
-    def setUp(self):
-        self.tmp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp_dir.cleanup)
-        self.output_dir = pathlib.Path(self.tmp_dir.name)
+class TestSelectTokenDtype(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("uint8_small", 2, np.uint8),
+            ("uint8_max", 256, np.uint8),
+            ("uint16_min", 257, np.uint16),
+            ("uint16_max", 65536, np.uint16),
+            ("uint32_min", 65537, np.uint32),
+            ("uint32_max", 2**32, np.uint32),
+            ("uint64_min", 2**32 + 1, np.uint64),
+        ]
+    )
+    def test_selects_expected_dtype(self, _name, vocab_size, expected_dtype):
+        result = numpy_dataset_conversion._select_token_dtype(vocab_size)
+        self.assertEqual(result, expected_dtype)
 
-    def _scalar_state(self):
-        return {
-            "current_position": 0,
-            "num_samples_skipped": 0,
-            "per_dataset_counts": {},
-            "per_dataset_tokens": {},
-            "per_dataset_trainable_tokens": {},
-            "per_dataset_filtered": {},
-        }
-
-    def test_incremental_save_appends_only_new_data(self):
-        token_ids = [1, 2, 3]
-        labels_mask = [1, 0, 1]
-        document_boundaries = [(0, 3)]
-        tw1, sw1, _ = numpy_dataset_conversion.save_checkpoint(
-            self.output_dir,
-            samples_processed=1,
-            token_ids=token_ids,
-            labels_mask=labels_mask,
-            document_boundaries=document_boundaries,
-            scalar_state=self._scalar_state(),
-            prev_tokens_written=0,
-            prev_samples_written=0,
-        )
-
-        tokens_path = self.output_dir / "_checkpoint_token_ids.bin"
-        size_after_first = tokens_path.stat().st_size
-
-        token_ids.extend([4, 5, 6, 7])
-        labels_mask.extend([0, 0, 1, 1])
-        document_boundaries.append((3, 7))
-
-        tw2, sw2, _ = numpy_dataset_conversion.save_checkpoint(
-            self.output_dir,
-            samples_processed=2,
-            token_ids=token_ids,
-            labels_mask=labels_mask,
-            document_boundaries=document_boundaries,
-            scalar_state=self._scalar_state(),
-            prev_tokens_written=tw1,
-            prev_samples_written=sw1,
-        )
-        size_after_second = tokens_path.stat().st_size
-
-        self.assertEqual(tw2, 7)
-        self.assertEqual(sw2, 2)
-        self.assertEqual(size_after_second - size_after_first, 4 * np.dtype(np.uint32).itemsize)
-
-        loaded = numpy_dataset_conversion.load_checkpoint(self.output_dir)
-        self.assertEqual(loaded["token_ids"], token_ids)
-        self.assertEqual(loaded["labels_mask"], labels_mask)
-        self.assertEqual(loaded["document_boundaries"], document_boundaries)
-
-    def test_load_raises_on_truncated_binary(self):
-        token_ids = [1, 2, 3, 4, 5]
-        labels_mask = [1, 0, 1, 0, 1]
-        document_boundaries = [(0, 5)]
-        numpy_dataset_conversion.save_checkpoint(
-            self.output_dir,
-            samples_processed=1,
-            token_ids=token_ids,
-            labels_mask=labels_mask,
-            document_boundaries=document_boundaries,
-            scalar_state=self._scalar_state(),
-            prev_tokens_written=0,
-            prev_samples_written=0,
-        )
-
-        tokens_path = self.output_dir / "_checkpoint_token_ids.bin"
-        with open(tokens_path, "r+b") as f:
-            f.truncate(np.dtype(np.uint32).itemsize)
-
-        with self.assertRaises(RuntimeError):
-            numpy_dataset_conversion.load_checkpoint(self.output_dir)
-
-    def test_load_raises_on_missing_binary(self):
-        token_ids = [1, 2, 3]
-        labels_mask = [1, 0, 1]
-        document_boundaries = [(0, 3)]
-        numpy_dataset_conversion.save_checkpoint(
-            self.output_dir,
-            samples_processed=1,
-            token_ids=token_ids,
-            labels_mask=labels_mask,
-            document_boundaries=document_boundaries,
-            scalar_state=self._scalar_state(),
-            prev_tokens_written=0,
-            prev_samples_written=0,
-        )
-
-        (self.output_dir / "_checkpoint_token_ids.bin").unlink()
-
-        with self.assertRaises(RuntimeError):
-            numpy_dataset_conversion.load_checkpoint(self.output_dir)
+    def test_raises_for_vocab_too_big(self):
+        with self.assertRaises(ValueError):
+            numpy_dataset_conversion._select_token_dtype(2**64 + 1)
 
 
 class TestWriteMemmapChunked(unittest.TestCase):
@@ -145,14 +64,38 @@ class TestWriteMemmapChunked(unittest.TestCase):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp_dir.cleanup)
         self.base = os.path.join(self.tmp_dir.name, "token_ids")
+        self.source_path = os.path.join(self.tmp_dir.name, "source.bin")
+
+    def _write_source(self, data, dtype):
+        np.asarray(data, dtype=dtype).tofile(self.source_path)
 
     def _read_chunk(self, chunk_idx, dtype, length):
         filename = f"{self.base}_part_{chunk_idx:04d}.npy"
         return list(np.memmap(filename, mode="r", dtype=dtype, shape=(length,)))
 
+    def test_empty_data(self):
+        open(self.source_path, "wb").close()
+        result = numpy_dataset_conversion._write_memmap_chunked_from_file(
+            self.base, self.source_path, 0, np.uint16, max_size_gb=1
+        )
+        self.assertEqual(result, [])
+        self.assertFalse(os.path.exists(f"{self.base}_part_0000.npy"))
+
+    def test_single_chunk(self):
+        data = list(range(8))
+        self._write_source(data, np.uint16)
+        result = numpy_dataset_conversion._write_memmap_chunked_from_file(
+            self.base, self.source_path, len(data), np.uint16, max_size_gb=1
+        )
+        self.assertEqual(result, [(0, 8)])
+        self.assertEqual(self._read_chunk(0, np.uint16, 8), data)
+
     def test_three_chunks(self):
         data = list(range(17))
-        result = numpy_dataset_conversion._write_memmap_chunked(self.base, data, np.uint16, max_size_bytes=16)
+        self._write_source(data, np.uint16)
+        result = numpy_dataset_conversion._write_memmap_chunked_from_file(
+            self.base, self.source_path, len(data), np.uint16, max_size_gb=16 / 1024**3
+        )
         self.assertEqual(result, [(0, 8), (8, 16), (16, 17)])
         self.assertEqual(self._read_chunk(0, np.uint16, 8), data[0:8])
         self.assertEqual(self._read_chunk(1, np.uint16, 8), data[8:16])
@@ -176,6 +119,121 @@ class TestWriteMetadataForChunks(unittest.TestCase):
         numpy_dataset_conversion._write_metadata_for_chunks(self.base, doc_boundaries, chunk_boundaries)
         self.assertEqual(self._read_chunk_rows(0), ["5,8"])
         self.assertEqual(self._read_chunk_rows(1), ["0,4"])
+
+    def test_doc_touching_boundary_is_excluded(self):
+        doc_boundaries = [(0, 8)]
+        chunk_boundaries = [(0, 8), (8, 16)]
+        numpy_dataset_conversion._write_metadata_for_chunks(self.base, doc_boundaries, chunk_boundaries)
+        self.assertEqual(self._read_chunk_rows(0), ["0,8"])
+        self.assertEqual(self._read_chunk_rows(1), [])
+
+
+class TestSaveTokenizer(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp_dir.cleanup)
+        self.tc = dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH,
+            tokenizer_revision="main",
+            use_fast=True,
+            chat_template_name="tulu",
+            add_bos=False,
+        )
+
+    def test_saves_tokenizer_files(self):
+        numpy_dataset_conversion._save_tokenizer(self.tc, self.tmp_dir.name)
+        tokenizer_dir = os.path.join(self.tmp_dir.name, "tokenizer")
+        self.assertTrue(os.path.isdir(tokenizer_dir))
+        self.assertTrue(os.path.exists(os.path.join(tokenizer_dir, "tokenizer_config.json")))
+
+
+class TestWriteDatasetStatistics(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp_dir.cleanup)
+
+    def test_happy_path(self):
+        dataset_stats = {
+            "per_dataset_stats": [
+                {
+                    "dataset_name": "ds_a",
+                    "dataset_split": "train",
+                    "initial_instances": 10,
+                    "final_instances": 8,
+                    "instances_filtered": 2,
+                    "frac_or_num_samples": 1.0,
+                    "original_dataset_size": 10,
+                    "is_upsampled": False,
+                    "upsampling_factor": 1.0,
+                },
+                {
+                    "dataset_name": "ds_b",
+                    "dataset_split": "train",
+                    "initial_instances": 5,
+                    "final_instances": 5,
+                    "instances_filtered": 0,
+                    "frac_or_num_samples": 2.0,
+                    "original_dataset_size": 5,
+                    "is_upsampled": True,
+                    "upsampling_factor": 2.0,
+                },
+            ]
+        }
+        numpy_dataset_conversion.write_dataset_statistics(
+            output_dir=self.tmp_dir.name,
+            dataset_statistics=dataset_stats,
+            total_instances=13,
+            total_tokens=1000,
+            total_trainable_tokens=700,
+            num_samples_skipped=1,
+            tokenizer_name="test-tokenizer",
+            max_seq_length=4096,
+            chat_template_name="tulu",
+            per_dataset_counts={"ds_a": 8, "ds_b": 5},
+            per_dataset_tokens={"ds_a": 600, "ds_b": 400},
+            per_dataset_trainable_tokens={"ds_a": 400, "ds_b": 300},
+            per_dataset_filtered={"ds_a": 1, "ds_b": 0},
+        )
+
+        json_path = os.path.join(self.tmp_dir.name, "dataset_statistics.json")
+        with open(json_path) as f:
+            loaded = json.load(f)
+        self.assertEqual(loaded["overall_statistics"]["total_instances"], 13)
+        self.assertEqual(loaded["overall_statistics"]["total_tokens"], 1000)
+        self.assertEqual(loaded["overall_statistics"]["trainable_tokens"], 700)
+        self.assertEqual(len(loaded["per_dataset_statistics"]), 2)
+        names = {s["dataset_name"] for s in loaded["per_dataset_statistics"]}
+        self.assertEqual(names, {"ds_a", "ds_b"})
+
+        txt_path = os.path.join(self.tmp_dir.name, "dataset_statistics.txt")
+        with open(txt_path) as f:
+            txt = f.read()
+        self.assertIn("ds_a", txt)
+        self.assertIn("ds_b", txt)
+        self.assertIn("Overall Statistics", txt)
+
+    def test_zero_totals_does_not_divide_by_zero(self):
+        numpy_dataset_conversion.write_dataset_statistics(
+            output_dir=self.tmp_dir.name,
+            dataset_statistics={"per_dataset_stats": []},
+            total_instances=0,
+            total_tokens=0,
+            total_trainable_tokens=0,
+            num_samples_skipped=0,
+            tokenizer_name="test-tokenizer",
+            max_seq_length=None,
+            chat_template_name=None,
+            per_dataset_counts={"ds_a": 0},
+            per_dataset_tokens={"ds_a": 0},
+            per_dataset_trainable_tokens={"ds_a": 0},
+            per_dataset_filtered={"ds_a": 0},
+        )
+        with open(os.path.join(self.tmp_dir.name, "dataset_statistics.json")) as f:
+            loaded = json.load(f)
+        overall = loaded["overall_statistics"]
+        self.assertEqual(overall["trainable_percentage"], 0)
+        self.assertEqual(overall["average_sequence_length"], 0)
+        self.assertEqual(loaded["per_dataset_statistics"][0]["avg_tokens_per_instance"], 0)
 
 
 class TestConvertHfToNumpySft(unittest.TestCase):
@@ -230,14 +288,14 @@ class TestConvertHfToNumpySft(unittest.TestCase):
         labels_file = os.path.join(output_dir, "labels_mask_part_0000.npy")
         metadata_file = os.path.join(output_dir, "token_ids_part_0000.csv.gz")
         stats_json = os.path.join(output_dir, "dataset_statistics.json")
-        checkpoint_file = os.path.join(output_dir, "_checkpoint.json")
 
         self.assertTrue(os.path.exists(token_file))
         self.assertTrue(os.path.exists(labels_file))
         self.assertTrue(os.path.exists(metadata_file))
         self.assertTrue(os.path.exists(stats_json))
         self.assertTrue(os.path.isdir(os.path.join(output_dir, "tokenizer")))
-        self.assertFalse(os.path.exists(checkpoint_file))
+        for partial in ("_tokens.partial.bin", "_labels.partial.bin", "_boundaries.partial.bin"):
+            self.assertFalse(os.path.exists(os.path.join(output_dir, partial)))
 
         token_size = os.path.getsize(token_file)
         labels_size = os.path.getsize(labels_file)
@@ -284,7 +342,7 @@ class TestResumeEquivalence(unittest.TestCase):
             add_bos=False,
         )
 
-    def _run(self, output_dir, checkpoint_interval, resume):
+    def _run(self, output_dir, resume, batch_size=10):
         numpy_dataset_conversion.convert_hf_to_numpy_sft(
             output_dir=output_dir,
             dataset_mixer_list=[os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
@@ -296,32 +354,37 @@ class TestResumeEquivalence(unittest.TestCase):
             dataset_skip_cache=True,
             dataset_local_cache_dir=self.temp_dir.name,
             num_examples=50,
-            checkpoint_interval=checkpoint_interval,
             resume=resume,
+            batch_size=batch_size,
         )
 
     def test_one_shot_matches_interrupt_plus_resume(self):
         golden = os.path.join(self.temp_dir.name, "golden")
-        self._run(golden, checkpoint_interval=1000, resume=False)
+        self._run(golden, resume=False)
 
         interrupted = os.path.join(self.temp_dir.name, "interrupted")
-        real_save = numpy_dataset_conversion.save_checkpoint
+        real_flush = numpy_dataset_conversion._flush_partial_files
         call_count = {"n": 0}
 
-        def fail_after_first(*args, **kwargs):
-            result = real_save(*args, **kwargs)
+        def fail_after_two(*args, **kwargs):
+            result = real_flush(*args, **kwargs)
             call_count["n"] += 1
-            if call_count["n"] == 1:
+            if call_count["n"] == 2:
                 raise RuntimeError("simulated interrupt")
             return result
 
         with (
-            unittest.mock.patch.object(numpy_dataset_conversion, "save_checkpoint", side_effect=fail_after_first),
+            unittest.mock.patch.object(numpy_dataset_conversion, "_flush_partial_files", side_effect=fail_after_two),
             self.assertRaises(RuntimeError),
         ):
-            self._run(interrupted, checkpoint_interval=10, resume=False)
+            self._run(interrupted, resume=False)
 
-        self._run(interrupted, checkpoint_interval=10, resume=True)
+        self.assertTrue(
+            os.path.exists(os.path.join(interrupted, "_boundaries.partial.bin")),
+            "interrupted run should have left partial files behind",
+        )
+
+        self._run(interrupted, resume=True)
 
         artifacts = sorted(
             name
