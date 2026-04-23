@@ -7,8 +7,8 @@ page describes the procedure.
 
 The full production mixer takes ~8 hours to run. For a tight feedback
 loop during development, do a 50k-example A/B first (about 8 minutes of
-wall-clock per side, plus a ~15s compare). Only once that passes should
-you fall back on a full-scale run.
+wall-clock per side, plus a ~15s compare). Only fall back on a
+full-scale run once the small A/B passes.
 
 ## How the compare works
 
@@ -23,27 +23,16 @@ The compare produces a `sha256` for every output artifact:
 Skip `dataset_statistics.txt` (human-readable dupe), the `tokenizer/`
 dir, and any `_checkpoint*` files.
 
-If any artifact diverges, print the first diverging byte range (e.g. via
-`cmp -l`) to help localize the bug.
-
 ## Step 1: two image builds
 
 Tokenization is driven from a Beaker image, so you need one image per
 side of the A/B.
 
-1. **Origin/main image.** Create a throwaway worktree at `origin/main`:
+1. **Origin/main image.** Create a throwaway worktree at `origin/main`
+   and build an image from it:
 
     ```bash
     git worktree add -b verify-main /tmp/oi-main-verify origin/main
-    ```
-
-    You may need small fixups on top of `origin/main` to make the
-    launch script runnable in the current Beaker environment —
-    specifically, `transformers v5` rejects tokenizer-only HF repos in
-    `AutoConfig.from_pretrained`, so cherry-pick the path-substring fix
-    if needed. Then build:
-
-    ```bash
     cd /tmp/oi-main-verify
     ./scripts/train/build_image_and_launch.sh \
         scripts/train/olmo-hybrid/7b_think_sft_tokenization.sh
@@ -72,10 +61,10 @@ each job takes ~7–8 minutes.
 ## Step 3: compare on Beaker
 
 weka isn't mounted locally, so run the compare as a tiny CPU job on
-Beaker. Launch with the HEAD image pinned by ID (not by tag — the
+Beaker. Pin `--image` to an explicit image ID — the
 `$USER/open-instruct-integration-test` tag moves in-place on every
 push, so by the time the tokenize jobs finish the tag may no longer
-match what you ran):
+match what you ran.
 
 ```bash
 uv run python mason.py \
@@ -119,16 +108,8 @@ PY
    /weka/oe-adapt-default/$USER/dataset/olmo-hybrid-main
 ```
 
-Success looks like `=== PASSED ===`.
-
-## Reference run
-
-A full-scale origin/main reference is recorded at
-`/weka/oe-adapt-default/finbarrt/dataset/olmo-hybrid-main-repro`
-(Beaker experiment
-[01KPRDGYEM81EASNNSBZ2HA7KA](https://beaker.org/ex/01KPRDGYEM81EASNNSBZ2HA7KA)).
-Point the compare's reference side at that directory to skip re-running
-the full origin/main mixer.
+Success looks like `=== PASSED ===`. On failure, use `cmp -l` on the
+diverging artifact to find the first mismatching byte range.
 
 ## Gotchas
 
@@ -138,5 +119,8 @@ the full origin/main mixer.
   hashing.
 - If the *file listings* differ (not just hashes), the culprit is
   usually a code change in `scripts/data/convert_sft_data_for_olmocore.py`
-  or upstream in `apply_chat_template`, not the numpy-path refactor.
-  Check `git log origin/main..HEAD -- scripts/data/ open_instruct/dataset_transformation.py`.
+  or upstream in `apply_chat_template`. Check
+  `git log origin/main..HEAD -- scripts/data/ open_instruct/dataset_transformation.py`.
+- If you've already produced a full-scale `origin/main` reference on
+  weka, point the compare's reference side at it to skip re-running the
+  full mixer.
