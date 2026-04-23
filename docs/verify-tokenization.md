@@ -21,7 +21,10 @@ The compare produces a `sha256` for every output artifact:
   `output_directory` (these vary by run and aren't meaningful to compare)
 
 Skip `dataset_statistics.txt` (human-readable dupe), the `tokenizer/`
-dir, and any `_checkpoint*` files.
+dir, any `_checkpoint*` files, and the `_tokens.partial.bin` /
+`_labels.partial.bin` scratch files used during the collect loop (they
+are removed on successful completion but may linger after an aborted
+run).
 
 ## Step 1: two image builds
 
@@ -81,7 +84,7 @@ import hashlib, gzip, json, os, sys
 new, ref = sys.argv[1], sys.argv[2]
 fail = 0
 for name in sorted(set(os.listdir(new)) | set(os.listdir(ref))):
-    if name.startswith("_checkpoint") or name in ("dataset_statistics.txt", "tokenizer"):
+    if name.startswith("_checkpoint") or name in ("_tokens.partial.bin", "_labels.partial.bin", "dataset_statistics.txt", "tokenizer"):
         continue
     a, b = os.path.join(new, name), os.path.join(ref, name)
     if not (os.path.isfile(a) and os.path.isfile(b)):
