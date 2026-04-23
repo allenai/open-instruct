@@ -16,6 +16,7 @@ uv run python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --env OLMO_SHARED_FS=1 \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 8 -- torchrun \

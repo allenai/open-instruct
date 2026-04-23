@@ -39,6 +39,7 @@ if [ -n "$1" ]; then
         --budget ai2/oe-adapt \
         --gpus 1 \
         --non_resumable \
+        --artifact_ttl 1d \
         -- \
         $LAUNCH_CMD
 else

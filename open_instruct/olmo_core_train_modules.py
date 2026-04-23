@@ -516,3 +516,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
             self.record_metric("_token_count", global_tokens, reduce_type=None)
+
+            data_prep_metrics = batch.get("metrics") or {}
+            for metric_key, metric_value in data_prep_metrics.items():
+                if isinstance(metric_value, (int, float)):
+                    self.record_metric(metric_key, float(metric_value), reduce_type=None)
