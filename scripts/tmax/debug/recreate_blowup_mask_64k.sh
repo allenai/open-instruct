@@ -1,6 +1,8 @@
 #!/bin/bash
-# Variant of recreate_blowup_mask.sh that doubles the generation budget to 64k
-# and moves sequence parallel from 2 -> 4 so per-GPU activation memory stays flat.
+# 64k-context variant of recreate_blowup_mask.sh that also starts from the vanilla
+# Qwen/Qwen3.5-9B base (rather than the pre-blowup checkpoint) so we can see whether
+# CISPO + the trust-region mask produces a stable long-context run from scratch.
+# Sequence parallel is 4 (vs. 2) to keep per-GPU activation memory flat.
 # 4 nodes x 8 GPUs (32 GPUs total); DP per node = 8 / sp=4 = 2.
 #
 # Response + prompt fit:
@@ -17,7 +19,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-9B blowup repro + CISPO mask, 64k ctx, sp=4" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-9B + CISPO mask, 64k ctx, sp=4" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -45,7 +47,7 @@ uv run python mason.py \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 4 \
-    --model_name_or_path hamishivi/qwen3.5_tmax_breakdown_test_step100 \
+    --model_name_or_path Qwen/Qwen3.5-9B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --total_episodes 128000 \
@@ -83,7 +85,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo_breakdown_mask_64k \
+    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo_mask_64k \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
