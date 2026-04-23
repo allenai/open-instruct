@@ -308,13 +308,35 @@ class SWERLSandboxEnv(RLEnvironment):
         if self._tests_dir is None:
             raise RuntimeError(f"No test data directory for task {self._task_id}")
 
-        # Upload tests only at submit time
-        self._upload_directory(self._tests_dir, "/tests")
-        self._backend.run_command("chmod +x /tests/test.sh 2>/dev/null || true")
-
-        check = self._backend.run_command("test -f /tests/test.sh && echo EXISTS")
-        if check.stdout.strip() != "EXISTS":
-            raise RuntimeError(f"No test.sh found in test data for task {self._task_id}")
+        # Upload tests only at submit time. The backend silently re-creates
+        # the container on NotFound during exec_run, so if the underlying
+        # container was recycled between put_archive and the verification
+        # exec, /tests won't exist. Retry once to cover that race.
+        check_stdout = ""
+        for attempt in range(2):
+            try:
+                self._upload_directory(self._tests_dir, "/tests")
+            except Exception as e:
+                logger.warning(
+                    f"[{self._task_id}] tests upload attempt {attempt + 1} raised: {e}"
+                )
+                if attempt == 0:
+                    continue
+                raise
+            self._backend.run_command("chmod +x /tests/test.sh 2>/dev/null || true")
+            check = self._backend.run_command("test -f /tests/test.sh && echo EXISTS")
+            check_stdout = check.stdout.strip()
+            if check_stdout == "EXISTS":
+                break
+            logger.warning(
+                f"[{self._task_id}] /tests/test.sh missing after upload attempt {attempt + 1}; retrying"
+            )
+        if check_stdout != "EXISTS":
+            ls = self._backend.run_command("ls -la /tests 2>&1 || true")
+            raise RuntimeError(
+                f"No test.sh found in test data for task {self._task_id}. "
+                f"/tests listing: {ls.stdout!r}"
+            )
 
         result = self._backend.run_command(f"timeout {self._test_timeout} bash /tests/test.sh")
 
