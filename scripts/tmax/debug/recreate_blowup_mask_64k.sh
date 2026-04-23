@@ -79,6 +79,7 @@ uv run python mason.py \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
+    --mask_truncated_completions true \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
