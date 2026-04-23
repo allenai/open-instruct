@@ -20,7 +20,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
+from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -348,9 +348,7 @@ class GRPOTrainModule(TransformerTrainModule):
         - Importance sampling with clipping
         """
         self.model.train()
-        data_BT: data_types.CollatedBatchData = batch["batch"]
-
-        data_BT = data_BT.to(self.device)
+        data_BT = batch["batch"].to(self.device)
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
