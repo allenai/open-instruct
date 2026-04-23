@@ -35,9 +35,8 @@ def _select_token_dtype(vocab_size: int):
     raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
 
-def _flush_partial_files(*file_handles) -> None:
-    """Flush + fsync the given partial files so a crash leaves them recoverable."""
-    for fh in file_handles:
+def _flush_partial_files(tokens_fh, labels_fh, boundaries_fh) -> None:
+    for fh in (tokens_fh, labels_fh, boundaries_fh):
         fh.flush()
         os.fsync(fh.fileno())
 
@@ -102,11 +101,8 @@ def _save_tokenizer(tc: dataset_transformation.TokenizerConfig, output_dir: path
 def _recover_partial_state(
     tokens_path: pathlib.Path, labels_path: pathlib.Path, boundaries_path: pathlib.Path, token_item_size: int
 ) -> tuple[int, int]:
-    """Truncate the three partial files to a consistent state and return (num_samples, current_position).
-
-    Boundaries file is treated as the commit log: its last complete (start,end) pair determines
-    how many bytes of tokens/labels are valid. Any trailing bytes are truncated off.
-    """
+    # Boundaries file is the commit log: its last complete (start,end) pair determines how many
+    # bytes of tokens/labels are valid; trailing bytes from an incomplete write get truncated.
     for path in (tokens_path, labels_path, boundaries_path):
         if not path.exists():
             return 0, 0
@@ -141,12 +137,6 @@ def _aggregate_stats(
     total_tokens: int,
     token_dtype,
 ) -> dict[str, Any]:
-    """Compute per-dataset and overall statistics from the on-disk partial files.
-
-    Runs once at the end. Reads the dataset_source column directly from the HF
-    dataset (cheap Arrow column access; no tokenization), then aggregates via
-    vectorized numpy ops over the labels/boundaries partial files.
-    """
     per_dataset_counts: dict[str, int] = {}
     per_dataset_tokens: dict[str, int] = {}
     per_dataset_trainable_tokens: dict[str, int] = {}
@@ -229,12 +219,6 @@ def convert_hf_to_numpy_sft(
     num_examples: int = 0,
     batch_size: int = 1000,
 ) -> None:
-    """Tokenize `dataset_mixer_list` and write OLMo-core numpy SFT files to `output_dir`.
-
-    Tokens/labels/boundaries stream directly to `_*.partial.bin` files in `output_dir`.
-    If `resume=True` and those files already exist, the run continues from where the
-    previous one left off. On successful completion, the partial files are deleted.
-    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Verify these values match the tokenizer config used in Olmo-core:")
@@ -277,9 +261,8 @@ def convert_hf_to_numpy_sft(
 
     vocab_size = tc.tokenizer.vocab_size
     token_dtype = _select_token_dtype(vocab_size)
-    token_dtype_name = np.dtype(token_dtype).name
     token_item_size = np.dtype(token_dtype).itemsize
-    logger.info(f"Using dtype '{token_dtype_name}' for token_ids based on vocab size {vocab_size}")
+    logger.info(f"Using dtype '{np.dtype(token_dtype).name}' for token_ids based on vocab size {vocab_size}")
 
     tokens_path = output_dir / "_tokens.partial.bin"
     labels_path = output_dir / "_labels.partial.bin"
@@ -302,10 +285,8 @@ def convert_hf_to_numpy_sft(
     total_samples = len(train_dataset)
     logger.info("Collecting tokens from dataset...")
 
-    if start_idx >= total_samples:
-        train_dataset_iter = train_dataset.select([])
-    elif start_idx > 0:
-        train_dataset_iter = train_dataset.select(range(start_idx, total_samples))
+    if start_idx > 0:
+        train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))
     else:
         train_dataset_iter = train_dataset
 
