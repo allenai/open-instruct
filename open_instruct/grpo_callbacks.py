@@ -88,9 +88,6 @@ class VLLMWeightSyncCallback(Callback):
         if step % self.sync_interval != 0:
             return
 
-        if dist.is_initialized():
-            dist.barrier()
-
         torch.cuda.empty_cache()
         ray.get(self.actor_manager.set_should_stop.remote(True))
 
