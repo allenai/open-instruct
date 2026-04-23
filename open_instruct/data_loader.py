@@ -1333,8 +1333,24 @@ class DataPreparationActor:
             # Truncated-completion stats are computed on the unfiltered batch so
             # they stay meaningful regardless of whether `mask_truncated_completions`
             # is actually dropping the rollouts downstream.
+            #
+            # A rollout counts as truncated if EITHER:
+            #  - finish_reason != "stop" (vLLM hit max_tokens on the final turn), OR
+            #  - len(response) >= response_length (budget exhausted inside the tool agent
+            #    loop so the loop exited without another vLLM call — the final stored
+            #    finish_reason can still be "stop" from an earlier turn). Only checking
+            #    finish_reason misses this second path, which is common in multi-turn
+            #    tool-using rollouts.
             num_before_filter = len(result.finish_reasons)
-            truncated_idxes = [i for i in range(num_before_filter) if result.finish_reasons[i] != "stop"]
+            response_length_cap = self.config.response_length
+
+            def _is_truncated(i: int) -> bool:
+                return (
+                    result.finish_reasons[i] != "stop"
+                    or len(result.responses[i]) >= response_length_cap
+                )
+
+            truncated_idxes = [i for i in range(num_before_filter) if _is_truncated(i)]
             num_truncated_completion = len(truncated_idxes)
             truncated_completion_correct_count = (
                 int(sum(1 for i in truncated_idxes if scores[i] > 0)) if num_truncated_completion else 0
@@ -1344,22 +1360,23 @@ class DataPreparationActor:
             )
 
             if self.config.mask_truncated_completions:
-                stop_idxes = torch.tensor(
-                    [i for i in range(num_before_filter) if result.finish_reasons[i] == "stop"]
+                keep_idxes = torch.tensor(
+                    [i for i in range(num_before_filter) if not _is_truncated(i)]
                 )
                 if num_truncated_completion > 0:
                     logger.info(
-                        f"[DataPreparationActor] Filtered {num_truncated_completion} responses that didn't "
-                        f"finish with 'stop'. Retention rate: {len(stop_idxes) / num_before_filter:.2%}"
+                        f"[DataPreparationActor] Filtered {num_truncated_completion} truncated responses "
+                        f"(finish_reason != 'stop' or len(response) >= {response_length_cap}). "
+                        f"Retention rate: {len(keep_idxes) / num_before_filter:.2%}"
                     )
-                scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
-                batch = batch[stop_idxes.tolist()]
-                result.responses = [result.responses[i] for i in stop_idxes]
-                result.masks = [result.masks[i] for i in stop_idxes]
-                result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
+                scores = scores[keep_idxes]
+                advantages = advantages[keep_idxes]
+                batch = batch[keep_idxes.tolist()]
+                result.responses = [result.responses[i] for i in keep_idxes]
+                result.masks = [result.masks[i] for i in keep_idxes]
+                result.finish_reasons = [result.finish_reasons[i] for i in keep_idxes]
                 assert result.logprobs is not None
-                result.logprobs = [result.logprobs[i] for i in stop_idxes]
+                result.logprobs = [result.logprobs[i] for i in keep_idxes]
 
             assert result.logprobs is not None
             packed_sequences = pack_sequences(
