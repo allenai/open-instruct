@@ -9,6 +9,7 @@ The output layout for each `output_dir` is:
 """
 
 import gzip
+import itertools
 import json
 import os
 import pathlib
@@ -89,8 +90,16 @@ def save_checkpoint(
     if prev_samples_written > 0:
         _truncate_to(boundaries_path, prev_samples_written * 2 * boundary_size)
 
-    new_tokens = np.asarray(token_ids[prev_tokens_written:], dtype=_CHECKPOINT_TOKEN_DTYPE).tobytes()
-    new_labels = np.asarray(labels_mask[prev_tokens_written:], dtype=_CHECKPOINT_LABELS_DTYPE).tobytes()
+    new_tokens = np.fromiter(
+        itertools.islice(token_ids, prev_tokens_written, None),
+        dtype=_CHECKPOINT_TOKEN_DTYPE,
+        count=len(token_ids) - prev_tokens_written,
+    ).tobytes()
+    new_labels = np.fromiter(
+        itertools.islice(labels_mask, prev_tokens_written, None),
+        dtype=_CHECKPOINT_LABELS_DTYPE,
+        count=len(labels_mask) - prev_tokens_written,
+    ).tobytes()
     new_boundaries = np.asarray(
         document_boundaries[prev_samples_written:], dtype=_CHECKPOINT_BOUNDARIES_DTYPE
     ).tobytes()
