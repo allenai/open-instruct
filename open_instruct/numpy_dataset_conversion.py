@@ -259,10 +259,6 @@ def convert_hf_to_numpy_sft(
 
     logger.info("Collecting tokens from dataset...")
     total_samples = len(train_dataset)
-    loop_start_time = time.perf_counter()
-    utils.maybe_update_beaker_description(
-        current_step=start_idx, total_steps=total_samples, start_time=loop_start_time
-    )
 
     if start_idx >= total_samples:
         train_dataset_iter = train_dataset.select([])
@@ -337,7 +333,7 @@ def convert_hf_to_numpy_sft(
                     num_samples_skipped += 1
                     per_dataset_filtered[dataset_source] += 1
 
-                assert all(mask == 1 for mask in sample_attention), (
+                assert (sample_attention == 1).all(), (
                     f"Expected all attention mask values to be 1, but found: {sample_attention}"
                 )
 
