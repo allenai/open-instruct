@@ -1,35 +1,34 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen35_4b_dapo_math}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B-base"
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+NUM_GPUS="${NUM_GPUS:-8}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
-DATASETS="hamishivi/DAPO-Math-17k-Processed_filtered 1.0"
-DATASET_SPLITS="train"
-
+CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
-    --cluster "ai2/jupiter" \
-    --workspace ai2/open-instruct-dev \
+    --cluster ${CLUSTER} \
+    --workspace ai2/oe-adapt-code \
     --priority ${PRIORITY} \
     --pure_docker_mode \
+    --no_auto_dataset_cache \
     --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 1 \
-    --gpus 8 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
-    --artifact_ttl 1d \
     -- \
-source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run open_instruct/grpo_fast.py \
+uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
+    --eval_pass_at_k 32 \
+    --eval_top_p 0.95 \
     --vllm_top_p 1.0 \
     --beta 0.0 \
     --async_steps 4 \
@@ -42,16 +41,18 @@ source configs/beaker_configs/ray_node_setup.sh \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
-    --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits $DATASET_SPLITS \
+    --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
+    --dataset_mixer_list_splits "train" \
+    --dataset_mixer_eval_list mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
-    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --model_name_or_path "Qwen/Qwen3-4B-Base" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
-    --deepspeed_stage 3 \
+    --total_episodes 128000 \
+    --deepspeed_stage 2 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
@@ -62,14 +63,12 @@ source configs/beaker_configs/ray_node_setup.sh \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
-    --sequence_parallel_size 2 \
     --with_tracking \
+    --send_slack_alerts \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
-    --load_ref_policy True \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME}/tmp-1d \
+    --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
-    --save_traces \
-    --push_to_hub False
+    --push_to_hub False "$@"

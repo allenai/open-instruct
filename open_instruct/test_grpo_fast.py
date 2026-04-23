@@ -491,6 +491,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             tokenizer=tokenizer,
             dataset=mock_dataset,
             base_env_config=EnvConfig(),
+            training_step=0,
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -520,6 +521,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             tokenizer=tokenizer,
             dataset=mock_dataset,
             base_env_config=EnvConfig(),
+            training_step=0,
         )
 
         self.assertEqual(reward_metrics["model_step_min"], 10.0)
@@ -566,6 +568,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     tokenizer=tokenizer,
                     dataset=mock_dataset,
                     base_env_config=EnvConfig(),
+                    training_step=0,
                 )
                 completed.set()
             except Exception:
@@ -769,6 +772,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             dataset=mock_dataset,
             base_env_config=EnvConfig(),
             filter_zero_std_samples=True,
+            training_step=0,
         )
 
         self.assertIsNone(result)

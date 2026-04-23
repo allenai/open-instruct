@@ -204,6 +204,8 @@ class GRPOExperimentConfig(
     """Whether to run local evaluation at training step 0. Defaults to False."""
     eval_pass_at_k: int = 1
     """Number of completions per eval prompt for local pass@k metrics."""
+    eval_top_p: float | None = None
+    """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
@@ -279,6 +281,8 @@ class GRPOExperimentConfig(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
+            raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
