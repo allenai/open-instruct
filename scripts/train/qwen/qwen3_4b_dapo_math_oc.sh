@@ -23,7 +23,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env TORCH_LOGS=+dynamo,+inductor,+recompiles \
     --env NCCL_DEBUG=WARN \
     --env TORCH_NCCL_TRACE_BUFFER_SIZE=1048576 \
     --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
