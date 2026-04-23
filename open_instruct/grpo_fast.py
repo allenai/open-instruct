@@ -770,6 +770,22 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_mask_BT,
                         self.args.truncated_importance_sampling_ratio_cap,
                     )
+                    tis_mask_BT = grpo_utils.compute_tis_mask(
+                        new_logprobs_BT,
+                        vllm_logprobs_BT,
+                        response_mask_BT,
+                        self.args.tis_mask_lower,
+                        self.args.tis_mask_upper,
+                    )
+                    combined_tis_BT = grpo_utils.combine_tis_terms(tis_clamped_BT, tis_mask_BT)
+
+                    if tis_mask_BT is not None:
+                        with torch.no_grad():
+                            num_valid = response_mask_BT.sum()
+                            frac_kept = (
+                                tis_mask_BT.sum() / num_valid if num_valid > 0 else torch.zeros((), device=tis_mask_BT.device)
+                            )
+                            self.local_metrics["debug/tis_mask_frac_kept"] = float(frac_kept)
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -777,7 +793,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_clamped_BT,
+                        tis_weights=combined_tis_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT

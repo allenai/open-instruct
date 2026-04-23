@@ -100,6 +100,19 @@ class GRPOExperimentConfig(
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
     truncated_importance_sampling_ratio_cap: float = 2.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
+    tis_mask_lower: float = 0.0
+    """Lower ε_ℓ for the trust-region mask on the π_θ/π_rollout ratio.
+
+    When >0, tokens with ratio ≤ 1 − tis_mask_lower are multiplied by 0 in the pg loss.
+    Follows eq. (5) in https://arxiv.org/pdf/2510.13786 (ScaleRL). Set to 0 to disable the
+    lower side of the mask.
+    """
+    tis_mask_upper: float = 0.0
+    """Upper ε_h for the trust-region mask on the π_θ/π_rollout ratio.
+
+    When >0, tokens with ratio ≥ 1 + tis_mask_upper are multiplied by 0 in the pg loss.
+    Set to 0 to disable the upper side of the mask.
+    """
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -215,6 +228,16 @@ class GRPOExperimentConfig(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.tis_mask_lower < 0.0 or self.tis_mask_upper < 0.0:
+            raise ValueError(
+                f"tis_mask_lower and tis_mask_upper must be ≥ 0 "
+                f"(got {self.tis_mask_lower=}, {self.tis_mask_upper=}). Use 0 to disable."
+            )
+        if self.tis_mask_lower >= 1.0:
+            raise ValueError(
+                f"tis_mask_lower must be < 1 (it is subtracted from 1 to form the lower ratio bound), "
+                f"got {self.tis_mask_lower}."
+            )
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
@@ -303,6 +326,54 @@ def compute_tis_weights(
     unclamped = torch.where(response_mask, torch.exp(logprob_diff), unclamped)
     clamped = torch.clamp(unclamped, max=cap)
     return clamped, unclamped
+
+
+def combine_tis_terms(
+    *terms: torch.Tensor | None,
+) -> torch.Tensor | None:
+    """Element-wise product of non-None TIS tensors (weights and/or masks).
+
+    Returns ``None`` if every term is ``None``. Used to combine the numeric-mismatch
+    cap from :func:`compute_tis_weights` with the trust-region mask from
+    :func:`compute_tis_mask` into a single ``tis_weights`` argument.
+    """
+    result: torch.Tensor | None = None
+    for term in terms:
+        if term is None:
+            continue
+        result = term if result is None else result * term
+    return result
+
+
+def compute_tis_mask(
+    new_logprobs: torch.Tensor,
+    vllm_logprobs: torch.Tensor,
+    response_mask: torch.Tensor,
+    eps_low: float,
+    eps_high: float,
+) -> torch.Tensor | None:
+    """Binary {0, 1} trust-region gate on the π_θ/π_rollout ratio.
+
+    Implements the calibration function f(x; ε_ℓ, ε_h) = 1 if 1 − ε_ℓ < x < 1 + ε_h else 0
+    from eq. (5) of https://arxiv.org/pdf/2510.13786. The ratio is computed from the
+    current trainer logprobs and the rollout (vLLM) logprobs directly, independent of any
+    cached π_old, so the gate matches the paper's r_t even under multi-epoch / cached
+    old_logprob setups.
+
+    Returns a float tensor the same shape as ``new_logprobs`` with 1.0 on in-range response
+    positions and 0.0 elsewhere, or ``None`` when both eps are 0 (disabled). Non-response
+    positions and positions with NaN vllm logprobs are also set to 0.
+    """
+    if eps_low <= 0.0 and eps_high <= 0.0:
+        return None
+    with torch.no_grad():
+        logprob_diff = (new_logprobs - vllm_logprobs).clamp(-10.0, 10.0)
+        ratio = torch.exp(logprob_diff)
+        lower = (1.0 - eps_low) if eps_low > 0.0 else float("-inf")
+        upper = (1.0 + eps_high) if eps_high > 0.0 else float("inf")
+        valid = response_mask & ~torch.isnan(vllm_logprobs)
+        in_range = (ratio > lower) & (ratio < upper)
+        return (valid & in_range).to(new_logprobs.dtype)
 
 
 def resolve_old_logprob(
