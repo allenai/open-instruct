@@ -237,15 +237,21 @@ def _global_max_num_chunks(local: int, accelerator: Accelerator) -> int:
 
 def _make_dummy_chunk(template: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     """One-row dummy input whose labels are all -100 → zero loss, zero grad, but
-    backward still runs so DDP/DS reducers get their expected call."""
+    backward still runs so DDP/DS reducers get their expected call.
+
+    Handles both 2D (B, T) tensors like input_ids / attention_mask / labels and any
+    1D (B,) auxiliary tensors the collator may emit — a leading size-1 batch dim
+    is stamped, remaining dims mirror the template row.
+    """
     dummy = {}
     for k, v in template.items():
+        shape = (1,) + tuple(v.shape[1:])
         if k == "labels":
-            dummy[k] = torch.full((1, v.shape[1]), -100, dtype=v.dtype, device=v.device)
+            dummy[k] = torch.full(shape, -100, dtype=v.dtype, device=v.device)
         elif k == "attention_mask":
-            dummy[k] = torch.ones((1, v.shape[1]), dtype=v.dtype, device=v.device)
+            dummy[k] = torch.ones(shape, dtype=v.dtype, device=v.device)
         else:
-            dummy[k] = torch.zeros((1, v.shape[1]), dtype=v.dtype, device=v.device)
+            dummy[k] = torch.zeros(shape, dtype=v.dtype, device=v.device)
     return dummy
 
 
@@ -1022,8 +1028,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataloader = DataLoader(train_dataset, batch_sampler=grouped_sampler, collate_fn=collate_fn)
     else:
         grouped_sampler = None
+        # drop_last=True avoids a trailing partial batch at each epoch boundary.
+        # Without it some ranks end up with fewer micro-batches on the last step,
+        # fall out of sync with the others on the optimizer ALLREDUCE, and we
+        # get a 600s NCCL watchdog timeout (observed as same-SeqNum collectives
+        # with different NumelIn across ranks at the epoch boundary).
         train_dataloader = DataLoader(
-            train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+            train_dataset, shuffle=True, collate_fn=collate_fn,
+            batch_size=args.per_device_train_batch_size, drop_last=True,
         )
 
     # Optimizer
