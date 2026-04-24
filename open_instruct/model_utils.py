@@ -284,6 +284,7 @@ def load_ref_policy(
     mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
     ref_policy_update_freq: int | None = None,
     alpha: float = 0.0,
+    trainer_backend: str = "deepspeed",
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -313,7 +314,10 @@ def load_ref_policy(
     )
     ref_policy.config.use_cache = False
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
+    if trainer_backend == "deepspeed":
+        ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
+    else:
+        ref_policy = ref_policy.to(device)
     ref_policy.eval()
 
     if checkpoint_path:

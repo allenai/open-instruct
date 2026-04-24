@@ -83,6 +83,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
@@ -207,6 +208,7 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
+DDP_TRAINING_STATE_FILENAME = "ddp_training_state.pt"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
 CLUSTER_STARTUP_TIMEOUT_S = 1200.0
 PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
@@ -325,6 +327,49 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_rank = local_rank
         self.dp_world_size = world_size // args.sequence_parallel_size
 
+    @property
+    def _uses_deepspeed(self) -> bool:
+        return self.args.trainer_backend == "deepspeed"
+
+    def _get_unwrapped_model(self) -> torch.nn.Module:
+        return self.model.module if hasattr(self.model, "module") else self.model
+
+    def _compute_global_grad_norm(self) -> float:
+        if self._uses_deepspeed:
+            return float(self.model.get_global_grad_norm())
+
+        local_grad_sq_sum = torch.zeros(1, device=self.device, dtype=torch.float64)
+        for param in self.model.parameters():
+            if param.grad is None:
+                continue
+            grad = param.grad.detach()
+            local_grad_sq_sum += torch.sum(grad.double() * grad.double())
+        dist.all_reduce(local_grad_sq_sum, op=dist.ReduceOp.SUM)
+        return math.sqrt(local_grad_sq_sum.item())
+
+    def _backward_and_step(self, loss: torch.Tensor, is_accumulation_boundary: bool) -> float | None:
+        if self._uses_deepspeed:
+            self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+            self.model.backward(loss)
+            if is_accumulation_boundary:
+                self.model.step()
+                return self._compute_global_grad_norm()
+            return None
+
+        sync_context = contextlib.nullcontext() if is_accumulation_boundary else self.model.no_sync()
+        with sync_context:
+            loss.backward()
+        if not is_accumulation_boundary:
+            return None
+
+        grad_norm = self._compute_global_grad_norm()
+        if self.args.max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_grad_norm)
+        self.optimizer.step()
+        self.scheduler.step()
+        self.optimizer.zero_grad(set_to_none=True)
+        return grad_norm
+
     def get_dataloader_state(self) -> dict[str, Any]:
         return self._streaming_dataloader.state_dict()
 
@@ -376,7 +421,8 @@ class PolicyTrainerRayProcess(RayProcess):
         # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
         if not torch.distributed.is_initialized():
             torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
-        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
+        if args.trainer_backend == "deepspeed":
+            deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,
@@ -394,7 +440,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        if args.trainer_backend == "deepspeed" and ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
@@ -431,14 +477,22 @@ class PolicyTrainerRayProcess(RayProcess):
             num_warmup_steps=warmup_steps,
             num_training_steps=num_scheduler_steps,
         )
-        self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
-            model=self.policy,
-            optimizer=self.optimizer,
-            config=ds_config,
-            lr_scheduler=scheduler,
-            dist_init_required=False,
-            mpu=self.mpu,
-        )
+        if args.trainer_backend == "deepspeed":
+            self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
+                model=self.policy,
+                optimizer=self.optimizer,
+                config=ds_config,
+                lr_scheduler=scheduler,
+                dist_init_required=False,
+                mpu=self.mpu,
+            )
+        else:
+            self.policy = self.policy.to(self.device)
+            self.model = DistributedDataParallel(
+                self.policy, device_ids=[self.local_rank], output_device=self.local_rank
+            )
+            self.scheduler = scheduler
+            self.optimizer.zero_grad(set_to_none=True)
         optimization_steps_done = 0
         checkpoint_state = None
         load_checkpoint_dir = args.resume_checkpoint_dir or args.checkpoint_state_dir
@@ -449,21 +503,32 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {load_checkpoint_dir} because it does not exist!"
                 )
             else:
-                # remove mpu for loading checkpoints, add it back after loading
-                old_mpu = self.mpu
-                self.model.mpu = None
-                path, states = self.model.load_checkpoint(
-                    load_checkpoint_dir,
-                    load_module_strict=True,
-                    load_optimizer_states=True,
-                    load_lr_scheduler_states=True,
-                    load_module_only=False,
-                )
-                self.model.mpu = old_mpu
-                if path is None:
-                    raise ValueError(f"Failed to load checkpoint from {load_checkpoint_dir}")
-                checkpoint_state = states
-                optimization_steps_done = states["training_step"]
+                if self._uses_deepspeed:
+                    # remove mpu for loading checkpoints, add it back after loading
+                    old_mpu = self.mpu
+                    self.model.mpu = None
+                    path, states = self.model.load_checkpoint(
+                        load_checkpoint_dir,
+                        load_module_strict=True,
+                        load_optimizer_states=True,
+                        load_lr_scheduler_states=True,
+                        load_module_only=False,
+                    )
+                    self.model.mpu = old_mpu
+                    if path is None:
+                        raise ValueError(f"Failed to load checkpoint from {load_checkpoint_dir}")
+                    checkpoint_state = states
+                    optimization_steps_done = states["training_step"]
+                else:
+                    training_state_path = os.path.join(load_checkpoint_dir, DDP_TRAINING_STATE_FILENAME)
+                    if not os.path.exists(training_state_path):
+                        raise ValueError(f"Failed to load checkpoint from {training_state_path}")
+                    states = torch.load(training_state_path, map_location="cpu", weights_only=False)
+                    self.model.module.load_state_dict(states["model"])
+                    self.optimizer.load_state_dict(states["optimizer"])
+                    self.scheduler.load_state_dict(states["scheduler"])
+                    checkpoint_state = states["client_state"]
+                    optimization_steps_done = checkpoint_state["training_step"]
 
                 rng_states = states["rng_states"]
                 torch.set_rng_state(rng_states["torch_cpu_rng_state"])
@@ -482,7 +547,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
-                if args.load_ref_policy and states.get("ref_policy_saved", False):
+                if (
+                    args.load_ref_policy
+                    and checkpoint_state is not None
+                    and checkpoint_state.get("ref_policy_saved", False)
+                ):
                     ref_policy_dir = os.path.join(load_checkpoint_dir, "ref_policy")
                     model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
                     if os.path.exists(model_path):
@@ -518,6 +587,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
+                trainer_backend=args.trainer_backend,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
@@ -609,7 +679,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
         return vllm_utils.broadcast_weights_to_vllm(
-            model=self.model.module,
+            model=self._get_unwrapped_model(),
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             model_step=model_step,
@@ -621,7 +691,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if not self.args.load_ref_policy:
             return
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
-            if self.args.deepspeed_stage == 3:
+            if self._uses_deepspeed and self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
                     if deepspeed.comm.get_rank() == 0:
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
@@ -718,6 +788,8 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        if not self._uses_deepspeed:
+            self.optimizer.zero_grad(set_to_none=True)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -813,12 +885,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    # Tell deepspeed whether this backward is the last in the accumulation group.
-                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                    self.model.backward(loss)
-                    if is_accumulation_boundary:
-                        self.model.step()
-                        grad_norms.append(float(self.model.get_global_grad_norm()))
+                    grad_norm = self._backward_and_step(loss, is_accumulation_boundary)
+                    if grad_norm is not None:
+                        grad_norms.append(grad_norm)
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
@@ -890,25 +959,45 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Save the main model checkpoint with enhanced client state
         # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
-        old_mpu = None
-        if self.model.mpu is not None:
-            old_mpu = self.mpu
-            self.model.mpu = None
-        self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
+        if self._uses_deepspeed:
+            old_mpu = None
+            if self.model.mpu is not None:
+                old_mpu = self.mpu
+                self.model.mpu = None
+            self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
-        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
+            # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
+            if self.rank == 0:
+                if args.keep_last_n_checkpoints >= 0:
+                    clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
+
+                # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
+                if args.gs_checkpoint_state_dir is not None:
+                    ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
+                        checkpoint_state_dir, args.gs_checkpoint_state_dir
+                    )
+            # add back the mpu
+            if old_mpu is not None:
+                self.model.mpu = old_mpu
+            return
+
         if self.rank == 0:
-            if args.keep_last_n_checkpoints >= 0:
-                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
-
-            # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
+            os.makedirs(checkpoint_state_dir, exist_ok=True)
+            torch.save(
+                {
+                    "model": self.model.module.state_dict(),
+                    "optimizer": self.optimizer.state_dict(),
+                    "scheduler": self.scheduler.state_dict(),
+                    "client_state": client_state,
+                    "rng_states": rng_states,
+                },
+                os.path.join(checkpoint_state_dir, DDP_TRAINING_STATE_FILENAME),
+            )
             if args.gs_checkpoint_state_dir is not None:
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
-        # add back the mpu
-        if old_mpu is not None:
-            self.model.mpu = old_mpu
+        torch.distributed.barrier()
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         output_path = pathlib.Path(output_dir)
@@ -935,15 +1024,17 @@ class PolicyTrainerRayProcess(RayProcess):
         if is_olmo3:
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
-        # gather parameters
         output_state_dict = {}
-        for k, v in model_to_save.named_parameters():
-            # only gather z3 params
-            params_to_fetch = _z3_params_to_fetch([v])
-            with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
-                vv = v.data.cpu()
-                if self.rank == 0:
-                    output_state_dict[k] = vv
+        if self._uses_deepspeed:
+            for k, v in model_to_save.named_parameters():
+                # only gather z3 params
+                params_to_fetch = _z3_params_to_fetch([v])
+                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                    vv = v.data.cpu()
+                    if self.rank == 0:
+                        output_state_dict[k] = vv
+        elif self.rank == 0:
+            output_state_dict = {k: v.data.cpu() for k, v in model_to_save.named_parameters()}
 
         if self.rank == 0:
             state_dict = model_to_save.state_dict()

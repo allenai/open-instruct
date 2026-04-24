@@ -135,6 +135,8 @@ class GRPOExperimentConfig(
     sequence_parallel_size: int = 1
     """sequence parallel size - how many GPUs we will parallelize sequences across during training.
     Useful for super-long context lengths."""
+    trainer_backend: Literal["deepspeed", "ddp"] = "deepspeed"
+    """Training backend for the policy learner."""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     deepspeed_zpg: int = 8
@@ -325,6 +327,7 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"`eval_only_set_checkpoint` must be >= 1 when provided, got {self.eval_only_set_checkpoint}"
             )
+        assert self.trainer_backend in {"deepspeed", "ddp"}
 
 
 ExperimentConfig = GRPOExperimentConfig
