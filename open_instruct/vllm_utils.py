@@ -159,10 +159,12 @@ def _install_vllm_weight_transfer_diagnostics() -> None:
         _phase(f"[vllm worker update_weights] NCCL metadata sample dtypes={dtype_names[:3]} shapes={shapes[:3]}")
         done_event, _ = _start_diag_heartbeat(
             "[vllm worker update_weights] NCCL receive_weights pending",
-            details=lambda: f"load_batches_started={counters['load_batches']} load_batches_done={counters['load_done']}",
+            details=lambda: (
+                f"load_batches_started={counters['load_batches']} load_batches_done={counters['load_done']}"
+            ),
         )
 
-        def load_weights_with_diag(weights: list[tuple[str, torch.Tensor]]) -> None:
+        def load_weights_with_diag(weights: list[tuple[str, torch.Tensor]]) -> Any:
             counters["load_batches"] += 1
             batch_idx = counters["load_batches"]
             load_start = time.perf_counter()
