@@ -18,11 +18,19 @@ value function for GAE (replacing the scalar value head when ``use_generative_va
 
 A background REINFORCE thread collects ``(prompt, generated_score, outcome)`` training pairs from
 the policy actors via a shared Ray queue.  A ``GenValueTrainerActor`` (one per cluster) holds a
-PyTorch copy of the gen-value model, computes REINFORCE gradients, and optionally syncs the
-updated weights back to the gen-value vLLM pool every ``gen_value_sync_freq`` policy steps by
-saving the model to a temp directory and restarting the gen-value vLLM engine.  Set
-``gen_value_sync_freq=0`` (default) to train the PyTorch gen-value model without syncing back to
-vLLM (useful for debugging the gradient path before wiring full weight-transfer infrastructure).
+PyTorch copy of the gen-value model and computes REINFORCE gradients using the paper's
+MSE-shaped critic reward ``R_v = 1 - (outcome - v_hat)**2``, following §5.2 of "Bringing Value
+Models Back" (arXiv:2604.10701).  On parse failure we treat the critic as having predicted
+``v_hat = 0`` (instead of the paper's reward-zero convention) so the gradient signal stays
+consistent with the piecewise-constant values we feed into GAE.
+
+Weight sync from the trainer actor back to the gen-value vLLM pool happens in-place over NCCL,
+mirroring how the policy syncs to its own vLLM pool in
+``grpo_fast.PolicyTrainerRayProcess.broadcast_to_vllm``.  A NCCL group is established once at
+startup via ``GenValueTrainerActor.setup_model_update_group``; every ``gen_value_sync_freq``
+policy steps (default: 1 = every step) we then broadcast the latest PyTorch weights into the
+running vLLM engines.  Set ``gen_value_sync_freq=0`` to skip sync entirely and keep the vLLM
+critic frozen while REINFORCE gradients are still computed (useful for debugging).
 
 Usage::
 
@@ -41,11 +49,9 @@ Usage::
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import random
-import tempfile
 import threading
 from concurrent import futures
 from dataclasses import dataclass
@@ -58,6 +64,8 @@ import torch.distributed as dist
 import wandb
 from ray.util import queue as ray_queue
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast_resource_plan, grpo_utils, utils, value_model_utils, vllm_utils
@@ -78,15 +86,33 @@ _GEN_VALUE_SAMPLE_SIZE = 4  # prompts sampled per step for background scoring
 class GenValueTrainerActor:
     """Ray actor that holds the gen-value model (PyTorch) and performs REINFORCE updates.
 
-    Lives on the same GPU as the gen-value vLLM engine so that IPC-based weight sync
-    (trainer → vLLM) can be used when needed.  The actor receives training pairs via
-    ``reinforce_step`` and applies REINFORCE with the raw outcome as reward.
+    The actor receives training pairs (prompt, generated, outcome) via ``reinforce_step``
+    and optimises the paper's accuracy-shaped REINFORCE reward::
+
+        R_v = 1 - (outcome - v_hat)**2    if v_hat was parsed from the generation
+            = 0                           otherwise
+
+    where ``outcome`` is clipped to [0, 1] and ``v_hat`` is the parsed/rescaled score
+    from the critic's own generation. This matches §5.2 of
+    "Bringing Value Models Back" (GenAC, arXiv:2604.10701).
+
+    Weight sync to the gen-value vLLM pool is done in-place over NCCL via
+    ``setup_model_update_group`` + ``broadcast_to_vllm``, mirroring how the policy
+    pushes weights to its vLLM pool in ``grpo_fast.PolicyTrainerRayProcess``.
     """
 
-    def __init__(self, model_path: str, learning_rate: float, score_min: float, score_max: float) -> None:
+    def __init__(
+        self,
+        model_path: str,
+        learning_rate: float,
+        score_min: float,
+        score_max: float,
+        tensor_parallel_size: int = 1,
+    ) -> None:
         self._lr = learning_rate
         self._score_min = score_min
         self._score_max = score_max
+        self._tp_size = tensor_parallel_size
         self._step_count = 0
 
         self._model = AutoModelForCausalLM.from_pretrained(
@@ -98,24 +124,51 @@ class GenValueTrainerActor:
             self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
         self._optimizer = torch.optim.AdamW(self._model.parameters(), lr=learning_rate)
 
-    def reinforce_step(self, training_pairs: list[dict]) -> dict:
-        """Apply one REINFORCE gradient step from a batch of (prompt, generated, outcome) pairs.
+        self._vllm_engines: list | None = None
+        self._model_update_group: Any | None = None
 
-        Returns a metrics dict with ``gen_value/reinforce_loss`` and ``gen_value/outcome_mean``.
+    def _score_from_text(self, text: str) -> float | None:
+        raw = value_model_utils.parse_generative_value_score(text, self._score_min, self._score_max)
+        if raw is None:
+            return None
+        return value_model_utils.rescale_gen_value_score(raw, self._score_min, self._score_max)
+
+    def reinforce_step(self, training_pairs: list[dict]) -> dict:
+        """Apply one REINFORCE gradient step with the MSE-shaped critic reward.
+
+        For each pair we compute ``R_v = 1 - (r - v_hat)^2``, with both ``r`` and
+        ``v_hat`` clipped to [0, 1]. Parse failures are treated as the critic
+        predicting ``v_hat = 0`` (rather than assigning a reward of 0), so the
+        critic still receives a consistent gradient signal on malformed outputs.
         """
         if not training_pairs:
             return {}
 
         self._optimizer.zero_grad()
         total_loss = 0.0
-        valid_outcomes: list[float] = []
+        rewards: list[float] = []
+        outcomes: list[float] = []
+        mses: list[float] = []  # (r - v_hat)^2 with parse-failure → v_hat=0.
+        parsed_v_hats: list[float] = []  # only for pairs where parsing succeeded.
+        parsed_count = 0
 
         for pair in training_pairs:
             if pair["outcome"] is None:
                 continue
-            outcome = float(pair["outcome"])
+            outcome = max(0.0, min(1.0, float(pair["outcome"])))
             prompt = pair["prompt"]
             generated = pair["generated"]
+
+            v_hat = self._score_from_text(generated)
+            if v_hat is None:
+                # Parse failure: treat the critic's prediction as 0.
+                effective_v_hat = 0.0
+            else:
+                effective_v_hat = v_hat
+                parsed_count += 1
+                parsed_v_hats.append(v_hat)
+            squared_error = (outcome - effective_v_hat) ** 2
+            reward = 1.0 - squared_error
 
             combined = prompt + generated
             enc = self._tokenizer(combined, return_tensors="pt", truncation=True, max_length=2048)
@@ -127,30 +180,87 @@ class GenValueTrainerActor:
             outputs = self._model(input_ids=input_ids, labels=labels)
             log_prob = -outputs.loss  # mean log-prob of generated tokens
 
-            loss = -log_prob * outcome
+            loss = -log_prob * reward
             loss.backward()
             total_loss += float(loss.detach())
-            valid_outcomes.append(outcome)
+            outcomes.append(outcome)
+            rewards.append(reward)
+            mses.append(squared_error)
 
-        if not valid_outcomes:
+        if not rewards:
             return {}
 
         torch.nn.utils.clip_grad_norm_(self._model.parameters(), 1.0)
         self._optimizer.step()
         self._step_count += 1
 
-        return {
-            "gen_value/reinforce_loss": total_loss / len(valid_outcomes),
-            "gen_value/outcome_mean": sum(valid_outcomes) / len(valid_outcomes),
+        metrics = {
+            "gen_value/reinforce_loss": total_loss / len(rewards),
+            "gen_value/reward_mean": sum(rewards) / len(rewards),
+            "gen_value/outcome_mean": sum(outcomes) / len(outcomes),
+            "gen_value/mse": sum(mses) / len(mses),
+            "gen_value/parse_rate": parsed_count / len(rewards),
             "gen_value/reinforce_steps": self._step_count,
         }
+        if parsed_v_hats:
+            # Mean of parsed predictions -- tells us whether the critic is biased high/low
+            # vs. ``outcome_mean`` and whether it's moving over training. Undefined when
+            # no pair parsed this step, so we only emit the key when we have signal.
+            metrics["gen_value/v_hat_mean"] = sum(parsed_v_hats) / len(parsed_v_hats)
+        return metrics
 
-    def save_weights(self, output_dir: str) -> str:
-        """Save the current model weights to ``output_dir`` and return the path."""
-        os.makedirs(output_dir, exist_ok=True)
-        self._model.save_pretrained(output_dir)
-        self._tokenizer.save_pretrained(output_dir)
-        return output_dir
+    def setup_model_update_group(self, vllm_engines: list) -> None:
+        """One-time NCCL handshake between this trainer and the gen-value vLLM engines.
+
+        World layout matches the policy pool: trainer is rank 0, then each vLLM
+        engine owns ``tensor_parallel_size`` consecutive ranks starting from 1.
+        """
+        self._vllm_engines = vllm_engines
+        if not vllm_engines:
+            self._model_update_group = None
+            return
+
+        master_address = ray._private.services.get_node_ip_address().strip("[]")
+        master_port = utils.find_free_port()
+        world_size = len(vllm_engines) * self._tp_size + 1
+        master_info = {
+            "master_address": master_address,
+            "master_port": master_port,
+            "world_size": world_size,
+        }
+        init_infos = [
+            master_info | {"rank_offset": i * self._tp_size + 1} for i, _ in enumerate(vllm_engines)
+        ]
+
+        # Submit the vLLM-side init RPCs first (async) so the NCCL handshake can
+        # proceed on both sides in parallel, then wait.
+        refs = [
+            engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info=info))
+            for engine, info in zip(vllm_engines, init_infos)
+        ]
+        torch.cuda.set_device(0)
+        self._model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
+        utils.ray_get_with_progress(
+            refs, desc="Initializing gen-value vLLM weight transfer engines", timeout=600
+        )
+
+    def broadcast_to_vllm(self, model_step: int) -> list:
+        """Push current PyTorch weights to the gen-value vLLM pool over NCCL.
+
+        Returns the list of engine-side ``update_weights`` ObjectRefs so the
+        caller can wait on them (mirrors ``PolicyTrainerRayProcess.broadcast_to_vllm``).
+        """
+        if not self._vllm_engines or self._model_update_group is None:
+            return []
+        torch.cuda.empty_cache()
+        torch.cuda.set_device(0)
+        return vllm_utils.broadcast_weights_to_vllm(
+            model=self._model,
+            vllm_engines=self._vllm_engines,
+            model_update_group=self._model_update_group,
+            model_step=model_step,
+            gather_whole_model=True,
+        )
 
     def get_step_count(self) -> int:
         return self._step_count
@@ -176,7 +286,9 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
     # Cap on the number of gen-value queries per rollout (evenly downsampled when exceeded).
     gen_value_max_segments: int = 16
     # Generation params for the gen value model's vLLM engine.
-    gen_value_max_new_tokens: int = 8
+    # Default matches GenAC's "Maximum Critic Response Length" (Table 5): the critic
+    # needs enough budget to actually do CoT reasoning before emitting the score.
+    gen_value_max_new_tokens: int = 1024
     gen_value_temperature: float = 1.0
     # Score schema.
     gen_value_score_min: float = 0.0
@@ -187,8 +299,10 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
     # Conditioning for the gen-value prompt: one of none, gt, correct_demo, rollout_context.
     gen_value_conditioning: str = "none"
     # How often (in policy steps) to sync REINFORCE-trained gen-value weights back to vLLM.
-    # 0 disables periodic sync (weights stay frozen in vLLM; REINFORCE gradient is still computed).
-    gen_value_sync_freq: int = 0
+    # Default=1 keeps the critic tracking the evolving actor every step (paper's joint-
+    # training regime). Set to 0 to disable sync entirely -- weights stay frozen in vLLM
+    # while REINFORCE gradients are still computed (useful for debugging).
+    gen_value_sync_freq: int = 1
 
     def __post_init__(self):
         super().__post_init__()
@@ -229,8 +343,10 @@ def score_partial_rollout_batch(
 ) -> tuple[list[float | None], list[str]]:
     """Send a batch of partial-rollout scoring prompts to the gen-value vLLM pool.
 
-    Returns (parsed_scores_in_0_1, raw_generations). ``None`` scores indicate parse failures; the
-    caller is free to substitute a default (e.g. 0.5) and track ``parse_rate`` as a metric.
+    Returns (parsed_scores_in_0_1, raw_generations). Parse failures are reported as ``None`` in
+    the returned list so callers can track ``parse_rate`` as a metric; downstream consumers that
+    need a numeric value should substitute ``0.0`` to match the in-graph gen-value scorer and the
+    REINFORCE trainer's handling of parse failures.
     """
     n_eng = len(vllm_engines)
     buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_eng)]
@@ -267,19 +383,25 @@ def score_partial_rollout_batch(
 def _build_sample_scoring_prompts(
     args: GenValueExperimentConfig, tokenizer: Any, train_dataset: Any, n: int, ground_truths_key: str = "ground_truth"
 ) -> list[str]:
-    """Sample n prompts from the dataset and build gen-value scoring prompts from them."""
+    """Sample n prompts from the dataset and build gen-value scoring prompts from them.
+
+    Used only by the diagnostic scoring thread; we probe the critic at the
+    start-of-rollout state (i.e. ``partial_response=""``) so the logged score
+    represents the prior value estimate for each sampled problem.
+    """
     indices = random.sample(range(len(train_dataset)), min(n, len(train_dataset)))
     prompts = []
     for idx in indices:
         prompt_ids = train_dataset[idx][INPUT_IDS_PROMPT_KEY]
-        prompt_text = tokenizer.decode(prompt_ids, skip_special_tokens=False)
+        prompt_text = tokenizer.decode(prompt_ids, skip_special_tokens=True)
         ground_truth = train_dataset[idx].get(ground_truths_key, "")
         scoring_prompt = value_model_utils.build_generative_value_prompt(
-            partial_response=prompt_text,
+            partial_response="",
             conditioning=args.gen_value_conditioning,
             ground_truth=ground_truth,
             score_min=args.gen_value_score_min,
             score_max=args.gen_value_score_max,
+            problem=prompt_text,
         )
         prompts.append(scoring_prompt)
     return prompts
@@ -366,63 +488,25 @@ def _gen_value_reinforce_loop(
 
 
 def _sync_gen_value_weights(
-    gen_value_trainer: Any,
-    gen_value_vllm_engines: list,
-    policy_group: Any,
-    gen_value_model_path: str,
-    args: GenValueExperimentConfig,
-    vllm_config: Any,
-    streaming_config: Any,
-    tc: Any,
-    reward_config: Any,
+    gen_value_trainer: Any, gen_value_vllm_engines: list, model_step: int
 ) -> None:
-    """Save gen-value trainer weights, kill old vLLM engines, recreate from checkpoint, re-wire policy actors."""
-    logger.info("[GenValue] Syncing gen-value weights to vLLM engines.")
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        saved_path = ray.get(gen_value_trainer.save_weights.remote(tmp_dir))
-        logger.info("[GenValue] Saved weights to %s", saved_path)
+    """Push updated gen-value weights to the gen-value vLLM pool over NCCL.
 
-        for engine in gen_value_vllm_engines:
-            with contextlib.suppress(Exception):
-                ray.kill(engine)
+    Mirrors the policy-side weight sync in ``grpo_fast.weight_sync_thread``:
+    the engines are put to sleep inside ``broadcast_weights_to_vllm``, the
+    trainer streams parameters over the NCCL group established at startup,
+    and the engines are woken back up here.
+    """
+    if not gen_value_vllm_engines:
+        return
+    logger.debug("[GenValue] Syncing weights at model_step=%d.", model_step)
 
-        gen_value_max_model_len = streaming_config.pack_length * 2
-        new_engines = vllm_utils.create_vllm_engines(
-            len(gen_value_vllm_engines),
-            args.gen_value_vllm_tensor_parallel_size,
-            vllm_config.vllm_enforce_eager,
-            tc.tokenizer_name_or_path or gen_value_model_path,
-            saved_path,
-            None,
-            args.seed,
-            False,
-            gen_value_max_model_len,
-            vllm_config.vllm_gpu_memory_utilization,
-            False,
-            pg=None,
-            tool_parser_type="legacy",
-            tool_definitions=None,
-            tool_stop_sequences=[],
-            max_steps=1,
-            per_turn_max_tokens=None,
-            mask_tool_use=False,
-            pools={},
-            prompt_queue=ray_queue.Queue(),
-            results_queue=ray_queue.Queue(),
-            eval_results_queue=ray_queue.Queue(),
-            actor_manager=None,
-            inflight_updates=False,
-            reward_config=reward_config,
-            train_dataset=None,
-            eval_dataset=None,
-            vllm_attention_backend=vllm_config.vllm_attention_backend,
-        )
+    engine_refs = ray.get(gen_value_trainer.broadcast_to_vllm.remote(model_step))
+    if engine_refs:
+        ray.get(engine_refs)
+    ray.get([engine.wake_up.remote() for engine in gen_value_vllm_engines])
 
-        gen_value_vllm_engines.clear()
-        gen_value_vllm_engines.extend(new_engines)
-
-    ray.get([a.set_gen_value_engines.remote(gen_value_vllm_engines) for a in policy_group.models])
-    logger.info("[GenValue] Weight sync complete: %d engine(s) re-wired.", len(gen_value_vllm_engines))
+    logger.debug("[GenValue] Weight sync complete (%d engine(s)).", len(gen_value_vllm_engines))
 
 
 def main():
@@ -666,10 +750,22 @@ def main():
     if gen_value_vllm_engines:
         gv_lr = args.gen_value_learning_rate or 1e-6
         gen_value_trainer = GenValueTrainerActor.remote(
-            gen_value_model_path, gv_lr, args.gen_value_score_min, args.gen_value_score_max
+            gen_value_model_path,
+            gv_lr,
+            args.gen_value_score_min,
+            args.gen_value_score_max,
+            tensor_parallel_size=args.gen_value_vllm_tensor_parallel_size,
         )
         ray.get(gen_value_trainer.ready.remote())
         logger.info("======== ✅ Gen-value trainer actor ready (lr=%.2e) =========", gv_lr)
+
+        # Establish the NCCL weight-transfer group between the trainer actor and the
+        # gen-value vLLM engines. Mirrors `setup_model_update_group` on the policy
+        # side (see grpo_fast.PolicyTrainerRayProcess) so we can push weights
+        # in-place instead of killing and recreating engines.
+        if args.gen_value_sync_freq > 0:
+            ray.get(gen_value_trainer.setup_model_update_group.remote(gen_value_vllm_engines))
+            logger.info("======== ✅ Gen-value NCCL weight-transfer group initialised =========")
 
         gen_value_training_queue = ray_queue.Queue(maxsize=200)
 
@@ -723,19 +819,12 @@ def main():
         if gen_value_vllm_engines:
             gen_value_step_trigger.set()
         _gv_policy_step_count[0] += 1
-        # Periodic weight sync: save PyTorch gen-value model → recreate vLLM engines.
+        # Periodic weight sync: NCCL broadcast PyTorch gen-value weights into the
+        # gen-value vLLM pool (handshake set up at startup in setup_model_update_group).
         sync_freq = args.gen_value_sync_freq
         if sync_freq > 0 and gen_value_trainer is not None and _gv_policy_step_count[0] % sync_freq == 0:
             _sync_gen_value_weights(
-                gen_value_trainer,
-                gen_value_vllm_engines,
-                policy_group,
-                gen_value_model_path,
-                args,
-                vllm_config,
-                streaming_config,
-                tc,
-                reward_config,
+                gen_value_trainer, gen_value_vllm_engines, _gv_policy_step_count[0]
             )
         return result
 

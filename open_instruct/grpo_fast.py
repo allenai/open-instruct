@@ -804,6 +804,19 @@ class PolicyTrainerRayProcess(RayProcess):
         if n_resp == 0:
             return empty_values, []
 
+        # Grab the problem / prompt text -- i.e. the contiguous run of non-response
+        # tokens before the first response token -- and decode it so the critic can
+        # condition on the actual question (matches GenAC Fig. 3). Special tokens
+        # from the policy's chat template are stripped so the critic sees a clean
+        # natural-language problem rather than role markers like <|im_start|>.
+        full_token_ids = query_responses[0].tolist()
+        if bool(resp_mask_full.any().item()):
+            first_resp_idx = int(resp_mask_full.long().argmax().item())
+        else:
+            first_resp_idx = len(full_token_ids)
+        problem_token_ids = full_token_ids[:first_resp_idx]
+        problem_text = self.tokenizer.decode(problem_token_ids, skip_special_tokens=True)
+
         segmentation: str = getattr(args, "gen_value_segmentation", "fixed")
         chunk_size: int = getattr(args, "gen_value_chunk_size", 512)
         max_segments: int | None = getattr(args, "gen_value_max_segments", None)
@@ -825,13 +838,14 @@ class PolicyTrainerRayProcess(RayProcess):
 
         prompts: list[str] = []
         for bdry in boundaries:
-            partial_text = self.tokenizer.decode(resp_token_ids[: bdry + 1], skip_special_tokens=False)
+            partial_text = self.tokenizer.decode(resp_token_ids[: bdry + 1], skip_special_tokens=True)
             prompt = value_model_utils.build_generative_value_prompt(
                 partial_response=partial_text,
                 conditioning=conditioning,
                 ground_truth=ground_truth_str if conditioning != "none" else "",
                 score_min=score_min,
                 score_max=score_max,
+                problem=problem_text,
             )
             prompts.append(prompt)
 
@@ -860,8 +874,10 @@ class PolicyTrainerRayProcess(RayProcess):
         scores: list[float] = []
         for text in generated_texts:
             raw = value_model_utils.parse_generative_value_score(text, score_min, score_max)
+            # Parse failure → v_hat = 0 (piecewise-constant value of 0 for that segment),
+            # matching the REINFORCE reward semantics in grpo_fast_genvalue.GenValueTrainerActor.
             scores.append(
-                value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.5
+                value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.0
             )
 
         # Vectorised piecewise-constant values: each token index maps to its segment score.

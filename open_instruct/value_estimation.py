@@ -550,7 +550,7 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
     for idx, row in df.iterrows():
         rollout_tokens = list(row["rollout_tokens"])
         for p_idx, t in enumerate(row["probe_positions"]):
-            partial = tokenizer.decode(rollout_tokens[:t], skip_special_tokens=False)
+            partial = tokenizer.decode(rollout_tokens[:t], skip_special_tokens=True)
             prompt = value_model_utils.build_generative_value_prompt(
                 partial,
                 conditioning=cfg.gen_value_conditioning,
@@ -558,6 +558,7 @@ def _score_with_generative_value(df, cfg: ScoreDatasetConfig) -> list[list[float
                 siblings=row.get("sibling_rollouts") or [],
                 score_min=cfg.gen_value_score_min,
                 score_max=cfg.gen_value_score_max,
+                problem=row.get("prompt", ""),
             )
             prompts.append(prompt)
             positions.append((idx, p_idx))

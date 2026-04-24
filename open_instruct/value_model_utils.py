@@ -168,11 +168,14 @@ def build_generative_value_prompt(
     siblings: Sequence[dict] | None = None,
     score_min: float = 0.0,
     score_max: float = 10.0,
+    problem: str = "",
 ) -> str:
     """Build the gen-value prompt.
 
-    The model should reason briefly then output <answer>X</answer> where X is in
-    [score_min, score_max]. Generation stops on </answer>; scores are later rescaled to [0, 1].
+    Mirrors the template in Figure 3 of GenAC (arXiv:2604.10701): the critic sees the
+    original ``problem`` followed by a ``partial_response`` and is asked to reason
+    briefly before emitting ``<answer>X</answer>`` with X in [score_min, score_max].
+    Generation stops on ``</answer>``; scores are later rescaled to [0, 1].
     """
     conditioning_text = ""
     if conditioning == "gt" and ground_truth:
@@ -194,14 +197,28 @@ def build_generative_value_prompt(
             lines.append(line)
         conditioning_text = "Here are some other attempts at this question:\n" + "".join(lines)
 
+    # Instruction template mirrors Figure 3 of GenAC (arXiv:2604.10701), minus the
+    # In-Context Conditioning item (paper's step 2), which is intentionally omitted.
     instruction = (
-        f"Here is a given partial response. Please predict the expected value of the response, "
-        f"scoring between {int(score_min)} and {int(score_max)}. "
-        f"Reason briefly, then wrap your final score in <answer>...</answer> where the score is "
-        f"a number in [{int(score_min)}, {int(score_max)}]."
+        "You will be given a problem and a partial response. Your job is to predict the "
+        f"expected value of the response on an integer scale from {int(score_min)} (very "
+        f"unlikely to succeed) to {int(score_max)} ({int(score_max)} most likely).\n"
+        "\n"
+        "Instructions:\n"
+        "1. Evaluate the difficulty of the problem.\n"
+        "2. Skim through the partial solution and detect any progress, error, or confusion.\n"
+        "3. Analyze the probability of success if the model finishes the solution.\n"
+        f"4. Output your final answer as an integer between {int(score_min)} and "
+        f"{int(score_max)} inclusive, wrapped in <answer>...</answer>."
     )
-    suffix = f"<rollout>{partial_response}</rollout>\nAnswer:"
-    return f"{conditioning_text}{instruction} {suffix}"
+    problem_block = f"Problem:\n{problem}\n\n" if problem else ""
+    conditioning_block = f"{conditioning_text}\n" if conditioning_text else ""
+    return (
+        f"{instruction}\n\n"
+        f"{problem_block}"
+        f"{conditioning_block}"
+        f"Partial response:\n<rollout>{partial_response}</rollout>\nAnswer:"
+    )
 
 
 def parse_generative_value_score(text: str, score_min: float = 0.0, score_max: float = 10.0) -> float | None:
