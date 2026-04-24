@@ -1177,10 +1177,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         inference_results_Q.put(
             self.create_mock_result(
-                0,
-                "0_0_1",
-                num_samples_per_prompt=num_samples_per_prompt,
-                reward_scores=[0.0, 0.5, 1.0, 0.5],
+                0, "0_0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 0.5, 1.0, 0.5]
             )
         )
         inference_results_Q.put(
@@ -1194,8 +1191,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_model_dims = self.create_llama7b_model_dims()
         tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
         never_give_up_state = data_loader_lib.NeverGiveUpAccumulationState(
-            pending_best_reward={"0_0": 1.0},
-            pending_attempt_counts={"0_0": 1},
+            pending_best_reward={"0_0": 1.0}, pending_attempt_counts={"0_0": 1}
         )
 
         _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(
@@ -1226,10 +1222,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         inference_results_Q.put(
             self.create_mock_result(
-                0,
-                "0_0_1",
-                num_samples_per_prompt=num_samples_per_prompt,
-                reward_scores=[0.5] * num_samples_per_prompt,
+                0, "0_0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.5] * num_samples_per_prompt
             )
         )
 
@@ -1238,8 +1231,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_model_dims = self.create_llama7b_model_dims()
         tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
         never_give_up_state = data_loader_lib.NeverGiveUpAccumulationState(
-            pending_best_reward={"0_0": 1.0},
-            pending_attempt_counts={"0_0": 1},
+            pending_best_reward={"0_0": 1.0}, pending_attempt_counts={"0_0": 1}
         )
 
         _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(

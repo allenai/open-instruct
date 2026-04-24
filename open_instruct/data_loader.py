@@ -1601,7 +1601,8 @@ def accumulate_inference_batches(
 
                 # if we filter this batch, requeue the prompt as long as we didn't hit max reward
                 # requeue with probability never_give_up
-                requeue_same_prompt = best_reward < max_possible_score and np.random.random() < never_give_up
+                solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
+                requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
 
                 # if we are replenishing prompts, requeue this particular prompt if requeue_same_prompt
                 # increase the ngu_suffix so it doesn't clash with previous ids
