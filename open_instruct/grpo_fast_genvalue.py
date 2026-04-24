@@ -415,10 +415,16 @@ def _gen_value_scoring_loop(
     step_trigger: threading.Event,
     stop_event: threading.Event,
     with_tracking: bool,
+    engines_lock: threading.Lock,
     ground_truths_key: str = "ground_truth",
 ) -> None:
     """Background thread: after each policy training step, score sample prompts with the gen-value
-    pool and log ``gen_value/score_mean`` and ``gen_value/parse_rate`` to W&B."""
+    pool and log ``gen_value/score_mean`` and ``gen_value/parse_rate`` to W&B.
+
+    ``engines_lock`` serialises engine use with ``_sync_gen_value_weights`` so a weight sync
+    can't put an engine to sleep while this thread has a ``generate_completions`` in flight
+    (the resulting deadlock is visible as a hang in ``engine.wake_up``).
+    """
     logger.info("[GenValue] Scoring thread started.")
     while not stop_event.is_set():
         triggered = step_trigger.wait(timeout=1.0)
@@ -431,15 +437,16 @@ def _gen_value_scoring_loop(
             prompts = _build_sample_scoring_prompts(
                 args, tokenizer, train_dataset, _GEN_VALUE_SAMPLE_SIZE, ground_truths_key
             )
-            scores, _ = score_partial_rollout_batch(
-                gen_value_vllm_engines,
-                tokenizer,
-                prompts,
-                max_new_tokens=args.gen_value_max_new_tokens,
-                temperature=args.gen_value_temperature,
-                score_min=args.gen_value_score_min,
-                score_max=args.gen_value_score_max,
-            )
+            with engines_lock:
+                scores, _ = score_partial_rollout_batch(
+                    gen_value_vllm_engines,
+                    tokenizer,
+                    prompts,
+                    max_new_tokens=args.gen_value_max_new_tokens,
+                    temperature=args.gen_value_temperature,
+                    score_min=args.gen_value_score_min,
+                    score_max=args.gen_value_score_max,
+                )
             valid = [s for s in scores if s is not None]
             if with_tracking:
                 wandb.log(
@@ -488,7 +495,10 @@ def _gen_value_reinforce_loop(
 
 
 def _sync_gen_value_weights(
-    gen_value_trainer: Any, gen_value_vllm_engines: list, model_step: int
+    gen_value_trainer: Any,
+    gen_value_vllm_engines: list,
+    model_step: int,
+    engines_lock: threading.Lock,
 ) -> None:
     """Push updated gen-value weights to the gen-value vLLM pool over NCCL.
 
@@ -496,15 +506,21 @@ def _sync_gen_value_weights(
     the engines are put to sleep inside ``broadcast_weights_to_vllm``, the
     trainer streams parameters over the NCCL group established at startup,
     and the engines are woken back up here.
+
+    ``engines_lock`` is held for the duration of the sync so the diagnostic
+    scoring thread cannot have a ``generate_completions`` in flight against
+    a sleeping engine -- otherwise ``engine.wake_up()`` deadlocks behind the
+    in-flight request on vLLM's single asyncio loop.
     """
     if not gen_value_vllm_engines:
         return
     logger.debug("[GenValue] Syncing weights at model_step=%d.", model_step)
 
-    engine_refs = ray.get(gen_value_trainer.broadcast_to_vllm.remote(model_step))
-    if engine_refs:
-        ray.get(engine_refs)
-    ray.get([engine.wake_up.remote() for engine in gen_value_vllm_engines])
+    with engines_lock:
+        engine_refs = ray.get(gen_value_trainer.broadcast_to_vllm.remote(model_step))
+        if engine_refs:
+            ray.get(engine_refs)
+        ray.get([engine.wake_up.remote() for engine in gen_value_vllm_engines])
 
     logger.debug("[GenValue] Weight sync complete (%d engine(s)).", len(gen_value_vllm_engines))
 
@@ -781,6 +797,9 @@ def main():
     # ── Step 5: background threads (scoring + REINFORCE) ──────────────────────
     gen_value_step_trigger = threading.Event()
     gen_value_stop_event = threading.Event()
+    # Serialises gen-value vLLM engine use between the diagnostic scoring thread
+    # and weight sync (see _sync_gen_value_weights docstring).
+    gen_value_engines_lock = threading.Lock()
     gen_value_thread: threading.Thread | None = None
 
     if gen_value_vllm_engines:
@@ -794,6 +813,7 @@ def main():
                 gen_value_step_trigger,
                 gen_value_stop_event,
                 args.with_tracking,
+                gen_value_engines_lock,
                 tc.ground_truths_key,
             ),
             daemon=True,
@@ -816,16 +836,21 @@ def main():
 
     def _one_training_step_with_genvalue(*step_args, **step_kwargs):
         result = _original_one_training_step(*step_args, **step_kwargs)
-        if gen_value_vllm_engines:
-            gen_value_step_trigger.set()
         _gv_policy_step_count[0] += 1
-        # Periodic weight sync: NCCL broadcast PyTorch gen-value weights into the
-        # gen-value vLLM pool (handshake set up at startup in setup_model_update_group).
+        # Sync FIRST, then fire the scoring trigger. Scoring needs to run on the
+        # latest weights, and firing before sync risks a generate_completions
+        # in flight when broadcast_weights_to_vllm calls engine.sleep() -- that
+        # deadlocks engine.wake_up() on vLLM's asyncio loop.
         sync_freq = args.gen_value_sync_freq
         if sync_freq > 0 and gen_value_trainer is not None and _gv_policy_step_count[0] % sync_freq == 0:
             _sync_gen_value_weights(
-                gen_value_trainer, gen_value_vllm_engines, _gv_policy_step_count[0]
+                gen_value_trainer,
+                gen_value_vllm_engines,
+                _gv_policy_step_count[0],
+                gen_value_engines_lock,
             )
+        if gen_value_vllm_engines:
+            gen_value_step_trigger.set()
         return result
 
     _grpo_fast.one_training_step = _one_training_step_with_genvalue
