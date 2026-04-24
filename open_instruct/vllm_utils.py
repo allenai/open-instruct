@@ -131,6 +131,23 @@ def _start_diag_heartbeat(
     return done_event, thread
 
 
+async def _update_weights_coroutine_with_diag(
+    llm_engine: Any, request: "WeightTransferUpdateRequest", model_step: int
+) -> Any:
+    start_time = time.perf_counter()
+    _phase(f"[vllm actor update_weights] coroutine start model_step={model_step}")
+    try:
+        result = await llm_engine.update_weights(request)
+    except Exception as e:
+        _phase(f"[vllm actor update_weights] coroutine exception: {type(e).__name__}: {e}")
+        raise
+    _phase(
+        "[vllm actor update_weights] coroutine done "
+        f"model_step={model_step} elapsed={time.perf_counter() - start_time:.3f}s"
+    )
+    return result
+
+
 _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED = False
 
 
@@ -944,20 +961,6 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    async def _update_weights_async_with_diag(self, request: WeightTransferUpdateRequest, model_step: int) -> Any:
-        start_time = time.perf_counter()
-        _phase(f"[vllm actor update_weights] coroutine start model_step={model_step}")
-        try:
-            result = await self.llm_engine.update_weights(request)
-        except Exception as e:
-            _phase(f"[vllm actor update_weights] coroutine exception: {type(e).__name__}: {e}")
-            raise
-        _phase(
-            "[vllm actor update_weights] coroutine done "
-            f"model_step={model_step} elapsed={time.perf_counter() - start_time:.3f}s"
-        )
-        return result
-
     def update_weights(
         self, names: list[str], dtype_names: list[str], shapes: list[tuple[int, ...]], packed: bool, model_step: int
     ) -> None:
@@ -984,7 +987,9 @@ class LLMRayActor:
             "[vllm actor update_weights] submit coroutine "
             f"model_step={model_step} active_tasks={len(self.active_tasks)} loop_thread_alive={self.loop_thread.is_alive()}"
         )
-        future = asyncio.run_coroutine_threadsafe(self._update_weights_async_with_diag(request, model_step), self.loop)
+        future = asyncio.run_coroutine_threadsafe(
+            _update_weights_coroutine_with_diag(self.llm_engine, request, model_step), self.loop
+        )
         try:
             heartbeat = 0
             while True:
