@@ -1295,14 +1295,21 @@ class PolicyTrainerRayProcess(RayProcess):
                     rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
                     dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
                     if gv_pairs:
-                        # Normalise terminal reward to [0, 1] so the REINFORCE
-                        # reward 1 - (outcome - v_hat)^2 has meaningful spread.
-                        # Without this, a format-reward-only rollout (e.g. 1.0)
-                        # and a fully-correct rollout (e.g. 10.0 or 11.0) both
-                        # clamp to outcome=1.0 inside reinforce_step, which
-                        # makes the critic converge to "always predict 1".
-                        max_score = float(getattr(self.streaming_config, "max_possible_score", 1.0)) or 1.0
-                        outcome = float(rewards[dones.astype(bool)].sum()) / max_score
+                        # Mean terminal reward across all sub-sequences in this
+                        # pack, normalised to [0, 1] by max_possible_score. We
+                        # use mean (not sum) because a multi-subseq pack would
+                        # otherwise accumulate outcomes above max_possible_score,
+                        # get clipped to 1 in reinforce_step, and the critic
+                        # would see outcome_mean pinned at 1.0 as soon as any
+                        # rollout in the pack succeeds. Mean also matches the
+                        # paper's per-rollout REINFORCE reward shape.
+                        done_mask = dones.astype(bool)
+                        n_dones = int(done_mask.sum())
+                        if n_dones > 0:
+                            max_score = float(getattr(self.streaming_config, "max_possible_score", 1.0)) or 1.0
+                            outcome = float(rewards[done_mask].sum()) / (n_dones * max_score)
+                        else:
+                            outcome = 0.0
                         for pair in gv_pairs:
                             pair["outcome"] = outcome
                         _gen_value_training_pairs.extend(gv_pairs)
