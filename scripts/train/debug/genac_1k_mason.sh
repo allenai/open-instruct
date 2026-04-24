@@ -64,7 +64,7 @@ uv run python mason.py \
     --vllm_top_p 1.0 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
-    --verification_reward 10.0 \
+    --verification_reward 1.0 \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 250 \
