@@ -54,6 +54,24 @@ logger = logging.getLogger(__name__)
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
 
+def concave_length_penalty(x: np.ndarray, k: float, q: float) -> np.ndarray:
+    """Box-Cox-style concave length penalty.
+
+        C_{k,q}(x) = [(1 + kx)^(1-q) - 1] / [k(1-q)]
+
+    With C(0) = 0 and C'(0) = 1 regardless of (k, q). For q > 1 the penalty
+    saturates at 1 / (k * (q - 1)); for q == 1 the limit is log(1 + kx) / k;
+    for q < 1 it grows polynomially as x^(1-q).
+    """
+    k = float(k)
+    q = float(q)
+    if k <= 0.0:
+        raise ValueError(f"concave_length_penalty requires k > 0, got {k}")
+    if abs(1.0 - q) < 1e-8:
+        return np.log1p(k * x) / k
+    return ((1.0 + k * x) ** (1.0 - q) - 1.0) / (k * (1.0 - q))
+
+
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
 
@@ -424,6 +442,23 @@ class StreamingDataLoaderConfig:
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
+
+    # Concave length penalty (Box-Cox style) applied to raw scores before advantage normalization.
+    # Penalty is:  alpha * [ (1 + k*x)^(1-q) - 1 ] / [ k*(1-q) ]
+    # where x is a weighted combination of per-rollout length features, divided by the normalizer.
+    add_concave_length_penalty: bool = False
+    concave_length_penalty_alpha: float = 0.025
+    concave_length_penalty_k: float = 0.05
+    concave_length_penalty_q: float = 2.0
+    # Weights on per-rollout length features.
+    concave_length_penalty_w_model: float = 1.0
+    """Weight on model-emitted response tokens (think + tool-call + final)."""
+    concave_length_penalty_w_obs: float = 0.25
+    """Weight on tool-output (observation) tokens."""
+    concave_length_penalty_w_call: float = 200.0
+    """Per-tool-call cost, in token-equivalent units."""
+    concave_length_penalty_normalizer: float = 1000.0
+    """Divisor applied to the weighted sum so the input x is in kilo-token units."""
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -1304,6 +1339,69 @@ class DataPreparationActor:
                 self.ground_truth_overrides.update(new_overrides)
 
             scores = np.array(batch.scores)
+            raw_scores = scores.copy()
+
+            concave_length_metrics: dict[str, Any] = {}
+            if self.config.add_concave_length_penalty and len(scores) > 0:
+                response_token_counts = np.array([len(r) for r in result.responses], dtype=np.float64)
+                model_token_counts = np.array([float(sum(m)) for m in result.masks], dtype=np.float64)
+                tool_output_token_counts = np.maximum(response_token_counts - model_token_counts, 0.0)
+                num_calls_arr = np.array(result.request_info.num_calls, dtype=np.float64)
+                concave_length_x = (
+                    self.config.concave_length_penalty_w_model * model_token_counts
+                    + self.config.concave_length_penalty_w_obs * tool_output_token_counts
+                    + self.config.concave_length_penalty_w_call * num_calls_arr
+                ) / self.config.concave_length_penalty_normalizer
+                concave_length_penalties = self.config.concave_length_penalty_alpha * concave_length_penalty(
+                    concave_length_x, k=self.config.concave_length_penalty_k, q=self.config.concave_length_penalty_q
+                )
+                scores = scores - concave_length_penalties
+
+                solved_mask_raw = raw_scores >= (self.config.max_possible_score - 1e-8)
+                concave_length_metrics = {
+                    "concave_length_penalty/x_mean": float(concave_length_x.mean()),
+                    "concave_length_penalty/x_max": float(concave_length_x.max()),
+                    "concave_length_penalty/x_min": float(concave_length_x.min()),
+                    "concave_length_penalty/x_hist": concave_length_x,
+                    "concave_length_penalty/penalty_mean": float(concave_length_penalties.mean()),
+                    "concave_length_penalty/penalty_max": float(concave_length_penalties.max()),
+                    "concave_length_penalty/penalty_min": float(concave_length_penalties.min()),
+                    "concave_length_penalty/penalty_hist": concave_length_penalties,
+                    "concave_length_penalty/shaped_score_mean": float(scores.mean()),
+                    "concave_length_penalty/raw_score_mean": float(raw_scores.mean()),
+                }
+                if solved_mask_raw.any():
+                    concave_length_metrics["concave_length_penalty/penalty_solved_mean"] = float(
+                        concave_length_penalties[solved_mask_raw].mean()
+                    )
+                    concave_length_metrics["concave_length_penalty/penalty_solved_max"] = float(
+                        concave_length_penalties[solved_mask_raw].max()
+                    )
+                if (~solved_mask_raw).any():
+                    concave_length_metrics["concave_length_penalty/penalty_unsolved_mean"] = float(
+                        concave_length_penalties[~solved_mask_raw].mean()
+                    )
+
+                # Within-group spread of penalties among solved rollouts — measures the
+                # gradient signal this penalty adds between multiple successes on the same prompt.
+                k_per_group = self.config.num_samples_per_prompt_rollout
+                if len(concave_length_penalties) % k_per_group == 0 and k_per_group > 1:
+                    pen_per_group = concave_length_penalties.reshape(-1, k_per_group)
+                    solved_per_group = solved_mask_raw.reshape(-1, k_per_group)
+                    group_gaps = []
+                    for grp_pen, grp_solved in zip(pen_per_group, solved_per_group):
+                        if int(grp_solved.sum()) >= 2:
+                            grp_solved_pens = grp_pen[grp_solved]
+                            group_gaps.append(float(grp_solved_pens.max() - grp_solved_pens.min()))
+                    if group_gaps:
+                        concave_length_metrics["concave_length_penalty/group_success_penalty_gap_mean"] = float(
+                            np.mean(group_gaps)
+                        )
+                        concave_length_metrics["concave_length_penalty/group_success_penalty_gap_max"] = float(
+                            max(group_gaps)
+                        )
+                        concave_length_metrics["concave_length_penalty/groups_with_multi_success"] = len(group_gaps)
+
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
@@ -1345,24 +1443,19 @@ class DataPreparationActor:
             response_length_cap = self.config.response_length
 
             def _is_truncated(i: int) -> bool:
-                return (
-                    result.finish_reasons[i] != "stop"
-                    or len(result.responses[i]) >= response_length_cap
-                )
+                return result.finish_reasons[i] != "stop" or len(result.responses[i]) >= response_length_cap
 
             truncated_idxes = [i for i in range(num_before_filter) if _is_truncated(i)]
             num_truncated_completion = len(truncated_idxes)
             truncated_completion_correct_count = (
-                int(sum(1 for i in truncated_idxes if scores[i] > 0)) if num_truncated_completion else 0
+                int(sum(1 for i in truncated_idxes if raw_scores[i] > 0)) if num_truncated_completion else 0
             )
             truncated_completion_lengths = np.array(
                 [len(result.responses[i]) for i in truncated_idxes], dtype=np.int64
             )
 
             if self.config.mask_truncated_completions:
-                keep_idxes = torch.tensor(
-                    [i for i in range(num_before_filter) if not _is_truncated(i)]
-                )
+                keep_idxes = torch.tensor([i for i in range(num_before_filter) if not _is_truncated(i)])
                 if num_truncated_completion > 0:
                     logger.info(
                         f"[DataPreparationActor] Filtered {num_truncated_completion} truncated responses "
@@ -1370,6 +1463,7 @@ class DataPreparationActor:
                         f"Retention rate: {len(keep_idxes) / num_before_filter:.2%}"
                     )
                 scores = scores[keep_idxes]
+                raw_scores = raw_scores[keep_idxes]
                 advantages = advantages[keep_idxes]
                 batch = batch[keep_idxes.tolist()]
                 result.responses = [result.responses[i] for i in keep_idxes]
@@ -1406,18 +1500,16 @@ class DataPreparationActor:
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
-                solved_mask = scores >= (self.config.max_possible_score - 1e-8)
+                # Use raw_scores (pre length-penalty) for the solved_mask so downstream metrics
+                # keep measuring actual task-success rate rather than shaped scores.
+                solved_mask = raw_scores >= (self.config.max_possible_score - 1e-8)
                 unsolved_num_responses = (~solved_mask).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
                 sequence_length_solved = (
-                    np.array([])
-                    if np.all(scores == 0)
-                    else np.array(sequence_lengths[solved_mask])
+                    np.array([]) if np.all(raw_scores == 0) else np.array(sequence_lengths[solved_mask])
                 )
                 sequence_length_unsolved = (
-                    np.array([])
-                    if np.all(solved_mask)
-                    else np.array(sequence_lengths[~solved_mask])
+                    np.array([]) if np.all(solved_mask) else np.array(sequence_lengths[~solved_mask])
                 )
                 stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 
@@ -1426,7 +1518,7 @@ class DataPreparationActor:
 
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
-                    "scores": scores.mean(),
+                    "scores": raw_scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
@@ -1461,6 +1553,7 @@ class DataPreparationActor:
                     "val/advantages_hist": advantages,
                     **reward_metrics,
                     **batch_metrics_prefixed,
+                    **concave_length_metrics,
                 }
 
                 tool_stats = EnvStatistics(tool_names=self.tool_names)
