@@ -56,13 +56,12 @@ import threading
 from concurrent import futures
 from dataclasses import dataclass
 import queue as queue_lib
-from queue import Queue
+from queue import Full, Queue
 from typing import Any
 
 import ray
 import torch
 import torch.distributed as dist
-import wandb
 from ray.util import queue as ray_queue
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
@@ -415,8 +414,8 @@ def _gen_value_scoring_loop(
     gen_value_vllm_engines: list,
     step_trigger: threading.Event,
     stop_event: threading.Event,
-    with_tracking: bool,
     engines_lock: threading.Lock,
+    metrics_Q: Queue,
     ground_truths_key: str = "ground_truth",
 ) -> None:
     """Background thread: after each policy training step, score sample prompts with the gen-value
@@ -449,23 +448,25 @@ def _gen_value_scoring_loop(
                     score_max=args.gen_value_score_max,
                 )
             valid = [s for s in scores if s is not None]
-            if with_tracking:
-                # commit=False buffers onto wandb's pending dict so the metrics
-                # land on the next main-thread wandb.log(step=training_step)
-                # call. Without this, wandb auto-advances run.step past
-                # training_step and the main thread's logs get silently dropped.
-                wandb.log(
-                    {
-                        "gen_value/score_mean": sum(valid) / len(valid) if valid else float("nan"),
-                        "gen_value/parse_rate": len(valid) / len(scores) if scores else 0.0,
-                    },
-                    commit=False,
-                )
+            score_metrics = {
+                "gen_value/score_mean": sum(valid) / len(valid) if valid else float("nan"),
+                "gen_value/score_parse_rate": len(valid) / len(scores) if scores else 0.0,
+            }
+            # Ship metrics to the main thread via a queue so they land in
+            # data_thread_metrics and therefore both the pretty-printed
+            # single-line output and wandb.log(step=training_step). We
+            # intentionally don't call wandb.log here: letting the main
+            # thread own step alignment avoids dropped logs from wandb's
+            # monotonic-step rule.
+            try:
+                metrics_Q.put_nowait(score_metrics)
+            except Full:
+                logger.warning("[GenValue] metrics queue full, dropping scoring metrics")
             logger.debug(
                 "[GenValue] scored %d prompts: mean=%.3f parse_rate=%.2f",
                 len(scores),
-                sum(valid) / len(valid) if valid else float("nan"),
-                len(valid) / len(scores) if scores else 0.0,
+                score_metrics["gen_value/score_mean"],
+                score_metrics["gen_value/score_parse_rate"],
             )
         except Exception:
             logger.exception("[GenValue] scoring failed for this step, continuing")
@@ -473,7 +474,7 @@ def _gen_value_scoring_loop(
 
 
 def _gen_value_reinforce_loop(
-    trainer_actor: Any, training_queue: Any, stop_event: threading.Event, with_tracking: bool
+    trainer_actor: Any, training_queue: Any, stop_event: threading.Event, metrics_Q: Queue
 ) -> None:
     """Background thread: drain the training-pairs queue and call ``GenValueTrainerActor.reinforce_step``.
 
@@ -501,11 +502,17 @@ def _gen_value_reinforce_loop(
             continue
         try:
             metrics = ray.get(trainer_actor.reinforce_step.remote(pairs))
-            if with_tracking and metrics:
-                # See scoring-thread comment: commit=False so the main training
-                # loop's wandb.log(step=training_step) owns run.step ordering,
-                # otherwise wandb drops the policy-side metrics.
-                wandb.log(metrics, commit=False)
+            if metrics:
+                # Route metrics through the main thread so they land in
+                # data_thread_metrics -> both the pretty-printed single-line
+                # output AND wandb.log(step=training_step). Avoids wandb's
+                # monotonic-step rule silently dropping background-thread logs.
+                try:
+                    metrics_Q.put_nowait(metrics)
+                except Full:
+                    logger.warning(
+                        "[GenValue] metrics queue full, dropping REINFORCE metrics"
+                    )
             logger.info("[GenValue] REINFORCE step: %s", metrics)
         except Exception:
             logger.exception("[GenValue] REINFORCE step failed, continuing")
@@ -818,6 +825,10 @@ def main():
     # Serialises gen-value vLLM engine use between the diagnostic scoring thread
     # and weight sync (see _sync_gen_value_weights docstring).
     gen_value_engines_lock = threading.Lock()
+    # Cross-thread metrics shuttle: background threads put() per-step metric
+    # dicts here; _one_training_step_with_genvalue drains them and merges into
+    # data_thread_metrics so they land in the main pretty-print + wandb log.
+    gen_value_metrics_Q: Queue = Queue(maxsize=64)
     gen_value_thread: threading.Thread | None = None
 
     if gen_value_vllm_engines:
@@ -830,8 +841,8 @@ def main():
                 gen_value_vllm_engines,
                 gen_value_step_trigger,
                 gen_value_stop_event,
-                args.with_tracking,
                 gen_value_engines_lock,
+                gen_value_metrics_Q,
                 tc.ground_truths_key,
             ),
             daemon=True,
@@ -842,7 +853,12 @@ def main():
         if gen_value_trainer is not None:
             gen_value_reinforce_thread = threading.Thread(
                 target=_gen_value_reinforce_loop,
-                args=(gen_value_trainer, gen_value_training_queue, gen_value_stop_event, args.with_tracking),
+                args=(
+                    gen_value_trainer,
+                    gen_value_training_queue,
+                    gen_value_stop_event,
+                    gen_value_metrics_Q,
+                ),
                 daemon=True,
                 name="genvalue-reinforce",
             )
@@ -853,6 +869,18 @@ def main():
     _gv_policy_step_count = [0]  # mutable counter shared with closure
 
     def _one_training_step_with_genvalue(*step_args, **step_kwargs):
+        # Drain any gen-value metrics emitted by the background threads since
+        # the previous step and merge them into data_thread_metrics (positional
+        # arg 4 of grpo_fast.one_training_step, a mutable dict). Main thread
+        # then includes them in the pretty-print and wandb.log(step=training_step).
+        data_thread_metrics = step_args[4] if len(step_args) > 4 else step_kwargs.get("data_thread_metrics")
+        if isinstance(data_thread_metrics, dict):
+            while True:
+                try:
+                    data_thread_metrics.update(gen_value_metrics_Q.get_nowait())
+                except queue_lib.Empty:
+                    break
+
         result = _original_one_training_step(*step_args, **step_kwargs)
         _gv_policy_step_count[0] += 1
         # Sync FIRST, then fire the scoring trigger. Scoring needs to run on the
