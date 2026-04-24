@@ -61,6 +61,7 @@ Recommendations:
 """
 
 import os
+import pathlib
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -122,11 +123,8 @@ class ConvertSFTDataArguments:
     """Only write the tokenizer config to the output directory"""
     tokenizer_config_only: bool = field(default=False)
 
-    """Resume from checkpoint if available"""
+    """Resume from previously-written partial files in output_dir, if present."""
     resume: bool = field(default=False)
-
-    """Checkpoint save interval (number of samples)"""
-    checkpoint_interval: int = field(default=100_000)
 
     """Shuffle seed for reproducible dataset ordering"""
     shuffle_seed: int = field(default=42)
@@ -147,7 +145,7 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
             transform_fn_args.append({})
 
     numpy_dataset_conversion.convert_hf_to_numpy_sft(
-        output_dir=args.output_dir,
+        output_dir=pathlib.Path(args.output_dir),
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,
@@ -160,7 +158,6 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
         dataset_skip_cache=args.dataset_skip_cache,
         dataset_config_hash=args.dataset_config_hash,
         shuffle_seed=args.shuffle_seed,
-        checkpoint_interval=args.checkpoint_interval,
         resume=args.resume,
         visualize=args.visualize,
         tokenizer_config_only=args.tokenizer_config_only,

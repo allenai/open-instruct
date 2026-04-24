@@ -46,8 +46,7 @@ python scripts/data/convert_sft_data_for_olmocore.py \
   --output_dir "$OUTPUT_DIR" \
   --max_seq_length 32768 \
   --visualize True \
-  --resume \
-  --checkpoint_interval 50000
+  --resume
 
 echo "=== Data preparation complete ==="
 echo "Output saved to: $OUTPUT_DIR"
