@@ -288,7 +288,7 @@ GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
 # Build model args JSON with optional process_output
-MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": true"
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
 fi
@@ -319,7 +319,7 @@ for TASK in "${TASKS[@]}"; do
             # HF model: check if it's supported
             if [[ " ${SUPPORTED_MODELS[*]} " =~ " ${MODEL_LOCATION} " ]]; then
                 # Supported HF model: remove model_path, no metadata needed
-                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": true"
                 if [[ -n "$PROCESS_OUTPUT" ]]; then
                     BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
                 fi
