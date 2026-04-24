@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Reapply packaging fix so `open_instruct` installs correctly as a third-party dependency (reverted by #1622) (https://github.com/allenai/open-instruct/pull/1634).
 - Drop unused `data_types` import and inline `batch["batch"].to(device)` in `GRPOTrainModule` (https://github.com/allenai/open-instruct/pull/1635).
 - Use incremental binary checkpoint for SFT tokenization resume, eliminating O(N²) re-serialization (https://github.com/allenai/open-instruct/pull/1633).
 - Extract numpy SFT conversion helpers into `open_instruct.numpy_dataset_conversion` (https://github.com/allenai/open-instruct/pull/1622).
