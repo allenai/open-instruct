@@ -532,13 +532,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     # remove mpu for loading checkpoints, add it back after loading
                     old_mpu = self.mpu
                     self.model.mpu = None
-                    path, states = self.model.load_checkpoint(
-                        load_checkpoint_dir,
-                        load_module_strict=True,
-                        load_optimizer_states=True,
-                        load_lr_scheduler_states=True,
-                        load_module_only=False,
-                    )
+                    load_ckpt_kwargs: dict[str, Any] = {
+                        "load_module_strict": True,
+                        "load_optimizer_states": True,
+                        "load_lr_scheduler_states": True,
+                        "load_module_only": False,
+                    }
+                    if args.resume_checkpoint_tag is not None:
+                        load_ckpt_kwargs["tag"] = args.resume_checkpoint_tag
+                    path, states = self.model.load_checkpoint(load_checkpoint_dir, **load_ckpt_kwargs)
                     self.model.mpu = old_mpu
                     if path is None:
                         raise ValueError(f"Failed to load checkpoint from {load_checkpoint_dir}")
@@ -583,9 +585,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
-                logger.info(
-                    f"{self.rank=}: Loaded checkpoint from {load_checkpoint_dir} with {optimization_steps_done=}"
-                )
+                log_ckpt = load_checkpoint_dir
+                if args.resume_checkpoint_tag is not None:
+                    log_ckpt = f"{load_checkpoint_dir} (tag={args.resume_checkpoint_tag})"
+                logger.info(f"{self.rank=}: Loaded checkpoint from {log_ckpt} with {optimization_steps_done=}")
         self.model.train()
 
         # reference model

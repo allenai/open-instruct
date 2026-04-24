@@ -1,6 +1,7 @@
 import enum
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -20,6 +21,8 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+_RESUME_CHECKPOINT_TAG_RE = re.compile(r"global_step[0-9]+\Z")
 
 
 def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
@@ -218,6 +221,10 @@ class GRPOExperimentConfig(
     resume_checkpoint_dir: str | None = None
     """If set, load DeepSpeed training state (weights, optimizer, RNG, client state) from this directory
     instead of ``checkpoint_state_dir``. Saves still go to ``checkpoint_state_dir`` when it is set."""
+    resume_checkpoint_tag: str | None = None
+    """If set, load this DeepSpeed checkpoint tag (must be ``global_step`` followed by digits, e.g.
+    ``global_step4000``) instead of the ``latest`` pointer. Requires ``checkpoint_state_dir`` or
+    ``resume_checkpoint_dir`` and DeepSpeed backend."""
     warn_if_low_disk_space: bool = False
     """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None
@@ -344,6 +351,29 @@ class GRPOExperimentConfig(
             calibrate_checkpoint_state_dir(self.resume_checkpoint_dir)
             if self.deepspeed_checkpoint_load_universal:
                 ensure_universal_checkpoint_exists(self.resume_checkpoint_dir)
+        if self.resume_checkpoint_tag is not None:
+            if self.trainer_backend != "deepspeed":
+                raise ValueError(
+                    "`resume_checkpoint_tag` is only supported with `trainer_backend=deepspeed` "
+                    f"(got {self.trainer_backend!r})."
+                )
+            load_root = self.resume_checkpoint_dir or self.checkpoint_state_dir
+            if load_root is None:
+                raise ValueError("`resume_checkpoint_tag` requires `checkpoint_state_dir` or `resume_checkpoint_dir`.")
+            tag = self.resume_checkpoint_tag.strip()
+            if not _RESUME_CHECKPOINT_TAG_RE.fullmatch(tag):
+                raise ValueError(
+                    "`resume_checkpoint_tag` must look like `global_step<N>` with decimal digits only "
+                    f"(e.g. `global_step4000`), got {self.resume_checkpoint_tag!r}"
+                )
+            self.resume_checkpoint_tag = tag
+            tag_dir = os.path.join(load_root, tag)
+            if not os.path.isdir(tag_dir):
+                raise ValueError(f"`resume_checkpoint_tag` directory does not exist: {tag_dir}")
+            with open(os.path.join(load_root, "latest"), "w") as f:
+                f.write(tag)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(load_root)
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
