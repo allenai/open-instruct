@@ -1295,7 +1295,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
                     dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
                     if gv_pairs:
-                        outcome = float(rewards[dones.astype(bool)].sum())
+                        # Normalise terminal reward to [0, 1] so the REINFORCE
+                        # reward 1 - (outcome - v_hat)^2 has meaningful spread.
+                        # Without this, a format-reward-only rollout (e.g. 1.0)
+                        # and a fully-correct rollout (e.g. 10.0 or 11.0) both
+                        # clamp to outcome=1.0 inside reinforce_step, which
+                        # makes the critic converge to "always predict 1".
+                        max_score = float(getattr(self.streaming_config, "max_possible_score", 1.0)) or 1.0
+                        outcome = float(rewards[dones.astype(bool)].sum()) / max_score
                         for pair in gv_pairs:
                             pair["outcome"] = outcome
                         _gen_value_training_pairs.extend(gv_pairs)
