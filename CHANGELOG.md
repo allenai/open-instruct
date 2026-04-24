@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
 - Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary (https://github.com/allenai/open-instruct/pull/1631).
 - Reapply packaging fix so `open_instruct` installs correctly as a third-party dependency (reverted by #1622) (https://github.com/allenai/open-instruct/pull/1634).
 - Drop unused `data_types` import and inline `batch["batch"].to(device)` in `GRPOTrainModule` (https://github.com/allenai/open-instruct/pull/1635).

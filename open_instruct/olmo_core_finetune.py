@@ -28,6 +28,7 @@ Usage:
 import dataclasses
 import datetime
 import os
+import pathlib
 from typing import Any
 
 import torch
@@ -64,7 +65,7 @@ def _tokenize_to_numpy_dir(
 ) -> None:
     logger.info(f"Tokenizing dataset into numpy format at {numpy_dir}")
     numpy_dataset_conversion.convert_hf_to_numpy_sft(
-        output_dir=numpy_dir,
+        output_dir=pathlib.Path(numpy_dir),
         dataset_mixer_list=args.dataset.mixer_list,
         dataset_mixer_list_splits=args.dataset.mixer_list_splits,
         tc=tc,
