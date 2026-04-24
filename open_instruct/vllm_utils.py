@@ -792,7 +792,37 @@ class LLMRayActor:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
+        if not getattr(self, "_diag_update_weights_logged", False):
+            print(
+                f"[DIAG] LLMRayActor.update_weights: len(names)={len(names)} packed={packed} model_step={model_step}",
+                flush=True,
+                file=sys.stderr,
+            )
+            head = names[:5]
+            tail = names[-5:] if len(names) > 5 else []
+            print(f"[DIAG] names[:5]={head}", flush=True, file=sys.stderr)
+            print(f"[DIAG] names[-5:]={tail}", flush=True, file=sys.stderr)
+            print(f"[DIAG] shapes[:5]={shapes[:5]}", flush=True, file=sys.stderr)
+            print(f"[DIAG] dtype_names[:5]={dtype_names[:5]}", flush=True, file=sys.stderr)
+            self._diag_update_weights_logged = True
+        done_event = threading.Event()
+
+        def _heartbeat():
+            n = 0
+            while not done_event.wait(timeout=5.0):
+                n += 1
+                print(
+                    f"[DIAG] update_weights heartbeat {n} model_step={model_step} active_tasks={len(self.active_tasks)} loop_thread_alive={self.loop_thread.is_alive()}",
+                    flush=True,
+                    file=sys.stderr,
+                )
+
+        hb = threading.Thread(target=_heartbeat, daemon=True)
+        hb.start()
+        try:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
+        finally:
+            done_event.set()
         self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
@@ -1316,6 +1346,9 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
+_DIAG_PREPARE_LOGGED = False
+
+
 def _prepare_params_for_sync(
     params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
 ) -> list[tuple[str, torch.Tensor]]:
@@ -1324,10 +1357,40 @@ def _prepare_params_for_sync(
     DS3 gathered tensors may be non-contiguous or views into temporary buffers.
     Cloning ensures we send independent, contiguous tensors over NCCL.
     """
+    global _DIAG_PREPARE_LOGGED
     mapped_params = []
+    diag_rows = []
     for n, p in params:
         mapped_name = name_mapper(n) if name_mapper else n
-        mapped_params.append((mapped_name, p.data.contiguous().clone()))
+        tensor = p.data.contiguous().clone()
+        mapped_params.append((mapped_name, tensor))
+        if not _DIAG_PREPARE_LOGGED:
+            diag_rows.append(
+                (
+                    n,
+                    mapped_name,
+                    type(p.data).__name__,
+                    tuple(tensor.shape),
+                    tensor.numel(),
+                    str(tensor.dtype),
+                    n == mapped_name,
+                )
+            )
+    if not _DIAG_PREPARE_LOGGED:
+        total_numel = sum(r[4] for r in diag_rows)
+        unmapped = [r[0] for r in diag_rows if r[6]]
+        print(
+            f"[DIAG] _prepare_params_for_sync: {len(diag_rows)} params, total_numel={total_numel}, unmapped_count={len(unmapped)}",
+            flush=True,
+            file=sys.stderr,
+        )
+        for r in diag_rows:
+            print(
+                f"[DIAG] param orig={r[0]} mapped={r[1]} pdata_type={r[2]} shape={r[3]} numel={r[4]} dtype={r[5]} unmapped={r[6]}",
+                flush=True,
+                file=sys.stderr,
+            )
+        _DIAG_PREPARE_LOGGED = True
     return mapped_params
 
 
