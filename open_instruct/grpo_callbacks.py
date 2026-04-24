@@ -84,6 +84,7 @@ class VLLMWeightSyncCallback(Callback):
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
+    inflight_updates: bool = False
 
     @property
     def train_module(self) -> TransformerTrainModule:
@@ -110,9 +111,15 @@ class VLLMWeightSyncCallback(Callback):
             model_step=step,
             name_mapper=self.name_mapper,
         )
-        _phase(f"[post_step step={step} rank={rank}] ray_get(refs) start")
-        utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
-        _phase(f"[post_step step={step} rank={rank}] ray_get(refs) done")
+        if not self.inflight_updates:
+            _phase(f"[post_step step={step} rank={rank}] ray_get(refs) start")
+            utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
+            _phase(f"[post_step step={step} rank={rank}] ray_get(refs) done")
+
+        if dist.is_initialized():
+            _phase(f"[post_step step={step} rank={rank}] pre-wake barrier start")
+            dist.barrier()
+            _phase(f"[post_step step={step} rank={rank}] pre-wake barrier done")
 
         _phase(f"[post_step step={step} rank={rank}] wake_up start")
         utils.ray_get_with_progress(

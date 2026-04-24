@@ -260,6 +260,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 model_update_group=self.model_update_group,
                 actor_manager=self.actor_manager,
                 name_mapper=olmo_core_to_hf_name,
+                inflight_updates=self.streaming_config.inflight_updates,
             )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
