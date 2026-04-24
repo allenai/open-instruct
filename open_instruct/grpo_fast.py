@@ -439,6 +439,11 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         if args.trainer_backend == "deepspeed":
             deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
+        else:
+            functorch_config = getattr(getattr(torch, "_functorch", None), "config", None)
+            if functorch_config is not None and getattr(functorch_config, "donated_buffer", None):
+                logger.info("Disabling functorch donated buffers for DDP prompt grad-norm measurement.")
+                functorch_config.donated_buffer = False
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,
