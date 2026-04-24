@@ -449,8 +449,8 @@ class StreamingDataLoaderConfig:
     # (i.e. response length in kilo-tokens). Per-category weights are exposed for ablations but
     # default to "count all response tokens equally".
     add_concave_length_penalty: bool = False
-    concave_length_penalty_alpha: float = 0.025
-    concave_length_penalty_k: float = 0.05
+    concave_length_penalty_alpha: float = 0.015
+    concave_length_penalty_k: float = 0.02
     concave_length_penalty_q: float = 2.0
     concave_length_penalty_w_model: float = 1.0
     """Weight on model-emitted response tokens (think + tool-call + final)."""

@@ -68,8 +68,8 @@ uv run python mason.py \
     --active_sampling \
     --mask_truncated_completions true \
     --add_concave_length_penalty true \
-    --concave_length_penalty_alpha 0.025 \
-    --concave_length_penalty_k 0.05 \
+    --concave_length_penalty_alpha 0.015 \
+    --concave_length_penalty_k 0.02 \
     --concave_length_penalty_q 2.0 \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
