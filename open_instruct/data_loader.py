@@ -1401,12 +1401,22 @@ class DataPreparationActor:
                 ground_truth_overrides=self.ground_truth_overrides,
             )
 
+        # Log throttle for the "waiting to be consumed" message below; the loop
+        # polls at 100ms so without throttling we flood the log whenever training
+        # falls behind rollouts.
+        _idle_log_interval_s = 300.0  # log at most once per ~5 min
         for step in range(self.training_step, self.num_training_steps):
             generation_idle_wait_start_time = time.perf_counter()
+            last_idle_log_time: float | None = None
             while step - self._last_consumed_step > self.config.async_steps:
-                logger.info(
-                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
-                )
+                now = time.perf_counter()
+                if last_idle_log_time is None or (now - last_idle_log_time) >= _idle_log_interval_s:
+                    logger.info(
+                        f"[DataPreparationActor] Step {step}: waiting for step "
+                        f"{self._last_consumed_step + self.config.async_steps} to be consumed. "
+                        f"Consider increasing training compute."
+                    )
+                    last_idle_log_time = now
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 

@@ -8,15 +8,23 @@
 #   4. NCCL weight sync from trainer actor → critic vLLM pool every policy step
 #      (gen_value_sync_freq=1).
 #
-# Compute footprint: 3 GPUs minimum.
-#   GPU 0: policy learner (DeepSpeed) + policy vLLM engine (shared via IPC)
-#   GPU 1: generative-critic vLLM engine
-#   GPU 2: generative-critic PyTorch trainer actor (GenValueTrainerActor)
+# Compute footprint: 4 GPUs minimum.
+#   GPU 0: policy learner (DeepSpeed)
+#   GPU 1: policy vLLM engine
+#   GPU 2: generative-critic vLLM engine
+#   GPU 3: generative-critic PyTorch trainer actor (GenValueTrainerActor)
+#
+# NOTE: this script intentionally does NOT use --single_gpu_mode. That mode
+# forces vLLM's IPC weight-transfer backend, which relies on pidfd_getfd()
+# and therefore requires CAP_SYS_PTRACE inside the container. Most Beaker
+# images don't grant that capability, so IPC weight sync fails with
+# "pidfd_getfd: Operation not permitted" on the first weight broadcast.
+# NCCL (the multi-GPU path) has no such requirement.
 #
 # Runs ~3-5 policy steps on Qwen3-0.6B with short prompts / responses so the
 # whole loop (rollout → gen-value scoring → GAE with piecewise-constant values →
 # REINFORCE step on the critic → NCCL weight broadcast) finishes in a few minutes
-# on a 3×A100 / 3×L40S box.
+# on a 4×A100 / 4×L40S box.
 set -euo pipefail
 
 unset LD_LIBRARY_PATH
@@ -65,7 +73,6 @@ mkdir -p "$HOME/.triton/autotune"
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.4 \
     --vllm_enforce_eager \
-    --single_gpu_mode \
     --inflight_updates True \
     --async_steps 2 \
     --seed 3 \
