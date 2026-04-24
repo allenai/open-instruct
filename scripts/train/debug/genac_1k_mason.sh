@@ -14,9 +14,12 @@
 #   - 1x GenValueTrainerActor (PyTorch, REINFORCE updates)
 #
 # Step budget:
-#   total_episodes = 1000 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                  = 1000 * 16 * 4 = 64000
-# -> exactly 1000 training steps.
+#   100 critic-only warmup steps (policy frozen via --value_warmup_steps)
+# + 1000 joint actor/critic steps
+# = 1100 total training steps
+#
+# total_episodes = 1100 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
+#                = 1100 * 16 * 4 = 70400
 DDMM=$(date +"%d%m")
 exp_name=genac_1k_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -55,7 +58,7 @@ uv run python mason.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 64000 \
+    --total_episodes 70400 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
@@ -73,6 +76,8 @@ uv run python mason.py \
     --push_to_hub False \
     --use_value_model \
     --value_learning_rate 1e-6 \
+    --value_warmup_steps 100 \
+    --reset_optimizer_after_value_warmup \
     --gae_lambda 1.0 \
     --gamma 1.0 \
     --value_loss_coef 0.0 \
