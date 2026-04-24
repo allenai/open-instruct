@@ -2,19 +2,23 @@
 OLMo-core utility functions, shared training configurations, and model configuration mappings.
 """
 
+import datetime
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 import torch.distributed as dist
 import transformers
+from olmo_core import optim as olmo_optim
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
-from olmo_core.distributed.utils import is_distributed
+from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.hf.checkpoint import save_hf_model
+from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.train import callbacks as train_callbacks
+from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingConfig,
@@ -22,7 +26,7 @@ from olmo_core.train.train_module.transformer import (
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -219,6 +223,73 @@ def build_checkpointer_callback(
     return CheckpointerCallback(
         save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
     )
+
+
+def setup_distributed_env(seed: int, timeout: datetime.timedelta | None = None) -> tuple[int, int, bool]:
+    """Initialize the olmo-core training environment and return (global_rank, world_size, is_main_process)."""
+    kwargs: dict[str, Any] = {"seed": seed}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    prepare_training_environment(**kwargs)
+    global_rank = get_rank() if is_distributed() else 0
+    world_size = get_world_size() if is_distributed() else 1
+    is_main_process = global_rank == 0
+    logger_utils.setup_logger(rank=global_rank)
+    return global_rank, world_size, is_main_process
+
+
+def build_scheduler(lr_scheduler_type: str, warmup_ratio: float, num_training_steps: int):
+    """Build an olmo-core LR scheduler from a scheduler-type string."""
+    warmup_steps = int(num_training_steps * warmup_ratio)
+    if lr_scheduler_type == "cosine":
+        return olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
+    if lr_scheduler_type == "linear":
+        return olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+    if lr_scheduler_type == "constant":
+        return olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
+    raise ValueError(f"Unknown lr_scheduler_type: {lr_scheduler_type!r}")
+
+
+def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
+    """Reload HF weights into a parallelized train_module.
+
+    TransformerTrainModule.__init__ calls parallelize_model which calls init_weights,
+    reinitializing all model weights. This reloads the HF checkpoint on top.
+    """
+    logger.info("Reloading HuggingFace weights after parallelization...")
+    sd = train_module.model.state_dict()
+    load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    train_module.model.load_state_dict(sd)
+
+
+def build_base_callbacks(
+    config_dict: dict,
+    run_name: str | None,
+    checkpointing_steps: int,
+    ephemeral_save_interval: int | None,
+    with_tracking: bool = False,
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+    save_async: bool = True,
+) -> dict[str, Any]:
+    """Build the callbacks shared across SFT and DPO: beaker, gpu monitor, checkpointer, and optional wandb."""
+    result: dict[str, Any] = {
+        "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
+        "gpu_monitor": train_callbacks.GPUMemoryMonitorCallback(),
+        "checkpointer": build_checkpointer_callback(
+            checkpointing_steps, ephemeral_save_interval, save_async=save_async
+        ),
+    }
+    if with_tracking and wandb_project:
+        result["wandb"] = train_callbacks.WandBCallback(
+            name=run_name,
+            entity=wandb_entity,
+            project=wandb_project,
+            config=config_dict,
+            enabled=True,
+            cancel_check_interval=10,
+        )
+    return result
 
 
 def is_hf_checkpoint(path: str) -> bool:

@@ -38,28 +38,12 @@ from olmo_core import data as oc_data
 from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.distributed import parallel
-from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
-from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.train import (
-    Duration,
-    LoadStrategy,
-    TrainerConfig,
-    callbacks,
-    prepare_training_environment,
-    teardown_training_environment,
-)
+from olmo_core.distributed.utils import is_distributed
+from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
-from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import (
-    dataset_transformation,
-    logger_utils,
-    numpy_dataset_conversion,
-    olmo_core_callbacks,
-    olmo_core_utils,
-    utils,
-)
+from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -166,15 +150,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
-    prepare_training_environment(
+    global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
         seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
     )
-
-    global_rank = get_rank() if is_distributed() else 0
-    is_main_process = global_rank == 0
-    world_size = get_world_size() if is_distributed() else 1
-
-    logger_utils.setup_logger(rank=global_rank)
 
     if is_main_process:
         os.makedirs(args.checkpoint.output_dir, exist_ok=True)
@@ -232,7 +210,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
     )
     logger.info(f"Total training steps: {effective_steps} (epochs={args.training.num_epochs})")
-    scheduler = optim.LinearWithWarmup(warmup_steps=int(effective_steps * args.training.warmup_ratio), alpha_f=0.0)
+    scheduler = olmo_core_utils.build_scheduler(
+        args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
+    )
 
     train_module_config = train_module_lib.TransformerTrainModuleConfig(
         rank_microbatch_size=rank_microbatch_size,
@@ -274,10 +254,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     data_loader.reshuffle(epoch=1)
 
     if use_hf_ckpt:
-        logger.info("Reloading HuggingFace weights after parallelization...")
-        sd = train_module.model.state_dict()
-        load_hf_model(args.model.model_name_or_path, sd, work_dir=args.checkpoint.output_dir)
-        train_module.model.load_state_dict(sd)
+        olmo_core_utils.reload_hf_checkpoint_after_parallelization(
+            train_module, args.model.model_name_or_path, args.checkpoint.output_dir
+        )
 
     if args.training.max_train_steps is not None:
         max_duration = Duration.steps(args.training.max_train_steps)
@@ -287,25 +266,17 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     run_name = args.tracking.run_name or f"sft-{os.path.basename(args.model.model_name_or_path)}"
     config_dict = dataclasses.asdict(args)
 
-    trainer_callbacks: dict[str, Any] = {
-        "gpu_monitor": callbacks.GPUMemoryMonitorCallback(),
-        "config_saver": callbacks.ConfigSaverCallback(_config=config_dict),
-        "garbage_collector": callbacks.GarbageCollectorCallback(),
-        "checkpointer": olmo_core_utils.build_checkpointer_callback(
-            args.checkpoint.checkpointing_steps, args.checkpoint.ephemeral_save_interval
-        ),
-        "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
-    }
-
-    if args.logging.with_tracking and args.logging.wandb_project:
-        trainer_callbacks["wandb"] = WandBCallback(
-            name=run_name,
-            entity=args.logging.wandb_entity or "ai2-llm",
-            project=args.logging.wandb_project,
-            config=config_dict,
-            enabled=True,
-            cancel_check_interval=10,
-        )
+    trainer_callbacks: dict[str, Any] = olmo_core_utils.build_base_callbacks(
+        config_dict=config_dict,
+        run_name=run_name,
+        checkpointing_steps=args.checkpoint.checkpointing_steps,
+        ephemeral_save_interval=args.checkpoint.ephemeral_save_interval,
+        with_tracking=args.logging.with_tracking,
+        wandb_project=args.logging.wandb_project,
+        wandb_entity=args.logging.wandb_entity or "ai2-llm",
+    )
+    trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
+    trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
     load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
 
