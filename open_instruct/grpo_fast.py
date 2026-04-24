@@ -334,16 +334,32 @@ class PolicyTrainerRayProcess(RayProcess):
     def _get_unwrapped_model(self) -> torch.nn.Module:
         return self.model.module if hasattr(self.model, "module") else self.model
 
+    def _get_trainable_params(self) -> list[torch.nn.Parameter]:
+        return [param for param in self._get_unwrapped_model().parameters() if param.requires_grad]
+
     def _compute_global_grad_norm(self) -> float:
         if self._uses_deepspeed:
             return float(self.model.get_global_grad_norm())
 
         local_grad_sq_sum = torch.zeros(1, device=self.device, dtype=torch.float64)
-        for param in self.model.parameters():
+        for param in self._get_trainable_params():
             if param.grad is None:
                 continue
             grad = param.grad.detach()
             local_grad_sq_sum += torch.sum(grad.double() * grad.double())
+        dist.all_reduce(local_grad_sq_sum, op=dist.ReduceOp.SUM)
+        return math.sqrt(local_grad_sq_sum.item())
+
+    def _measure_prompt_grad_norm(self, loss: torch.Tensor) -> float | None:
+        if self._uses_deepspeed:
+            return None
+
+        local_grad_sq_sum = torch.zeros(1, device=self.device, dtype=torch.float64)
+        grads = torch.autograd.grad(loss, self._get_trainable_params(), retain_graph=True, allow_unused=True)
+        for grad in grads:
+            if grad is None:
+                continue
+            local_grad_sq_sum += torch.sum(grad.detach().double() * grad.detach().double())
         dist.all_reduce(local_grad_sq_sum, op=dist.ReduceOp.SUM)
         return math.sqrt(local_grad_sq_sum.item())
 
@@ -364,7 +380,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         grad_norm = self._compute_global_grad_norm()
         if self.args.max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self._get_trainable_params(), self.args.max_grad_norm)
         self.optimizer.step()
         self.scheduler.step()
         self.optimizer.zero_grad(set_to_none=True)
@@ -440,7 +456,11 @@ class PolicyTrainerRayProcess(RayProcess):
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
-        if args.trainer_backend == "deepspeed" and ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        if (
+            args.trainer_backend == "deepspeed"
+            and ds_config is not None
+            and ds_config["zero_optimization"]["stage"] == 3
+        ):
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
@@ -743,10 +763,15 @@ class PolicyTrainerRayProcess(RayProcess):
         data_BT = data_BT.to(self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
+        batch_metrics = batch_data["metrics"]
+        prompt_indices = np.asarray(batch_metrics.get("batch/prompt_indices", []), dtype=np.int64).ravel()
+        prompt_datasets = np.asarray(batch_metrics.get("batch/prompt_datasets", []), dtype=object).ravel()
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
         if leftover > 0:
             data_BT = data_BT[:-leftover]
+            prompt_indices = prompt_indices[:-leftover]
+            prompt_datasets = prompt_datasets[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
@@ -788,6 +813,9 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        prompt_grad_norms: list[float] = []
+        prompt_grad_norm_indices: list[int] = []
+        prompt_grad_norm_datasets: list[str] = []
         if not self._uses_deepspeed:
             self.optimizer.zero_grad(set_to_none=True)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -884,6 +912,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+                    prompt_grad_norm = self._measure_prompt_grad_norm(loss)
+                    if prompt_grad_norm is not None and i < len(prompt_indices) and i < len(prompt_datasets):
+                        prompt_grad_norms.append(prompt_grad_norm)
+                        prompt_grad_norm_indices.append(int(prompt_indices[i]))
+                        prompt_grad_norm_datasets.append(str(prompt_datasets[i]))
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                     grad_norm = self._backward_and_step(loss, is_accumulation_boundary)
                     if grad_norm is not None:
@@ -905,11 +938,19 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_unclamped=tis_unclamped_BT,
                     )
 
-            batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
+                array_metrics.update(
+                    grpo_utils.compute_prompt_grad_norm_metrics(
+                        prompt_indices=prompt_grad_norm_indices,
+                        prompt_datasets=prompt_grad_norm_datasets,
+                        prompt_grad_norms=prompt_grad_norms,
+                        by_index_key="val/train_prompt_grad_norm_by_index",
+                        dataset_mean_prefix="val/train_prompt_grad_norm_mean",
+                    )
+                )
                 for key, value in batch_metrics.items():
                     if value is None:
                         continue
@@ -2005,6 +2046,14 @@ def one_training_step(
             table_key="val/train_manufactoria_test_pass_rate_by_index_table",
             index_column="test_index",
             value_column="pass_rate",
+        )
+        _move_index_value_rows_to_wandb_table(
+            metrics_to_log,
+            table_metrics,
+            source_key="val/train_prompt_grad_norm_by_index",
+            table_key="val/train_prompt_grad_norm_by_index_table",
+            index_column="dataset_index",
+            value_column="grad_norm",
         )
         for key, value in list(metrics_to_log.items()):
             if isinstance(value, np.ndarray | list) and _can_log_metric_as_wandb_histogram(value):

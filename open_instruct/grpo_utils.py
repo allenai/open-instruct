@@ -57,6 +57,44 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
     return metrics
 
 
+def compute_prompt_grad_norm_metrics(
+    prompt_indices: list[int] | np.ndarray,
+    prompt_datasets: list[str] | np.ndarray,
+    prompt_grad_norms: list[float] | np.ndarray,
+    by_index_key: str,
+    dataset_mean_prefix: str,
+) -> dict[str, float | list[tuple[int, float]]]:
+    metrics: dict[str, float | list[tuple[int, float]]] = {}
+    grad_norms = np.asarray(prompt_grad_norms, dtype=np.float64).ravel()
+    if grad_norms.size == 0:
+        return metrics
+
+    prompt_indices_array = np.asarray(prompt_indices, dtype=np.int64).ravel()
+    prompt_datasets_array = np.asarray(prompt_datasets, dtype=object).ravel()
+    if prompt_indices_array.size != grad_norms.size or prompt_datasets_array.size != grad_norms.size:
+        return metrics
+
+    prompt_index_to_grad_norms: dict[int, list[float]] = {}
+    for prompt_index, grad_norm in zip(prompt_indices_array, grad_norms):
+        prompt_index_to_grad_norms.setdefault(int(prompt_index), []).append(float(grad_norm))
+
+    prompt_grad_norm_by_index = [
+        (prompt_index, float(np.mean(values)))
+        for prompt_index, values in sorted(prompt_index_to_grad_norms.items(), key=lambda item: item[0])
+    ]
+    metrics[by_index_key] = prompt_grad_norm_by_index
+
+    merged_grad_norm_by_prompt: dict[int, float] = dict(prompt_grad_norm_by_index)
+    merged_grad_norm_by_row = [merged_grad_norm_by_prompt[int(prompt_index)] for prompt_index in prompt_indices_array]
+    dataset_to_grad_norms: dict[str, list[float]] = {}
+    for dataset_name, grad_norm in zip(prompt_datasets_array, merged_grad_norm_by_row):
+        dataset_to_grad_norms.setdefault(str(dataset_name), []).append(float(grad_norm))
+    for dataset_name, values in dataset_to_grad_norms.items():
+        metrics[f"{dataset_mean_prefix}_{dataset_name}"] = float(np.mean(values))
+
+    return metrics
+
+
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
