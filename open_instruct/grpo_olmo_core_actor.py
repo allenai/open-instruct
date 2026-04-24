@@ -154,7 +154,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
             )
 
-        ac_config = olmo_core_utils.build_ac_config(self.grpo_config)
+        ac_config = olmo_core_utils.build_ac_config(
+            self.grpo_config.activation_memory_budget, self.grpo_config.compile_model
+        )
 
         self.train_module = GRPOTrainModule(
             model=self.model,

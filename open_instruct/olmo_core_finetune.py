@@ -176,7 +176,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         shard_degree=dp_shard_degree,
     )
 
-    ac_config = olmo_core_utils.build_ac_config(args.training)
+    ac_config = olmo_core_utils.build_ac_config(args.training.activation_memory_budget, args.training.compile_model)
 
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
     rank_microbatch_size = args.training.per_device_train_batch_size * args.training.max_seq_length

@@ -47,8 +47,7 @@ uv run python mason.py \
     --max_grad_norm 1.0 \
     --num_epochs 2 \
     --rope_scaling_factor 8 \
-    --ac_mode selected_modules \
-    --ac_modules "blocks.*.feed_forward" \
+    --activation_memory_budget 0.5 \
     --cp_degree 2 \
     --cp_strategy ulysses \
     --attn_implementation flash_2 \
