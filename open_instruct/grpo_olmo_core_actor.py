@@ -27,7 +27,7 @@ from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
@@ -198,7 +198,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.vllm_engines = vllm_engines
         self.model_update_group = None
 
-        if not vllm_engines or self.rank != 0:
+        if not vllm_engines:
+            torch.distributed.barrier()
+            return
+
+        if self.rank != 0:
+            torch.distributed.barrier()
             return
 
         if self.grpo_config.single_gpu_mode:
@@ -226,6 +231,39 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         ray.get(refs)
         logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
+        torch.distributed.barrier()
+
+    def run_initial_weight_sync(self) -> None:
+        """Broadcast initial learner weights to vLLM engines before training starts.
+
+        Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync). Ensures
+        the first NCCL weight-broadcast collective fires in a known-good state, before
+        step 1's post_step callback races against in-flight rollouts.
+        """
+        if not self.vllm_engines:
+            return
+        if self.rank == 0:
+            ray.get(self.actor_manager.set_should_stop.remote(True))
+        refs = vllm_utils.broadcast_weights_to_vllm(
+            model=self.train_module.model,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            model_step=0,
+            name_mapper=olmo_core_to_hf_name,
+        )
+        if self.rank == 0:
+            utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+        if self.rank == 0:
+            utils.ray_get_with_progress(
+                [engine.wake_up.remote() for engine in self.vllm_engines],
+                desc="Waking up vLLM engines after initial sync",
+                enable=False,
+            )
+            ray.get(self.actor_manager.set_should_stop.remote(False))
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
     def setup_callbacks(
         self,

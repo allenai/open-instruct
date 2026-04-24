@@ -313,6 +313,12 @@ def main(
         desc="Setting up callbacks",
     )
 
+    if vllm_engines:
+        utils.ray_get_with_progress(
+            [m.run_initial_weight_sync.remote() for m in policy_group.models], desc="Initial vLLM weight sync"
+        )
+        logger.info("======== Initial vLLM weight sync complete =========")
+
     logger.info("Starting OLMo-core GRPO training with Ray actors...")
     utils.ray_get_with_progress([m.fit.remote() for m in policy_group.models], desc="Running OLMo-core GRPO training")
     logger.info("Training complete.")
