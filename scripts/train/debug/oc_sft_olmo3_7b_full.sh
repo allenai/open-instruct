@@ -57,7 +57,7 @@ uv run python mason.py \
     --with_tracking \
     --logging_steps 1 \
     --mixer_list allenai/Dolci-Instruct-SFT 1.0 \
-    --dataset_path /weka/oe-adapt-default/nathanl/dataset/olmo3-32b-instruct-sft-1114 \
+    --local_cache_dir /weka/oe-adapt-default/allennlp/numpy_sft_cache \
     --seed 33333 \
     --data_loader_seed 34521 \
     --output_dir \$CHECKPOINT_OUTPUT_DIR

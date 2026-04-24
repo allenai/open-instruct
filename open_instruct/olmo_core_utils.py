@@ -163,12 +163,6 @@ class DatasetConfig:
     """The hash of the dataset configuration."""
     hf_entity: str | None = None
     """The user or org name for dataset caching on the Hugging Face Hub."""
-    dataset_path: str | None = None
-    """Path to a directory of pre-tokenized numpy SFT files (token_ids_part_*.npy, labels_mask_part_*.npy).
-
-    When set, tokenization is skipped entirely and the numpy loader reads this directory directly.
-    When unset, on-the-fly tokenization writes into `{local_cache_dir}/numpy_sft/{config_hash}/`.
-    """
 
 
 @dataclass

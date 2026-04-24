@@ -27,8 +27,6 @@ Usage:
 
 import dataclasses
 import datetime
-import hashlib
-import json
 import os
 from typing import Any
 
@@ -51,42 +49,6 @@ logger = logger_utils.setup_logger(__name__)
 _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
 
 _TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
-
-
-def _numpy_cache_dir_hash(
-    mixer_list: list[str],
-    mixer_list_splits: list[str],
-    max_seq_length: int,
-    tokenizer_name: str | None,
-    chat_template_name: str | None,
-    transform_fn: list[str],
-) -> str:
-    payload = json.dumps(
-        {
-            "mixer_list": mixer_list,
-            "mixer_list_splits": mixer_list_splits,
-            "max_seq_length": max_seq_length,
-            "tokenizer": tokenizer_name,
-            "chat_template": chat_template_name,
-            "transform_fn": transform_fn,
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:10]
-
-
-def _resolve_numpy_dir(args: "SFTArguments", tc: dataset_transformation.TokenizerConfig) -> str:
-    if args.dataset.dataset_path is not None:
-        return args.dataset.dataset_path
-    cache_hash = _numpy_cache_dir_hash(
-        mixer_list=args.dataset.mixer_list,
-        mixer_list_splits=args.dataset.mixer_list_splits,
-        max_seq_length=args.training.max_seq_length,
-        tokenizer_name=tc.tokenizer_name_or_path,
-        chat_template_name=tc.chat_template_name,
-        transform_fn=args.dataset.transform_fn,
-    )
-    return os.path.join(args.dataset.local_cache_dir, "numpy_sft", cache_hash)
 
 
 def _numpy_dir_is_populated(numpy_dir: str) -> bool:
@@ -138,7 +100,15 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
     transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
 
-    numpy_dir = _resolve_numpy_dir(args, tc)
+    dcs = dataset_transformation.load_dataset_configs(
+        dataset_mixer_list=args.dataset.mixer_list,
+        dataset_mixer_list_splits=args.dataset.mixer_list_splits,
+        dataset_transform_fn=args.dataset.transform_fn,
+        transform_fn_args=transform_fn_args,
+        target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+    )
+    cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
+    numpy_dir = os.path.join(args.dataset.local_cache_dir, "numpy_sft", cache_hash)
 
     if args.dataset.cache_dataset_only:
         pre_init_rank = int(os.environ.get("RANK", 0))
@@ -149,6 +119,27 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
                 _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
             logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
+
+    if not _numpy_dir_is_populated(numpy_dir):
+        mixer = " ".join(args.dataset.mixer_list)
+        raise FileNotFoundError(
+            "Pre-tokenized numpy SFT dataset not found.\n"
+            f"  expected: {numpy_dir}\n"
+            f"  hash:     {cache_hash}\n\n"
+            "Launch a CPU-only tokenization job on a Weka-mounted cluster first, e.g.:\n\n"
+            "  uv run python mason.py \\\n"
+            "      --cluster ai2/jupiter --workspace ai2/open-instruct-dev \\\n"
+            '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
+            "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"
+            "      -- uv run python open_instruct/olmo_core_finetune.py \\\n"
+            f"      --model_name_or_path {args.model.model_name_or_path} \\\n"
+            f"      --tokenizer_name_or_path {tc.tokenizer_name_or_path} \\\n"
+            f"      --max_seq_length {args.training.max_seq_length} \\\n"
+            f"      --mixer_list {mixer} \\\n"
+            f"      --local_cache_dir {args.dataset.local_cache_dir} \\\n"
+            "      --cache_dataset_only\n\n"
+            "Re-launch training once the tokenization job has completed."
+        )
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
         seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
@@ -181,13 +172,6 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     rank_batch_size_seqs = args.training.per_device_train_batch_size * args.training.gradient_accumulation_steps
     rank_microbatch_size = args.training.per_device_train_batch_size * args.training.max_seq_length
     dp_world_size = world_size // cp_degree
-
-    if is_main_process and not _numpy_dir_is_populated(numpy_dir):
-        _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
-    if is_distributed():
-        dist.barrier()
-    if not _numpy_dir_is_populated(numpy_dir):
-        raise RuntimeError(f"Expected tokenized numpy files at {numpy_dir} after tokenization barrier.")
 
     oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc)
     np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
