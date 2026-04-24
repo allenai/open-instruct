@@ -778,17 +778,34 @@ class PolicyTrainerRayProcess(RayProcess):
     def _score_rollout_with_gen_value(
         self,
         query_responses: torch.Tensor,
+        position_ids: torch.Tensor,
         response_mask: torch.Tensor,
-        ground_truth_str: str,
-        response_logprobs: "list[float] | None" = None,
+        ground_truths_pack: list[str],
+        response_logprobs_full: "torch.Tensor | None" = None,
     ) -> tuple[torch.Tensor, list[dict]]:
-        """Score a rollout at segment boundaries using the gen-value vLLM pool.
+        """Score every sub-sequence in a packed rollout with the gen-value vLLM pool.
 
-        ``response_logprobs`` is a pre-extracted list of log-probs for response tokens only
-        (length == number of response tokens). Required when gen_value_segmentation='sae'.
+        The pack is first split into its constituent sub-sequences via position-id
+        resets (see ``_unpack_subseqs``). Each sub-sequence is scored independently
+        against *its own* problem text and ground truth -- previously the pack was
+        treated as one rollout, so gen-value prompts were built from the first
+        sub-sequence's problem + a concatenated response from all sub-sequences,
+        which meant per-segment scores and training pairs on multi-subseq packs
+        were meaningless.
 
-        Returns (values_BT, training_pairs) where values_BT has shape (1, seq_len-1) and
-        training_pairs is a list of {prompt, generated, outcome} dicts (outcome filled by caller).
+        All per-sub-sequence scoring prompts are batched into a single vLLM call
+        so we don't pay an RPC round-trip per sub-sequence.
+
+        ``response_logprobs_full`` is the full per-token log-prob tensor for the
+        pack (shape ``(1, seq_len)``). When ``gen_value_segmentation='sae'`` we
+        slice it per sub-sequence to get the right SAE boundaries.
+
+        Returns ``(values_BT, training_pairs)`` where:
+          - ``values_BT`` has shape ``(1, seq_len-1)`` (shifted layout), with each
+            response token carrying its sub-sequence's piecewise-constant score.
+          - ``training_pairs`` is a flat list of ``{prompt, generated, outcome,
+            subseq_idx}`` dicts. ``outcome`` is left as ``None`` so the caller can
+            stamp per-sub-sequence outcomes derived from the rewards/dones tensors.
         """
         args = self.args
         device = query_responses.device
@@ -798,24 +815,9 @@ class PolicyTrainerRayProcess(RayProcess):
         if not self._gen_value_engines:
             return empty_values, []
 
-        resp_mask_full = response_mask[0].bool()
-        resp_token_ids = query_responses[0][resp_mask_full].tolist()
-        n_resp = len(resp_token_ids)
-        if n_resp == 0:
+        subseqs = self._unpack_subseqs(query_responses, position_ids, response_mask)
+        if not subseqs:
             return empty_values, []
-
-        # Grab the problem / prompt text -- i.e. the contiguous run of non-response
-        # tokens before the first response token -- and decode it so the critic can
-        # condition on the actual question (matches GenAC Fig. 3). Special tokens
-        # from the policy's chat template are stripped so the critic sees a clean
-        # natural-language problem rather than role markers like <|im_start|>.
-        full_token_ids = query_responses[0].tolist()
-        if bool(resp_mask_full.any().item()):
-            first_resp_idx = int(resp_mask_full.long().argmax().item())
-        else:
-            first_resp_idx = len(full_token_ids)
-        problem_token_ids = full_token_ids[:first_resp_idx]
-        problem_text = self.tokenizer.decode(problem_token_ids, skip_special_tokens=True)
 
         segmentation: str = getattr(args, "gen_value_segmentation", "fixed")
         chunk_size: int = getattr(args, "gen_value_chunk_size", 512)
@@ -827,27 +829,83 @@ class PolicyTrainerRayProcess(RayProcess):
         max_new_tokens: int = getattr(args, "gen_value_max_new_tokens", 8)
         temperature: float = getattr(args, "gen_value_temperature", 1.0)
 
-        boundaries = value_model_utils.segment_rollout(
-            resp_token_ids,
-            response_logprobs,
-            mode=segmentation,
-            sae_threshold=sae_threshold,
-            fixed_chunk_size=chunk_size,
-            max_segments=max_segments,
-        )
-
+        # Per-subseq precomputation; scoring prompts from all subseqs are batched.
         prompts: list[str] = []
-        for bdry in boundaries:
-            partial_text = self.tokenizer.decode(resp_token_ids[: bdry + 1], skip_special_tokens=True)
-            prompt = value_model_utils.build_generative_value_prompt(
-                partial_response=partial_text,
-                conditioning=conditioning,
-                ground_truth=ground_truth_str if conditioning != "none" else "",
-                score_min=score_min,
-                score_max=score_max,
-                problem=problem_text,
+        prompt_subseq_idx: list[int] = []
+        per_subseq_info: list[dict] = []
+
+        for s_idx, sub in enumerate(subseqs):
+            ids = sub["input_ids"]  # (L,)
+            mask = sub["response_is_resp"].bool()  # (L,)
+            offset = sub["offset_in_pack"]
+            length = int(ids.numel())
+
+            mask_local_idx = mask.nonzero(as_tuple=True)[0]
+            n_resp_sub = int(mask_local_idx.numel())
+            if n_resp_sub == 0:
+                per_subseq_info.append(
+                    {"boundaries": [], "n_resp_sub": 0, "scores_start": len(prompts), "resp_shifted": None}
+                )
+                continue
+
+            first_resp_local = int(mask.long().argmax().item())
+            problem_token_ids = ids[:first_resp_local].tolist()
+            resp_token_ids = ids[mask].tolist()
+            problem_text = self.tokenizer.decode(problem_token_ids, skip_special_tokens=True)
+
+            # Slice the pack's log-probs down to this sub-sequence's response tokens
+            # (only needed for SAE segmentation).
+            sub_resp_logprobs: list[float] | None = None
+            if segmentation == "sae" and response_logprobs_full is not None:
+                lp_sub = response_logprobs_full[0, offset : offset + length].float()
+                sub_resp_logprobs = lp_sub[mask].tolist()
+
+            boundaries = value_model_utils.segment_rollout(
+                resp_token_ids,
+                sub_resp_logprobs,
+                mode=segmentation,
+                sae_threshold=sae_threshold,
+                fixed_chunk_size=chunk_size,
+                max_segments=max_segments,
             )
-            prompts.append(prompt)
+
+            gt_str = ground_truths_pack[s_idx] if s_idx < len(ground_truths_pack) else ""
+
+            scores_start = len(prompts)
+            for bdry in boundaries:
+                partial_text = self.tokenizer.decode(resp_token_ids[: bdry + 1], skip_special_tokens=True)
+                p = value_model_utils.build_generative_value_prompt(
+                    partial_response=partial_text,
+                    conditioning=conditioning,
+                    ground_truth=gt_str if conditioning != "none" else "",
+                    score_min=score_min,
+                    score_max=score_max,
+                    problem=problem_text,
+                )
+                prompts.append(p)
+                prompt_subseq_idx.append(s_idx)
+
+            # Shifted indices for this subseq's response tokens in the pack's (seq_len-1) layout.
+            # Pack position of each response token is offset + k; the shifted index is (pack_pos-1).
+            # Response tokens at pack position 0 (only possible for subseq 0 with an empty prompt)
+            # can't be represented in the shifted layout and are dropped, matching the original
+            # single-subseq behaviour.
+            pack_positions = mask_local_idx + offset
+            valid_mask = pack_positions >= 1
+            resp_shifted = (pack_positions[valid_mask] - 1).to(device)
+
+            per_subseq_info.append(
+                {
+                    "boundaries": boundaries,
+                    "n_resp_sub": n_resp_sub,
+                    "scores_start": scores_start,
+                    "resp_shifted": resp_shifted,
+                    "n_dropped_leading": n_resp_sub - int(valid_mask.sum().item()),
+                }
+            )
+
+        if not prompts:
+            return empty_values, []
 
         n_eng = len(self._gen_value_engines)
         buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_eng)]
@@ -871,27 +929,44 @@ class PolicyTrainerRayProcess(RayProcess):
             for (k, _), text in zip(bucket, bucket_texts):
                 generated_texts[k] = text
 
-        scores: list[float] = []
+        all_scores: list[float] = []
         for text in generated_texts:
             raw = value_model_utils.parse_generative_value_score(text, score_min, score_max)
             # Parse failure → v_hat = 0 (piecewise-constant value of 0 for that segment),
             # matching the REINFORCE reward semantics in grpo_fast_genvalue.GenValueTrainerActor.
-            scores.append(
+            all_scores.append(
                 value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.0
             )
 
-        # Vectorised piecewise-constant values: each token index maps to its segment score.
-        # values_BT[:, t] corresponds to sequence position t+1 (shifted layout).
-        resp_indices_shifted = response_mask[0, 1:].bool().nonzero(as_tuple=True)[0]
-        segment_ends = torch.tensor([b + 1 for b in boundaries], device=device)
-        scores_t = torch.tensor(scores, device=device)
-        idx = torch.bucketize(torch.arange(n_resp, device=device), segment_ends, right=True)
-        values_flat = scores_t[idx]
         values_BT = torch.zeros(1, seq_len - 1, device=device)
-        if resp_indices_shifted.numel() > 0:
-            values_BT[0, resp_indices_shifted] = values_flat[: resp_indices_shifted.numel()]
+        for info in per_subseq_info:
+            boundaries = info["boundaries"]
+            n_resp_sub = info["n_resp_sub"]
+            if not boundaries or n_resp_sub == 0:
+                continue
+            start = info["scores_start"]
+            sub_scores = all_scores[start : start + len(boundaries)]
+            segment_ends = torch.tensor([b + 1 for b in boundaries], device=device)
+            scores_t = torch.tensor(sub_scores, device=device)
+            idx = torch.bucketize(torch.arange(n_resp_sub, device=device), segment_ends, right=True)
+            values_flat = scores_t[idx]  # (n_resp_sub,)
+            resp_shifted = info["resp_shifted"]
+            if resp_shifted is None or resp_shifted.numel() == 0:
+                continue
+            # Drop any leading values that correspond to pack-pos-0 response tokens.
+            n_dropped = info.get("n_dropped_leading", 0)
+            values_BT[0, resp_shifted] = values_flat[n_dropped : n_dropped + resp_shifted.numel()]
 
-        training_pairs = [{"prompt": p, "generated": g, "outcome": None} for p, g in zip(prompts, generated_texts)]
+        training_pairs: list[dict] = []
+        for k, (prompt, generated) in enumerate(zip(prompts, generated_texts)):
+            training_pairs.append(
+                {
+                    "prompt": prompt,
+                    "generated": generated,
+                    "outcome": None,
+                    "subseq_idx": prompt_subseq_idx[k],
+                }
+            )
         return values_BT, training_pairs
 
     def _forward_value_with_conditioning(
@@ -1259,22 +1334,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     gv_pairs: list[dict] = []
                     if _use_gen_value:
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
-                        gt_str = gts_pack[0] if gts_pack else ""
-                        gv_resp_logprobs: list[float] | None = None
+                        gv_logprobs_full = None
                         if (
                             getattr(self.args, "gen_value_segmentation", "fixed") == "sae"
                             and self.args.use_sae
                             and data_BT.vllm_logprobs is not None
                         ):
-                            # Both tensors have shape (1, seq_len); slice [0, 1:] gives (seq_len-1,).
-                            lp = data_BT.vllm_logprobs[i][0, 1:].float()
-                            resp_shifted = data_BT.response_masks[i][0, 1:].bool()
-                            gv_resp_logprobs = lp[resp_shifted[: lp.shape[0]]].tolist()
+                            gv_logprobs_full = data_BT.vllm_logprobs[i]
                         values_BT, gv_pairs = self._score_rollout_with_gen_value(
                             data_BT.query_responses[i],
+                            data_BT.position_ids[i],
                             data_BT.response_masks[i],
-                            gt_str,
-                            response_logprobs=gv_resp_logprobs,
+                            list(gts_pack),
+                            response_logprobs_full=gv_logprobs_full,
                         )
                     elif self.args.value_model_ground_truth_conditioning:
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
@@ -1295,23 +1367,36 @@ class PolicyTrainerRayProcess(RayProcess):
                     rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
                     dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
                     if gv_pairs:
-                        # Mean terminal reward across all sub-sequences in this
-                        # pack, normalised to [0, 1] by max_possible_score. We
-                        # use mean (not sum) because a multi-subseq pack would
-                        # otherwise accumulate outcomes above max_possible_score,
-                        # get clipped to 1 in reinforce_step, and the critic
-                        # would see outcome_mean pinned at 1.0 as soon as any
-                        # rollout in the pack succeeds. Mean also matches the
-                        # paper's per-rollout REINFORCE reward shape.
-                        done_mask = dones.astype(bool)
-                        n_dones = int(done_mask.sum())
-                        if n_dones > 0:
-                            max_score = float(getattr(self.streaming_config, "max_possible_score", 1.0)) or 1.0
-                            outcome = float(rewards[done_mask].sum()) / (n_dones * max_score)
-                        else:
-                            outcome = 0.0
+                        # Stamp each gv_pair with the per-sub-sequence outcome the
+                        # segment actually belongs to (training pairs are tagged
+                        # with subseq_idx in _score_rollout_with_gen_value).
+                        # We work in the unshifted pack layout for
+                        # rewards / dones so sub-sequence slicing lines up with
+                        # the offsets from _unpack_subseqs.
+                        max_score = float(getattr(self.streaming_config, "max_possible_score", 1.0)) or 1.0
+                        rewards_full = data_BT.rewards[i][0].float().cpu().numpy()
+                        dones_full = data_BT.dones[i][0].cpu().numpy().astype(bool)
+                        subseqs_for_outcome = self._unpack_subseqs(
+                            data_BT.query_responses[i], data_BT.position_ids[i], data_BT.response_masks[i]
+                        )
+                        subseq_outcomes: list[float] = []
+                        for sub in subseqs_for_outcome:
+                            s_off = sub["offset_in_pack"]
+                            s_len = int(sub["length"])
+                            sub_dones = dones_full[s_off : s_off + s_len]
+                            sub_rewards = rewards_full[s_off : s_off + s_len]
+                            if sub_dones.any():
+                                n_d = int(sub_dones.sum())
+                                subseq_outcomes.append(
+                                    float(sub_rewards[sub_dones].sum()) / (n_d * max_score)
+                                )
+                            else:
+                                subseq_outcomes.append(0.0)
                         for pair in gv_pairs:
-                            pair["outcome"] = outcome
+                            s_idx = int(pair.get("subseq_idx", 0))
+                            pair["outcome"] = (
+                                subseq_outcomes[s_idx] if 0 <= s_idx < len(subseq_outcomes) else 0.0
+                            )
                         _gen_value_training_pairs.extend(gv_pairs)
                     resp_masks_np = resp_mask.long().cpu().numpy()
                     logprobs_np = None
