@@ -51,6 +51,7 @@ from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
+from vllm.v1.worker import gpu_worker as vllm_gpu_worker
 
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
@@ -157,6 +158,20 @@ def _install_vllm_weight_transfer_diagnostics() -> None:
     if _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED:
         return
     _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED = True
+
+    if not getattr(vllm_gpu_worker.Worker, "_open_instruct_update_weights_traced", False):
+        _orig_worker_update_weights = vllm_gpu_worker.Worker.update_weights
+
+        def _worker_update_weights_with_diag(self: Any, update_info: Any) -> Any:
+            names = (update_info or {}).get("names") if isinstance(update_info, dict) else None
+            count = len(names) if names is not None else "?"
+            _phase(f"[DIAG-B vllm worker.update_weights entry] pid={os.getpid()} names={count}")
+            result = _orig_worker_update_weights(self, update_info)
+            _phase(f"[DIAG-B vllm worker.update_weights exit] pid={os.getpid()}")
+            return result
+
+        vllm_gpu_worker.Worker.update_weights = _worker_update_weights_with_diag
+        vllm_gpu_worker.Worker._open_instruct_update_weights_traced = True
 
     original_receive_weights = NCCLWeightTransferEngine.receive_weights
 
