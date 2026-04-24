@@ -103,9 +103,11 @@ def _recover_partial_state(
 ) -> tuple[int, int]:
     # Boundaries file is the commit log: its last complete (start,end) pair determines how many
     # bytes of tokens/labels are valid; trailing bytes from an incomplete write get truncated.
-    for path in (tokens_path, labels_path, boundaries_path):
-        if not path.exists():
-            return 0, 0
+    paths = (tokens_path, labels_path, boundaries_path)
+    if not all(p.exists() for p in paths):
+        for p in paths:
+            p.unlink(missing_ok=True)
+        return 0, 0
 
     pair_bytes = 2 * np.dtype(_BOUNDARIES_DTYPE).itemsize
     boundaries_size = boundaries_path.stat().st_size
@@ -158,7 +160,7 @@ def _aggregate_stats(
 
     labels_mm = np.memmap(labels_path, mode="r", dtype=np.uint8, shape=(total_tokens,))
     starts = boundaries[:, 0].astype(np.intp)
-    trainable_counts = np.add.reduceat(labels_mm.astype(np.int64), starts)
+    trainable_counts = np.add.reduceat(labels_mm, starts, dtype=np.int64)
     zero_length_mask = sample_lengths == 0
     if zero_length_mask.any():
         trainable_counts = np.where(zero_length_mask, 0, trainable_counts)
