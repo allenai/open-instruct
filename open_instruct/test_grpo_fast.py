@@ -1169,6 +1169,100 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(never_give_up_state.pending_response_counts, {})
         self.assertEqual(never_give_up_state.pending_reward_sums, {})
 
+    def test_active_sampling_never_give_up_better_filters_non_improving_nonzero_std_retry(self):
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
+
+        inference_results_Q = Queue(maxsize=2)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        inference_results_Q.put(
+            self.create_mock_result(
+                0,
+                "0_0_1",
+                num_samples_per_prompt=num_samples_per_prompt,
+                reward_scores=[0.0, 0.5, 1.0, 0.5],
+            )
+        )
+        inference_results_Q.put(
+            self.create_mock_result(
+                1, "0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 1.0, 0.0, 1.0]
+            )
+        )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+        never_give_up_state = data_loader_lib.NeverGiveUpAccumulationState(
+            pending_best_reward={"0_0": 1.0},
+            pending_attempt_counts={"0_0": 1},
+        )
+
+        _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=1,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            never_give_up=0.0,
+            show_progress_bar=False,
+            never_give_up_state=never_give_up_state,
+        )
+
+        self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [2])
+        self.assertEqual(batch_stats.prompts_resamples, [1])
+        self.assertEqual(never_give_up_state.pending_best_reward, {})
+
+    def test_active_sampling_never_give_up_different_accepts_changed_zero_std_retry(self):
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(1)
+
+        inference_results_Q = Queue(maxsize=1)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        inference_results_Q.put(
+            self.create_mock_result(
+                0,
+                "0_0_1",
+                num_samples_per_prompt=num_samples_per_prompt,
+                reward_scores=[0.5] * num_samples_per_prompt,
+            )
+        )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+        never_give_up_state = data_loader_lib.NeverGiveUpAccumulationState(
+            pending_best_reward={"0_0": 1.0},
+            pending_attempt_counts={"0_0": 1},
+        )
+
+        _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=1,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            never_give_up=1.0,
+            never_give_up_accept_on="different",
+            show_progress_bar=False,
+            never_give_up_state=never_give_up_state,
+        )
+
+        self.assertEqual(batch.scores, [0.5] * num_samples_per_prompt)
+        self.assertEqual(batch_stats.filtered_prompts, 0)
+        self.assertEqual(batch_stats.prompts_resamples, [2])
+        self.assertEqual(never_give_up_state.pending_best_reward, {})
+
     def test_active_sampling_never_give_up_does_not_rescale_when_pending_counts_disabled(self):
         num_samples_per_prompt = 4
         queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(1)

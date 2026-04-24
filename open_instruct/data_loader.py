@@ -474,6 +474,8 @@ class StreamingDataLoaderConfig:
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
     never_give_up: float = 0.0
+    never_give_up_accept_on: Literal["better", "different"] = "better"
+    """When to accept a never-give-up retry against the chain's previous best reward."""
     maintain_pending_ngu_age: int = 2
     maintain_pending_ngu_completions: bool = True
     """Keep full ``GenerationResult`` objects across zero-std never-give-up retries so they can be merged into one
@@ -613,6 +615,10 @@ class StreamingDataLoaderConfig:
             )
         if not 0.0 <= self.never_give_up <= 1.0:
             raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
+        if self.never_give_up_accept_on not in ("better", "different"):
+            raise ValueError(
+                f"`never_give_up_accept_on` must be 'better' or 'different', got {self.never_give_up_accept_on!r}."
+            )
         if self.maintain_pending_ngu_age < 0:
             raise ValueError(f"`maintain_pending_ngu_age` must be non-negative, got {self.maintain_pending_ngu_age}.")
         if self.maintain_pending_ngu_count_rescale not in (None, "anchor_pos", "ratio"):
@@ -1294,6 +1300,7 @@ def accumulate_inference_batches(
     filter_zero_std_samples: bool = False,
     active_sampling_max_samples_multiplier: int | None = 10,
     never_give_up: float = 0.0,
+    never_give_up_accept_on: Literal["better", "different"] = "better",
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     no_resampling_persist: bool = True,
@@ -1570,20 +1577,37 @@ def accumulate_inference_batches(
 
         reward_scores = np.asarray(result.reward_scores, dtype=float)
         current_reward = float(reward_scores.max())
-        best_reward = current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
-        requeue_same_prompt = False
-        filter_zero_std_prompt = filter_zero_std_samples and np.std(result.reward_scores) == 0
-        if filter_zero_std_prompt and pending_best_reward is not None and current_reward > pending_best_reward:
-            filter_zero_std_prompt = False
-        elif filter_zero_std_prompt:
-            requeue_same_prompt = best_reward < max_possible_score and np.random.random() < never_give_up
 
-        if filter_zero_std_prompt:
+        accept_this_batch = True
+        if filter_zero_std_samples:
+            non_zero_std_reward = np.std(result.reward_scores) != 0
+            if pending_best_reward is None:
+                # if there are no previous ngu samples, accept if non-zero std
+                accept_this_batch = non_zero_std_reward
+            elif never_give_up_accept_on == "different":
+                # if there are previous ngu samples, accept if non-zero std or reward is different from previous
+                accept_this_batch = non_zero_std_reward or current_reward != pending_best_reward
+            elif never_give_up_accept_on == "better":
+                # if there are previous ngu samples, accept only if reward is better than previous
+                accept_this_batch = current_reward > pending_best_reward
+
+        if not accept_this_batch:
             if replenish_prompts:
                 assert param_prompt_Q is not None
-                replacement_example = example
+
+                best_reward = (
+                    current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
+                )
+
+                # if we filter this batch, requeue the prompt as long as we didn't hit max reward
+                # requeue with probability never_give_up
+                requeue_same_prompt = best_reward < max_possible_score and np.random.random() < never_give_up
+
+                # if we are replenishing prompts, requeue this particular prompt if requeue_same_prompt
+                # increase the ngu_suffix so it doesn't clash with previous ids
                 prompt_id_suffix = None
                 if requeue_same_prompt:
+                    replacement_example = example
                     prompt_id_suffix = get_never_give_up_retry_suffix(
                         result.prompt_id, iter_dataloader._epoch if iter_dataloader is not None else 0, result.index
                     )
@@ -1643,10 +1667,11 @@ def accumulate_inference_batches(
                 record_filtered_prompt(pending_result, prompt_dataset_key)
             record_filtered_prompt(result, prompt_dataset_key)
             logging.debug(
-                f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
+                f"[Data Preparation Thread] Filtered prompt during active sampling, total filtered {total_filtered_prompts}"
             )
             continue
         else:
+            # if we accept this batch and must replenish prompts, add a new prompt to the queue
             if replenish_prompts:
                 assert iter_dataloader is not None
                 assert param_prompt_Q is not None
@@ -2199,6 +2224,7 @@ class DataPreparationActor:
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
+                never_give_up_accept_on=self.config.never_give_up_accept_on,
                 replenish_prompts=True,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 no_resampling_persist=self.config.no_resampling_persist,
