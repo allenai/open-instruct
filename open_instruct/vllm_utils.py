@@ -100,6 +100,101 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+WEIGHT_SYNC_DIAG_HEARTBEAT_S = 5.0
+
+
+def _short_weight_list(weights: list[tuple[str, torch.Tensor]]) -> str:
+    if not weights:
+        return "empty"
+    first_name, first_tensor = weights[0]
+    last_name, last_tensor = weights[-1]
+    return (
+        f"count={len(weights)} first={first_name} shape={tuple(first_tensor.shape)} dtype={first_tensor.dtype} "
+        f"last={last_name} shape={tuple(last_tensor.shape)} dtype={last_tensor.dtype}"
+    )
+
+
+def _start_diag_heartbeat(
+    label: str, details: Callable[[], str] | None = None
+) -> tuple[threading.Event, threading.Thread]:
+    done_event = threading.Event()
+
+    def _heartbeat() -> None:
+        n = 0
+        while not done_event.wait(timeout=WEIGHT_SYNC_DIAG_HEARTBEAT_S):
+            n += 1
+            suffix = f" {details()}" if details is not None else ""
+            _phase(f"{label} heartbeat={n}{suffix}")
+
+    thread = threading.Thread(target=_heartbeat, daemon=True)
+    thread.start()
+    return done_event, thread
+
+
+_VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED = False
+
+
+def _install_vllm_weight_transfer_diagnostics() -> None:
+    """Instrument vLLM's trainer->worker weight receive path in this process."""
+    global _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED
+    if _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED:
+        return
+    _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED = True
+
+    original_receive_weights = NCCLWeightTransferEngine.receive_weights
+
+    def receive_weights_with_diag(
+        self: Any, update_info: Any, load_weights: Callable[[list[tuple[str, torch.Tensor]]], Any]
+    ) -> Any:
+        names = list(getattr(update_info, "names", []))
+        dtype_names = list(getattr(update_info, "dtype_names", []))
+        shapes = list(getattr(update_info, "shapes", []))
+        packed = getattr(update_info, "packed", None)
+        counters = {"load_batches": 0, "load_done": 0}
+        start_time = time.perf_counter()
+        _phase(
+            "[vllm worker update_weights] NCCL receive_weights start "
+            f"names={len(names)} packed={packed} first={names[:1]} last={names[-1:]}"
+        )
+        _phase(f"[vllm worker update_weights] NCCL metadata sample dtypes={dtype_names[:3]} shapes={shapes[:3]}")
+        done_event, _ = _start_diag_heartbeat(
+            "[vllm worker update_weights] NCCL receive_weights pending",
+            details=lambda: f"load_batches_started={counters['load_batches']} load_batches_done={counters['load_done']}",
+        )
+
+        def load_weights_with_diag(weights: list[tuple[str, torch.Tensor]]) -> None:
+            counters["load_batches"] += 1
+            batch_idx = counters["load_batches"]
+            load_start = time.perf_counter()
+            _phase(f"[vllm worker update_weights] load_weights start batch={batch_idx} {_short_weight_list(weights)}")
+            try:
+                return load_weights(weights)
+            except Exception as e:
+                _phase(
+                    f"[vllm worker update_weights] load_weights exception batch={batch_idx}: {type(e).__name__}: {e}"
+                )
+                raise
+            finally:
+                counters["load_done"] += 1
+                _phase(
+                    "[vllm worker update_weights] load_weights done "
+                    f"batch={batch_idx} elapsed={time.perf_counter() - load_start:.3f}s"
+                )
+
+        try:
+            result = original_receive_weights(self, update_info, load_weights_with_diag)
+        except Exception as e:
+            _phase(f"[vllm worker update_weights] NCCL receive_weights exception: {type(e).__name__}: {e}")
+            raise
+        finally:
+            done_event.set()
+        _phase(
+            "[vllm worker update_weights] NCCL receive_weights done "
+            f"elapsed={time.perf_counter() - start_time:.3f}s load_batches={counters['load_batches']}"
+        )
+        return result
+
+    NCCLWeightTransferEngine.receive_weights = receive_weights_with_diag
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -584,6 +679,7 @@ class LLMRayActor:
             eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        _install_vllm_weight_transfer_diagnostics()
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -713,6 +809,7 @@ class LLMRayActor:
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
 
+            self._install_llm_engine_rpc_diagnostics(engine_client)
             return engine_client
 
         def _run_loop():
@@ -734,6 +831,66 @@ class LLMRayActor:
             return
         message = "timed out" if self.loop_thread.is_alive() else "thread died before completing"
         raise RuntimeError(f"vLLM engine {message}")
+
+    def _install_llm_engine_rpc_diagnostics(self, engine_client: Any) -> None:
+        """Instrument vLLM frontend RPCs that wrap engine-core utility calls."""
+        if getattr(engine_client, "_open_instruct_rpc_diagnostics_installed", False):
+            return
+        engine_client._open_instruct_rpc_diagnostics_installed = True
+
+        original_collective_rpc = engine_client.collective_rpc
+
+        async def collective_rpc_with_diag(
+            method: str, timeout: float | None = None, args: tuple[Any, ...] = (), kwargs: dict[str, Any] | None = None
+        ) -> Any:
+            if method != "update_weights":
+                return await original_collective_rpc(method, timeout=timeout, args=args, kwargs=kwargs)
+            start_time = time.perf_counter()
+            done_event, _ = _start_diag_heartbeat(
+                "[vllm frontend update_weights] collective_rpc pending",
+                details=lambda: f"elapsed={time.perf_counter() - start_time:.1f}s",
+            )
+            _phase("[vllm frontend update_weights] collective_rpc start")
+            try:
+                result = await original_collective_rpc(method, timeout=timeout, args=args, kwargs=kwargs)
+            except Exception as e:
+                _phase(f"[vllm frontend update_weights] collective_rpc exception: {type(e).__name__}: {e}")
+                raise
+            finally:
+                done_event.set()
+            _phase(
+                f"[vllm frontend update_weights] collective_rpc done elapsed={time.perf_counter() - start_time:.3f}s"
+            )
+            return result
+
+        engine_client.collective_rpc = collective_rpc_with_diag
+
+        engine_core = getattr(engine_client, "engine_core", None)
+        original_call_utility = getattr(engine_core, "call_utility_async", None)
+        if original_call_utility is None or getattr(engine_core, "_open_instruct_rpc_diagnostics_installed", False):
+            return
+        engine_core._open_instruct_rpc_diagnostics_installed = True
+
+        async def call_utility_async_with_diag(method: str, *args: Any, **kwargs: Any) -> Any:
+            if method not in {"pause_scheduler", "sleep", "update_weights", "collective_rpc", "wake_up"}:
+                return await original_call_utility(method, *args, **kwargs)
+            start_time = time.perf_counter()
+            done_event, _ = _start_diag_heartbeat(
+                f"[vllm engine-core utility] {method} pending",
+                details=lambda: f"elapsed={time.perf_counter() - start_time:.1f}s",
+            )
+            _phase(f"[vllm engine-core utility] {method} send")
+            try:
+                result = await original_call_utility(method, *args, **kwargs)
+            except Exception as e:
+                _phase(f"[vllm engine-core utility] {method} exception: {type(e).__name__}: {e}")
+                raise
+            finally:
+                done_event.set()
+            _phase(f"[vllm engine-core utility] {method} result elapsed={time.perf_counter() - start_time:.3f}s")
+            return result
+
+        engine_core.call_utility_async = call_utility_async_with_diag
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
@@ -785,6 +942,20 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
+    async def _update_weights_async_with_diag(self, request: WeightTransferUpdateRequest, model_step: int) -> Any:
+        start_time = time.perf_counter()
+        _phase(f"[vllm actor update_weights] coroutine start model_step={model_step}")
+        try:
+            result = await self.llm_engine.update_weights(request)
+        except Exception as e:
+            _phase(f"[vllm actor update_weights] coroutine exception: {type(e).__name__}: {e}")
+            raise
+        _phase(
+            "[vllm actor update_weights] coroutine done "
+            f"model_step={model_step} elapsed={time.perf_counter() - start_time:.3f}s"
+        )
+        return result
+
     def update_weights(
         self, names: list[str], dtype_names: list[str], shapes: list[tuple[int, ...]], packed: bool, model_step: int
     ) -> None:
@@ -805,25 +976,40 @@ class LLMRayActor:
             print(f"[DIAG] shapes[:5]={shapes[:5]}", flush=True, file=sys.stderr)
             print(f"[DIAG] dtype_names[:5]={dtype_names[:5]}", flush=True, file=sys.stderr)
             self._diag_update_weights_logged = True
-        done_event = threading.Event()
-
-        def _heartbeat():
-            n = 0
-            while not done_event.wait(timeout=5.0):
-                n += 1
-                print(
-                    f"[DIAG] update_weights heartbeat {n} model_step={model_step} active_tasks={len(self.active_tasks)} loop_thread_alive={self.loop_thread.is_alive()}",
-                    flush=True,
-                    file=sys.stderr,
-                )
-
-        hb = threading.Thread(target=_heartbeat, daemon=True)
-        hb.start()
+        request = WeightTransferUpdateRequest(update_info=update_info)
+        start_time = time.perf_counter()
+        _phase(
+            "[vllm actor update_weights] submit coroutine "
+            f"model_step={model_step} active_tasks={len(self.active_tasks)} loop_thread_alive={self.loop_thread.is_alive()}"
+        )
+        future = asyncio.run_coroutine_threadsafe(self._update_weights_async_with_diag(request, model_step), self.loop)
         try:
-            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
+            heartbeat = 0
+            while True:
+                try:
+                    future.result(timeout=WEIGHT_SYNC_DIAG_HEARTBEAT_S)
+                    break
+                except futures.TimeoutError:
+                    heartbeat += 1
+                    done_tasks = sum(task.done() for task in self.active_tasks.values())
+                    _phase(
+                        "[vllm actor update_weights] waiting for coroutine "
+                        f"heartbeat={heartbeat} model_step={model_step} future_done={future.done()} "
+                        f"active_tasks={len(self.active_tasks)} done_active_tasks={done_tasks} "
+                        f"loop_thread_alive={self.loop_thread.is_alive()} elapsed={time.perf_counter() - start_time:.1f}s"
+                    )
+                except Exception as e:
+                    _phase(f"[vllm actor update_weights] future exception: {type(e).__name__}: {e}")
+                    raise
         finally:
-            done_event.set()
+            if not future.done():
+                future.cancel()
+        _phase(
+            "[vllm actor update_weights] future result returned "
+            f"model_step={model_step} elapsed={time.perf_counter() - start_time:.3f}s"
+        )
         self.current_model_step = model_step
+        _phase(f"[vllm actor update_weights] Ray RPC returning model_step={model_step}")
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
