@@ -114,15 +114,27 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
+    ac_mode: TransformerActivationCheckpointingMode = TransformerActivationCheckpointingMode.budget
+    """Activation checkpointing mode."""
+    ac_modules: list[str] | None = None
+    """Modules to checkpoint when ac_mode='selected_modules'. E.g., ['blocks.*.feed_forward']."""
 
 
 def build_ac_config(training: TrainingConfig) -> TransformerActivationCheckpointingConfig | None:
-    if training.activation_memory_budget < 1.0 and training.compile_model:
+    if training.ac_mode == TransformerActivationCheckpointingMode.selected_modules:
+        if not training.ac_modules:
+            raise ValueError("ac_modules must be set when ac_mode='selected_modules'")
         return TransformerActivationCheckpointingConfig(
-            mode=TransformerActivationCheckpointingMode.budget,
-            activation_memory_budget=training.activation_memory_budget,
+            mode=TransformerActivationCheckpointingMode.selected_modules, modules=training.ac_modules
         )
-    return None
+    if training.ac_mode == TransformerActivationCheckpointingMode.budget:
+        if training.activation_memory_budget < 1.0 and training.compile_model:
+            return TransformerActivationCheckpointingConfig(
+                mode=TransformerActivationCheckpointingMode.budget,
+                activation_memory_budget=training.activation_memory_budget,
+            )
+        return None
+    raise ValueError(f"Unknown ac_mode: {training.ac_mode!r}")
 
 
 def build_cp_config(training: TrainingConfig) -> TransformerContextParallelConfig | None:
