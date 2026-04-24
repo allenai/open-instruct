@@ -445,18 +445,19 @@ class StreamingDataLoaderConfig:
 
     # Concave length penalty (Box-Cox style) applied to raw scores before advantage normalization.
     # Penalty is:  alpha * [ (1 + k*x)^(1-q) - 1 ] / [ k*(1-q) ]
-    # where x is a weighted combination of per-rollout length features, divided by the normalizer.
+    # With defaults below, x is simply the total response token count divided by the normalizer
+    # (i.e. response length in kilo-tokens). Per-category weights are exposed for ablations but
+    # default to "count all response tokens equally".
     add_concave_length_penalty: bool = False
     concave_length_penalty_alpha: float = 0.025
     concave_length_penalty_k: float = 0.05
     concave_length_penalty_q: float = 2.0
-    # Weights on per-rollout length features.
     concave_length_penalty_w_model: float = 1.0
     """Weight on model-emitted response tokens (think + tool-call + final)."""
-    concave_length_penalty_w_obs: float = 0.25
-    """Weight on tool-output (observation) tokens."""
-    concave_length_penalty_w_call: float = 200.0
-    """Per-tool-call cost, in token-equivalent units."""
+    concave_length_penalty_w_obs: float = 1.0
+    """Weight on tool-output (observation) tokens. Defaults to 1 — all response tokens count equally."""
+    concave_length_penalty_w_call: float = 0.0
+    """Per-tool-call cost, in token-equivalent units. Defaults to 0 — per-call term disabled."""
     concave_length_penalty_normalizer: float = 1000.0
     """Divisor applied to the weighted sum so the input x is in kilo-token units."""
 
