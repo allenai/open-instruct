@@ -42,12 +42,7 @@ import yaml
 
 
 BEAKER_ID_RE = re.compile(r"^[0-9A-Z]{26}$")
-DEFAULT_CLUSTERS = (
-    "ai2/jupiter-cirrascale-2",
-    "ai2/saturn-cirrascale",
-    "ai2/ceres-cirrascale",
-    "ai2/neptune-cirrascale",
-)
+DEFAULT_CLUSTERS = ("ai2/jupiter",)
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,9 +91,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--experiment_name", type=str, default=None)
     parser.add_argument(
-        "--dry_run",
-        action="store_true",
-        help="Write the spec YAML and print the beaker command, but do not submit.",
+        "--dry_run", action="store_true", help="Write the spec YAML and print the beaker command, but do not submit."
     )
     return parser.parse_args()
 
@@ -143,7 +136,7 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
 
 INSTALL_SCRIPT = (
     "set -euo pipefail && "
-    "git clone --depth=1 --branch finbarr/cli-sampling-override "
+    "git clone --depth=1"
     "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
     "/opt/olmo-eval-internal && "
     "cd /opt/olmo-eval-internal && "
@@ -154,12 +147,7 @@ INSTALL_SCRIPT = (
 )
 
 
-def build_spec(
-    args: argparse.Namespace,
-    inner_cmd: list[str],
-    dataset_id: str | None,
-    experiment_name: str,
-) -> dict:
+def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str | None, experiment_name: str) -> dict:
     datasets: list[dict] = [
         {"mountPath": "/weka/oe-adapt-default", "source": {"weka": "oe-adapt-default"}},
         {"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}},
