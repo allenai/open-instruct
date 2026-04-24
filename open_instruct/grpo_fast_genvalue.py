@@ -449,11 +449,16 @@ def _gen_value_scoring_loop(
                 )
             valid = [s for s in scores if s is not None]
             if with_tracking:
+                # commit=False buffers onto wandb's pending dict so the metrics
+                # land on the next main-thread wandb.log(step=training_step)
+                # call. Without this, wandb auto-advances run.step past
+                # training_step and the main thread's logs get silently dropped.
                 wandb.log(
                     {
                         "gen_value/score_mean": sum(valid) / len(valid) if valid else float("nan"),
                         "gen_value/parse_rate": len(valid) / len(scores) if scores else 0.0,
-                    }
+                    },
+                    commit=False,
                 )
             logger.debug(
                 "[GenValue] scored %d prompts: mean=%.3f parse_rate=%.2f",
@@ -487,8 +492,11 @@ def _gen_value_reinforce_loop(
         try:
             metrics = ray.get(trainer_actor.reinforce_step.remote(pairs))
             if with_tracking and metrics:
-                wandb.log(metrics)
-            logger.debug("[GenValue] REINFORCE step: %s", metrics)
+                # See scoring-thread comment: commit=False so the main training
+                # loop's wandb.log(step=training_step) owns run.step ordering,
+                # otherwise wandb drops the policy-side metrics.
+                wandb.log(metrics, commit=False)
+            logger.info("[GenValue] REINFORCE step: %s", metrics)
         except Exception:
             logger.exception("[GenValue] REINFORCE step failed, continuing")
     logger.info("[GenValue] REINFORCE thread stopped.")

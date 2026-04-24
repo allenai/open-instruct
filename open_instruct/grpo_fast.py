@@ -1357,10 +1357,17 @@ class PolicyTrainerRayProcess(RayProcess):
                 sae_step_metrics["value/sae_boundary_frac"] = float(np.mean(per_sample_bf))
             if per_sample_lam:
                 sae_step_metrics["value/avg_lambda"] = float(np.mean(per_sample_lam))
-            # Push gen-value training pairs to the REINFORCE queue (fire-and-forget).
+            # Push gen-value training pairs to the REINFORCE queue. Log failures
+            # (full queue, dead actor) at WARN so we don't silently lose the
+            # entire learning signal if the REINFORCE thread isn't draining.
             if _gen_value_training_pairs and self._gen_value_training_queue is not None:
-                with contextlib.suppress(Exception):
-                    self._gen_value_training_queue.put_nowait.remote(_gen_value_training_pairs)
+                try:
+                    ray.get(self._gen_value_training_queue.put_nowait.remote(_gen_value_training_pairs))
+                except Exception:
+                    logger.exception(
+                        "[GenValue] failed to enqueue %d training pairs; REINFORCE step will be skipped",
+                        len(_gen_value_training_pairs),
+                    )
             # Global advantage whitening across all samples and ranks (replaces per-sample whitening).
             if self.args.whiten_advantages and value_loss_inputs is not None:
                 adv_parts = [data_BT.advantages[i][:, 1:].float() for i in range(num_samples)]
