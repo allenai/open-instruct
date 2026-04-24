@@ -780,15 +780,46 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[tuple[int, ...]], packed: bool, model_step: int
-    ) -> None:
+    def update_weights(self, *args, **kwargs) -> None:
+        """Accept both the NCCL and IPC trainer-side calling conventions.
+
+        - NCCL path (``broadcast_weights_to_vllm``): invoked as
+          ``update_weights.remote(names, dtype_names, shapes, packed, model_step)``
+          with 5 positional args.
+        - IPC path (``vllm.distributed.weight_transfer.ipc_engine``): invoked as
+          ``update_weights.remote({"update_info": update_info})`` with a single
+          positional dict (model_step is sent afterward via ``set_model_step``).
+
+        vLLM's native weight-transfer API uses the IPC dict form, so we
+        accept both shapes to keep ``--single_gpu_mode`` working alongside the
+        NCCL path used by multi-GPU pools.
+        """
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
+
+        model_step: int | None = None
+        if len(args) == 1 and isinstance(args[0], dict) and "update_info" in args[0]:
+            update_info = args[0]["update_info"]
+        elif len(args) == 5:
+            names, dtype_names, shapes, packed, model_step = args
+            update_info = {
+                "names": names,
+                "dtype_names": dtype_names,
+                "shapes": shapes,
+                "packed": packed,
+            }
+        else:
+            raise TypeError(
+                f"LLMRayActor.update_weights received an unexpected call: "
+                f"args={len(args)} positional, kwargs={list(kwargs)}. Expected either "
+                f"(names, dtype_names, shapes, packed, model_step) for NCCL or a single "
+                f"dict with 'update_info' for IPC."
+            )
+
         self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
-        self.current_model_step = model_step
+        if model_step is not None:
+            self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
