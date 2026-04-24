@@ -1668,16 +1668,7 @@ def broadcast_weights_to_vllm(
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
     use_packed = False
-
-    if is_rank_0:
-        refs = [
-            engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
-        ]
-    else:
-        refs = []
-
     trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=use_packed)
 
     if isinstance(model, FSDPModule):
@@ -1695,10 +1686,19 @@ def broadcast_weights_to_vllm(
         _phase(f"[weight-sync step={model_step} rank={rank}] unshard done")
         try:
             if is_rank_0:
-                _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
                 mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
+                names = [n for n, _ in mapped_params]
+                dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
+                shapes = [list(t.shape) for _, t in mapped_params]
+                refs = [
+                    engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step)
+                    for engine in vllm_engines
+                ]
+                _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
                 _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights done")
+            else:
+                refs = []
         finally:
             _phase(f"[weight-sync step={model_step} rank={rank}] reshard start")
             for _, block in fsdp_submodules:
@@ -1706,6 +1706,15 @@ def broadcast_weights_to_vllm(
             _phase(f"[weight-sync step={model_step} rank={rank}] reshard done")
         _phase(f"[weight-sync step={model_step} rank={rank}] broadcast_weights_to_vllm returning")
         return refs
+
+    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
+
+    if is_rank_0:
+        refs = [
+            engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
+        ]
+    else:
+        refs = []
 
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
