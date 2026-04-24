@@ -1357,12 +1357,20 @@ class PolicyTrainerRayProcess(RayProcess):
                 sae_step_metrics["value/sae_boundary_frac"] = float(np.mean(per_sample_bf))
             if per_sample_lam:
                 sae_step_metrics["value/avg_lambda"] = float(np.mean(per_sample_lam))
-            # Push gen-value training pairs to the REINFORCE queue. Log failures
-            # (full queue, dead actor) at WARN so we don't silently lose the
-            # entire learning signal if the REINFORCE thread isn't draining.
+            # Push gen-value training pairs to the REINFORCE queue. ray.util.queue.Queue
+            # methods are regular sync methods (they proxy to an actor internally);
+            # the previous code called .put_nowait.remote(...) which raised
+            # AttributeError and was silently swallowed, so training pairs were
+            # being dropped on the floor and the REINFORCE thread never learned.
             if _gen_value_training_pairs and self._gen_value_training_queue is not None:
                 try:
-                    ray.get(self._gen_value_training_queue.put_nowait.remote(_gen_value_training_pairs))
+                    self._gen_value_training_queue.put_nowait(_gen_value_training_pairs)
+                except Full:
+                    logger.warning(
+                        "[GenValue] training-pair queue is full; dropping %d pairs. "
+                        "REINFORCE thread may be falling behind.",
+                        len(_gen_value_training_pairs),
+                    )
                 except Exception:
                     logger.exception(
                         "[GenValue] failed to enqueue %d training pairs; REINFORCE step will be skipped",

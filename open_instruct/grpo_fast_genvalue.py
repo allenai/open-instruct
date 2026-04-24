@@ -55,6 +55,7 @@ import random
 import threading
 from concurrent import futures
 from dataclasses import dataclass
+import queue as queue_lib
 from queue import Queue
 from typing import Any
 
@@ -484,8 +485,17 @@ def _gen_value_reinforce_loop(
     logger.info("[GenValue] REINFORCE thread started.")
     while not stop_event.is_set():
         try:
-            pairs = ray.get(training_queue.get.remote(timeout=1.0))
+            # ray.util.queue.Queue.get is a regular sync method that blocks up
+            # to `timeout` seconds and raises queue.Empty on timeout. The
+            # previous `training_queue.get.remote(timeout=1.0)` raised
+            # AttributeError (no .remote on a bound method) and was swallowed
+            # by the bare `except Exception`, so this thread was spinning
+            # without ever consuming a pair.
+            pairs = training_queue.get(timeout=1.0)
+        except queue_lib.Empty:
+            continue
         except Exception:
+            logger.exception("[GenValue] unexpected error reading training-pair queue")
             continue
         if pairs is None or len(pairs) == 0:
             continue
