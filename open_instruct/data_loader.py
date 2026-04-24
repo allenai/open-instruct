@@ -467,6 +467,7 @@ class StreamingDataLoaderConfig:
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
     num_response_tokens_rollout: int | None = None
+    num_response_completions_rollout: int | None = None
 
     # GRPO sampling/filtering
     active_sampling: bool = False
@@ -632,6 +633,15 @@ class StreamingDataLoaderConfig:
             raise ValueError(
                 "`num_response_tokens_rollout` must be greater than 0 when provided, "
                 f"got {self.num_response_tokens_rollout}."
+            )
+        if self.num_response_completions_rollout is not None and self.num_response_completions_rollout <= 0:
+            raise ValueError(
+                "`num_response_completions_rollout` must be greater than 0 when provided, "
+                f"got {self.num_response_completions_rollout}."
+            )
+        if self.num_response_tokens_rollout is not None and self.num_response_completions_rollout is not None:
+            raise ValueError(
+                "`num_response_tokens_rollout` and `num_response_completions_rollout` are mutually exclusive."
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
@@ -1272,6 +1282,7 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     num_tokens: int | None = None,
+    num_completions: int | None = None,
     dataset_index_map: dict[int, int] | None = None,
     prompt_test_index_map: dict[int, list[int]] | None = None,
     prompt_test_difficulty_map: dict[int, list[int]] | None = None,
@@ -1312,6 +1323,8 @@ def accumulate_inference_batches(
 
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
+    if num_tokens is not None and num_completions is not None:
+        raise ValueError("`num_tokens` and `num_completions` are mutually exclusive.")
 
     if replenish_prompts:
         assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
@@ -1352,9 +1365,13 @@ def accumulate_inference_batches(
     given_up_prompts_by_dataset: dict[str, int] = {}
     given_up_prompts_resamples: list[int] = []
     prompts_resamples: list[int] = []
-    target_is_tokens = num_tokens is not None
-    target_total = num_tokens if num_tokens is not None else num_prompts
-    target_label = "response tokens" if target_is_tokens else "prompts"
+    target_mode = "tokens" if num_tokens is not None else "completions" if num_completions is not None else "prompts"
+    target_total = (
+        num_tokens if num_tokens is not None else num_completions if num_completions is not None else num_prompts
+    )
+    target_label = {"tokens": "response tokens", "completions": "response completions", "prompts": "prompts"}[
+        target_mode
+    ]
     progress_bar = tqdm(total=target_total, desc=progress_bar_desc, disable=not show_progress_bar, leave=False)
     logger.info(
         f"[accumulate_inference_batches] Starting to accumulate {target_total} {target_label}, "
@@ -1480,9 +1497,13 @@ def accumulate_inference_batches(
     ) -> int:
         return pending_response_count + sum(len(pending_result.responses) for pending_result in pending_results)
 
-    while (num_tokens_sampled < target_total if target_is_tokens else num_prompts_sampled < target_total) and (
-        max_prompts_to_sample is None or prompts_consumed < max_prompts_to_sample
-    ):
+    while (
+        num_tokens_sampled < target_total
+        if target_mode == "tokens"
+        else total_generated_completions < target_total
+        if target_mode == "completions"
+        else num_prompts_sampled < target_total
+    ) and (max_prompts_to_sample is None or prompts_consumed < max_prompts_to_sample):
         try:
             result = inference_results_Q.get(timeout=timeout)
         except Empty:
@@ -1601,7 +1622,7 @@ def accumulate_inference_batches(
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
-            if not active_sampling and not target_is_tokens:
+            if not active_sampling and target_mode == "prompts":
                 num_prompts_sampled += 1
                 progress_bar.update(1)
                 if progress_callback is not None:
@@ -1672,11 +1693,15 @@ def accumulate_inference_batches(
             baseline_reward_sum = reward_scores_sum
 
         accepted_response_tokens = sum(len(response) for response in result.responses)
-        if target_is_tokens:
+        if target_mode == "tokens":
             num_tokens_sampled += accepted_response_tokens
             progress_bar.update(accepted_response_tokens)
             if progress_callback is not None:
                 progress_callback(num_tokens_sampled, target_total)
+        elif target_mode == "completions":
+            progress_bar.update(sample_count)
+            if progress_callback is not None:
+                progress_callback(total_generated_completions, target_total)
         else:
             num_prompts_sampled += 1
             progress_bar.update(1)
@@ -1749,13 +1774,20 @@ def accumulate_inference_batches(
         accepted_prompt_lengths.append(len(query))
         all_model_steps.extend([result.model_step] * len(result.responses))
 
-    if num_tokens_sampled < target_total if target_is_tokens else num_prompts_sampled < target_total:
+    accepted_target_total = (
+        num_tokens_sampled
+        if target_mode == "tokens"
+        else sum(len(result.responses) for result in results)
+        if target_mode == "completions"
+        else num_prompts_sampled
+    )
+    if accepted_target_total < target_total:
         cap = max_prompts_to_sample if max_prompts_to_sample is not None else "no cap"
         logger.warning(
             "[accumulate_inference_batches] Incomplete batch: accepted %s/%s %s after consuming %s "
             "generation(s) (max consumable before stop: %s). With active sampling, each filtered prompt still "
             "counts toward that cap — increase `active_sampling_max_samples_multiplier` if you need a full batch.",
-            num_tokens_sampled if target_is_tokens else num_prompts_sampled,
+            accepted_target_total,
             target_total,
             target_label,
             prompts_consumed,
@@ -2141,7 +2173,11 @@ class DataPreparationActor:
             rollout_target = (
                 f"{self.config.num_response_tokens_rollout} response tokens"
                 if self.config.num_response_tokens_rollout is not None
-                else f"{self.global_batch_size} prompts"
+                else (
+                    f"{self.config.num_response_completions_rollout} response completions"
+                    if self.config.num_response_completions_rollout is not None
+                    else f"{self.global_batch_size} prompts"
+                )
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {rollout_target}"
@@ -2154,6 +2190,7 @@ class DataPreparationActor:
                 tokenizer=self.tokenizer,
                 dataset=self.dataset,
                 num_tokens=self.config.num_response_tokens_rollout,
+                num_completions=self.config.num_response_completions_rollout,
                 dataset_index_map=self.dataset_index_map,
                 prompt_test_index_map=self.prompt_test_index_map,
                 prompt_test_difficulty_map=self.prompt_test_difficulty_map,
@@ -2294,9 +2331,11 @@ class DataPreparationActor:
                 expected_num_responses = (
                     self.config.num_samples_per_prompt_rollout * self.global_batch_size
                     if self.config.num_response_tokens_rollout is None
+                    and self.config.num_response_completions_rollout is None
                     else None
                 )
                 expected_num_response_tokens = self.config.num_response_tokens_rollout
+                expected_num_response_completions = self.config.num_response_completions_rollout
                 unsolved_num_responses = (scores < self.config.max_possible_score).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
                 real_num_response_tokens = int(sequence_lengths.sum())
@@ -2376,6 +2415,8 @@ class DataPreparationActor:
                     step_metrics["real_batch_size_ratio"] = real_num_responses / expected_num_responses
                 if expected_num_response_tokens is not None:
                     step_metrics["real_token_size_ratio"] = real_num_response_tokens / expected_num_response_tokens
+                if expected_num_response_completions is not None:
+                    step_metrics["real_completion_size_ratio"] = real_num_responses / expected_num_response_completions
                 step_metrics.update(
                     compute_prompt_solve_rate_metrics(
                         batch_stats=batch_stats,
