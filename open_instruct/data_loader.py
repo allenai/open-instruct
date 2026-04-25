@@ -441,6 +441,15 @@ class StreamingDataLoaderConfig:
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
+    mask_non_submitting_completions: bool = False
+    """Drop rollouts where the env state never reached `done=True`.
+
+    Cleaner alternative to `mask_truncated_completions`: instead of inferring
+    truncation from finish_reason / response length, look at whether the model
+    actually finished its trajectory (i.e. submitted / declared task done).
+    Catches both token-cap'd and env-max-step'd rollouts uniformly. Defaults to
+    `False` so existing runs are unchanged.
+    """
     mask_tool_use: bool = True
 
     # Concave length penalty (Box-Cox style) applied to raw scores before advantage normalization.
@@ -1446,6 +1455,12 @@ class DataPreparationActor:
             def _is_truncated(i: int) -> bool:
                 return result.finish_reasons[i] != "stop" or len(result.responses[i]) >= response_length_cap
 
+            def _is_non_submitting(i: int) -> bool:
+                states = result.request_info.rollout_states
+                if i >= len(states):
+                    return False
+                return not states[i].get("done", True)
+
             truncated_idxes = [i for i in range(num_before_filter) if _is_truncated(i)]
             num_truncated_completion = len(truncated_idxes)
             truncated_completion_correct_count = (
@@ -1455,12 +1470,26 @@ class DataPreparationActor:
                 [len(result.responses[i]) for i in truncated_idxes], dtype=np.int64
             )
 
-            if self.config.mask_truncated_completions:
-                keep_idxes = torch.tensor([i for i in range(num_before_filter) if not _is_truncated(i)])
-                if num_truncated_completion > 0:
+            non_submitting_idxes = [i for i in range(num_before_filter) if _is_non_submitting(i)]
+            num_non_submitting_completion = len(non_submitting_idxes)
+
+            do_mask_filter = self.config.mask_truncated_completions or self.config.mask_non_submitting_completions
+            if do_mask_filter:
+
+                def _should_drop(i: int) -> bool:
+                    if self.config.mask_truncated_completions and _is_truncated(i):
+                        return True
+                    if self.config.mask_non_submitting_completions and _is_non_submitting(i):
+                        return True
+                    return False
+
+                keep_idxes = torch.tensor([i for i in range(num_before_filter) if not _should_drop(i)])
+                num_dropped = num_before_filter - len(keep_idxes)
+                if num_dropped > 0:
                     logger.info(
-                        f"[DataPreparationActor] Filtered {num_truncated_completion} truncated responses "
-                        f"(finish_reason != 'stop' or len(response) >= {response_length_cap}). "
+                        f"[DataPreparationActor] Filtered {num_dropped} rollouts "
+                        f"(mask_truncated={self.config.mask_truncated_completions}, "
+                        f"mask_non_submitting={self.config.mask_non_submitting_completions}). "
                         f"Retention rate: {len(keep_idxes) / num_before_filter:.2%}"
                     )
                 scores = scores[keep_idxes]
@@ -1542,6 +1571,10 @@ class DataPreparationActor:
                         num_truncated_completion / num_before_filter if num_before_filter else 0.0
                     ),
                     "val/truncated_completion_correct_count": truncated_completion_correct_count,
+                    "val/non_submitting_completion_count": num_non_submitting_completion,
+                    "val/non_submitting_completion_fraction": (
+                        num_non_submitting_completion / num_before_filter if num_before_filter else 0.0
+                    ),
                     "val/truncated_completion_length_mean": (
                         float(truncated_completion_lengths.mean()) if num_truncated_completion else 0.0
                     ),
