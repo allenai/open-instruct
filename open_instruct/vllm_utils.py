@@ -1698,7 +1698,8 @@ def broadcast_weights_to_vllm(
         _phase(f"[weight-sync step={model_step} rank={rank}] unshard start ({len(fsdp_submodules)} blocks)")
         for _, block in fsdp_submodules:
             block.unshard()
-        _phase(f"[weight-sync step={model_step} rank={rank}] unshard done")
+        torch.cuda.synchronize()
+        _phase(f"[weight-sync step={model_step} rank={rank}] unshard done (synced)")
         try:
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
