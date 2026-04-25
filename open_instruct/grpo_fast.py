@@ -1328,6 +1328,10 @@ class PolicyTrainerRayProcess(RayProcess):
             _vdiag_incorrect: list[list[float]] = [[] for _ in range(_NUM_PCT_BINS)]
             _vdiag_returns_all: list[float] = []
             _vdiag_preds_all: list[float] = []
+            _gen_value_adv_correct: list[float] = []
+            _gen_value_adv_incorrect: list[float] = []
+            _gen_value_terminal_vhat_correct: list[float] = []
+            _gen_value_terminal_vhat_incorrect: list[float] = []
             with Timer("Value forward (no-grad)", noop=self.rank != 0), torch.no_grad():
                 for i in range(num_samples):
                     resp_mask = data_BT.response_masks[i][:, 1:].bool()
@@ -1418,6 +1422,48 @@ class PolicyTrainerRayProcess(RayProcess):
                     new_adv = torch.zeros_like(data_BT.advantages[i])
                     new_adv[:, 1:] = torch.from_numpy(adv_np.astype("float32")).to(device)
                     data_BT.advantages[i] = new_adv
+
+                    if _use_gen_value:
+                        # Actor-facing GenAC diagnostics. Split the actual advantages and
+                        # terminal gen-value predictions by per-sub-sequence outcome so we can
+                        # directly see whether the critic creates a useful correct-vs-incorrect
+                        # training signal. These are computed on the same shifted layout as
+                        # values_BT / adv_np.
+                        max_score = float(getattr(self.streaming_config, "max_possible_score", 1.0)) or 1.0
+                        rewards_full_diag = data_BT.rewards[i][0].float().cpu().numpy()
+                        dones_full_diag = data_BT.dones[i][0].cpu().numpy().astype(bool)
+                        vals_np_diag = values_BT.float().cpu().numpy()
+                        subseqs_diag = self._unpack_subseqs(
+                            data_BT.query_responses[i], data_BT.position_ids[i], data_BT.response_masks[i]
+                        )
+                        for sub in subseqs_diag:
+                            s_off = sub["offset_in_pack"]
+                            s_len = int(sub["length"])
+                            sub_dones = dones_full_diag[s_off : s_off + s_len]
+                            sub_rewards = rewards_full_diag[s_off : s_off + s_len]
+                            if sub_dones.any():
+                                n_d = int(sub_dones.sum())
+                                outcome_norm = float(sub_rewards[sub_dones].sum()) / (n_d * max_score)
+                            else:
+                                outcome_norm = 0.0
+                            is_correct_subseq = outcome_norm > 0.5
+
+                            resp_local = sub["response_is_resp"].bool().nonzero(as_tuple=True)[0].cpu().numpy()
+                            if len(resp_local) == 0:
+                                continue
+                            pack_positions = resp_local + s_off
+                            shifted_positions = pack_positions[pack_positions >= 1] - 1
+                            if len(shifted_positions) == 0:
+                                continue
+                            adv_tokens = adv_np[0, shifted_positions]
+                            terminal_vhat = float(vals_np_diag[0, shifted_positions[-1]])
+                            if is_correct_subseq:
+                                _gen_value_adv_correct.extend([float(x) for x in adv_tokens])
+                                _gen_value_terminal_vhat_correct.append(terminal_vhat)
+                            else:
+                                _gen_value_adv_incorrect.extend([float(x) for x in adv_tokens])
+                                _gen_value_terminal_vhat_incorrect.append(terminal_vhat)
+
                     # value_mask uses [:, :-1] so V(s_t) is supervised at the correct response
                     # positions (not shifted left like response_masks[:, 1:] would do).
                     value_mask = data_BT.response_masks[i][:, :-1].bool()
@@ -1456,6 +1502,27 @@ class PolicyTrainerRayProcess(RayProcess):
                 sae_step_metrics["value/sae_boundary_frac"] = float(np.mean(per_sample_bf))
             if per_sample_lam:
                 sae_step_metrics["value/avg_lambda"] = float(np.mean(per_sample_lam))
+            if _gen_value_adv_correct:
+                sae_step_metrics["gen_value/advantage_correct_mean"] = float(np.mean(_gen_value_adv_correct))
+            if _gen_value_adv_incorrect:
+                sae_step_metrics["gen_value/advantage_incorrect_mean"] = float(np.mean(_gen_value_adv_incorrect))
+            if _gen_value_adv_correct and _gen_value_adv_incorrect:
+                sae_step_metrics["gen_value/advantage_gap"] = float(
+                    np.mean(_gen_value_adv_correct) - np.mean(_gen_value_adv_incorrect)
+                )
+            if _gen_value_terminal_vhat_correct:
+                sae_step_metrics["gen_value/terminal_vhat_correct_mean"] = float(
+                    np.mean(_gen_value_terminal_vhat_correct)
+                )
+            if _gen_value_terminal_vhat_incorrect:
+                sae_step_metrics["gen_value/terminal_vhat_incorrect_mean"] = float(
+                    np.mean(_gen_value_terminal_vhat_incorrect)
+                )
+            if _gen_value_terminal_vhat_correct and _gen_value_terminal_vhat_incorrect:
+                sae_step_metrics["gen_value/terminal_vhat_gap"] = float(
+                    np.mean(_gen_value_terminal_vhat_correct)
+                    - np.mean(_gen_value_terminal_vhat_incorrect)
+                )
             # Push gen-value training pairs to the REINFORCE queue. ray.util.queue.Queue
             # methods are regular sync methods (they proxy to an actor internally);
             # the previous code called .put_nowait.remote(...) which raised
