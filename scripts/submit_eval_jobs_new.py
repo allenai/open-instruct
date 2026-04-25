@@ -136,7 +136,7 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
 
 INSTALL_SCRIPT = (
     "set -euo pipefail && "
-    "git clone --depth=1"
+    "git clone --depth=1 "
     "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
     "/opt/olmo-eval-internal && "
     "cd /opt/olmo-eval-internal && "
