@@ -99,6 +99,7 @@ class VLLMWeightSyncCallback(Callback):
         _phase(f"[post_step step={step} rank={rank}] entering")
 
         torch.cuda.empty_cache()
+        torch.cuda.set_device(0)
         _phase(f"[post_step step={step} rank={rank}] set_should_stop(True) start")
         ray.get(self.actor_manager.set_should_stop.remote(True))
         _phase(f"[post_step step={step} rank={rank}] set_should_stop(True) done")

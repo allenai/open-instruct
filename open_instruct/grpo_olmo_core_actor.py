@@ -244,6 +244,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
         if self.rank == 0:
             ray.get(self.actor_manager.set_should_stop.remote(True))
+        torch.cuda.empty_cache()
+        torch.cuda.set_device(0)
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=self.train_module.model,
             vllm_engines=self.vllm_engines,
