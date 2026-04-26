@@ -326,6 +326,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.world_size = world_size
         self.local_rank = local_rank
         self.dp_world_size = world_size // args.sequence_parallel_size
+        self._ddp_fp32_param_pairs: list[tuple[torch.nn.Parameter, torch.nn.Parameter]] = []
 
     @property
     def _uses_deepspeed(self) -> bool:
@@ -337,6 +338,42 @@ class PolicyTrainerRayProcess(RayProcess):
     def _get_trainable_params(self) -> list[torch.nn.Parameter]:
         return [param for param in self._get_unwrapped_model().parameters() if param.requires_grad]
 
+    def _build_ddp_fp32_optimizer_params(self, optim_params):
+        """Create fp32 master params for DDP AdamW while keeping model params bf16."""
+        self._ddp_fp32_param_pairs = []
+
+        def make_master_param(param: torch.nn.Parameter) -> torch.nn.Parameter:
+            master_param = torch.nn.Parameter(param.detach().float().clone(), requires_grad=True)
+            self._ddp_fp32_param_pairs.append((param, master_param))
+            return master_param
+
+        if isinstance(optim_params, list) and all(isinstance(group, dict) for group in optim_params):
+            fp32_groups = []
+            for group in optim_params:
+                fp32_group = {key: value for key, value in group.items() if key != "params"}
+                fp32_group["params"] = [make_master_param(param) for param in group["params"]]
+                fp32_groups.append(fp32_group)
+            return fp32_groups
+
+        return [make_master_param(param) for param in optim_params]
+
+    def _sync_ddp_fp32_params_from_model(self) -> None:
+        for model_param, master_param in self._ddp_fp32_param_pairs:
+            master_param.data.copy_(model_param.detach().float())
+
+    def _sync_ddp_fp32_grads_from_model(self) -> None:
+        for model_param, master_param in self._ddp_fp32_param_pairs:
+            master_param.grad = None if model_param.grad is None else model_param.grad.detach().float()
+
+    def _sync_model_params_from_ddp_fp32(self) -> None:
+        for model_param, master_param in self._ddp_fp32_param_pairs:
+            model_param.data.copy_(master_param.detach().to(dtype=model_param.dtype))
+
+    def _zero_grad(self) -> None:
+        self.optimizer.zero_grad(set_to_none=True)
+        if not self._uses_deepspeed:
+            self.model.zero_grad(set_to_none=True)
+
     def _compute_global_grad_norm(self) -> float:
         if self._uses_deepspeed:
             return float(self.model.get_global_grad_norm())
@@ -347,7 +384,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 continue
             grad = param.grad.detach()
             local_grad_sq_sum += torch.sum(grad.double() * grad.double())
-        dist.all_reduce(local_grad_sq_sum, op=dist.ReduceOp.SUM)
         return math.sqrt(local_grad_sq_sum.item())
 
     def _measure_prompt_grad_norm(self, loss: torch.Tensor) -> float | None:
@@ -379,11 +415,23 @@ class PolicyTrainerRayProcess(RayProcess):
             return None
 
         grad_norm = self._compute_global_grad_norm()
+        if self._ddp_fp32_param_pairs:
+            self._sync_ddp_fp32_grads_from_model()
+            if self.args.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    [master_param for _, master_param in self._ddp_fp32_param_pairs], self.args.max_grad_norm
+                )
+            self.optimizer.step()
+            self.scheduler.step()
+            self._sync_model_params_from_ddp_fp32()
+            self._zero_grad()
+            return grad_norm
+
         if self.args.max_grad_norm is not None:
             torch.nn.utils.clip_grad_norm_(self._get_trainable_params(), self.args.max_grad_norm)
         self.optimizer.step()
         self.scheduler.step()
-        self.optimizer.zero_grad(set_to_none=True)
+        self._zero_grad()
         return grad_norm
 
     def get_dataloader_state(self) -> dict[str, Any]:
@@ -476,7 +524,11 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+            **(
+                {"device_map": {"": self.local_rank}}
+                if args.trainer_backend == "ddp" or args.deepspeed_stage != 3
+                else {}
+            ),
         )
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
@@ -493,6 +545,8 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
+        if args.trainer_backend == "ddp":
+            optim_params = self._build_ddp_fp32_optimizer_params(optim_params)
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
@@ -517,7 +571,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.policy, device_ids=[self.local_rank], output_device=self.local_rank
             )
             self.scheduler = scheduler
-            self.optimizer.zero_grad(set_to_none=True)
+            self._zero_grad()
         optimization_steps_done = 0
         checkpoint_state = None
         load_checkpoint_dir = args.resume_checkpoint_dir or args.checkpoint_state_dir
@@ -553,6 +607,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     states = torch.load(training_state_path, map_location="cpu", weights_only=False)
                     self.model.module.load_state_dict(states["model"])
                     self.optimizer.load_state_dict(states["optimizer"])
+                    self._sync_ddp_fp32_params_from_model()
                     self.scheduler.load_state_dict(states["scheduler"])
                     checkpoint_state = states["client_state"]
                     optimization_steps_done = checkpoint_state["training_step"]
@@ -825,7 +880,7 @@ class PolicyTrainerRayProcess(RayProcess):
         prompt_grad_norm_indices: list[int] = []
         prompt_grad_norm_datasets: list[str] = []
         if not self._uses_deepspeed:
-            self.optimizer.zero_grad(set_to_none=True)
+            self._zero_grad()
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)

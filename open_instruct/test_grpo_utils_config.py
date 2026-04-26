@@ -45,20 +45,24 @@ def test_eval_top_k_accepts_valid_values(value):
     assert cfg.eval_top_k == value
 
 
-def test_create_generation_configs_applies_eval_top_k_override(monkeypatch):
+def test_create_generation_configs_applies_eval_top_k_override():
     args = ExperimentConfig(seed=123, eval_pass_at_k=2, eval_top_k=17)
     streaming_config = type(
         "StreamingConfigStub",
         (),
-        {"temperature": 0.8, "response_length": 64, "num_samples_per_prompt_rollout": 4, "stop_strings": ["</s>"]},
+        {
+            "temperature": 0.8,
+            "response_length": 64,
+            "eval_response_length": 64,
+            "num_samples_per_prompt_rollout": 4,
+            "stop_strings": ["</s>"],
+        },
     )()
     vllm_config = type("VLLMConfigStub", (), {"vllm_top_p": 0.9})()
-    monkeypatch.setattr("open_instruct.grpo_fast.vllm_config", vllm_config, raising=False)
-
-    generation_configs = create_generation_configs(args, streaming_config)
+    generation_configs = create_generation_configs(args, streaming_config, vllm_config)
 
     assert generation_configs["train"] == SamplingConfig(
-        temperature=0.8, top_p=0.9, top_k=-1, max_tokens=64, n=4, stop=["</s>"], seed=123, logprobs=1
+        temperature=0.8, top_p=0.9, max_tokens=64, n=4, stop=["</s>"], seed=123, logprobs=1
     )
     assert generation_configs["eval"] == SamplingConfig(
         temperature=0.8, top_p=0.9, top_k=17, max_tokens=64, n=2, stop=["</s>"], seed=123, logprobs=1

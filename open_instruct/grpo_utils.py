@@ -306,6 +306,8 @@ class GRPOExperimentConfig(
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+        if self.trainer_backend == "ddp" and self.sequence_parallel_size > 1:
+            raise ValueError("`trainer_backend=ddp` does not support `sequence_parallel_size > 1`.")
 
         total_learner_gpus = sum(self.num_learners_per_node)
         if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
