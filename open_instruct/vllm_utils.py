@@ -231,6 +231,21 @@ def _install_vllm_weight_transfer_diagnostics() -> None:
     NCCLWeightTransferEngine.receive_weights = receive_weights_with_diag
 
 
+class WorkerWeightTransferDiagExt:
+    """Worker-extension class injected into vLLM workers via worker_extension_cls.
+
+    Provides ``install_weight_transfer_diag`` (callable from the driver via
+    ``collective_rpc``) which monkey-patches the Worker.update_weights and
+    NCCLWeightTransferEngine.receive_weights inside the worker subprocess so the
+    DIAG-B prints actually fire there. The LLMRayActor process can't patch the
+    worker subprocess directly because vLLM v1 uses spawn.
+    """
+
+    def install_weight_transfer_diag(self) -> None:
+        _install_vllm_weight_transfer_diagnostics()
+        print(f"[DIAG-B WorkerExt installed] pid={os.getpid()}", flush=True, file=sys.stderr)
+
+
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
@@ -811,6 +826,7 @@ class LLMRayActor:
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
+        engine_args.worker_extension_cls = "open_instruct.vllm_utils.WorkerWeightTransferDiagExt"
 
         init_complete = threading.Event()
         self.loop = None
@@ -844,6 +860,8 @@ class LLMRayActor:
             await asyncio.sleep(0.1)
 
             self._install_llm_engine_rpc_diagnostics(engine_client)
+            await engine_client.collective_rpc("install_weight_transfer_diag")
+            _phase("[DIAG-B] dispatched install_weight_transfer_diag to workers")
             return engine_client
 
         def _run_loop():
