@@ -9,9 +9,12 @@
 #
 # GPU layout (8 GPUs on 1 node):
 #   - 4x policy learners (DeepSpeed stage 3)
-#   - 2x policy vLLM engines (TP=1)
-#   - 1x generative-critic vLLM engine (TP=1)
+#   - 1x policy vLLM engine (TP=1)
+#   - 2x generative-critic vLLM engines (TP=1)
 #   - 1x GenValueTrainerActor (PyTorch, REINFORCE updates)
+# (Rationale: with num_samples_per_prompt_rollout=16 the gen-value pool has to
+# score 16x more responses per step than the policy generates per prompt, so
+# the gen-value vLLM pool is the bottleneck. Give it more engines than policy.)
 #
 # Step budget:
 #   100 critic-only warmup steps (policy frozen via --value_warmup_steps)
@@ -19,7 +22,7 @@
 # = 1100 total training steps
 #
 # total_episodes = 1100 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                = 1100 * 16 * 4 = 70400
+#                = 1100 * 16 * 16 = 281600
 DDMM=$(date +"%d%m")
 exp_name=genac_1k_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -44,7 +47,7 @@ uv run python mason.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
-    --num_samples_per_prompt_rollout 4 \
+    --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
@@ -52,17 +55,17 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 4096 \
-    --pack_length 6144 \
+    --response_length 8096 \
+    --pack_length 10240 \
     --model_name_or_path Qwen/Qwen3-4B-Base \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 70400 \
+    --total_episodes 281600 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 2 \
+    --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --lr_scheduler_type constant \
@@ -86,7 +89,7 @@ uv run python mason.py \
     --sae_threshold 0.2 \
     --use_generative_value_model \
     --gen_value_model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --gen_value_vllm_num_engines 1 \
+    --gen_value_vllm_num_engines 2 \
     --gen_value_vllm_tensor_parallel_size 1 \
     --gen_value_segmentation sae \
     --gen_value_max_segments 16 \

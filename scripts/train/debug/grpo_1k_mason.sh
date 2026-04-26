@@ -13,7 +13,7 @@
 #
 # Step budget:
 #   total_episodes = 1000 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                  = 1000 * 16 * 4 = 64000
+#                  = 1000 * 16 * 16 = 256000
 DDMM=$(date +"%d%m")
 exp_name=grpo_1k_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -52,7 +52,7 @@ uv run python mason.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 64000 \
+    --total_episodes 256000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
