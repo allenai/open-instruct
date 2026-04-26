@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Add `scripts/submit_eval_jobs_new.py` to submit olmo-eval-internal evaluation jobs via Beaker without gantry.
+
 ### Changed
 - Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary (https://github.com/allenai/open-instruct/pull/1631).
 - Reapply packaging fix so `open_instruct` installs correctly as a third-party dependency (reverted by #1622) (https://github.com/allenai/open-instruct/pull/1634).
