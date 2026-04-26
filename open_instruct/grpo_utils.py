@@ -164,6 +164,8 @@ class GRPOExperimentConfig(
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
+    disable_per_example_grad_norm_logging: bool = False
+    """Disable DDP-only per-example gradient norm logging. Aggregate optimizer gradient norm logging remains enabled."""
 
     # Ray
     single_gpu_mode: bool = False

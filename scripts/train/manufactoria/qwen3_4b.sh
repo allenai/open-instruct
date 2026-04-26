@@ -12,6 +12,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
+NUM_NODES="${NUM_NODES:-1}"
 
 uv run python mason.py \
     --cluster $CLUSTER \
@@ -22,7 +23,7 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --description "${RUN_NAME}" \
     --image "${BEAKER_IMAGE}" \
-    --num_nodes 1 \
+    --num_nodes $NUM_NODES \
     --gpus $NUM_GPUS \
     --max_retries 0 \
     --no_auto_dataset_cache \

@@ -351,7 +351,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return math.sqrt(local_grad_sq_sum.item())
 
     def _measure_prompt_grad_norm(self, loss: torch.Tensor) -> float | None:
-        if self._uses_deepspeed:
+        if self._uses_deepspeed or self.args.disable_per_example_grad_norm_logging:
             return None
 
         local_grad_sq_sum = torch.zeros(1, device=self.device, dtype=torch.float64)
