@@ -2,6 +2,7 @@ import tempfile
 import unittest
 
 import datasets
+import numpy as np
 import parameterized
 import torch
 
@@ -496,6 +497,50 @@ class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):
         )
         self.assertTrue(config.save_traces)
         self.assertEqual(config.rollouts_save_path, "/tmp/rollouts")
+
+
+class TestMaskNonSubmittingCompletionsPercent(unittest.TestCase):
+    def test_sample_non_submitting_unmask_idxes_hits_target_fraction(self):
+        sampled = open_instruct.data_loader._sample_non_submitting_unmask_idxes(
+            submitting_count=90,
+            non_submitting_idxes=list(range(90, 110)),
+            target_fraction=0.1,
+            rng=np.random.default_rng(0),
+        )
+
+        self.assertEqual(len(sampled), 10)
+        self.assertTrue(sampled.issubset(set(range(90, 110))))
+
+    def test_sample_non_submitting_unmask_idxes_caps_at_available_samples(self):
+        sampled = open_instruct.data_loader._sample_non_submitting_unmask_idxes(
+            submitting_count=90,
+            non_submitting_idxes=[90, 91, 92],
+            target_fraction=0.5,
+            rng=np.random.default_rng(0),
+        )
+
+        self.assertEqual(sampled, {90, 91, 92})
+
+    def test_sample_non_submitting_unmask_idxes_requires_submitting_samples(self):
+        sampled = open_instruct.data_loader._sample_non_submitting_unmask_idxes(
+            submitting_count=0,
+            non_submitting_idxes=[0, 1, 2],
+            target_fraction=0.1,
+            rng=np.random.default_rng(0),
+        )
+
+        self.assertEqual(sampled, set())
+
+    def test_mask_non_submitting_percent_requires_mask_flag(self):
+        with self.assertRaises(ValueError):
+            open_instruct.data_loader.StreamingDataLoaderConfig(mask_non_submitting_completions_percent=0.1)
+
+    def test_mask_non_submitting_percent_must_be_less_than_one(self):
+        with self.assertRaises(ValueError):
+            open_instruct.data_loader.StreamingDataLoaderConfig(
+                mask_non_submitting_completions=True,
+                mask_non_submitting_completions_percent=1.0,
+            )
 
 
 if __name__ == "__main__":

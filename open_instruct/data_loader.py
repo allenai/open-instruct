@@ -72,6 +72,25 @@ def concave_length_penalty(x: np.ndarray, k: float, q: float) -> np.ndarray:
     return ((1.0 + k * x) ** (1.0 - q) - 1.0) / (k * (1.0 - q))
 
 
+def _sample_non_submitting_unmask_idxes(
+    submitting_count: int,
+    non_submitting_idxes: list[int],
+    target_fraction: float,
+    rng: np.random.Generator,
+) -> set[int]:
+    """Sample non-submitting rollouts so they are at most target_fraction of the retained batch."""
+    if target_fraction <= 0.0 or submitting_count <= 0 or not non_submitting_idxes:
+        return set()
+
+    target_count = int(np.floor(target_fraction * submitting_count / (1.0 - target_fraction)))
+    target_count = min(target_count, len(non_submitting_idxes))
+    if target_count <= 0:
+        return set()
+
+    sampled = rng.choice(np.array(non_submitting_idxes, dtype=np.int64), size=target_count, replace=False)
+    return set(int(i) for i in sampled)
+
+
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
 
@@ -450,6 +469,14 @@ class StreamingDataLoaderConfig:
     Catches both token-cap'd and env-max-step'd rollouts uniformly. Defaults to
     `False` so existing runs are unchanged.
     """
+    mask_non_submitting_completions_percent: float = 0.0
+    """Fraction of the retained batch that may be randomly kept from non-submitting rollouts.
+
+    Only applies when `mask_non_submitting_completions=True`. For example, 0.1
+    keeps enough randomly selected non-submitting rollouts for them to make up
+    at most 10% of the post-filter batch. Defaults to 0.0, preserving the
+    existing behavior of dropping all non-submitting rollouts.
+    """
     mask_tool_use: bool = True
 
     # Concave length penalty (Box-Cox style) applied to raw scores before advantage normalization.
@@ -570,6 +597,13 @@ class StreamingDataLoaderConfig:
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+        if not 0.0 <= self.mask_non_submitting_completions_percent < 1.0:
+            raise ValueError("`mask_non_submitting_completions_percent` must be in [0.0, 1.0).")
+        if self.mask_non_submitting_completions_percent > 0.0 and not self.mask_non_submitting_completions:
+            raise ValueError(
+                "`mask_non_submitting_completions_percent` only applies when "
+                "`mask_non_submitting_completions` is True."
+            )
 
         assert (
             self.apply_verifiable_reward
@@ -1206,6 +1240,7 @@ class DataPreparationActor:
         self.config = config
         self.config.max_possible_score = max_possible_score
         self.generation_config = generation_config
+        self.seed = seed
         self.num_training_steps = num_training_steps
         self.per_device_train_batch_size = per_device_train_batch_size
         self.global_batch_size = global_batch_size
@@ -1472,35 +1507,56 @@ class DataPreparationActor:
 
             non_submitting_idxes = [i for i in range(num_before_filter) if _is_non_submitting(i)]
             num_non_submitting_completion = len(non_submitting_idxes)
+            num_unmasked_non_submitting_completion = 0
 
             do_mask_filter = self.config.mask_truncated_completions or self.config.mask_non_submitting_completions
             if do_mask_filter:
+                truncated_drop_idxes = {
+                    i for i in range(num_before_filter) if self.config.mask_truncated_completions and _is_truncated(i)
+                }
+                non_submitting_drop_idxes = [
+                    i
+                    for i in range(num_before_filter)
+                    if self.config.mask_non_submitting_completions
+                    and _is_non_submitting(i)
+                    and i not in truncated_drop_idxes
+                ]
+                unmasked_non_submitting_idxes: set[int] = set()
+                if self.config.mask_non_submitting_completions_percent > 0.0:
+                    submitting_keep_count = sum(
+                        1
+                        for i in range(num_before_filter)
+                        if i not in truncated_drop_idxes and not _is_non_submitting(i)
+                    )
+                    unmasked_non_submitting_idxes = _sample_non_submitting_unmask_idxes(
+                        submitting_count=submitting_keep_count,
+                        non_submitting_idxes=non_submitting_drop_idxes,
+                        target_fraction=self.config.mask_non_submitting_completions_percent,
+                        rng=np.random.default_rng(self.seed + step),
+                    )
+                    num_unmasked_non_submitting_completion = len(unmasked_non_submitting_idxes)
 
-                def _should_drop(i: int) -> bool:
-                    if self.config.mask_truncated_completions and _is_truncated(i):
-                        return True
-                    if self.config.mask_non_submitting_completions and _is_non_submitting(i):
-                        return True
-                    return False
-
-                keep_idxes = torch.tensor([i for i in range(num_before_filter) if not _should_drop(i)])
-                num_dropped = num_before_filter - len(keep_idxes)
+                drop_idxes = truncated_drop_idxes | (set(non_submitting_drop_idxes) - unmasked_non_submitting_idxes)
+                keep_idxes_list = [i for i in range(num_before_filter) if i not in drop_idxes]
+                num_dropped = num_before_filter - len(keep_idxes_list)
                 if num_dropped > 0:
                     logger.info(
                         f"[DataPreparationActor] Filtered {num_dropped} rollouts "
                         f"(mask_truncated={self.config.mask_truncated_completions}, "
-                        f"mask_non_submitting={self.config.mask_non_submitting_completions}). "
-                        f"Retention rate: {len(keep_idxes) / num_before_filter:.2%}"
+                        f"mask_non_submitting={self.config.mask_non_submitting_completions}, "
+                        f"mask_non_submitting_percent={self.config.mask_non_submitting_completions_percent}, "
+                        f"unmasked_non_submitting={num_unmasked_non_submitting_completion}). "
+                        f"Retention rate: {len(keep_idxes_list) / num_before_filter:.2%}"
                     )
-                scores = scores[keep_idxes]
-                raw_scores = raw_scores[keep_idxes]
-                advantages = advantages[keep_idxes]
-                batch = batch[keep_idxes.tolist()]
-                result.responses = [result.responses[i] for i in keep_idxes]
-                result.masks = [result.masks[i] for i in keep_idxes]
-                result.finish_reasons = [result.finish_reasons[i] for i in keep_idxes]
+                scores = scores[keep_idxes_list]
+                raw_scores = raw_scores[keep_idxes_list]
+                advantages = advantages[keep_idxes_list]
+                batch = batch[keep_idxes_list]
+                result.responses = [result.responses[i] for i in keep_idxes_list]
+                result.masks = [result.masks[i] for i in keep_idxes_list]
+                result.finish_reasons = [result.finish_reasons[i] for i in keep_idxes_list]
                 assert result.logprobs is not None
-                result.logprobs = [result.logprobs[i] for i in keep_idxes]
+                result.logprobs = [result.logprobs[i] for i in keep_idxes_list]
 
             assert result.logprobs is not None
             packed_sequences = pack_sequences(
@@ -1574,6 +1630,10 @@ class DataPreparationActor:
                     "val/non_submitting_completion_count": num_non_submitting_completion,
                     "val/non_submitting_completion_fraction": (
                         num_non_submitting_completion / num_before_filter if num_before_filter else 0.0
+                    ),
+                    "val/non_submitting_completion_unmasked_count": num_unmasked_non_submitting_completion,
+                    "val/non_submitting_completion_unmasked_fraction": (
+                        num_unmasked_non_submitting_completion / real_num_responses if real_num_responses else 0.0
                     ),
                     "val/truncated_completion_length_mean": (
                         float(truncated_completion_lengths.mean()) if num_truncated_completion else 0.0
