@@ -27,8 +27,11 @@ Usage:
 
 import dataclasses
 import datetime
+import glob
+import hashlib
 import os
 import pathlib
+import re
 from typing import Any
 
 import torch
@@ -51,9 +54,32 @@ _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
 
 _TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
 
+_NUMPY_SFT_SUBDIR = "numpy_sft"
+
+_PART_INDEX_RE = re.compile(r"_part_(\d+)\.")
+
+
+def _chunk_indices(numpy_dir: str, pattern: str) -> set[int]:
+    indices = set()
+    for path in glob.glob(os.path.join(numpy_dir, pattern)):
+        match = _PART_INDEX_RE.search(os.path.basename(path))
+        if match is not None:
+            indices.add(int(match.group(1)))
+    return indices
+
 
 def _numpy_dir_is_populated(numpy_dir: str) -> bool:
-    return os.path.exists(os.path.join(numpy_dir, "token_ids_part_0000.npy"))
+    """Return True only if every chunk has token_ids, labels_mask, and metadata."""
+    token_chunks = _chunk_indices(numpy_dir, "token_ids_part_*.npy")
+    if not token_chunks:
+        return False
+    labels_chunks = _chunk_indices(numpy_dir, "labels_mask_part_*.npy")
+    metadata_chunks = _chunk_indices(numpy_dir, "token_ids_part_*.csv.gz")
+    return token_chunks == labels_chunks == metadata_chunks
+
+
+def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
+    return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
 
 def _tokenize_to_numpy_dir(
@@ -109,7 +135,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
     )
     cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
-    numpy_dir = os.path.join(args.dataset.local_cache_dir, "numpy_sft", cache_hash)
+    seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
+    numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
 
     if args.dataset.cache_dataset_only:
         pre_init_rank = int(os.environ.get("RANK", 0))
@@ -154,7 +181,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     init_device = "meta" if not use_hf_ckpt else "cpu"
-    model, model_config = olmo_core_utils.setup_model(args.model, init_device=init_device)
+    model, model_config = olmo_core_utils.setup_model(args.model, tc, init_device=init_device)
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
     cp_degree = args.training.cp_degree or 1

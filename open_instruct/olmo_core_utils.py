@@ -282,12 +282,12 @@ def is_hf_checkpoint(path: str) -> bool:
     containing config.json, and paths with a '-hf' component. Returns False for
     olmo-core distributed checkpoints.
     """
-    if not os.path.isabs(path):
-        return True
-    if os.path.isfile(os.path.join(path, "config.json")):
-        return True
+    if os.path.isdir(path):
+        return os.path.isfile(os.path.join(path, "config.json"))
     parts = path.replace("\\", "/").split("/")
-    return any("-hf" in part for part in parts)
+    if any("-hf" in part for part in parts):
+        return True
+    return not os.path.isabs(path)
 
 
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
@@ -340,16 +340,21 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
-def setup_model(model_config_args: ModelConfig, init_device: str = "cpu") -> tuple[Transformer, TransformerConfig]:
+def setup_model(
+    model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
+) -> tuple[Transformer, TransformerConfig]:
     model_name_or_path = model_config_args.model_name_or_path
     if is_hf_checkpoint(model_name_or_path):
+        logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
         hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
         vocab_size = hf_config.vocab_size
     else:
+        logger.info(f"Detected olmo-core checkpoint at {model_name_or_path}")
         assert model_config_args.config_name is not None, (
             "--config_name is required when model_name_or_path is an olmo-core checkpoint"
         )
-        vocab_size = OLMoCoreTokenizerConfig.dolma2().padded_vocab_size()
+        assert tc is not None, "tc (TokenizerConfig) is required for olmo-core checkpoints to derive vocab_size"
+        vocab_size = to_oc_tokenizer_config(tc).padded_vocab_size()
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     model_config = get_transformer_config(
         model_config_args.config_name or model_name_or_path,
