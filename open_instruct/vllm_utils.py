@@ -48,6 +48,7 @@ from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArg
 from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
+from vllm.model_executor.model_loader import reload as vllm_reload_mod
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
@@ -172,6 +173,26 @@ def _install_vllm_weight_transfer_diagnostics() -> None:
 
         vllm_gpu_worker.Worker.update_weights = _worker_update_weights_with_diag
         vllm_gpu_worker.Worker._open_instruct_update_weights_traced = True
+
+    if not getattr(vllm_reload_mod, "_open_instruct_layerwise_traced", False):
+        _orig_init_layerwise = vllm_reload_mod.initialize_layerwise_reload
+        _orig_finalize_layerwise = vllm_reload_mod.finalize_layerwise_reload
+
+        def _init_layerwise_with_diag(model: Any) -> Any:
+            _phase(f"[DIAG-C initialize_layerwise_reload start] pid={os.getpid()}")
+            result = _orig_init_layerwise(model)
+            _phase(f"[DIAG-C initialize_layerwise_reload done] pid={os.getpid()}")
+            return result
+
+        def _finalize_layerwise_with_diag(*args: Any, **kwargs: Any) -> Any:
+            _phase(f"[DIAG-C finalize_layerwise_reload start] pid={os.getpid()}")
+            result = _orig_finalize_layerwise(*args, **kwargs)
+            _phase(f"[DIAG-C finalize_layerwise_reload done] pid={os.getpid()}")
+            return result
+
+        vllm_reload_mod.initialize_layerwise_reload = _init_layerwise_with_diag
+        vllm_reload_mod.finalize_layerwise_reload = _finalize_layerwise_with_diag
+        vllm_reload_mod._open_instruct_layerwise_traced = True
 
     original_receive_weights = NCCLWeightTransferEngine.receive_weights
 
