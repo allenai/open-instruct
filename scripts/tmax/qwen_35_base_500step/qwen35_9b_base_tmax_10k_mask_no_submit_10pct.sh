@@ -7,6 +7,8 @@
 # gradient signal observed in the bare-turn-cap run (azq01scd) — rollouts
 # that were forcibly stopped before submitting carry no gradient, while
 # submitted-but-wrong rollouts still contribute negative signal.
+# Randomly unmasks enough non-submitting rollouts for them to make up at most
+# 10% of the retained train batch.
 # 4 nodes x 8 GPUs (32 GPUs total)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -14,7 +16,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-9B + max_steps=100 + mask_non_submitting" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-9B + max_steps=100 + mask_non_submitting + 10pct_unmask" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -72,13 +74,14 @@ uv run python mason.py \
     --active_sampling \
     --mask_truncated_completions false \
     --mask_non_submitting_completions true \
+    --mask_non_submitting_completions_percent 0.1 \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo_mask_no_submit \
+    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo_mask_no_submit_10pct \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
