@@ -38,7 +38,7 @@ uv run python mason.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
-    --num_samples_per_prompt_rollout 4 \
+    --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
@@ -46,8 +46,8 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 4096 \
-    --pack_length 6144 \
+    --response_length 8096 \
+    --pack_length 10240 \
     --model_name_or_path Qwen/Qwen3-4B-Base \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
