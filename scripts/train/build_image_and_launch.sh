@@ -68,6 +68,7 @@ fi
 echo "Installing dependencies with uv..."
 uv sync
 
-# Run the provided script with all arguments; BEAKER_IMAGE is exported for the script to read.
-export BEAKER_IMAGE="$beaker_user/$image_name"
-bash "$@"
+# Run the provided script with the image name and all remaining arguments
+script="$1"
+shift
+bash "$script" "$beaker_user/$image_name" "$@"
