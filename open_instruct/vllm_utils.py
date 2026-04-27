@@ -1742,6 +1742,12 @@ def broadcast_weights_to_vllm(
         _phase(f"[weight-sync step={model_step} rank={rank}] unshard start ({len(fsdp_submodules)} blocks)")
         for _, block in fsdp_submodules:
             block.unshard()
+        # The root FSDPModule wraps params not inside any submodule (e.g. model.norm,
+        # lm_head). _get_fsdp2_submodules excludes the root, so unshard it explicitly
+        # or those root-level DTensor params will fail NCCL broadcast with an illegal
+        # memory access (their `.contiguous().clone()` produces a buffer with global
+        # stride backed by only the local shard).
+        model.unshard()
         torch.cuda.synchronize()
         _phase(f"[weight-sync step={model_step} rank={rank}] unshard done (synced)")
         try:
@@ -1780,6 +1786,7 @@ def broadcast_weights_to_vllm(
             _phase(f"[weight-sync step={model_step} rank={rank}] reshard start")
             for _, block in fsdp_submodules:
                 block.reshard()
+            model.reshard()
             _phase(f"[weight-sync step={model_step} rank={rank}] reshard done")
         _phase(f"[weight-sync step={model_step} rank={rank}] broadcast_weights_to_vllm returning")
         return refs
