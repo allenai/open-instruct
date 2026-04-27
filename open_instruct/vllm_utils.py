@@ -1256,7 +1256,6 @@ def create_vllm_engines(
                         "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
                         "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
                         "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
-                        "TORCHINDUCTOR_CACHE_DIR": f"/tmp/torchinductor_vllm_engine{i}",
                     }
                 ),
             )

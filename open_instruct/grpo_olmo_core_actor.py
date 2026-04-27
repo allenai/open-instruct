@@ -90,7 +90,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         os.environ["NUM_NODES"] = str(self.grpo_config.num_nodes)
         os.environ["LOCAL_WORLD_SIZE"] = str(self.local_world_size)
         os.environ["FS_LOCAL_RANK"] = str(self.rank)
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = f"/tmp/torchinductor_trainer_rank{self.rank}"
 
         # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
         torch.cuda.set_device(0)

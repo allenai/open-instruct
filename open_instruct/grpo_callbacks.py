@@ -8,7 +8,6 @@ These callbacks handle:
 
 import contextlib
 import re
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -16,7 +15,6 @@ from typing import Any, cast
 import ray
 import ray.exceptions
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
@@ -27,10 +25,6 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
-
-
-def _phase(msg: str) -> None:
-    print(f"[PHASE] {msg}", flush=True, file=sys.stderr)
 
 
 _BLOCK_PATTERN = re.compile(r"blocks\.(\d+)\.(.*)")
@@ -95,14 +89,9 @@ class VLLMWeightSyncCallback(Callback):
         if step % self.sync_interval != 0:
             return
 
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        _phase(f"[post_step step={step} rank={rank}] entering")
-
         torch.cuda.empty_cache()
         torch.cuda.set_device(0)
-        _phase(f"[post_step step={step} rank={rank}] set_should_stop(True) start")
         ray.get(self.actor_manager.set_should_stop.remote(True))
-        _phase(f"[post_step step={step} rank={rank}] set_should_stop(True) done")
 
         model = self.train_module.model
         refs = vllm_utils.broadcast_weights_to_vllm(
@@ -113,27 +102,12 @@ class VLLMWeightSyncCallback(Callback):
             name_mapper=self.name_mapper,
         )
         if not self.inflight_updates:
-            _phase(f"[post_step step={step} rank={rank}] ray_get(refs) start")
             utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
-            _phase(f"[post_step step={step} rank={rank}] ray_get(refs) done")
 
-        if dist.is_initialized():
-            _phase(f"[post_step step={step} rank={rank}] pre-wake barrier start")
-            dist.barrier()
-            _phase(f"[post_step step={step} rank={rank}] pre-wake barrier done")
-
-        _phase(f"[post_step step={step} rank={rank}] wake_up start")
         utils.ray_get_with_progress(
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
-        _phase(f"[post_step step={step} rank={rank}] wake_up done")
         ray.get(self.actor_manager.set_should_stop.remote(False))
-        _phase(f"[post_step step={step} rank={rank}] set_should_stop(False) done")
-
-        if dist.is_initialized():
-            _phase(f"[post_step step={step} rank={rank}] exit barrier start")
-            dist.barrier()
-            _phase(f"[post_step step={step} rank={rank}] exit barrier done")
 
 
 @dataclass
