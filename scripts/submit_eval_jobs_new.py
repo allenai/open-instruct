@@ -1,10 +1,10 @@
 """Submit evaluation jobs using allenai/olmo-eval-internal.
 
 Submits a Beaker v2 experiment that runs `olmo-eval run` against a model. The
-Beaker image (see allenai/olmo-eval-internal Dockerfile) ships with CUDA and
-PyTorch only; olmo-eval-internal, vllm, and transformers are installed at job
-start via INSTALL_SCRIPT. When `--location` is a Beaker dataset, the model is
-mounted at `/model`.
+Beaker image ships with CUDA and PyTorch; olmo-eval-internal, vllm, and
+transformers are installed at job start via INSTALL_SCRIPT to allow testing the
+latest code. When `--location` is a Beaker dataset, the model is mounted at
+`/model`.
 
 Example:
     uv run python scripts/submit_eval_jobs_new.py \\
@@ -32,6 +32,7 @@ from open_instruct import launch_utils
 BEAKER_ID_RE = re.compile(r"^[0-9A-Z]{26}$")
 DEFAULT_CLUSTERS = ("ai2/jupiter",)
 MAX_EXPERIMENT_NAME_LEN = 128
+EXPERIMENT_NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 INSTALL_SCRIPT = (
     "set -euo pipefail && "
@@ -136,6 +137,12 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
 
 
 def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str | None, experiment_name: str) -> dict:
+    non_weka_clusters = [c for c in args.cluster if c not in launch_utils.WEKA_CLUSTERS]
+    if non_weka_clusters:
+        raise ValueError(
+            f"Clusters {non_weka_clusters} do not support Weka mounts required by this script. "
+            f"Use one of {launch_utils.WEKA_CLUSTERS}."
+        )
     datasets: list[dict] = [
         {"mountPath": "/weka/oe-adapt-default", "source": {"weka": "oe-adapt-default"}},
         {"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}},
@@ -181,19 +188,20 @@ def main() -> None:
     inner_cmd = build_inner_cmd(args, model_path)
 
     today = date.today().strftime("%m%d%Y")
-    experiment_name = (args.experiment_name or f"olmo_eval_{args.model_name}_{today}")[:MAX_EXPERIMENT_NAME_LEN]
+    raw_name = args.experiment_name or f"olmo_eval_{args.model_name}_{today}"
+    experiment_name = EXPERIMENT_NAME_SAFE_RE.sub("_", raw_name)[:MAX_EXPERIMENT_NAME_LEN]
     spec = build_spec(args, inner_cmd, dataset_id, experiment_name)
 
     print("Inner command:", shlex.join(inner_cmd))
 
     if args.dry_run:
         print("Dry run; spec:")
-        print(yaml.dump(spec, default_flow_style=False, sort_keys=False))
+        print(yaml.safe_dump(spec, default_flow_style=False, sort_keys=False))
         return
 
     spec_path = launch_utils.auto_created_spec_path(experiment_name)
     with open(spec_path, "w") as f:
-        yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
+        yaml.safe_dump(spec, f, default_flow_style=False, sort_keys=False)
     print("Spec written to:", spec_path)
 
     beaker_cmd = ["beaker", "experiment", "create", spec_path, "--workspace", args.workspace]
