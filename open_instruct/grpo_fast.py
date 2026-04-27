@@ -361,9 +361,33 @@ class PolicyTrainerRayProcess(RayProcess):
         for model_param, master_param in self._ddp_fp32_param_pairs:
             master_param.data.copy_(model_param.detach().float())
 
-    def _sync_ddp_fp32_grads_from_model(self) -> None:
+    def _accumulate_ddp_fp32_grads_from_model(self) -> None:
         for model_param, master_param in self._ddp_fp32_param_pairs:
-            master_param.grad = None if model_param.grad is None else model_param.grad.detach().float()
+            if model_param.grad is None:
+                continue
+            grad = model_param.grad.detach().float()
+            if master_param.grad is None:
+                master_param.grad = grad
+            else:
+                master_param.grad.add_(grad)
+            model_param.grad = None
+
+    def _all_reduce_ddp_fp32_grads(self) -> None:
+        world_size = dist.get_world_size()
+        for _, master_param in self._ddp_fp32_param_pairs:
+            if master_param.grad is None:
+                continue
+            dist.all_reduce(master_param.grad, op=dist.ReduceOp.SUM)
+            master_param.grad.div_(world_size)
+
+    def _compute_ddp_fp32_grad_norm(self) -> float:
+        grad_sq_sum = torch.zeros(1, device=self.device, dtype=torch.float64)
+        for _, master_param in self._ddp_fp32_param_pairs:
+            if master_param.grad is None:
+                continue
+            grad = master_param.grad.detach()
+            grad_sq_sum += torch.sum(grad.double() * grad.double())
+        return math.sqrt(grad_sq_sum.item())
 
     def _sync_model_params_from_ddp_fp32(self) -> None:
         for model_param, master_param in self._ddp_fp32_param_pairs:
@@ -408,15 +432,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 return self._compute_global_grad_norm()
             return None
 
-        sync_context = contextlib.nullcontext() if is_accumulation_boundary else self.model.no_sync()
-        with sync_context:
-            loss.backward()
-        if not is_accumulation_boundary:
-            return None
-
-        grad_norm = self._compute_global_grad_norm()
         if self._ddp_fp32_param_pairs:
-            self._sync_ddp_fp32_grads_from_model()
+            loss.backward()
+            self._accumulate_ddp_fp32_grads_from_model()
+            if not is_accumulation_boundary:
+                return None
+
+            self._all_reduce_ddp_fp32_grads()
+            grad_norm = self._compute_ddp_fp32_grad_norm()
             if self.args.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(
                     [master_param for _, master_param in self._ddp_fp32_param_pairs], self.args.max_grad_norm
@@ -427,6 +450,13 @@ class PolicyTrainerRayProcess(RayProcess):
             self._zero_grad()
             return grad_norm
 
+        sync_context = contextlib.nullcontext() if is_accumulation_boundary else self.model.no_sync()
+        with sync_context:
+            loss.backward()
+        if not is_accumulation_boundary:
+            return None
+
+        grad_norm = self._compute_global_grad_norm()
         if self.args.max_grad_norm is not None:
             torch.nn.utils.clip_grad_norm_(self._get_trainable_params(), self.args.max_grad_norm)
         self.optimizer.step()
@@ -896,6 +926,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     }
 
                 for i in range(num_samples):
+                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                    if self._ddp_fp32_param_pairs:
+                        self.model.require_backward_grad_sync = False
                     response_mask_BT = data_BT.response_masks[i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
@@ -980,7 +1013,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         prompt_grad_norms.append(prompt_grad_norm)
                         prompt_grad_norm_indices.append(int(prompt_indices[i]))
                         prompt_grad_norm_datasets.append(str(prompt_datasets[i]))
-                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                     grad_norm = self._backward_and_step(loss, is_accumulation_boundary)
                     if grad_norm is not None:
                         grad_norms.append(grad_norm)
@@ -1000,6 +1032,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_clamped=tis_clamped_BT,
                         tis_unclamped=tis_unclamped_BT,
                     )
+
+            if self._ddp_fp32_param_pairs:
+                self.model.require_backward_grad_sync = True
 
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
