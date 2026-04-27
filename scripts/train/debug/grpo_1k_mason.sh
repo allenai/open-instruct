@@ -13,7 +13,7 @@
 #
 # Step budget:
 #   total_episodes = 1000 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                  = 1000 * 16 * 16 = 256000
+#                  = 1000 * 8 * 16 = 128000
 DDMM=$(date +"%d%m")
 exp_name=grpo_1k_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -36,10 +36,17 @@ uv run python mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 8 \
     --inflight_updates \
+    --active_sampling \
+    --no_resampling_pass_rate 0.875 \
+    --loss_fn dapo \
+    --clip_higher 0.272 \
+    --mask_truncated_completions False \
+    --truncated_importance_sampling_ratio_cap 2.0 \
+    --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 16 \
+    --num_unique_prompts_rollout 8 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -52,13 +59,14 @@ uv run python mason.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 256000 \
+    --total_episodes 128000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
     --vllm_num_engines 2 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
+    --vllm_enable_prefix_caching \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
