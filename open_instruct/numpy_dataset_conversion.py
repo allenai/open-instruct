@@ -27,6 +27,10 @@ logger = logger_utils.setup_logger(__name__)
 
 _BOUNDARIES_DTYPE = np.int64
 
+TOKEN_IDS_NPY_GLOB = "token_ids_part_*.npy"
+LABELS_MASK_NPY_GLOB = "labels_mask_part_*.npy"
+TOKEN_IDS_METADATA_GLOB = "token_ids_part_*.csv.gz"
+
 
 def _select_token_dtype(vocab_size: int):
     for dtype in (np.uint8, np.uint16, np.uint32, np.uint64):

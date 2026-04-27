@@ -70,11 +70,11 @@ def _chunk_indices(numpy_dir: str, pattern: str) -> set[int]:
 
 def _numpy_dir_is_populated(numpy_dir: str) -> bool:
     """Return True only if every chunk has token_ids, labels_mask, and metadata."""
-    token_chunks = _chunk_indices(numpy_dir, "token_ids_part_*.npy")
+    token_chunks = _chunk_indices(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)
     if not token_chunks:
         return False
-    labels_chunks = _chunk_indices(numpy_dir, "labels_mask_part_*.npy")
-    metadata_chunks = _chunk_indices(numpy_dir, "token_ids_part_*.csv.gz")
+    labels_chunks = _chunk_indices(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)
+    metadata_chunks = _chunk_indices(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB)
     return token_chunks == labels_chunks == metadata_chunks
 
 
@@ -204,9 +204,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
         tokenizer=oc_tokenizer_config,
         work_dir=args.checkpoint.output_dir,
-        paths=[os.path.join(numpy_dir, "token_ids_part_*.npy")],
+        paths=[os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)],
         expand_glob=True,
-        label_mask_paths=[os.path.join(numpy_dir, "labels_mask_*.npy")],
+        label_mask_paths=[os.path.join(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)],
         generate_doc_lengths=True,
         long_doc_strategy=oc_data.LongDocStrategy.truncate,
         sequence_length=args.training.max_seq_length,
