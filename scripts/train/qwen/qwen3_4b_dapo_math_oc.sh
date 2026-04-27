@@ -30,8 +30,6 @@ uv run mason.py \
     --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=180 \
     --env PYTHONUNBUFFERED=1 \
     --env RAY_DEDUP_LOGS=0 \
-    --env CUDA_LAUNCH_BLOCKING=1 \
-    --env NCCL_DEBUG=INFO \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \

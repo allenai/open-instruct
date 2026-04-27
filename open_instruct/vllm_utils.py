@@ -18,7 +18,6 @@
 import argparse
 import asyncio
 import dataclasses
-import faulthandler
 import os
 import queue
 import sys
@@ -49,11 +48,9 @@ from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArg
 from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
-from vllm.model_executor.model_loader import reload as vllm_reload_mod
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
-from vllm.v1.worker import gpu_worker as vllm_gpu_worker
 
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
@@ -71,10 +68,6 @@ from open_instruct.environments.tools.parsers import ToolParser, create_tool_par
 from open_instruct.ground_truth_utils import RewardConfig
 
 logger = logger_utils.setup_logger(__name__)
-
-
-def _phase(msg: str) -> None:
-    print(f"[PHASE] {msg}", flush=True, file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -103,173 +96,6 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
-WEIGHT_SYNC_DIAG_HEARTBEAT_S = 5.0
-
-
-def _short_weight_list(weights: list[tuple[str, torch.Tensor]]) -> str:
-    if not weights:
-        return "empty"
-    first_name, first_tensor = weights[0]
-    last_name, last_tensor = weights[-1]
-    return (
-        f"count={len(weights)} first={first_name} shape={tuple(first_tensor.shape)} dtype={first_tensor.dtype} "
-        f"last={last_name} shape={tuple(last_tensor.shape)} dtype={last_tensor.dtype}"
-    )
-
-
-def _start_diag_heartbeat(
-    label: str, details: Callable[[], str] | None = None
-) -> tuple[threading.Event, threading.Thread]:
-    done_event = threading.Event()
-
-    def _heartbeat() -> None:
-        n = 0
-        while not done_event.wait(timeout=WEIGHT_SYNC_DIAG_HEARTBEAT_S):
-            n += 1
-            suffix = f" {details()}" if details is not None else ""
-            _phase(f"{label} heartbeat={n}{suffix}")
-
-    thread = threading.Thread(target=_heartbeat, daemon=True)
-    thread.start()
-    return done_event, thread
-
-
-async def _update_weights_coroutine_with_diag(
-    llm_engine: Any, request: "WeightTransferUpdateRequest", model_step: int
-) -> Any:
-    start_time = time.perf_counter()
-    _phase(f"[vllm actor update_weights] coroutine start model_step={model_step}")
-    try:
-        result = await llm_engine.update_weights(request)
-    except Exception as e:
-        _phase(f"[vllm actor update_weights] coroutine exception: {type(e).__name__}: {e}")
-        raise
-    _phase(
-        "[vllm actor update_weights] coroutine done "
-        f"model_step={model_step} elapsed={time.perf_counter() - start_time:.3f}s"
-    )
-    return result
-
-
-_VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED = False
-
-
-def _install_vllm_weight_transfer_diagnostics() -> None:
-    """Instrument vLLM's trainer->worker weight receive path in this process."""
-    global _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED
-    if _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED:
-        return
-    _VLLM_WEIGHT_TRANSFER_DIAGNOSTICS_INSTALLED = True
-
-    if not getattr(vllm_gpu_worker.Worker, "_open_instruct_update_weights_traced", False):
-        _orig_worker_update_weights = vllm_gpu_worker.Worker.update_weights
-
-        def _worker_update_weights_with_diag(self: Any, update_info: Any) -> Any:
-            names = (update_info or {}).get("names") if isinstance(update_info, dict) else None
-            count = len(names) if names is not None else "?"
-            _phase(f"[DIAG-B vllm worker.update_weights entry] pid={os.getpid()} names={count}")
-            result = _orig_worker_update_weights(self, update_info)
-            _phase(f"[DIAG-B vllm worker.update_weights exit] pid={os.getpid()}")
-            return result
-
-        vllm_gpu_worker.Worker.update_weights = _worker_update_weights_with_diag
-        vllm_gpu_worker.Worker._open_instruct_update_weights_traced = True
-
-    if not getattr(vllm_reload_mod, "_open_instruct_layerwise_traced", False):
-        _orig_init_layerwise = vllm_reload_mod.initialize_layerwise_reload
-        _orig_finalize_layerwise = vllm_reload_mod.finalize_layerwise_reload
-
-        def _init_layerwise_with_diag(model: Any) -> Any:
-            _phase(f"[DIAG-C initialize_layerwise_reload start] pid={os.getpid()}")
-            result = _orig_init_layerwise(model)
-            _phase(f"[DIAG-C initialize_layerwise_reload done] pid={os.getpid()}")
-            return result
-
-        def _finalize_layerwise_with_diag(*args: Any, **kwargs: Any) -> Any:
-            _phase(f"[DIAG-C finalize_layerwise_reload start] pid={os.getpid()}")
-            _phase(f"[DIAG-D pre-finalize torch.cuda.synchronize start] pid={os.getpid()}")
-            torch.cuda.synchronize()
-            _phase(f"[DIAG-D pre-finalize torch.cuda.synchronize done] pid={os.getpid()}")
-            result = _orig_finalize_layerwise(*args, **kwargs)
-            _phase(f"[DIAG-C finalize_layerwise_reload done] pid={os.getpid()}")
-            return result
-
-        vllm_reload_mod.initialize_layerwise_reload = _init_layerwise_with_diag
-        vllm_reload_mod.finalize_layerwise_reload = _finalize_layerwise_with_diag
-        vllm_reload_mod._open_instruct_layerwise_traced = True
-
-    original_receive_weights = NCCLWeightTransferEngine.receive_weights
-
-    def receive_weights_with_diag(
-        self: Any, update_info: Any, load_weights: Callable[[list[tuple[str, torch.Tensor]]], Any]
-    ) -> Any:
-        names = list(getattr(update_info, "names", []))
-        dtype_names = list(getattr(update_info, "dtype_names", []))
-        shapes = list(getattr(update_info, "shapes", []))
-        packed = getattr(update_info, "packed", None)
-        counters = {"load_batches": 0, "load_done": 0}
-        start_time = time.perf_counter()
-        _phase(
-            "[vllm worker update_weights] NCCL receive_weights start "
-            f"names={len(names)} packed={packed} first={names[:1]} last={names[-1:]}"
-        )
-        _phase(f"[vllm worker update_weights] NCCL metadata sample dtypes={dtype_names[:3]} shapes={shapes[:3]}")
-        done_event, _ = _start_diag_heartbeat(
-            "[vllm worker update_weights] NCCL receive_weights pending",
-            details=lambda: (
-                f"load_batches_started={counters['load_batches']} load_batches_done={counters['load_done']}"
-            ),
-        )
-
-        def load_weights_with_diag(weights: list[tuple[str, torch.Tensor]]) -> Any:
-            counters["load_batches"] += 1
-            batch_idx = counters["load_batches"]
-            load_start = time.perf_counter()
-            _phase(f"[vllm worker update_weights] load_weights start batch={batch_idx} {_short_weight_list(weights)}")
-            try:
-                return load_weights(weights)
-            except Exception as e:
-                _phase(
-                    f"[vllm worker update_weights] load_weights exception batch={batch_idx}: {type(e).__name__}: {e}"
-                )
-                raise
-            finally:
-                counters["load_done"] += 1
-                _phase(
-                    "[vllm worker update_weights] load_weights done "
-                    f"batch={batch_idx} elapsed={time.perf_counter() - load_start:.3f}s"
-                )
-
-        try:
-            result = original_receive_weights(self, update_info, load_weights_with_diag)
-        except Exception as e:
-            _phase(f"[vllm worker update_weights] NCCL receive_weights exception: {type(e).__name__}: {e}")
-            raise
-        finally:
-            done_event.set()
-        _phase(
-            "[vllm worker update_weights] NCCL receive_weights done "
-            f"elapsed={time.perf_counter() - start_time:.3f}s load_batches={counters['load_batches']}"
-        )
-        return result
-
-    NCCLWeightTransferEngine.receive_weights = receive_weights_with_diag
-
-
-class WorkerWeightTransferDiagExt:
-    """Worker-extension class injected into vLLM workers via worker_extension_cls.
-
-    Provides ``install_weight_transfer_diag`` (callable from the driver via
-    ``collective_rpc``) which monkey-patches the Worker.update_weights and
-    NCCLWeightTransferEngine.receive_weights inside the worker subprocess so the
-    DIAG-B prints actually fire there. The LLMRayActor process can't patch the
-    worker subprocess directly because vLLM v1 uses spawn.
-    """
-
-    def install_weight_transfer_diag(self) -> None:
-        _install_vllm_weight_transfer_diagnostics()
-        faulthandler.dump_traceback_later(60, repeat=True, file=sys.stderr)
-        print(f"[DIAG-B WorkerExt installed] pid={os.getpid()} faulthandler dump=60s", flush=True, file=sys.stderr)
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -754,7 +580,6 @@ class LLMRayActor:
             eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
-        _install_vllm_weight_transfer_diagnostics()
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -852,7 +677,6 @@ class LLMRayActor:
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
-        engine_args.worker_extension_cls = "open_instruct.vllm_utils.WorkerWeightTransferDiagExt"
 
         init_complete = threading.Event()
         self.loop = None
@@ -885,9 +709,6 @@ class LLMRayActor:
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
 
-            self._install_llm_engine_rpc_diagnostics(engine_client)
-            await engine_client.collective_rpc("install_weight_transfer_diag")
-            _phase("[DIAG-B] dispatched install_weight_transfer_diag to workers")
             return engine_client
 
         def _run_loop():
@@ -909,66 +730,6 @@ class LLMRayActor:
             return
         message = "timed out" if self.loop_thread.is_alive() else "thread died before completing"
         raise RuntimeError(f"vLLM engine {message}")
-
-    def _install_llm_engine_rpc_diagnostics(self, engine_client: Any) -> None:
-        """Instrument vLLM frontend RPCs that wrap engine-core utility calls."""
-        if getattr(engine_client, "_open_instruct_rpc_diagnostics_installed", False):
-            return
-        engine_client._open_instruct_rpc_diagnostics_installed = True
-
-        original_collective_rpc = engine_client.collective_rpc
-
-        async def collective_rpc_with_diag(
-            method: str, timeout: float | None = None, args: tuple[Any, ...] = (), kwargs: dict[str, Any] | None = None
-        ) -> Any:
-            if method != "update_weights":
-                return await original_collective_rpc(method, timeout=timeout, args=args, kwargs=kwargs)
-            start_time = time.perf_counter()
-            done_event, _ = _start_diag_heartbeat(
-                "[vllm frontend update_weights] collective_rpc pending",
-                details=lambda: f"elapsed={time.perf_counter() - start_time:.1f}s",
-            )
-            _phase("[vllm frontend update_weights] collective_rpc start")
-            try:
-                result = await original_collective_rpc(method, timeout=timeout, args=args, kwargs=kwargs)
-            except Exception as e:
-                _phase(f"[vllm frontend update_weights] collective_rpc exception: {type(e).__name__}: {e}")
-                raise
-            finally:
-                done_event.set()
-            _phase(
-                f"[vllm frontend update_weights] collective_rpc done elapsed={time.perf_counter() - start_time:.3f}s"
-            )
-            return result
-
-        engine_client.collective_rpc = collective_rpc_with_diag
-
-        engine_core = getattr(engine_client, "engine_core", None)
-        original_call_utility = getattr(engine_core, "call_utility_async", None)
-        if original_call_utility is None or getattr(engine_core, "_open_instruct_rpc_diagnostics_installed", False):
-            return
-        engine_core._open_instruct_rpc_diagnostics_installed = True
-
-        async def call_utility_async_with_diag(method: str, *args: Any, **kwargs: Any) -> Any:
-            if method not in {"pause_scheduler", "sleep", "update_weights", "collective_rpc", "wake_up"}:
-                return await original_call_utility(method, *args, **kwargs)
-            start_time = time.perf_counter()
-            done_event, _ = _start_diag_heartbeat(
-                f"[vllm engine-core utility] {method} pending",
-                details=lambda: f"elapsed={time.perf_counter() - start_time:.1f}s",
-            )
-            _phase(f"[vllm engine-core utility] {method} send")
-            try:
-                result = await original_call_utility(method, *args, **kwargs)
-            except Exception as e:
-                _phase(f"[vllm engine-core utility] {method} exception: {type(e).__name__}: {e}")
-                raise
-            finally:
-                done_event.set()
-            _phase(f"[vllm engine-core utility] {method} result elapsed={time.perf_counter() - start_time:.3f}s")
-            return result
-
-        engine_core.call_utility_async = call_utility_async_with_diag
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
@@ -1027,55 +788,10 @@ class LLMRayActor:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        if not getattr(self, "_diag_update_weights_logged", False):
-            print(
-                f"[DIAG] LLMRayActor.update_weights: len(names)={len(names)} packed={packed} model_step={model_step}",
-                flush=True,
-                file=sys.stderr,
-            )
-            head = names[:5]
-            tail = names[-5:] if len(names) > 5 else []
-            print(f"[DIAG] names[:5]={head}", flush=True, file=sys.stderr)
-            print(f"[DIAG] names[-5:]={tail}", flush=True, file=sys.stderr)
-            print(f"[DIAG] shapes[:5]={shapes[:5]}", flush=True, file=sys.stderr)
-            print(f"[DIAG] dtype_names[:5]={dtype_names[:5]}", flush=True, file=sys.stderr)
-            self._diag_update_weights_logged = True
         request = WeightTransferUpdateRequest(update_info=update_info)
-        start_time = time.perf_counter()
-        _phase(
-            "[vllm actor update_weights] submit coroutine "
-            f"model_step={model_step} active_tasks={len(self.active_tasks)} loop_thread_alive={self.loop_thread.is_alive()}"
-        )
-        future = asyncio.run_coroutine_threadsafe(
-            _update_weights_coroutine_with_diag(self.llm_engine, request, model_step), self.loop
-        )
-        try:
-            heartbeat = 0
-            while True:
-                try:
-                    future.result(timeout=WEIGHT_SYNC_DIAG_HEARTBEAT_S)
-                    break
-                except futures.TimeoutError:
-                    heartbeat += 1
-                    done_tasks = sum(task.done() for task in self.active_tasks.values())
-                    _phase(
-                        "[vllm actor update_weights] waiting for coroutine "
-                        f"heartbeat={heartbeat} model_step={model_step} future_done={future.done()} "
-                        f"active_tasks={len(self.active_tasks)} done_active_tasks={done_tasks} "
-                        f"loop_thread_alive={self.loop_thread.is_alive()} elapsed={time.perf_counter() - start_time:.1f}s"
-                    )
-                except Exception as e:
-                    _phase(f"[vllm actor update_weights] future exception: {type(e).__name__}: {e}")
-                    raise
-        finally:
-            if not future.done():
-                future.cancel()
-        _phase(
-            "[vllm actor update_weights] future result returned "
-            f"model_step={model_step} elapsed={time.perf_counter() - start_time:.3f}s"
-        )
+        future = asyncio.run_coroutine_threadsafe(self.llm_engine.update_weights(request), self.loop)
+        future.result()
         self.current_model_step = model_step
-        _phase(f"[vllm actor update_weights] Ray RPC returning model_step={model_step}")
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1598,9 +1314,6 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
-_DIAG_PREPARE_LOGGED = False
-
-
 def _prepare_params_for_sync(
     params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
 ) -> list[tuple[str, torch.Tensor]]:
@@ -1609,41 +1322,7 @@ def _prepare_params_for_sync(
     DS3 gathered tensors may be non-contiguous or views into temporary buffers.
     Cloning ensures we send independent, contiguous tensors over NCCL.
     """
-    global _DIAG_PREPARE_LOGGED
-    mapped_params = []
-    diag_rows = []
-    for n, p in params:
-        mapped_name = name_mapper(n) if name_mapper else n
-        tensor = p.data.contiguous().clone()
-        mapped_params.append((mapped_name, tensor))
-        if not _DIAG_PREPARE_LOGGED:
-            diag_rows.append(
-                (
-                    n,
-                    mapped_name,
-                    type(p.data).__name__,
-                    tuple(tensor.shape),
-                    tensor.numel(),
-                    str(tensor.dtype),
-                    n == mapped_name,
-                )
-            )
-    if not _DIAG_PREPARE_LOGGED:
-        total_numel = sum(r[4] for r in diag_rows)
-        unmapped = [r[0] for r in diag_rows if r[6]]
-        print(
-            f"[DIAG] _prepare_params_for_sync: {len(diag_rows)} params, total_numel={total_numel}, unmapped_count={len(unmapped)}",
-            flush=True,
-            file=sys.stderr,
-        )
-        for r in diag_rows:
-            print(
-                f"[DIAG] param orig={r[0]} mapped={r[1]} pdata_type={r[2]} shape={r[3]} numel={r[4]} dtype={r[5]} unmapped={r[6]}",
-                flush=True,
-                file=sys.stderr,
-            )
-        _DIAG_PREPARE_LOGGED = True
-    return mapped_params
+    return [(name_mapper(n) if name_mapper else n, p.data.contiguous().clone()) for n, p in params]
 
 
 def _collect_weight_metadata(
@@ -1716,12 +1395,8 @@ def broadcast_weights_to_vllm(
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
 
     is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    _phase(f"[weight-sync step={model_step} rank={rank}] entering broadcast_weights_to_vllm")
     if is_rank_0:
-        _phase(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() start")
         ray.get([engine.sleep.remote() for engine in vllm_engines])
-        _phase(f"[weight-sync step={model_step} rank=0] engine.sleep.remote() done")
 
     if model_update_group is None and is_rank_0:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
@@ -1739,7 +1414,6 @@ def broadcast_weights_to_vllm(
                 "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
                 "collectives interleave with the trainer->vLLM NCCL sends."
             )
-        _phase(f"[weight-sync step={model_step} rank={rank}] unshard start ({len(fsdp_submodules)} blocks)")
         for _, block in fsdp_submodules:
             block.unshard()
         # The root FSDPModule wraps params not inside any submodule (e.g. model.norm,
@@ -1749,13 +1423,9 @@ def broadcast_weights_to_vllm(
         # stride backed by only the local shard).
         model.unshard()
         torch.cuda.synchronize()
-        _phase(f"[weight-sync step={model_step} rank={rank}] unshard done (synced)")
         try:
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
-                _phase(f"[weight-sync step={model_step} rank=0] post-clone sync start")
-                torch.cuda.synchronize()
-                _phase(f"[weight-sync step={model_step} rank=0] post-clone sync done")
                 names = [n for n, _ in mapped_params]
                 dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
                 shapes = [list(t.shape) for _, t in mapped_params]
@@ -1763,32 +1433,13 @@ def broadcast_weights_to_vllm(
                     engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step)
                     for engine in vllm_engines
                 ]
-                _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
-
-                def _logging_iter(items):
-                    for i, item in enumerate(items):
-                        if i % 25 == 0:
-                            n, t = item
-                            _phase(
-                                f"[weight-sync step={model_step} rank=0] broadcast i={i} name={n} shape={tuple(t.shape)} dtype={t.dtype} dev={t.device}"
-                            )
-                        yield item
-
-                NCCLWeightTransferEngine.trainer_send_weights(
-                    iterator=_logging_iter(mapped_params), trainer_args=trainer_args
-                )
-                _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights done")
-                torch.cuda.synchronize()
-                _phase(f"[weight-sync step={model_step} rank=0] post-send sync done")
+                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             else:
                 refs = []
         finally:
-            _phase(f"[weight-sync step={model_step} rank={rank}] reshard start")
             for _, block in fsdp_submodules:
                 block.reshard()
             model.reshard()
-            _phase(f"[weight-sync step={model_step} rank={rank}] reshard done")
-        _phase(f"[weight-sync step={model_step} rank={rank}] broadcast_weights_to_vllm returning")
         return refs
 
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
