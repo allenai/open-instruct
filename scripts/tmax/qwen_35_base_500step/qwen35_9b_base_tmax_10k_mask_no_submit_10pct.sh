@@ -1,6 +1,4 @@
 #!/bin/bash
-export BEAKER_ALLOW_SUBCONTAINERS=1
-export BEAKER_SKIP_DOCKER_SOCKET=1
 
 # RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k.
 # Uses mask_non_submitting_completions: drop rollouts that never reached
@@ -27,6 +25,8 @@ uv run python mason.py \
        --num_nodes 4 \
        --max_retries 0 \
        --env REPO_PATH=/stage \
+       --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+       --env BEAKER_SKIP_DOCKER_SOCKET=1 \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \

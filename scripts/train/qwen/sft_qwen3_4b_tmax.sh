@@ -1,6 +1,4 @@
 #!/bin/bash
-export BEAKER_ALLOW_SUBCONTAINERS=1
-export BEAKER_SKIP_DOCKER_SOCKET=1
 
 # SFT on Qwen3-4B-Instruct-2507 using hamishivi/tmax-sft-full-20260317
 # 20k seq len, 2e-5 LR, 4 nodes x 8 GPUs
@@ -19,6 +17,8 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
+    --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+    --env BEAKER_SKIP_DOCKER_SOCKET=1 \
     --budget ai2/oe-adapt \
     --gpus 8 \
     -- \

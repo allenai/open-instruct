@@ -1,6 +1,4 @@
 #!/bin/bash
-export BEAKER_ALLOW_SUBCONTAINERS=1
-export BEAKER_SKIP_DOCKER_SOCKET=1
 
 # Compare training debug/vllm_vs_local_logprob_diff_mean against the offline
 # kernel-mismatch measurement from diagnose_logprobs.py / diagnose_multiturn_logprobs.py
@@ -28,6 +26,8 @@ uv run python mason.py \
        --priority urgent \
        --preemptible \
        --num_nodes 1 \
+       --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+       --env BEAKER_SKIP_DOCKER_SOCKET=1 \
        --max_retries 0 \
        --timeout 30m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \

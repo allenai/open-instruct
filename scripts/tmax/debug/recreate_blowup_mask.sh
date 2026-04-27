@@ -1,6 +1,4 @@
 #!/bin/bash
-export BEAKER_ALLOW_SUBCONTAINERS=1
-export BEAKER_SKIP_DOCKER_SOCKET=1
 
 # Repro of the tmax-10k blowup with the ScaleRL eq. (3)-(5) trust-region mask applied.
 # Resumes from hamishivi/qwen3.5_tmax_breakdown_test_step100 (the checkpoint just before
@@ -26,6 +24,8 @@ uv run python mason.py \
        --num_nodes 4 \
        --max_retries 0 \
        --env REPO_PATH=/stage \
+       --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+       --env BEAKER_SKIP_DOCKER_SOCKET=1 \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \

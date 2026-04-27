@@ -69,6 +69,7 @@ if command -v podman >/dev/null 2>&1; then
             echo "Podman info log ($PODMAN_INFO_LOG):"
             sed -n '1,200p' "$PODMAN_INFO_LOG"
         fi
+        echo "Podman failed with 'cannot clone: Operation not permitted'; this usually means the Beaker task was not launched with subcontainer permissions."
     fi
 else
     echo "WARNING: podman not found; Docker SDK will use $DOCKER_HOST if available"

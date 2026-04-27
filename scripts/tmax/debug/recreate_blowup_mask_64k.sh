@@ -1,6 +1,4 @@
 #!/bin/bash
-export BEAKER_ALLOW_SUBCONTAINERS=1
-export BEAKER_SKIP_DOCKER_SOCKET=1
 
 # 64k-context variant of recreate_blowup_mask.sh that also starts from the vanilla
 # Qwen/Qwen3.5-9B base (rather than the pre-blowup checkpoint) so we can see whether
@@ -30,6 +28,8 @@ uv run python mason.py \
        --num_nodes 4 \
        --max_retries 0 \
        --env REPO_PATH=/stage \
+       --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+       --env BEAKER_SKIP_DOCKER_SOCKET=1 \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
