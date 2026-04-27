@@ -1,38 +1,24 @@
 """Submit evaluation jobs using allenai/olmo-eval-internal.
 
-Replicates the Beaker-dataset flow of `scripts/submit_eval_jobs.py` but uses
-`olmo-eval run` (from olmo-eval-internal, baked into the Beaker image) as the
-in-container command. The model is mounted at `/model` when `--location` refers
-to a Beaker dataset.
-
-The in-container command is:
-
-    olmo-eval run -m <model_path> --harness default \
-        -o provider.kind=vllm_server \
-        -o provider.max_model_len=<max_length> \
-        -o provider.trust_remote_code=true \
-        -t <task> [-t <task> ...] \
-        --num-gpus <n> \
-        --output-dir /results
-
-This submits directly via `beaker experiment create`, avoiding gantry (and
-therefore any git/ref requirements). The wrapper writes a v2 experiment spec
-YAML to `configs/beaker_configs/auto_created/` and invokes the Beaker CLI.
+Submits a Beaker v2 experiment that runs `olmo-eval run` against a model. The
+Beaker image (see allenai/olmo-eval-internal Dockerfile) ships with CUDA and
+PyTorch only; olmo-eval-internal, vllm, and transformers are installed at job
+start via INSTALL_SCRIPT. When `--location` is a Beaker dataset, the model is
+mounted at `/model`.
 
 Example:
-    uv run python scripts/submit_eval_jobs_new.py \
-        --model_name qwen3_4b_base_dapo_20260422_083224 \
-        --location 01KPTSPMHGEZVYCDNR0XBVJCGZ \
-        --tasks aime_2025:pass_at_32 \
-        --max_length 8192 \
-        --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \
-        --priority urgent \
-        --preemptible \
+    uv run python scripts/submit_eval_jobs_new.py \\
+        --model_name qwen3_4b_base_dapo_20260422_083224 \\
+        --location 01KPTSPMHGEZVYCDNR0XBVJCGZ \\
+        --tasks aime_2025:pass_at_32 \\
+        --max_length 8192 \\
+        --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \\
+        --priority urgent \\
+        --preemptible \\
         --workspace ai2/open-instruct-dev
 """
 
 import argparse
-import os
 import re
 import shlex
 import subprocess
@@ -40,9 +26,24 @@ from datetime import date
 
 import yaml
 
+from open_instruct import launch_utils
+
 
 BEAKER_ID_RE = re.compile(r"^[0-9A-Z]{26}$")
 DEFAULT_CLUSTERS = ("ai2/jupiter",)
+MAX_EXPERIMENT_NAME_LEN = 128
+
+INSTALL_SCRIPT = (
+    "set -euo pipefail && "
+    "git clone --depth=1 "
+    "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
+    "/opt/olmo-eval-internal && "
+    "cd /opt/olmo-eval-internal && "
+    "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
+    "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
+    "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
+    "cd /workspace"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--experiment_name", type=str, default=None)
     parser.add_argument(
-        "--dry_run", action="store_true", help="Write the spec YAML and print the beaker command, but do not submit."
+        "--dry_run", action="store_true", help="Print the spec and beaker command, but do not write or submit."
     )
     return parser.parse_args()
 
@@ -134,19 +135,6 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
     return cmd
 
 
-INSTALL_SCRIPT = (
-    "set -euo pipefail && "
-    "git clone --depth=1 "
-    "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
-    "/opt/olmo-eval-internal && "
-    "cd /opt/olmo-eval-internal && "
-    "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
-    "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
-    "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
-    "cd /workspace"
-)
-
-
 def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str | None, experiment_name: str) -> dict:
     datasets: list[dict] = [
         {"mountPath": "/weka/oe-adapt-default", "source": {"weka": "oe-adapt-default"}},
@@ -187,30 +175,29 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
 
 def main() -> None:
     args = parse_args()
-
-    if len(args.workspace.split("/")) != 2 or not all(args.workspace.split("/")):
-        raise ValueError(f"--workspace must be '<org>/<workspace>'. Received: '{args.workspace}'")
+    launch_utils.validate_beaker_workspace(args.workspace)
 
     model_path, dataset_id = resolve_model_mount(args.location)
     inner_cmd = build_inner_cmd(args, model_path)
 
     today = date.today().strftime("%m%d%Y")
-    experiment_name = (args.experiment_name or f"olmo_eval_{args.model_name}_{today}")[:128]
+    experiment_name = (args.experiment_name or f"olmo_eval_{args.model_name}_{today}")[:MAX_EXPERIMENT_NAME_LEN]
     spec = build_spec(args, inner_cmd, dataset_id, experiment_name)
 
-    out_dir = "configs/beaker_configs/auto_created"
-    os.makedirs(out_dir, exist_ok=True)
-    spec_path = os.path.join(out_dir, f"{experiment_name}.yaml")
+    print("Inner command:", shlex.join(inner_cmd))
+
+    if args.dry_run:
+        print("Dry run; spec:")
+        print(yaml.dump(spec, default_flow_style=False, sort_keys=False))
+        return
+
+    spec_path = launch_utils.auto_created_spec_path(experiment_name)
     with open(spec_path, "w") as f:
         yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
-
-    print("Inner command:", shlex.join(inner_cmd))
     print("Spec written to:", spec_path)
 
     beaker_cmd = ["beaker", "experiment", "create", spec_path, "--workspace", args.workspace]
     print("Running:", shlex.join(beaker_cmd))
-    if args.dry_run:
-        return
     subprocess.run(beaker_cmd, check=True)
 
 

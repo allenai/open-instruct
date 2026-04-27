@@ -158,11 +158,7 @@ args = parser.parse_args()
 
 
 workspace = args.workspace
-# Do not silently alter the workspace; require fully-qualified form.
-if len(workspace.split("/")) != 2 or not all(workspace.split("/")):
-    raise ValueError(
-        f"--workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/oe-adapt-general'). Received: '{workspace}'"
-    )
+launch_utils.validate_beaker_workspace(workspace)
 model_type = "vanilla_lm" if not args.is_tuned else "tuned_lm"
 
 with open("configs/beaker_configs/default_eval.yaml") as f:
@@ -651,11 +647,7 @@ if not args.skip_oi_evals:
     experiment_name = f"open_instruct_eval_{model_name}_{today}"
     d["description"] = experiment_name
     d["tasks"] = eval_task_specs
-    # if configs/beaker_configs/auto_created doesn't exist, create it with os
-    if not os.path.exists("configs/beaker_configs/auto_created"):
-        os.makedirs("configs/beaker_configs/auto_created")
-    fn = f"configs/beaker_configs/auto_created/{experiment_name}.yaml"
-    os.makedirs(os.path.dirname(fn), exist_ok=True)
+    fn = launch_utils.auto_created_spec_path(experiment_name)
     with open(fn, "w") as file:
         yaml.dump(d, file, default_flow_style=True)
 

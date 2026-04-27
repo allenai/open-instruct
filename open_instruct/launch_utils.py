@@ -3,6 +3,8 @@ import subprocess
 
 from transformers.utils import hub as transformers_hub
 
+AUTO_CREATED_BEAKER_CONFIG_DIR = "configs/beaker_configs/auto_created"
+
 WEKA_CLUSTERS = [
     "ai2/jupiter",
     "ai2/saturn",
@@ -96,3 +98,16 @@ def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
     print(f"Copying model to GS bucket with command: {cmd}")
     live_subprocess_output(cmd)
+
+
+def validate_beaker_workspace(workspace: str) -> None:
+    parts = workspace.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError(
+            f"--workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/oe-adapt-general'). Received: '{workspace}'"
+        )
+
+
+def auto_created_spec_path(experiment_name: str) -> str:
+    os.makedirs(AUTO_CREATED_BEAKER_CONFIG_DIR, exist_ok=True)
+    return os.path.join(AUTO_CREATED_BEAKER_CONFIG_DIR, f"{experiment_name}.yaml")
