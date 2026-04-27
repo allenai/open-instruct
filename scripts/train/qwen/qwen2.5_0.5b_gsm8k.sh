@@ -39,9 +39,10 @@ uv run --active open_instruct/grpo_fast.py \
     --eval_pass_at_k 1 \
     --eval_top_p 1.0 \
     --vllm_top_p 1.0 \
-    --async_steps 2 \
+    --async_steps 1 \
     --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 2.0 \
+    --truncated_importance_sampling_ratio_cap 0.0 \
+    --use_vllm_logprobs \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 32 \
@@ -64,12 +65,12 @@ uv run --active open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
-    --save_freq 100 \
-    --checkpoint_state_freq 100 \
+    --local_eval_every 200 \
+    --save_freq 200 \
+    --checkpoint_state_freq 200 \
     --vllm_enable_prefix_caching \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 1 \
+    --num_learners_per_node 1 \
+    --vllm_num_engines 3 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
