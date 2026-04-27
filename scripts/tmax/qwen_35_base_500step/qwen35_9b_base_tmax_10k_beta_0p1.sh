@@ -11,7 +11,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "SWERL tmax-10k GRPO with Qwen3.5-9B + beta=0.1 + no masking" \
        --pure_docker_mode \
-       --workspace ai2/olmo-instruct \
+       --workspace dr-tulu-ablations \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \
