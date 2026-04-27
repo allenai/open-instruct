@@ -781,17 +781,17 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[tuple[int, ...]], packed: bool, model_step: int
-    ) -> None:
+    def update_weights(self, kwargs: dict, model_step: int | None = None) -> None:
+        # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
+        # `dict(update_info=...)`. NCCL callers must match that shape.
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        request = WeightTransferUpdateRequest(update_info=update_info)
+        request = WeightTransferUpdateRequest(**kwargs)
         future = asyncio.run_coroutine_threadsafe(self.llm_engine.update_weights(request), self.loop)
         future.result()
-        self.current_model_step = model_step
+        if model_step is not None:
+            self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1429,9 +1429,9 @@ def broadcast_weights_to_vllm(
                 names = [n for n, _ in mapped_params]
                 dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
                 shapes = [list(t.shape) for _, t in mapped_params]
+                update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
                 refs = [
-                    engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step)
-                    for engine in vllm_engines
+                    engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines
                 ]
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             else:
@@ -1445,9 +1445,8 @@ def broadcast_weights_to_vllm(
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
 
     if is_rank_0:
-        refs = [
-            engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
-        ]
+        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
+        refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
     else:
         refs = []
 
