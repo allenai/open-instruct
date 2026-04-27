@@ -9,7 +9,7 @@ shift || true
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
-WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
