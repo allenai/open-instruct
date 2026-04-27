@@ -4,7 +4,9 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+shift || true
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
