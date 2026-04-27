@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import faulthandler
 import os
 import queue
 import sys
@@ -264,7 +265,8 @@ class WorkerWeightTransferDiagExt:
 
     def install_weight_transfer_diag(self) -> None:
         _install_vllm_weight_transfer_diagnostics()
-        print(f"[DIAG-B WorkerExt installed] pid={os.getpid()}", flush=True, file=sys.stderr)
+        faulthandler.dump_traceback_later(60, repeat=True, file=sys.stderr)
+        print(f"[DIAG-B WorkerExt installed] pid={os.getpid()} faulthandler dump=60s", flush=True, file=sys.stderr)
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
