@@ -232,8 +232,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync) so the
         first NCCL weight-broadcast collective fires from a known-good state.
         """
-        if not self.vllm_engines:
-            return
         if self.rank == 0:
             ray.get(self.actor_manager.set_should_stop.remote(True))
         refs = vllm_utils.broadcast_weights_to_vllm(

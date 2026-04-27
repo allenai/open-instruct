@@ -26,7 +26,6 @@ from open_instruct import logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
-
 _BLOCK_PATTERN = re.compile(r"blocks\.(\d+)\.(.*)")
 _OLMO_CORE_TO_HF_LAYER_MAPPINGS = {
     "attention.w_q.weight": "self_attn.q_proj.weight",
@@ -78,31 +77,30 @@ class VLLMWeightSyncCallback(Callback):
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
-    inflight_updates: bool = False
 
     @property
     def train_module(self) -> TransformerTrainModule:
         return cast(TransformerTrainModule, self.trainer.train_module)
 
     def post_step(self) -> None:
-        step = self.trainer.global_step
-        if step % self.sync_interval != 0:
+        if (step := self.trainer.global_step) % self.sync_interval != 0:
             return
 
         torch.cuda.empty_cache()
-        torch.cuda.set_device(0)
         ray.get(self.actor_manager.set_should_stop.remote(True))
 
         model = self.train_module.model
-        refs = vllm_utils.broadcast_weights_to_vllm(
-            model=model,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            model_step=step,
-            name_mapper=self.name_mapper,
+        utils.ray_get_with_progress(
+            vllm_utils.broadcast_weights_to_vllm(
+                model=model,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=step,
+                name_mapper=self.name_mapper,
+            ),
+            desc="Broadcasting weights to vLLM engines",
+            enable=False,
         )
-        if not self.inflight_updates:
-            utils.ray_get_with_progress(refs, desc="Broadcasting weights to vLLM engines", enable=False)
 
         utils.ray_get_with_progress(
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False

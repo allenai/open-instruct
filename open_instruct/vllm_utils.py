@@ -69,7 +69,6 @@ from open_instruct.ground_truth_utils import RewardConfig
 
 logger = logger_utils.setup_logger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
 #
@@ -781,17 +780,14 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, kwargs: dict, model_step: int | None = None) -> None:
+    def update_weights(self, update_info: dict, model_step: int) -> None:
         # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
         # `dict(update_info=...)`. NCCL callers must match that shape.
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        request = WeightTransferUpdateRequest(**kwargs)
-        future = asyncio.run_coroutine_threadsafe(self.llm_engine.update_weights(request), self.loop)
-        future.result()
-        if model_step is not None:
-            self.current_model_step = model_step
+        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
