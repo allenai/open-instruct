@@ -259,7 +259,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ray.get(self.actor_manager.set_should_stop.remote(True))
         torch.cuda.empty_cache()
         torch.cuda.set_device(0)
-        self._warmup_forward_for_weight_sync()
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=self.train_module.model,
             vllm_engines=self.vllm_engines,
