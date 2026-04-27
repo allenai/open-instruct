@@ -113,8 +113,6 @@ RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/cr
     && make install \
     && rm -rf /tmp/crun
 
-RUN uv pip install --no-cache-dir --system podman-compose
-
 # Translate Docker CLI calls from sandbox code to Podman.
 RUN ln -sf "$(which podman)" /usr/local/bin/docker
 
