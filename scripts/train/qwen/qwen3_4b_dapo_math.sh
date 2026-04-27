@@ -1,19 +1,20 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
+EXP="${EXP:-}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
-PRIORITY="${PRIORITY:-high}"
+PRIORITY="${PRIORITY:-urgent}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace ai2/olmo-instruct \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
@@ -31,7 +32,7 @@ uv run open_instruct/grpo_fast.py \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 1 \
     --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -69,6 +70,6 @@ uv run open_instruct/grpo_fast.py \
     --clip_higher 0.272 \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
-    --load_ref_policy True \
+    --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
