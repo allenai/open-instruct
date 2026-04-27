@@ -8,10 +8,12 @@ These callbacks handle:
 
 import contextlib
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import numpy as np
 import ray
 import ray.exceptions
 import torch
@@ -62,6 +64,86 @@ def olmo_core_to_hf_name(name: str) -> str:
 
 
 @dataclass
+class StepTimingCallback(Callback):
+    """Records outer-loop timing and utilization metrics per step."""
+
+    model_dims: utils.ModelDims | None = None
+    vllm_num_engines: int = 1
+    vllm_tensor_parallel_size: int = 1
+    samples_per_prompt: int = 1
+    num_training_gpus: int = 1
+
+    _step_start: float = field(default=0.0, init=False, repr=False)
+    _train_start: float = field(default=0.0, init=False, repr=False)
+    _train_duration: float = field(default=0.0, init=False, repr=False)
+    _training_start: float = field(default=0.0, init=False, repr=False)
+    _num_total_tokens: int = field(default=0, init=False, repr=False)
+    _prompt_lengths: list[int] = field(default_factory=list, init=False, repr=False)
+    _response_lengths: list[int] = field(default_factory=list, init=False, repr=False)
+    _total_generation_time: float = field(default=0.0, init=False, repr=False)
+
+    def pre_train(self) -> None:
+        self._training_start = time.perf_counter()
+
+    def pre_step(self, batch: dict[str, Any]) -> None:
+        now = time.perf_counter()
+        self._step_start = now
+        self._train_start = now
+        metrics = batch.get("metrics") or {}
+        prompt_lengths = metrics.get("batch/prompt_lengths")
+        response_lengths = metrics.get("batch/response_lengths")
+        self._prompt_lengths = list(prompt_lengths) if prompt_lengths is not None else []
+        self._response_lengths = list(response_lengths) if response_lengths is not None else []
+        gen_time = metrics.get("time/getting_response", 0.0)
+        self._total_generation_time = float(gen_time) if gen_time is not None else 0.0
+
+    def post_train_batch(self) -> None:
+        self._train_duration = time.perf_counter() - self._train_start
+
+    def post_step(self) -> None:
+        now = time.perf_counter()
+        step_time = now - self._step_start
+        total_training_time = now - self._training_start
+
+        train_module = self.trainer.train_module
+        num_step_tokens = int(getattr(train_module, "_last_num_step_tokens", 0))
+        self._num_total_tokens += num_step_tokens
+
+        self.trainer.record_metric("time/total", step_time, reduce_type=None)
+        self.trainer.record_metric("time/training", self._train_duration, reduce_type=None)
+        self.trainer.record_metric("time/saving", 0.0, reduce_type=None)
+
+        if step_time > 0:
+            self.trainer.record_metric("learner_tokens_per_second_step", num_step_tokens / step_time, reduce_type=None)
+        if total_training_time > 0:
+            self.trainer.record_metric(
+                "learner_tokens_per_second_overall", self._num_total_tokens / total_training_time, reduce_type=None
+            )
+
+        if (
+            self.model_dims is not None
+            and self._prompt_lengths
+            and self._response_lengths
+            and len(self._response_lengths) == len(self._prompt_lengths) * self.samples_per_prompt
+            and self._total_generation_time > 0
+            and self._train_duration > 0
+        ):
+            utilization = utils.calculate_utilization_metrics(
+                model_dims=self.model_dims,
+                prompt_lengths=self._prompt_lengths,
+                response_lengths=self._response_lengths,
+                total_generation_time=self._total_generation_time,
+                samples_per_prompt=self.samples_per_prompt,
+                num_engines=self.vllm_num_engines,
+                num_gpus_per_engine=self.vllm_tensor_parallel_size,
+                training_time=self._train_duration,
+                num_training_gpus=self.num_training_gpus,
+            )
+            for key, value in utilization.items():
+                self.trainer.record_metric(key, float(value), reduce_type=None)
+
+
+@dataclass
 class VLLMWeightSyncCallback(Callback):
     """Callback to synchronize weights from training model to vLLM inference engines.
 
@@ -77,6 +159,7 @@ class VLLMWeightSyncCallback(Callback):
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
+    inflight_updates: bool = False
 
     @property
     def train_module(self) -> TransformerTrainModule:
@@ -86,6 +169,7 @@ class VLLMWeightSyncCallback(Callback):
         if (step := self.trainer.global_step) % self.sync_interval != 0:
             return
 
+        sync_start = time.perf_counter()
         torch.cuda.empty_cache()
         ray.get(self.actor_manager.set_should_stop.remote(True))
 
@@ -106,6 +190,14 @@ class VLLMWeightSyncCallback(Callback):
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
         ray.get(self.actor_manager.set_should_stop.remote(False))
+
+        sync_duration = time.perf_counter() - sync_start
+        actor_sync_times = np.asarray([sync_duration], dtype=np.float64)
+        self.trainer.record_metric("time/weight_sync", sync_duration, reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_mean", float(actor_sync_times.mean()), reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_min", float(actor_sync_times.min()), reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_max", float(actor_sync_times.max()), reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_median", float(np.median(actor_sync_times)), reduce_type=None)
 
 
 @dataclass

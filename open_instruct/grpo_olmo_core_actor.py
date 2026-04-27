@@ -28,7 +28,12 @@ from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngin
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
-from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
+from open_instruct.grpo_callbacks import (
+    RefPolicyUpdateCallback,
+    StepTimingCallback,
+    VLLMWeightSyncCallback,
+    olmo_core_to_hf_name,
+)
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
@@ -176,6 +181,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
+            streaming_config=self.streaming_config,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
@@ -293,6 +299,16 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
+
+        model_dims = utils.ModelDims.from_hf_config(self.model_name_or_path)
+
+        trainer_callbacks["step_timing"] = StepTimingCallback(
+            model_dims=model_dims,
+            vllm_num_engines=self.vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=self.vllm_config.vllm_tensor_parallel_size,
+            samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
+            num_training_gpus=self.world_size,
+        )
 
         if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(

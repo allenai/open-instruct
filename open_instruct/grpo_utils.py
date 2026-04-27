@@ -292,6 +292,31 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
     return vllm_logprobs
 
 
+def compute_vllm_local_debug_metrics(
+    local_logprobs: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor
+) -> dict[str, float]:
+    """Compute debug metrics comparing vLLM logprobs against locally-recomputed logprobs."""
+    with torch.no_grad():
+        valid_mask = response_mask & ~torch.isnan(vllm_logprobs)
+        valid_count = valid_mask.sum()
+        diff = (local_logprobs - vllm_logprobs).abs()
+        masked_diff = torch.masked_fill(diff, ~valid_mask, 0.0)
+        mean_diff = masked_diff.sum() / valid_count if valid_count > 0 else torch.tensor(0.0)
+        max_diff = masked_diff.max() if valid_count > 0 else torch.tensor(0.0)
+        std_diff = masked_diff[valid_mask].std() if valid_count > 1 else torch.tensor(0.0)
+
+        reverse_kl = torch.exp(vllm_logprobs) * (vllm_logprobs - local_logprobs)
+        masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
+        mean_reverse_kl = masked_reverse_kl.sum() / valid_count if valid_count > 0 else torch.tensor(0.0)
+
+    return {
+        "debug/vllm_vs_local_logprob_diff_mean": float(mean_diff),
+        "debug/vllm_vs_local_logprob_diff_max": float(max_diff),
+        "debug/vllm_vs_local_logprob_diff_std": float(std_diff),
+        "debug/vllm_local_reverse_kl": float(mean_reverse_kl),
+    }
+
+
 def compute_tis_weights(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
