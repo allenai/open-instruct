@@ -41,8 +41,6 @@ uv run --active open_instruct/grpo_fast.py \
     --vllm_top_p 1.0 \
     --async_steps 1 \
     --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 0.0 \
-    --use_vllm_logprobs \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 32 \
