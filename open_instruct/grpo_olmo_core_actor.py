@@ -197,12 +197,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.vllm_engines = vllm_engines
         self.model_update_group = None
 
-        if not vllm_engines:
-            torch.distributed.barrier()
-            return
-
-        if self.rank != 0:
-            torch.distributed.barrier()
+        if not vllm_engines or self.rank != 0:
             return
 
         if self.grpo_config.single_gpu_mode:
@@ -230,21 +225,17 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         ray.get(refs)
         logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
-        torch.distributed.barrier()
 
     def run_initial_weight_sync(self) -> None:
         """Broadcast initial learner weights to vLLM engines before training starts.
 
-        Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync). Ensures
-        the first NCCL weight-broadcast collective fires in a known-good state, before
-        step 1's post_step callback races against in-flight rollouts.
+        Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync) so the
+        first NCCL weight-broadcast collective fires from a known-good state.
         """
         if not self.vllm_engines:
             return
         if self.rank == 0:
             ray.get(self.actor_manager.set_should_stop.remote(True))
-        torch.cuda.empty_cache()
-        torch.cuda.set_device(0)
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=self.train_module.model,
             vllm_engines=self.vllm_engines,
@@ -254,17 +245,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
         if self.rank == 0:
             utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-        if self.rank == 0:
             utils.ray_get_with_progress(
                 [engine.wake_up.remote() for engine in self.vllm_engines],
                 desc="Waking up vLLM engines after initial sync",
                 enable=False,
             )
             ray.get(self.actor_manager.set_should_stop.remote(False))
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
 
     def setup_callbacks(
         self,
