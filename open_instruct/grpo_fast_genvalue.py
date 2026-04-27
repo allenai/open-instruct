@@ -108,11 +108,13 @@ class GenValueTrainerActor:
         score_min: float,
         score_max: float,
         tensor_parallel_size: int = 1,
+        max_prompt_tokens: int = 8192,
     ) -> None:
         self._lr = learning_rate
         self._score_min = score_min
         self._score_max = score_max
         self._tp_size = tensor_parallel_size
+        self._max_prompt_tokens = max_prompt_tokens
         self._step_count = 0
 
         self._model = AutoModelForCausalLM.from_pretrained(
@@ -151,6 +153,7 @@ class GenValueTrainerActor:
         mses: list[float] = []  # (r - v_hat)^2 with parse-failure → v_hat=0.
         parsed_v_hats: list[float] = []  # only for pairs where parsing succeeded.
         parsed_count = 0
+        skipped_empty_generation = 0
 
         for pair in training_pairs:
             if pair["outcome"] is None:
@@ -170,14 +173,20 @@ class GenValueTrainerActor:
             squared_error = (outcome - effective_v_hat) ** 2
             reward = 1.0 - squared_error
 
-            combined = prompt + generated
-            enc = self._tokenizer(combined, return_tensors="pt", truncation=True, max_length=2048)
-            prompt_len = len(self._tokenizer(prompt, add_special_tokens=False).input_ids)
-            input_ids = enc.input_ids.cuda()
-            labels = input_ids.clone()
-            labels[0, :prompt_len] = -100
+            prompt_ids = self._tokenizer(prompt, add_special_tokens=False).input_ids
+            generated_ids = self._tokenizer(generated, add_special_tokens=False).input_ids
+            if not generated_ids:
+                skipped_empty_generation += 1
+                continue
+            if len(prompt_ids) > self._max_prompt_tokens:
+                prompt_ids = prompt_ids[-self._max_prompt_tokens :]
 
-            outputs = self._model(input_ids=input_ids, labels=labels)
+            input_ids = torch.tensor([prompt_ids + generated_ids], dtype=torch.long, device="cuda")
+            attention_mask = torch.ones_like(input_ids)
+            labels = input_ids.clone()
+            labels[0, : len(prompt_ids)] = -100
+
+            outputs = self._model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
             log_prob = -outputs.loss  # mean log-prob of generated tokens
 
             loss = -log_prob * reward
@@ -202,6 +211,8 @@ class GenValueTrainerActor:
             "gen_value/parse_rate": parsed_count / len(rewards),
             "gen_value/reinforce_steps": self._step_count,
         }
+        if skipped_empty_generation:
+            metrics["gen_value/skipped_empty_generation"] = skipped_empty_generation
         if parsed_v_hats:
             # Mean of parsed predictions -- tells us whether the critic is biased high/low
             # vs. ``outcome_mean`` and whether it's moving over training. Undefined when
@@ -296,6 +307,8 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
     # Training coefficients.
     gen_value_learning_rate: float | None = None
     gen_value_reinforce_coef: float = 0.1
+    gen_value_reinforce_max_prompt_tokens: int = 8192
+    """Maximum prompt tokens kept for gen-value REINFORCE; generated score tokens are always kept."""
     # Conditioning for the gen-value prompt: one of none, gt, correct_demo, rollout_context.
     gen_value_conditioning: str = "none"
     # How often (in policy steps) to sync REINFORCE-trained gen-value weights back to vLLM.
@@ -323,6 +336,11 @@ class GenValueExperimentConfig(grpo_utils.GRPOExperimentConfig):
             raise ValueError(f"--gen_value_chunk_size must be > 0, got {self.gen_value_chunk_size}.")
         if self.gen_value_score_max <= self.gen_value_score_min:
             raise ValueError("--gen_value_score_max must be greater than --gen_value_score_min.")
+        if self.gen_value_reinforce_max_prompt_tokens <= 0:
+            raise ValueError(
+                "--gen_value_reinforce_max_prompt_tokens must be > 0, "
+                f"got {self.gen_value_reinforce_max_prompt_tokens}."
+            )
         if self.gen_value_conditioning not in value_model_utils.GEN_VALUE_CONDITIONING_TYPES:
             raise ValueError(
                 f"--gen_value_conditioning must be one of "
@@ -796,6 +814,7 @@ def main():
             args.gen_value_score_min,
             args.gen_value_score_max,
             tensor_parallel_size=args.gen_value_vllm_tensor_parallel_size,
+            max_prompt_tokens=args.gen_value_reinforce_max_prompt_tokens,
         )
         ray.get(gen_value_trainer.ready.remote())
         logger.info("======== ✅ Gen-value trainer actor ready (lr=%.2e) =========", gv_lr)
