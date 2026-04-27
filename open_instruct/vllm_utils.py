@@ -1758,7 +1758,19 @@ def broadcast_weights_to_vllm(
                     for engine in vllm_engines
                 ]
                 _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+
+                def _logging_iter(items):
+                    for i, item in enumerate(items):
+                        if i % 25 == 0:
+                            n, t = item
+                            _phase(
+                                f"[weight-sync step={model_step} rank=0] broadcast i={i} name={n} shape={tuple(t.shape)} dtype={t.dtype} dev={t.device}"
+                            )
+                        yield item
+
+                NCCLWeightTransferEngine.trainer_send_weights(
+                    iterator=_logging_iter(mapped_params), trainer_args=trainer_args
+                )
                 _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights done")
                 torch.cuda.synchronize()
                 _phase(f"[weight-sync step={model_step} rank=0] post-send sync done")
