@@ -187,6 +187,9 @@ def _install_vllm_weight_transfer_diagnostics() -> None:
 
         def _finalize_layerwise_with_diag(*args: Any, **kwargs: Any) -> Any:
             _phase(f"[DIAG-C finalize_layerwise_reload start] pid={os.getpid()}")
+            _phase(f"[DIAG-D pre-finalize torch.cuda.synchronize start] pid={os.getpid()}")
+            torch.cuda.synchronize()
+            _phase(f"[DIAG-D pre-finalize torch.cuda.synchronize done] pid={os.getpid()}")
             result = _orig_finalize_layerwise(*args, **kwargs)
             _phase(f"[DIAG-C finalize_layerwise_reload done] pid={os.getpid()}")
             return result

@@ -233,6 +233,19 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
         torch.distributed.barrier()
 
+    def _warmup_forward_for_weight_sync(self) -> None:
+        """Run a dummy forward so FSDP2 materializes sharded params on-device.
+
+        Mirrors grpo_fast.warmup_for_weight_sync. Without this, the first NCCL
+        broadcast can race against parameter materialization on the worker.
+        """
+        model = self.train_module.model
+        device = next(model.parameters()).device
+        input_ids = torch.tensor([[self.tokenizer.pad_token_id]], device=device, dtype=torch.long)
+        with torch.no_grad():
+            model(input_ids=input_ids)
+        torch.cuda.synchronize()
+
     def run_initial_weight_sync(self) -> None:
         """Broadcast initial learner weights to vLLM engines before training starts.
 
@@ -246,6 +259,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ray.get(self.actor_manager.set_should_stop.remote(True))
         torch.cuda.empty_cache()
         torch.cuda.set_device(0)
+        self._warmup_forward_for_weight_sync()
         refs = vllm_utils.broadcast_weights_to_vllm(
             model=self.train_module.model,
             vllm_engines=self.vllm_engines,
