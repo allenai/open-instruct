@@ -6,9 +6,14 @@
 # pick up the credentials when creating docker.from_env() clients.
 
 PODMAN_SOCKET_PATH=/tmp/podman.sock
+PODMAN_LOG_DIR=/output/tmp
+PODMAN_SERVICE_LOG="${PODMAN_LOG_DIR}/podman-system-service.log"
+PODMAN_INFO_LOG="${PODMAN_LOG_DIR}/podman-info.log"
 export DOCKER_HOST="unix://${PODMAN_SOCKET_PATH}"
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
+
+mkdir -p "$PODMAN_LOG_DIR"
 
 if [ -x /usr/local/bin/setup_dockerio_mirror ]; then
     /usr/local/bin/setup_dockerio_mirror
@@ -17,21 +22,53 @@ else
 fi
 
 if command -v podman >/dev/null 2>&1; then
-    if [ ! -S "$PODMAN_SOCKET_PATH" ]; then
-        rm -f "$PODMAN_SOCKET_PATH"
-        podman system service --time=0 "$DOCKER_HOST" >/tmp/podman-system-service.log 2>&1 &
-        export PODMAN_SYSTEM_SERVICE_PID=$!
+    echo "Podman found at $(command -v podman)"
+    podman --version || true
+    podman info --debug >"$PODMAN_INFO_LOG" 2>&1 || echo "WARNING: podman info failed; details in $PODMAN_INFO_LOG"
 
-        for _ in $(seq 1 50); do
+    if [ ! -S "$PODMAN_SOCKET_PATH" ]; then
+        echo "Starting Podman service for Docker SDK: podman system service --time=0 $DOCKER_HOST"
+        rm -f "$PODMAN_SOCKET_PATH"
+        : >"$PODMAN_SERVICE_LOG"
+        podman system service --time=0 "$DOCKER_HOST" >"$PODMAN_SERVICE_LOG" 2>&1 &
+        export PODMAN_SYSTEM_SERVICE_PID=$!
+        echo "Podman service PID: $PODMAN_SYSTEM_SERVICE_PID"
+
+        for attempt in $(seq 1 50); do
             [ -S "$PODMAN_SOCKET_PATH" ] && break
+            if ! kill -0 "$PODMAN_SYSTEM_SERVICE_PID" >/dev/null 2>&1; then
+                echo "WARNING: Podman service process exited before socket appeared"
+                wait "$PODMAN_SYSTEM_SERVICE_PID"
+                echo "Podman service exit code: $?"
+                break
+            fi
+            if [ "$attempt" = "10" ] || [ "$attempt" = "25" ] || [ "$attempt" = "50" ]; then
+                echo "Waiting for Podman socket at $PODMAN_SOCKET_PATH (attempt $attempt/50)"
+            fi
             sleep 0.1
         done
+    else
+        echo "Podman socket already exists at $PODMAN_SOCKET_PATH"
     fi
 
     if [ -S "$PODMAN_SOCKET_PATH" ]; then
         echo "Docker SDK configured to use Podman socket at $DOCKER_HOST"
     else
         echo "WARNING: Podman socket was not created at $PODMAN_SOCKET_PATH"
+        if [ -e "$PODMAN_SOCKET_PATH" ]; then
+            echo "A non-socket file exists at $PODMAN_SOCKET_PATH:"
+            ls -l "$PODMAN_SOCKET_PATH" || true
+        fi
+        if [ -s "$PODMAN_SERVICE_LOG" ]; then
+            echo "Podman service log ($PODMAN_SERVICE_LOG):"
+            sed -n '1,200p' "$PODMAN_SERVICE_LOG"
+        else
+            echo "Podman service log is empty at $PODMAN_SERVICE_LOG"
+        fi
+        if [ -s "$PODMAN_INFO_LOG" ]; then
+            echo "Podman info log ($PODMAN_INFO_LOG):"
+            sed -n '1,200p' "$PODMAN_INFO_LOG"
+        fi
     fi
 else
     echo "WARNING: podman not found; Docker SDK will use $DOCKER_HOST if available"
