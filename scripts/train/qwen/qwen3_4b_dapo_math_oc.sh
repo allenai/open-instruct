@@ -4,18 +4,16 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${1:-${BEAKER_IMAGE:-nathanl/open_instruct_auto}}"
-shift || true
+BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
-CLUSTER="${CLUSTER:-ai2/jupiter}"
-PRIORITY="${PRIORITY:-urgent}"
-WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
+CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
+PRIORITY="${PRIORITY:-high}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ${WORKSPACE} \
+    --workspace ai2/oe-adapt-code \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --no_auto_dataset_cache \
@@ -23,13 +21,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env NCCL_DEBUG=WARN \
-    --env TORCH_NCCL_TRACE_BUFFER_SIZE=1048576 \
-    --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
-    --env TORCH_NCCL_DESYNC_DEBUG=1 \
-    --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=180 \
-    --env PYTHONUNBUFFERED=1 \
-    --env RAY_DEDUP_LOGS=0 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \
@@ -52,7 +43,7 @@ uv run open_instruct/grpo.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits "train" \
-    --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 allenai/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
