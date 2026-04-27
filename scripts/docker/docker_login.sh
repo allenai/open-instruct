@@ -10,6 +10,12 @@ export DOCKER_HOST="unix://${PODMAN_SOCKET_PATH}"
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
 
+if [ -x /usr/local/bin/setup_dockerio_mirror ]; then
+    /usr/local/bin/setup_dockerio_mirror
+else
+    echo "WARNING: /usr/local/bin/setup_dockerio_mirror not found; skipping Docker Hub mirror setup"
+fi
+
 if command -v podman >/dev/null 2>&1; then
     if [ ! -S "$PODMAN_SOCKET_PATH" ]; then
         rm -f "$PODMAN_SOCKET_PATH"
