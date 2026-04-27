@@ -51,11 +51,8 @@ dependencies = [
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-include = ["open_instruct", "open_instruct.*"]
-
-[tool.setuptools.exclude-package-data]
-"open_instruct" = ["test_data/*", "test_data/**/*"]
+[tool.setuptools]
+py-modules = ["open_instruct"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]

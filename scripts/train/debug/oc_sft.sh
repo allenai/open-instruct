@@ -19,7 +19,7 @@ uv run python mason.py \
     --no-host-networking \
     --no_auto_dataset_cache \
     -- \
-    PYTHONPATH=/stage torchrun --nproc_per_node=1 \
+    torchrun --nproc_per_node=1 \
     open_instruct/olmo_core_finetune.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --max_seq_length 1024 \
