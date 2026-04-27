@@ -83,25 +83,26 @@ class VLLMWeightSyncCallback(Callback):
         return cast(TransformerTrainModule, self.trainer.train_module)
 
     def post_step(self) -> None:
-        if (step := self.trainer.global_step) % self.sync_interval != 0:
+        if self.trainer.global_step % self.sync_interval != 0:
             return
 
         torch.cuda.empty_cache()
+
         ray.get(self.actor_manager.set_should_stop.remote(True))
 
         model = self.train_module.model
+
         utils.ray_get_with_progress(
             vllm_utils.broadcast_weights_to_vllm(
                 model=model,
                 vllm_engines=self.vllm_engines,
                 model_update_group=self.model_update_group,
-                model_step=step,
+                model_step=self.trainer.global_step,
                 name_mapper=self.name_mapper,
             ),
             desc="Broadcasting weights to vLLM engines",
             enable=False,
         )
-
         utils.ray_get_with_progress(
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
