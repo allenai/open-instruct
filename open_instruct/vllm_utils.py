@@ -1757,6 +1757,8 @@ def broadcast_weights_to_vllm(
                 _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights start")
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
                 _phase(f"[weight-sync step={model_step} rank=0] trainer_send_weights done")
+                torch.cuda.synchronize()
+                _phase(f"[weight-sync step={model_step} rank=0] post-send sync done")
             else:
                 refs = []
         finally:
