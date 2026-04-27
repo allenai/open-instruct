@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # 64k-context variant of recreate_blowup_mask.sh that also starts from the vanilla
 # Qwen/Qwen3.5-9B base (rather than the pre-blowup checkpoint) so we can see whether
 # CISPO + the trust-region mask produces a stable long-context run from scratch.

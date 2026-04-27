@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # Sample 100 prompts from hamishivi/swerl-tmax-10k, do 8 rollouts each through the
 # full grpo_fast.py vLLM + tool agent loop, and dump every rollout (with
 # finish_reason) to /output/rollouts/*.jsonl.

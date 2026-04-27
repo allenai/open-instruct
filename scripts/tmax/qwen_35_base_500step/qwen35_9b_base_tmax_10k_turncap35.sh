@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k.
 # Drops mask_truncated_completions and lowers the per-rollout tool-call cap
 # from 100 to 35. The lower turn cap bounds how long any single rollout can

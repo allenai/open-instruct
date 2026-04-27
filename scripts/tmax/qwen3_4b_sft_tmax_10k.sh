@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # RL on hamishivi/sft_qwen3_4b_tmax_4node2203 + hamishivi/swerl-tmax-10k + hamishivi/agent-task-combined
 # 4 nodes x 8 GPUs (32 GPUs total)
 

@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # Training script for GRPO with SWERL Sandbox environment (4 nodes x 8 GPUs on Beaker)
 #
 # SWERL Sandbox: Per-sample Docker tasks with bash-only tool loop (TassieAgent style).

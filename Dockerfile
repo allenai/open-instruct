@@ -60,6 +60,70 @@ RUN curl --silent \
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
+# Install Podman for sandbox tasks that need subcontainers on Beaker.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf \
+    automake \
+    conmon \
+    gcc \
+    go-md2man \
+    golang-github-containers-common \
+    golang-go \
+    iptables \
+    libassuan-dev \
+    libbtrfs-dev \
+    libcap-dev \
+    libc6-dev \
+    libdevmapper-dev \
+    libglib2.0-dev \
+    libgpg-error-dev \
+    libgpgme-dev \
+    libprotobuf-c-dev \
+    libprotobuf-dev \
+    libseccomp-dev \
+    libselinux1-dev \
+    libsystemd-dev \
+    libtool \
+    libyajl-dev \
+    netavark \
+    passt \
+    pkg-config \
+    python3-sphinx \
+    systemd \
+    uidmap \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /etc/containers/registries.conf.d/
+COPY docker/podman/containers.conf /etc/containers/containers.conf
+COPY docker/podman/policy.json /etc/containers/policy.json
+COPY docker/podman/10-unqualified-search-registries.conf /etc/containers/registries.conf.d/10-unqualified-search-registries.conf
+
+RUN wget -qO- https://github.com/containers/podman/archive/refs/tags/v5.6.2.tar.gz \
+    | tar xz -C /tmp \
+    && cd /tmp/podman-5.6.2 \
+    && make BUILDTAGS="selinux seccomp" PREFIX=/usr \
+    && make install PREFIX=/usr \
+    && rm -rf /tmp/podman-5.6.2
+
+RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/crun \
+    && cd /tmp/crun \
+    && ./autogen.sh \
+    && ./configure --prefix=/usr --sysconfdir=/etc \
+    && make \
+    && make install \
+    && rm -rf /tmp/crun
+
+RUN uv pip install --no-cache-dir --system podman-compose
+
+# Translate Docker CLI calls from sandbox code to Podman.
+RUN ln -sf "$(which podman)" /usr/local/bin/docker
+
+RUN echo "root:10000:11165536" >> /etc/subuid \
+    && echo "root:10000:11165536" >> /etc/subgid
+
+COPY docker/podman/setup_dockerio_mirror /usr/local/bin/setup_dockerio_mirror
+RUN chmod +x /usr/local/bin/setup_dockerio_mirror
+
 WORKDIR /stage/
 
 ENV UV_CACHE_DIR=/root/.cache/uv \

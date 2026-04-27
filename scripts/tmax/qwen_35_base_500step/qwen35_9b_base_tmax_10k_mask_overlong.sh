@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k with mask_truncated_completions
 # turned on — rollouts whose final vLLM finish_reason is not "stop" are dropped
 # from the batch before packing (see data_loader.py around line 1333).

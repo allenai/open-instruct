@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k with mask_truncated_completions
 # AND the Box-Cox-style concave length penalty on raw scores before advantage
 # normalization. Penalty is alpha * [(1+kx)^(1-q) - 1] / [k(1-q)], applied to a

@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k
 # 4 nodes x 8 GPUs (32 GPUs total)
 

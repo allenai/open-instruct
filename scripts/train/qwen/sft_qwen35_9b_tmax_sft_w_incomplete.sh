@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # SFT for Qwen3.5-9B on hamishivi/tmax-sft-full-20260403 (sft_w_incomplete), all splits.
 # 4 nodes x 8 GPUs = 32 GPUs, SP=2, 32k seq len.
 

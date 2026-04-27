@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # Repro of the tmax-10k blowup with the ScaleRL eq. (3)-(5) trust-region mask applied.
 # Resumes from hamishivi/qwen3.5_tmax_breakdown_test_step100 (the checkpoint just before
 # the blowup) and turns on the π_θ/π_rollout mask with bounds [0.5, 3.0] (ratio-space).

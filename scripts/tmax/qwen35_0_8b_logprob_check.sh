@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # Compare training debug/vllm_vs_local_logprob_diff_mean against the offline
 # kernel-mismatch measurement from diagnose_logprobs.py / diagnose_multiturn_logprobs.py
 #

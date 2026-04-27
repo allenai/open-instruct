@@ -4,6 +4,33 @@
 #
 # Writes ~/.docker/config.json directly so all processes (including Ray workers)
 # pick up the credentials when creating docker.from_env() clients.
+
+PODMAN_SOCKET_PATH=/tmp/podman.sock
+export DOCKER_HOST="unix://${PODMAN_SOCKET_PATH}"
+unset DOCKER_TLS_VERIFY
+unset DOCKER_CERT_PATH
+
+if command -v podman >/dev/null 2>&1; then
+    if [ ! -S "$PODMAN_SOCKET_PATH" ]; then
+        rm -f "$PODMAN_SOCKET_PATH"
+        podman system service --time=0 "$DOCKER_HOST" >/tmp/podman-system-service.log 2>&1 &
+        export PODMAN_SYSTEM_SERVICE_PID=$!
+
+        for _ in $(seq 1 50); do
+            [ -S "$PODMAN_SOCKET_PATH" ] && break
+            sleep 0.1
+        done
+    fi
+
+    if [ -S "$PODMAN_SOCKET_PATH" ]; then
+        echo "Docker SDK configured to use Podman socket at $DOCKER_HOST"
+    else
+        echo "WARNING: Podman socket was not created at $PODMAN_SOCKET_PATH"
+    fi
+else
+    echo "WARNING: podman not found; Docker SDK will use $DOCKER_HOST if available"
+fi
+
 if [ -n "$DOCKER_PAT" ]; then
     python -c "
 import base64, json, os

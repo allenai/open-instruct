@@ -1,4 +1,7 @@
 #!/bin/bash
+export BEAKER_ALLOW_SUBCONTAINERS=1
+export BEAKER_SKIP_DOCKER_SOCKET=1
+
 # RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k.
 # Uses mask_non_submitting_completions: drop rollouts that never reached
 # rollout_state.done=True (i.e. the model didn't get to submit / declare task
