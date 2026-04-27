@@ -1747,6 +1747,9 @@ def broadcast_weights_to_vllm(
         try:
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
+                _phase(f"[weight-sync step={model_step} rank=0] post-clone sync start")
+                torch.cuda.synchronize()
+                _phase(f"[weight-sync step={model_step} rank=0] post-clone sync done")
                 names = [n for n, _ in mapped_params]
                 dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
                 shapes = [list(t.shape) for _, t in mapped_params]
