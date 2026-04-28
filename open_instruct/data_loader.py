@@ -792,6 +792,7 @@ class BatchStatistics:
     prompt_lengths: list[int]
     response_lengths: list[int]
     generated_completions: int
+    generated_tokens: int
     filtered_prompts: int
     filtered_prompts_zero: int
     filtered_prompts_solved: int
@@ -1393,6 +1394,7 @@ def accumulate_inference_batches(
     num_tokens_sampled = 0
     prompts_consumed = 0
     total_generated_completions = 0
+    total_generated_tokens = 0
     collected_results = []  # Track results for potential requeue on timeout
     if never_give_up_state is None:
         never_give_up_state = NeverGiveUpAccumulationState()
@@ -1538,6 +1540,7 @@ def accumulate_inference_batches(
         assert result.prompt_id is not None
         prompts_consumed += 1
         total_generated_completions += len(result.responses)
+        total_generated_tokens += sum(len(response) for response in result.responses)
 
         dataset_position = dataset_index_map[result.index]
         example = dataset[dataset_position]
@@ -1935,6 +1938,7 @@ def accumulate_inference_batches(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
         generated_completions=total_generated_completions,
+        generated_tokens=total_generated_tokens,
         filtered_prompts=total_filtered_prompts,
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
