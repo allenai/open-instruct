@@ -7,13 +7,13 @@ NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
-PRIORITY="${PRIORITY:-high}"
+PRIORITY="${PRIORITY:-urgent}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace ai2/open-instruct-dev \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --no_auto_dataset_cache \
