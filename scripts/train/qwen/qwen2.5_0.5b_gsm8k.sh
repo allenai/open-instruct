@@ -11,6 +11,7 @@ LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-in
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+shift || true
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
@@ -35,7 +36,6 @@ uv run mason.py \
 uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name ${RUN_NAME} \
-    --log_train_solve_rate_metrics \
     --beta 0.0 \
     --eval_top_p 1.0 \
     --async_steps 2 \
