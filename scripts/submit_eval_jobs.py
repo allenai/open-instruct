@@ -19,6 +19,7 @@ Example:
 """
 
 import argparse
+import pathlib
 import re
 import shlex
 import subprocess
@@ -36,21 +37,18 @@ EXPERIMENT_NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 DEFAULT_OLMO_EVAL_REF = "main"
 GIT_REF_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+INSTALL_SCRIPT_PATH = pathlib.Path(__file__).parent / "eval" / "install_olmo_eval.sh"
+INSTALL_HEREDOC_TAG = "OPEN_INSTRUCT_INSTALL_EOF"
 
 
-def build_install_script(ref: str) -> str:
+def build_install_block(ref: str) -> str:
     if not GIT_REF_SAFE_RE.match(ref):
         raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
+    body = INSTALL_SCRIPT_PATH.read_text()
     return (
-        "set -euo pipefail && "
-        "git clone "
-        "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
-        "/opt/olmo-eval-internal && "
-        f"cd /opt/olmo-eval-internal && git checkout {shlex.quote(ref)} && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
-        "--upgrade 'transformers>=5.4.0' 'numpy<2.3' && "
-        "cd /workspace"
+        f"bash -s -- {shlex.quote(ref)} <<'{INSTALL_HEREDOC_TAG}'\n"
+        f"{body}"
+        f"{INSTALL_HEREDOC_TAG}"
     )
 
 
@@ -164,7 +162,11 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
     if dataset_id:
         datasets.append({"mountPath": "/model", "source": {"beaker": dataset_id}})
 
-    full_command = f"{build_install_script(args.olmo_eval_ref)} && {shlex.join(inner_cmd)}"
+    full_command = (
+        "set -euo pipefail\n"
+        f"{build_install_block(args.olmo_eval_ref)}\n"
+        f"{shlex.join(inner_cmd)}\n"
+    )
 
     return {
         "version": "v2",
