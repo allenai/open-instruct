@@ -797,6 +797,10 @@ class BatchStatistics:
     filtered_prompts_zero: int
     filtered_prompts_solved: int
     filtered_prompts_nonzero: int
+    filtered_completions: int
+    filtered_completions_zero: int
+    filtered_completions_solved: int
+    filtered_completions_nonzero: int
     percent_solved_mean: float
     percent_solved_hist: np.ndarray
     prompt_indices: list[int]
@@ -1364,6 +1368,10 @@ def accumulate_inference_batches(
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
+    total_filtered_completions = 0
+    filtered_completions_zero = 0
+    filtered_completions_solved = 0
+    filtered_completions_nonzero = 0
     total_no_resampled = 0
     filtered_prompt_datasets = []
     filtered_prompt_datasets_zero = []
@@ -1485,20 +1493,27 @@ def accumulate_inference_batches(
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
+        nonlocal total_filtered_completions, filtered_completions_zero
+        nonlocal filtered_completions_solved, filtered_completions_nonzero
         assert filtered_result.reward_scores is not None
+        filtered_completion_count = len(filtered_result.responses)
         total_filtered_prompts += 1
+        total_filtered_completions += filtered_completion_count
         filtered_prompt_datasets.append(dataset_key)
         completions_used_by_dataset[dataset_key] = completions_used_by_dataset.get(dataset_key, 0) + len(
             filtered_result.responses
         )
         if filtered_result.reward_scores[0] == 0:
             filtered_prompt_zero += 1
+            filtered_completions_zero += filtered_completion_count
             filtered_prompt_datasets_zero.append(dataset_key)
         elif filtered_result.reward_scores[0] == max_possible_score:
             filtered_prompt_solved += 1
+            filtered_completions_solved += filtered_completion_count
             filtered_prompt_datasets_solved.append(dataset_key)
         else:
             filtered_prompt_nonzero += 1
+            filtered_completions_nonzero += filtered_completion_count
             filtered_prompt_datasets_nonzero.append(dataset_key)
 
     def count_pending_completion_samples(
@@ -1943,6 +1958,10 @@ def accumulate_inference_batches(
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
+        filtered_completions=total_filtered_completions,
+        filtered_completions_zero=filtered_completions_zero,
+        filtered_completions_solved=filtered_completions_solved,
+        filtered_completions_nonzero=filtered_completions_nonzero,
         percent_solved_mean=percent_solved_mean,
         percent_solved_hist=np.array(all_percent_solved),
         prompt_indices=all_prompt_indices,
