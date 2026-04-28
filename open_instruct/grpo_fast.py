@@ -423,6 +423,11 @@ class PolicyTrainerRayProcess(RayProcess):
         dist.all_reduce(local_grad_sq_sum, op=dist.ReduceOp.SUM)
         return math.sqrt(local_grad_sq_sum.item())
 
+    def _has_global_masked_tokens(self, mask: torch.Tensor) -> bool:
+        local_count = mask.sum().to(device=self.device, dtype=torch.float64).reshape(1)
+        dist.all_reduce(local_count, op=dist.ReduceOp.SUM)
+        return local_count.item() > 0
+
     def _backward_and_step(self, loss: torch.Tensor, is_accumulation_boundary: bool) -> float | None:
         if self._uses_deepspeed:
             self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
@@ -906,9 +911,9 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
-        prompt_grad_norms: list[float] = []
-        prompt_grad_norm_indices: list[int] = []
-        prompt_grad_norm_datasets: list[str] = []
+        prompt_grad_norms_by_label: dict[str, list[float]] = {"all": [], "pos": [], "neg": []}
+        prompt_grad_norm_indices_by_label: dict[str, list[int]] = {"all": [], "pos": [], "neg": []}
+        prompt_grad_norm_datasets_by_label: dict[str, list[str]] = {"all": [], "pos": [], "neg": []}
         if not self._uses_deepspeed:
             self._zero_grad()
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -989,10 +994,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.truncated_importance_sampling_ratio_cap,
                     )
 
+                    advantages_BT = data_BT.advantages[i][:, 1:]
                     pg_loss_BT, clip_mask_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
-                        advantages=data_BT.advantages[i][:, 1:],
+                        advantages=advantages_BT,
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         tis_weights=tis_clamped_BT,
@@ -1010,9 +1016,24 @@ class PolicyTrainerRayProcess(RayProcess):
                     torch.cuda.empty_cache()
                     prompt_grad_norm = self._measure_prompt_grad_norm(loss)
                     if prompt_grad_norm is not None and i < len(prompt_indices) and i < len(prompt_datasets):
-                        prompt_grad_norms.append(prompt_grad_norm)
-                        prompt_grad_norm_indices.append(int(prompt_indices[i]))
-                        prompt_grad_norm_datasets.append(str(prompt_datasets[i]))
+                        prompt_index = int(prompt_indices[i])
+                        prompt_dataset = str(prompt_datasets[i])
+                        prompt_grad_norms_by_label["all"].append(prompt_grad_norm)
+                        prompt_grad_norm_indices_by_label["all"].append(prompt_index)
+                        prompt_grad_norm_datasets_by_label["all"].append(prompt_dataset)
+
+                        for label, sample_mask_BT in (("pos", advantages_BT > 0), ("neg", advantages_BT < 0)):
+                            response_label_mask_BT = response_mask_BT & sample_mask_BT
+                            if not self._has_global_masked_tokens(response_label_mask_BT):
+                                continue
+                            label_loss = masked_mean(per_token_loss_BT, response_label_mask_BT, None, loss_denominator)
+                            label_loss *= self.args.world_size // self.args.sequence_parallel_size
+                            label_grad_norm = self._measure_prompt_grad_norm(label_loss)
+                            if label_grad_norm is None:
+                                continue
+                            prompt_grad_norms_by_label[label].append(label_grad_norm)
+                            prompt_grad_norm_indices_by_label[label].append(prompt_index)
+                            prompt_grad_norm_datasets_by_label[label].append(prompt_dataset)
                     grad_norm = self._backward_and_step(loss, is_accumulation_boundary)
                     if grad_norm is not None:
                         grad_norms.append(grad_norm)
@@ -1042,13 +1063,24 @@ class PolicyTrainerRayProcess(RayProcess):
                 array_metrics = {}
                 array_metrics.update(
                     grpo_utils.compute_prompt_grad_norm_metrics(
-                        prompt_indices=prompt_grad_norm_indices,
-                        prompt_datasets=prompt_grad_norm_datasets,
-                        prompt_grad_norms=prompt_grad_norms,
+                        prompt_indices=prompt_grad_norm_indices_by_label["all"],
+                        prompt_datasets=prompt_grad_norm_datasets_by_label["all"],
+                        prompt_grad_norms=prompt_grad_norms_by_label["all"],
                         by_index_key="val/train_prompt_grad_norm_by_index",
                         dataset_mean_prefix="val/train_prompt_grad_norm_mean",
                     )
                 )
+                for label in ("pos", "neg"):
+                    array_metrics.update(
+                        grpo_utils.compute_prompt_grad_norm_metrics(
+                            prompt_indices=prompt_grad_norm_indices_by_label[label],
+                            prompt_datasets=prompt_grad_norm_datasets_by_label[label],
+                            prompt_grad_norms=prompt_grad_norms_by_label[label],
+                            by_index_key=None,
+                            dataset_mean_prefix="val/train_prompt_grad_norm_mean",
+                            dataset_mean_suffix=label,
+                        )
+                    )
                 for key, value in batch_metrics.items():
                     if value is None:
                         continue

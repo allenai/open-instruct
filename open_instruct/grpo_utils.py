@@ -64,8 +64,9 @@ def compute_prompt_grad_norm_metrics(
     prompt_indices: list[int] | np.ndarray,
     prompt_datasets: list[str] | np.ndarray,
     prompt_grad_norms: list[float] | np.ndarray,
-    by_index_key: str,
+    by_index_key: str | None,
     dataset_mean_prefix: str,
+    dataset_mean_suffix: str | None = None,
 ) -> dict[str, float | list[tuple[int, float]]]:
     metrics: dict[str, float | list[tuple[int, float]]] = {}
     grad_norms = np.asarray(prompt_grad_norms, dtype=np.float64).ravel()
@@ -85,7 +86,8 @@ def compute_prompt_grad_norm_metrics(
         (prompt_index, float(np.mean(values)))
         for prompt_index, values in sorted(prompt_index_to_grad_norms.items(), key=lambda item: item[0])
     ]
-    metrics[by_index_key] = prompt_grad_norm_by_index
+    if by_index_key is not None:
+        metrics[by_index_key] = prompt_grad_norm_by_index
 
     merged_grad_norm_by_prompt: dict[int, float] = dict(prompt_grad_norm_by_index)
     merged_grad_norm_by_row = [merged_grad_norm_by_prompt[int(prompt_index)] for prompt_index in prompt_indices_array]
@@ -93,7 +95,10 @@ def compute_prompt_grad_norm_metrics(
     for dataset_name, grad_norm in zip(prompt_datasets_array, merged_grad_norm_by_row):
         dataset_to_grad_norms.setdefault(str(dataset_name), []).append(float(grad_norm))
     for dataset_name, values in dataset_to_grad_norms.items():
-        metrics[f"{dataset_mean_prefix}_{dataset_name}"] = float(np.mean(values))
+        metric_name = f"{dataset_mean_prefix}_{dataset_name}"
+        if dataset_mean_suffix is not None:
+            metric_name = f"{metric_name}_{dataset_mean_suffix}"
+        metrics[metric_name] = float(np.mean(values))
 
     return metrics
 
