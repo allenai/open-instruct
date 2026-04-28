@@ -6,6 +6,12 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+if [[ "${1:-}" == "$BEAKER_USER"* ]]; then
+    BEAKER_IMAGE="$1"
+    shift
+fi
+
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-urgent}"
 
