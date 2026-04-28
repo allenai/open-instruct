@@ -2,24 +2,31 @@
 OLMo-core utility functions, shared training configurations, and model configuration mappings.
 """
 
+import datetime
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 import torch.distributed as dist
 import transformers
-from olmo_core.distributed.utils import is_distributed
+from olmo_core import optim as olmo_optim
+from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
+from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.hf.checkpoint import save_hf_model
+from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
+from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.train import callbacks as train_callbacks
+from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingConfig,
     TransformerActivationCheckpointingMode,
 )
+from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -35,6 +42,8 @@ class ExperimentConfig:
     """A unique name of this run"""
     seed: int = 42
     """Random seed for initialization and dataset shuffling."""
+    data_loader_seed: int | None = None
+    """Separate seed for data loader instance ordering. If None, uses seed."""
 
 
 @dataclass
@@ -51,6 +60,14 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+    rope_scaling_factor: float | None = None
+    """YaRN RoPE scaling factor. When set, applies YaRN RoPE scaling to the model."""
+    rope_scaling_beta_fast: float = 32
+    """YaRN RoPE beta_fast parameter."""
+    rope_scaling_beta_slow: float = 1
+    """YaRN RoPE beta_slow parameter."""
+    rope_scaling_old_context_len: int = 8192
+    """YaRN RoPE old_context_len parameter."""
 
     def __post_init__(self):
         if self.attn_implementation is None:
@@ -93,6 +110,10 @@ class TrainingConfig:
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW."""
+    cp_degree: int | None = None
+    """Context parallelism degree. When set, enables context parallelism."""
+    cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
+    """Context parallelism strategy."""
 
 
 def build_ac_config(
@@ -103,6 +124,19 @@ def build_ac_config(
             mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget
         )
     return None
+
+
+def build_cp_config(training: TrainingConfig) -> TransformerContextParallelConfig | None:
+    if training.cp_degree is None:
+        return None
+    if training.cp_strategy == "llama3":
+        return TransformerContextParallelConfig.llama3(degree=training.cp_degree)
+    elif training.cp_strategy == "zig_zag":
+        return TransformerContextParallelConfig.zig_zag(degree=training.cp_degree)
+    elif training.cp_strategy == "ulysses":
+        return TransformerContextParallelConfig.ulysses(degree=training.cp_degree)
+    else:
+        raise ValueError(f"Unknown cp_strategy: {training.cp_strategy}")
 
 
 @dataclass
@@ -174,6 +208,88 @@ def build_checkpointer_callback(
     )
 
 
+def setup_distributed_env(seed: int, timeout: datetime.timedelta | None = None) -> tuple[int, int, bool]:
+    """Initialize the olmo-core training environment and return (global_rank, world_size, is_main_process)."""
+    kwargs: dict[str, Any] = {"seed": seed}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    prepare_training_environment(**kwargs)
+    global_rank = get_rank() if is_distributed() else 0
+    world_size = get_world_size() if is_distributed() else 1
+    is_main_process = global_rank == 0
+    logger_utils.setup_logger(rank=global_rank)
+    return global_rank, world_size, is_main_process
+
+
+def build_scheduler(lr_scheduler_type: str, warmup_ratio: float, num_training_steps: int):
+    """Build an olmo-core LR scheduler from a scheduler-type string."""
+    warmup_steps = int(num_training_steps * warmup_ratio)
+    if lr_scheduler_type == "cosine":
+        return olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
+    if lr_scheduler_type == "linear":
+        return olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+    if lr_scheduler_type == "constant":
+        return olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
+    raise ValueError(f"Unknown lr_scheduler_type: {lr_scheduler_type!r}")
+
+
+def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
+    """Reload HF weights into a parallelized train_module.
+
+    TransformerTrainModule.__init__ calls parallelize_model which calls init_weights,
+    reinitializing all model weights. This reloads the HF checkpoint on top.
+    """
+    logger.info("Reloading HuggingFace weights after parallelization...")
+    sd = train_module.model.state_dict()
+    load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    train_module.model.load_state_dict(sd)
+
+
+def build_base_callbacks(
+    config_dict: dict,
+    run_name: str | None,
+    checkpointing_steps: int,
+    ephemeral_save_interval: int | None,
+    with_tracking: bool = False,
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+    save_async: bool = True,
+) -> dict[str, Any]:
+    """Build the callbacks shared across SFT and DPO: beaker, gpu monitor, checkpointer, and optional wandb."""
+    result: dict[str, Any] = {
+        "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
+        "gpu_monitor": train_callbacks.GPUMemoryMonitorCallback(),
+        "checkpointer": build_checkpointer_callback(
+            checkpointing_steps, ephemeral_save_interval, save_async=save_async
+        ),
+    }
+    if with_tracking and wandb_project:
+        result["wandb"] = train_callbacks.WandBCallback(
+            name=run_name,
+            entity=wandb_entity,
+            project=wandb_project,
+            config=config_dict,
+            enabled=True,
+            cancel_check_interval=10,
+        )
+    return result
+
+
+def is_hf_checkpoint(path: str) -> bool:
+    """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
+
+    Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
+    containing config.json, and paths with a '-hf' component. Returns False for
+    olmo-core distributed checkpoints.
+    """
+    if os.path.isdir(path):
+        return os.path.isfile(os.path.join(path, "config.json"))
+    parts = path.replace("\\", "/").split("/")
+    if any("-hf" in part for part in parts):
+        return True
+    return not os.path.isabs(path)
+
+
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "allenai/OLMo-2-0425-1B": "olmo2_1B_v2",
     "allenai/OLMo-2-1124-7B": "olmo2_7B",
@@ -225,15 +341,36 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
 
 
 def setup_model(
-    model_name_or_path: str, config_name: str | None, attn_implementation: AttentionBackendName
+    model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
 ) -> tuple[Transformer, TransformerConfig]:
-    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-    vocab_size = hf_config.vocab_size
+    model_name_or_path = model_config_args.model_name_or_path
+    if is_hf_checkpoint(model_name_or_path):
+        logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
+        hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        vocab_size = hf_config.vocab_size
+    else:
+        logger.info(f"Detected olmo-core checkpoint at {model_name_or_path}")
+        assert model_config_args.config_name is not None, (
+            "--config_name is required when model_name_or_path is an olmo-core checkpoint"
+        )
+        assert tc is not None, "tc (TokenizerConfig) is required for olmo-core checkpoints to derive vocab_size"
+        vocab_size = to_oc_tokenizer_config(tc).padded_vocab_size()
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     model_config = get_transformer_config(
-        config_name or model_name_or_path, vocab_size, attn_backend=attn_implementation
+        model_config_args.config_name or model_name_or_path,
+        vocab_size,
+        attn_backend=model_config_args.attn_implementation,
     )
-    model = model_config.build(init_device="cpu")
+    if model_config_args.rope_scaling_factor is not None:
+        model_config = model_config.with_rope_scaling(
+            YaRNRoPEScalingConfig(
+                factor=model_config_args.rope_scaling_factor,
+                beta_fast=model_config_args.rope_scaling_beta_fast,
+                beta_slow=model_config_args.rope_scaling_beta_slow,
+                old_context_len=model_config_args.rope_scaling_old_context_len,
+            )
+        )
+    model = model_config.build(init_device=init_device)
     return model, model_config
 
 
@@ -277,6 +414,34 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     if utils.is_beaker_job():
         dataset_config.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     return tokenizer
+
+
+def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
+    """Map open-instruct TokenizerConfig to olmo-core's TokenizerConfig for NumpyFSL loading.
+
+    Prefers the curated `dolma2()` preset for the dolma2/OLMo-2 family (its
+    `padded_vocab_size()` rounding matches the trainer expectations); otherwise
+    builds one directly from the HF tokenizer's special tokens.
+    """
+    identifier = tc.tokenizer_name_or_path or ""
+    dolma2_markers = ("dolma2", "OLMo-2-1124", "OLMo-2-0325", "OLMo-2-0425")
+    if any(marker in identifier for marker in dolma2_markers):
+        return OLMoCoreTokenizerConfig.dolma2()
+    eos_id = tc.tokenizer.eos_token_id
+    bos_id = tc.tokenizer.bos_token_id
+    # olmo-core's doc-boundary scanner requires an EOS *immediately followed by* BOS
+    # when both are set; when the tokenizer reuses the same id for both (e.g.
+    # olmo-3-tokenizer-instruct-dev has eos==bos==100257), that pattern never
+    # appears in practice, so fall back to the EOS-only scanner.
+    if bos_id == eos_id:
+        bos_id = None
+    return OLMoCoreTokenizerConfig(
+        vocab_size=tc.tokenizer.vocab_size,
+        eos_token_id=eos_id,
+        pad_token_id=tc.tokenizer.pad_token_id,
+        bos_token_id=bos_id,
+        identifier=identifier or None,
+    )
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
+- Address review feedback on #1620: derive vocab size from the run's tokenizer (no longer hardcoded to dolma2), validate complete numpy artifacts before reusing the SFT cache, fold seed/max_seq_length into the cache directory, fix HF-vs-olmo-core checkpoint detection for relative local paths, and log which checkpoint format was detected (https://github.com/allenai/open-instruct/pull/1620).
 - Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary (https://github.com/allenai/open-instruct/pull/1631).
 - Revert reapply of packaging fix from #1634 (https://github.com/allenai/open-instruct/pull/1637).
 - Drop unused `data_types` import and inline `batch["batch"].to(device)` in `GRPOTrainModule` (https://github.com/allenai/open-instruct/pull/1635).
@@ -49,6 +51,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Replace `scripts/submit_eval_jobs.py` with a new olmo-eval-internal launcher (Beaker v2, no gantry); the previous script is preserved as `scripts/submit_eval_jobs_old.py` and emits a `DeprecationWarning` (https://github.com/allenai/open-instruct/pull/1638).
+- Add OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1579).
 - Add DR-TULU replication script for Qwen 3.5 4B with evolving rubrics, per-tool pool size overrides, `vllm_qwen3_xml` parser, and `<answer>` tag extraction in rubric scoring (https://github.com/allenai/open-instruct/pull/1609).
 - Add MiniMax provider support: register `minimax-m2.7` and `minimax-m2.7-highspeed` models in `PRICE_PER_TOKEN` for cost tracking and add cl100k_base encoding support in `context_window_checker` (https://github.com/allenai/open-instruct/pull/1602).
 - Wire evolving rubric config flags into the GRPO training loop so `apply_evolving_rubric_reward` actually triggers rubric generation, buffer management, and ground-truth overrides during training (https://github.com/allenai/open-instruct/pull/1581).
