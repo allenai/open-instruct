@@ -22,7 +22,7 @@
 # = 1100 total training steps
 #
 # total_episodes = 1100 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                = 1100 * 8 * 16 = 140800
+#                = 1100 * 32 * 16 = 563200
 DDMM=$(date +"%d%m")
 exp_name=genac_1k_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -55,20 +55,20 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 8 \
+    --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 8096 \
+    --response_length 8192 \
     --pack_length 10240 \
     --model_name_or_path Qwen/Qwen3-4B-Base \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 140800 \
+    --total_episodes 563200 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
@@ -86,12 +86,12 @@ uv run python mason.py \
     --with_tracking \
     --push_to_hub False \
     --use_value_model \
-    --value_learning_rate 1e-6 \
+    --value_learning_rate 2e-6 \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup \
     --gae_lambda 1.0 \
     --gamma 1.0 \
-    --value_loss_coef 0.0 \
+    --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
     --use_sae \
     --sae_threshold 0.2 \
