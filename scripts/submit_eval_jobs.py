@@ -49,7 +49,7 @@ def build_install_script(ref: str) -> str:
         f"cd /opt/olmo-eval-internal && git checkout {shlex.quote(ref)} && "
         "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
         "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
-        "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
+        "--upgrade 'transformers>=5.4.0' 'numpy<2.3' && "
         "cd /workspace"
     )
 
@@ -143,7 +143,7 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
             continue
         cmd += ["-t", task]
         if args.sampling_max_tokens is not None:
-            cmd += ["-o", f"max_tokens={args.sampling_max_tokens}"]
+            cmd += ["-o", f"sampling_params.max_tokens={args.sampling_max_tokens}"]
     cmd += ["--num-gpus", str(args.num_gpus)]
     cmd += ["--output-dir", "/results"]
     return cmd
