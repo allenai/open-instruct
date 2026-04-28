@@ -736,12 +736,22 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
-                        old_logprob_BT,
-                        vllm_logprobs_BT,
-                        response_mask_BT,
-                        self.args.truncated_importance_sampling_ratio_cap,
-                    )
+                    if self.args.use_icepop:
+                        tis_clamped_BT, tis_unclamped_BT = None, None
+                        icepop_mask_BT = grpo_utils.compute_icepop_mask(
+                            old_logprob_BT,
+                            vllm_logprobs_BT,
+                            response_mask_BT,
+                            self.args.truncated_importance_sampling_ratio_cap,
+                        )
+                    else:
+                        tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
+                            old_logprob_BT,
+                            vllm_logprobs_BT,
+                            response_mask_BT,
+                            self.args.truncated_importance_sampling_ratio_cap,
+                        )
+                        icepop_mask_BT = None
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -750,6 +760,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         tis_weights=tis_clamped_BT,
+                        icepop_mask=icepop_mask_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -785,6 +796,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args,
                         tis_clamped=tis_clamped_BT,
                         tis_unclamped=tis_unclamped_BT,
+                        icepop_mask=icepop_mask_BT,
                     )
 
             batch_metrics = batch_data["metrics"]

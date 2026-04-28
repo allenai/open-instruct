@@ -99,7 +99,13 @@ class GRPOExperimentConfig(
     clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
     truncated_importance_sampling_ratio_cap: float = 2.0
-    """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
+    """The maximum cap for truncated importance sampling ratio (0 means disabled).
+    When `use_icepop` is True this same field is reinterpreted as the IcePop β."""
+    use_icepop: bool = False
+    """If True, replace truncated importance sampling with the IcePop pop(·, 1/β, β)
+    operator: tokens whose train/infer mismatch ratio ρ = π^train_old / π^infer_old
+    falls outside [1/β, β] have their per-token policy loss zeroed out. β is read
+    from `truncated_importance_sampling_ratio_cap`."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -283,6 +289,12 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.use_icepop and self.truncated_importance_sampling_ratio_cap <= 1.0:
+            raise ValueError(
+                "When use_icepop=True, truncated_importance_sampling_ratio_cap is reinterpreted "
+                "as the IcePop β and must be > 1.0. "
+                f"Got {self.truncated_importance_sampling_ratio_cap}."
+            )
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -290,6 +302,16 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
     vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
     return vllm_logprobs
+
+
+def _compute_train_infer_ratio(
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor
+) -> torch.Tensor:
+    """ρ = exp(old_logprob - vllm_logprobs) on response tokens, 1.0 on padding."""
+    logprob_diff = torch.where(
+        response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
+    )
+    return torch.exp(logprob_diff)
 
 
 def compute_tis_weights(
@@ -301,12 +323,18 @@ def compute_tis_weights(
     """
     if cap <= 0:
         return None, None
-    unclamped = torch.ones_like(old_logprob)
-    logprob_diff = old_logprob - vllm_logprobs
-    logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
-    unclamped = torch.where(response_mask, torch.exp(logprob_diff), unclamped)
+    unclamped = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
     clamped = torch.clamp(unclamped, max=cap)
     return clamped, unclamped
+
+
+def compute_icepop_mask(
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, beta: float
+) -> torch.Tensor:
+    """IcePop pop(ρ, 1/β, β): 1 where ρ ∈ [1/β, β] on response tokens, 0 elsewhere."""
+    rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
+    in_range = (rho >= 1.0 / beta) & (rho <= beta)
+    return (in_range & response_mask).to(old_logprob.dtype)
 
 
 def resolve_old_logprob(
@@ -345,6 +373,7 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
+    icepop_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -360,6 +389,10 @@ def compute_grpo_loss(
     if tis_weights is not None:
         pg_losses = pg_losses * tis_weights
         pg_losses2 = pg_losses2 * tis_weights
+
+    if icepop_mask is not None:
+        pg_losses = pg_losses * icepop_mask
+        pg_losses2 = pg_losses2 * icepop_mask
 
     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
@@ -503,6 +536,7 @@ _SCALAR_LOSS_STAT_KEYS = [
     "val/ratio",
     "val/tis_clipfrac",
     "val/tis_ratio",
+    "val/icepop_drop_frac",
 ]
 
 
@@ -528,6 +562,7 @@ def populate_sample_loss_stats(
     config: GRPOExperimentConfig,
     tis_clamped: torch.Tensor | None = None,
     tis_unclamped: torch.Tensor | None = None,
+    icepop_mask: torch.Tensor | None = None,
 ) -> None:
     with torch.no_grad():
         if config.load_ref_policy and ref_logprobs is not None:
@@ -542,6 +577,8 @@ def populate_sample_loss_stats(
             loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
                 (tis_clamped < tis_unclamped).float(), response_mask
             )
+        if icepop_mask is not None:
+            loss_stats_B["val/icepop_drop_frac"][sample_idx] = masked_mean((1.0 - icepop_mask).float(), response_mask)
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss

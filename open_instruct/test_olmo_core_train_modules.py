@@ -267,6 +267,39 @@ class TestComputeGRPOLoss(unittest.TestCase):
         torch.testing.assert_close(pg_tis, pg_no_tis * 2.0)
         torch.testing.assert_close(pg2_tis, pg2_no_tis * 2.0)
 
+    def test_icepop_mask(self):
+        beta = 2.0
+        response_mask = torch.tensor([[True, True, True, True, True]])
+        # ρ values: 0.25 (drop), 0.5 (keep), 1.0 (keep), 2.0 (keep), 4.0 (drop)
+        old_logprob = torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
+        vllm_logprobs = torch.zeros_like(old_logprob)
+        mask = grpo_utils.compute_icepop_mask(old_logprob, vllm_logprobs, response_mask, beta)
+        torch.testing.assert_close(mask, torch.tensor([[0.0, 1.0, 1.0, 1.0, 0.0]]))
+
+        # Padding tokens (response_mask=False) should always be 0.
+        response_mask_with_pad = torch.tensor([[False, True, True, True, False]])
+        mask_pad = grpo_utils.compute_icepop_mask(old_logprob, vllm_logprobs, response_mask_with_pad, beta)
+        torch.testing.assert_close(mask_pad, torch.tensor([[0.0, 1.0, 1.0, 1.0, 0.0]]))
+
+    def test_icepop_zeroes_loss(self):
+        config = _make_grpo_config()
+        new_logprobs = torch.randn(1, 3)
+        ratio = torch.exp(torch.randn(1, 3))
+        advantages = torch.randn(1, 3)
+        icepop_mask = torch.tensor([[1.0, 0.0, 1.0]])
+
+        pg_losses, pg_losses2, _, _ = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            icepop_mask=icepop_mask,
+        )
+        self.assertEqual(pg_losses[0, 1].item(), 0.0)
+        self.assertEqual(pg_losses2[0, 1].item(), 0.0)
+        self.assertNotEqual(pg_losses[0, 0].item(), 0.0)
+
     def test_invalid_loss_fn(self):
         config = _make_grpo_config(loss_fn="invalid")
         with self.assertRaises(ValueError):
