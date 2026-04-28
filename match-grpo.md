@@ -154,6 +154,39 @@ Hence `tis_clipfrac` is ~1300× elevated from the very first measurement, with i
 
 Fix sketch: derive `doc_lens` (or directly `cu_doc_lens` + `max_doc_len`) from `position_ids` at each forward and pass them through `forward_for_logprobs` into `model(...)`. Boundaries are positions where `position_ids` resets to 0.
 
+## Bug 5 update — parity probe results (Beaker `01KQAB41231GR717CXTS9H930Y`)
+
+Single-rank probe loads identical Qwen3-4B-Base weights into HF Qwen3 and OLMo-core's `Transformer` (via `load_hf_model`), runs the same input, captures hidden state after each block via forward hooks.
+
+**Tied lm_head sanity:** `same_storage=False`, but `max|w_emb − w_out|=0` — load path materialized two equal copies, OK.
+
+| | logprob max\|Δ\| | logprob mean\|Δ\| | argmax-agree |
+|---|---:|---:|---:|
+| single-doc, OLMo BROKEN (no doc_lens) | 3.1e-2 | 7.0e-3 | 100.0% |
+| packed-2-doc, OLMo BROKEN | 9.00 | 1.86 | 72.7% |
+| packed-2-doc, OLMo FIXED (doc_lens passed) | 7.25 | 1.13 | 68.2% |
+
+**Per-layer single-doc (no packing → rules out doc-mask bugs):**
+- `embed`: 0 (weights load identically, including tied lm_head)
+- `block_0`: max 0.031 — bf16 noise
+- `block_1..5`: max grows 0.5 → 0.5, mean 1e-3 → 3e-3
+- **`block_6`: max jumps to 288**, mean still 0.027 — single outlier-channel diverges
+- `block_7..35`: max stays ≈288, mean grows 0.029 → 0.235
+- `final_norm`: max 3.5, mean 0.028
+
+**Two findings that revise Bug 5:**
+
+1. **Single-doc still diverges.** With no packing and `position_ids = [0..N-1]`, the dropped kwargs are inert — yet OLMo and HF disagree starting at `block_6`. There's a real arch / weight-conversion mismatch beyond the silent-kwarg-drop. This is the dominant cause of the trainer↔vLLM TIS gap, not the packed attention bug.
+
+2. **HF Qwen3 with `attention_mask=None + position_ids` does NOT build an intra-doc mask.** If it did, OLMo FIXED (intra-doc via `doc_lens`) should match HF closer than OLMo BROKEN (cross-doc). Instead BROKEN is closer (mean Δ 1.86 vs FIXED's 1.13 in mean is misleading because of the block_6 outlier — argmax-agree is 73% BROKEN vs 68% FIXED, and max is smaller for BROKEN). HF runs plain causal across the whole packed sequence; `position_ids` only affect RoPE. **`grpo_fast.py:690` comment claiming "HF constructs the correct 3D intra-document mask from position_ids" is incorrect.**
+
+The implication: grpo_fast.py's training-time HF forward also has cross-doc bleed during training and only agrees with vLLM by accident or because most packed boundaries are far enough apart that bleed is small. The 1300× TIS gap is driven by the block_6+ arch divergence in OLMo-core, not packing.
+
+**Where to look next at block_6:**
+- q_norm / k_norm (per-head RMSNorm new in Qwen3): present in HF, declared in OLMo-core qwen3_4B config (`qk_norm=True`, `use_head_qk_norm=True`). Verify weights load and that placement/scope (per-head vs per-channel) matches.
+- RoPE θ=1e6 — check OLMo-core's RoPE matches HF's (fp32 cos/sin, frequency layout, half-rotate convention).
+- RMSNorm precision — HF Qwen3 casts to fp32 inside RMSNorm, then back; check OLMo-core does the same.
+
 ## Recommended next moves
 
 1. **Diagnostic: raise `--truncated_importance_sampling_ratio_cap` to 5.0** and confirm reward/length catch up to reference. If they do, TIS clipping is the dampener.
