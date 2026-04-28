@@ -540,16 +540,16 @@ class GRPOTrainModule(TransformerTrainModule):
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
-            local_tokens = token_counts.sum().item()
+            global_tokens = token_counts.sum().item()
 
             keys = sorted(local_metrics.keys())
-            values = [local_tokens] + [local_metrics[k] * local_tokens for k in keys]
+            values = [local_metrics[k] * global_tokens for k in keys]
             tensor = torch.tensor(values, device=self.device)
             dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 
-            global_tokens = tensor[0].item()
+            denom = global_tokens * dist.get_world_size(self.trainer.dp_process_group)
             for i, k in enumerate(keys):
-                self.record_metric(k, (tensor[i + 1] / global_tokens).item(), reduce_type=None)
+                self.record_metric(k, (tensor[i] / denom).item(), reduce_type=None)
             if self.scheduler is not None and self.trainer.max_steps is not None:
                 lr = self.scheduler.get_lr(
                     self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),

@@ -105,8 +105,7 @@ class StepTimingCallback(Callback):
         step_time = now - self._step_start
         total_training_time = now - self._training_start
 
-        train_module = self.trainer.train_module
-        num_step_tokens = int(getattr(train_module, "_last_num_step_tokens", 0))
+        num_step_tokens = sum(self._prompt_lengths) + sum(self._response_lengths)
         self._num_total_tokens += num_step_tokens
 
         self.trainer.record_metric("time/total", step_time, reduce_type=None)
@@ -126,7 +125,7 @@ class StepTimingCallback(Callback):
             and self._response_lengths
             and len(self._response_lengths) == len(self._prompt_lengths) * self.samples_per_prompt
             and self._total_generation_time > 0
-            and self._train_duration > 0
+            and step_time > 0
         ):
             utilization = utils.calculate_utilization_metrics(
                 model_dims=self.model_dims,
@@ -136,7 +135,7 @@ class StepTimingCallback(Callback):
                 samples_per_prompt=self.samples_per_prompt,
                 num_engines=self.vllm_num_engines,
                 num_gpus_per_engine=self.vllm_tensor_parallel_size,
-                training_time=self._train_duration,
+                training_time=step_time,
                 num_training_gpus=self.num_training_gpus,
             )
             for key, value in utilization.items():
@@ -174,7 +173,7 @@ class VLLMWeightSyncCallback(Callback):
         ray.get(self.actor_manager.set_should_stop.remote(True))
 
         model = self.train_module.model
-        utils.ray_get_with_progress(
+        _, actor_sync_times = utils.ray_get_with_progress(
             vllm_utils.broadcast_weights_to_vllm(
                 model=model,
                 vllm_engines=self.vllm_engines,
@@ -192,7 +191,7 @@ class VLLMWeightSyncCallback(Callback):
         ray.get(self.actor_manager.set_should_stop.remote(False))
 
         sync_duration = time.perf_counter() - sync_start
-        actor_sync_times = np.asarray([sync_duration], dtype=np.float64)
+        actor_sync_times = np.asarray(actor_sync_times, dtype=np.float64)
         self.trainer.record_metric("time/weight_sync", sync_duration, reduce_type=None)
         self.trainer.record_metric("time/weight_sync_mean", float(actor_sync_times.mean()), reduce_type=None)
         self.trainer.record_metric("time/weight_sync_min", float(actor_sync_times.min()), reduce_type=None)

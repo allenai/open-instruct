@@ -76,7 +76,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
-        self.vllm_engines = None
+        self.vllm_engines: list[ray.actor.ActorHandle] = []
         self.model_update_group = None
         self.actor_manager = None
         self.with_tracking = False
