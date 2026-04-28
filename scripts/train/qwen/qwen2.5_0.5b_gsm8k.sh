@@ -10,17 +10,18 @@ DATASET_SPLITS="${DATASET_SPLITS:-train}"
 LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-userprompt-quartiles 1.0}"
 LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
-BEAKER_IMAGE="michaeln/open_instruct"
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
-CLUSTER="${CLUSTER:-ai2/neptune ai2/jupiter ai2/ceres ai2/rhea ai2/saturn}"
-PRIORITY="${PRIORITY:-high}"
+CLUSTER="${CLUSTER:-ai2/jupiter}"
+PRIORITY="${PRIORITY:-urgent}"
 NUM_GPUS="${NUM_GPUS:-3}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace ${WORKSPACE} \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
@@ -31,7 +32,7 @@ uv run mason.py \
     --gpus ${NUM_GPUS} \
     --budget ai2/oe-adapt \
     -- \
-uv run --active open_instruct/grpo_fast.py \
+uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --run_name ${RUN_NAME} \
     --log_train_solve_rate_metrics \
@@ -40,6 +41,7 @@ uv run --active open_instruct/grpo_fast.py \
     --eval_top_p 1.0 \
     --vllm_top_p 1.0 \
     --async_steps 2 \
+    --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
@@ -67,6 +69,7 @@ uv run --active open_instruct/grpo_fast.py \
     --local_eval_every 100 \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
+    --gradient_checkpointing \
     --vllm_enable_prefix_caching \
     --num_learners_per_node 2 \
     --vllm_num_engines 1 \
