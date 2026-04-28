@@ -58,8 +58,10 @@ def _setup_scheduler(args: dpo_utils.DPOExperimentConfig, num_training_steps: in
         scheduler = olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
     elif args.lr_scheduler_type == "linear":
         scheduler = olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
-    else:
+    elif args.lr_scheduler_type == "constant":
         scheduler = olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
+    else:
+        raise ValueError(f"Unsupported lr_scheduler_type: {args.lr_scheduler_type}")
     return scheduler
 
 
