@@ -1,12 +1,12 @@
 #!/bin/bash
-# Value warmup + RL from the GRPO-trained checkpoint: scalar PPO critic for 100
-# value-only steps, then 1000 regular policy/value RL steps.
+# Value warmup + RL from the GRPO-trained checkpoint: SAE + answer_prefix GT
+# conditioning for 100 value-only steps, then 1000 regular policy/value RL steps.
 #
 # Step budget:
-#   total_episodes = (100 value warmup + 1000 RL) * 32 prompts * 8 samples
-#                  = 281600
+#   total_episodes = (100 value warmup + 1000 RL) * 32 prompts * 16 samples
+#                  = 563200
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain100_rl1k_ppo_from_grpo_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain100_rl1k_sae_ap_from_grpo_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -30,10 +30,14 @@ uv run python mason.py \
     --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
+    --loss_fn dapo \
+    --clip_higher 0.272 \
+    --mask_truncated_completions False \
+    --load_ref_policy True \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
-    --num_samples_per_prompt_rollout 8 \
+    --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
@@ -43,17 +47,18 @@ uv run python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
-    --model_name_or_path hamishivi/vip_grpo_base_p32_2403_qwen3_4b_math__1__1774385112_step1000 \
+    --model_name_or_path Qwen/Qwen3-4B-Base \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 281600 \
+    --total_episodes 563200 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
+    --vllm_enable_prefix_caching \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
@@ -69,5 +74,9 @@ uv run python mason.py \
     --gamma 1.0 \
     --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
+    --use_sae \
+    --sae_threshold 0.2 \
+    --value_model_ground_truth_conditioning \
+    --gt_conditioning_template answer_prefix \
     --value_warmup_steps 100 \
     --reset_optimizer_after_value_warmup
