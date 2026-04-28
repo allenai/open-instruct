@@ -5,6 +5,7 @@ OLMo-core's native training infrastructure.
 """
 
 import math
+import time
 from typing import Any, Literal
 
 import torch
@@ -359,6 +360,7 @@ class GRPOTrainModule(TransformerTrainModule):
         - KL penalty computation
         - Importance sampling with clipping
         """
+        train_start = time.perf_counter()
         self.model.train()
         data_BT: data_types.CollatedBatchData = batch["batch"]
 
@@ -528,6 +530,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
             self.record_metric("_token_count", global_tokens, reduce_type=None)
+            self.record_metric("time/training", time.perf_counter() - train_start, reduce_type=None)
 
             data_prep_metrics = batch.get("metrics") or {}
             for metric_key, metric_value in data_prep_metrics.items():

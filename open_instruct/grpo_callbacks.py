@@ -8,9 +8,10 @@ These callbacks handle:
 
 import contextlib
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import ray
 import ray.exceptions
@@ -86,6 +87,8 @@ class VLLMWeightSyncCallback(Callback):
         if self.trainer.global_step % self.sync_interval != 0:
             return
 
+        start = time.perf_counter()
+
         torch.cuda.empty_cache()
 
         ray.get(self.actor_manager.set_should_stop.remote(True))
@@ -107,6 +110,8 @@ class VLLMWeightSyncCallback(Callback):
             [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
         )
         ray.get(self.actor_manager.set_should_stop.remote(False))
+
+        self.trainer.record_metric("time/weight_sync", time.perf_counter() - start, reduce_type=None)
 
 
 @dataclass
@@ -157,6 +162,28 @@ class RefPolicyUpdateCallback(Callback):
         finally:
             for m in fsdp2_submodules:
                 m.reshard()
+
+
+@dataclass
+class StepTimerCallback(Callback):
+    """Records per-step wall-clock timings: time/total spans pre_step → post_step.
+
+    Priority is set very low so its post_step runs after every other callback (e.g.
+    VLLMWeightSyncCallback), making time/total an end-to-end step duration.
+    """
+
+    priority: ClassVar[int] = -1000
+
+    _step_start: float | None = field(default=None, init=False, repr=False)
+
+    def pre_step(self, batch: dict[str, Any]) -> None:
+        self._step_start = time.perf_counter()
+
+    def post_step(self) -> None:
+        if self._step_start is None:
+            return
+        self.trainer.record_metric("time/total", time.perf_counter() - self._step_start, reduce_type=None)
+        self._step_start = None
 
 
 @dataclass
