@@ -77,6 +77,7 @@ class StepTimingCallback(Callback):
     _train_start: float = field(default=0.0, init=False, repr=False)
     _train_duration: float = field(default=0.0, init=False, repr=False)
     _training_start: float = field(default=0.0, init=False, repr=False)
+    _last_post_step: float = field(default=0.0, init=False, repr=False)
     _num_total_tokens: int = field(default=0, init=False, repr=False)
     _prompt_lengths: list[int] = field(default_factory=list, init=False, repr=False)
     _response_lengths: list[int] = field(default_factory=list, init=False, repr=False)
@@ -84,6 +85,7 @@ class StepTimingCallback(Callback):
 
     def pre_train(self) -> None:
         self._training_start = time.perf_counter()
+        self._last_post_step = self._training_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
         now = time.perf_counter()
@@ -102,7 +104,8 @@ class StepTimingCallback(Callback):
 
     def post_step(self) -> None:
         now = time.perf_counter()
-        step_time = now - self._step_start
+        step_time = now - self._last_post_step
+        self._last_post_step = now
         total_training_time = now - self._training_start
 
         num_step_tokens = sum(self._prompt_lengths) + sum(self._response_lengths)
