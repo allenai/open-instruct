@@ -500,13 +500,13 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 if local_step % accumulation_steps == 0:
                     if not dry_run:
-                        self.optim_step()
-                    self.zero_grads()
+                        super().optim_step()
+                    super().zero_grads()
 
         if local_step % accumulation_steps != 0:
             if not dry_run:
-                self.optim_step()
-            self.zero_grads()
+                super().optim_step()
+            super().zero_grads()
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)

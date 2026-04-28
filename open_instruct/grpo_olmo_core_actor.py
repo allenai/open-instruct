@@ -16,7 +16,7 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.optim import AdamWConfig, CosWithWarmup, LinearWithWarmup
+from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
@@ -141,8 +141,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
-        else:
+        elif self.grpo_config.lr_scheduler_type == "constant":
+            scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
+        elif self.grpo_config.lr_scheduler_type == "linear":
             scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+        else:
+            raise ValueError(f"Unsupported lr_scheduler_type: {self.grpo_config.lr_scheduler_type}")
 
         optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
 
