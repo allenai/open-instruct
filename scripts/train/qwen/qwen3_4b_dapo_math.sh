@@ -33,7 +33,7 @@ uv run open_instruct/grpo_fast.py \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
     --beta 0.0 \
-    --async_steps 2 \
+    --async_steps 1 \
     --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
