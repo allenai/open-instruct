@@ -7,13 +7,13 @@
 # This isolates whether GenAC's learned value signal improves over the usual
 # group-relative advantages.
 #
-# GPU layout (6 GPUs on 1 node):
+# GPU layout (8 GPUs on 1 node):
 #   - 4x policy learners (DeepSpeed stage 3)
-#   - 2x policy vLLM engines (TP=1)
+#   - 4x policy vLLM engines (TP=1)
 #
 # Step budget:
 #   total_episodes = 1000 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                  = 1000 * 8 * 16 = 128000
+#                  = 1000 * 32 * 16 = 512000
 DDMM=$(date +"%d%m")
 exp_name=grpo_1k_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -27,7 +27,7 @@ uv run python mason.py \
     --priority urgent \
     --preemptible \
     --num_nodes 1 \
-    --gpus 6 \
+    --gpus 8 \
     --max_retries 0 \
     --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -46,24 +46,24 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 8 \
+    --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 8096 \
+    --response_length 8192 \
     --pack_length 10240 \
     --model_name_or_path Qwen/Qwen3-4B-Base \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 128000 \
+    --total_episodes 512000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 2 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --vllm_enable_prefix_caching \
@@ -72,7 +72,7 @@ uv run python mason.py \
     --verification_reward 1.0 \
     --seed 1 \
     --local_eval_every 100 \
-    --save_freq 250 \
+    --save_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub False
