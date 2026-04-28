@@ -4,7 +4,7 @@ EXP="${EXP:-}"
 EXP_NAME="${EXP_NAME:-qwen2.5_0.5b_instruct_gsm8k_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-DATASETS="${DATASETS:-mnoukhov/gsm8k-qwen2.5-0.5b-instruct-512samples-userprompt-quartiles 1.0}"
+DATASETS="${DATASETS:-mnoukhov/gsm8k-train-harder-quartiles 1.0}"
 DATASET_SPLITS="${DATASET_SPLITS:-train}"
 
 LOCAL_EVALS="${LOCAL_EVALS:-mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-userprompt-quartiles 1.0}"

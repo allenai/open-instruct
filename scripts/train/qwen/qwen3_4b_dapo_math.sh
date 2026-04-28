@@ -20,6 +20,7 @@ uv run mason.py \
     --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 1 \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
@@ -32,7 +33,7 @@ uv run open_instruct/grpo_fast.py \
     --vllm_top_p 1.0 \
     --local_eval_every 100 \
     --beta 0.0 \
-    --async_steps 1 \
+    --async_steps 2 \
     --active_sampling \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 2.0 \
