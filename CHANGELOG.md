@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
-- Fix `scripts/submit_eval_jobs.py`: drop the `vllm[runai]>=0.19.0` upgrade (was clobbering the image's cu12.8 wheels with cu13), pin `numpy<2.3` for numba compat, and correct the `--sampling_max_tokens` override path to `sampling_params.max_tokens=N` (https://github.com/allenai/open-instruct/pull/REPLACE_ME).
+- Fix `scripts/submit_eval_jobs.py`: drop the `vllm[runai]>=0.19.0` upgrade (was clobbering the image's cu12.8 wheels with cu13), pin `numpy<2.3` for numba compat, and correct the `--sampling_max_tokens` override path to `sampling_params.max_tokens=N` (https://github.com/allenai/open-instruct/pull/1644).
 - Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
 - Address review feedback on #1620: derive vocab size from the run's tokenizer (no longer hardcoded to dolma2), validate complete numpy artifacts before reusing the SFT cache, fold seed/max_seq_length into the cache directory, fix HF-vs-olmo-core checkpoint detection for relative local paths, and log which checkpoint format was detected (https://github.com/allenai/open-instruct/pull/1620).
 - Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary (https://github.com/allenai/open-instruct/pull/1631).
