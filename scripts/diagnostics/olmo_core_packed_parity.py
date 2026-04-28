@@ -28,6 +28,7 @@ transformers, olmo_core.
 
 import torch
 import transformers
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerConfig
 
@@ -101,7 +102,9 @@ def main() -> None:
     print(f"Loading OLMo-core ({MODEL})")
     tokenizer = transformers.AutoTokenizer.from_pretrained(MODEL)
     hf_config = transformers.AutoConfig.from_pretrained(MODEL)
-    olmo_config = TransformerConfig.qwen3_4B(vocab_size=hf_config.vocab_size)
+    olmo_config = TransformerConfig.qwen3_4B(
+        vocab_size=hf_config.vocab_size, attn_backend=AttentionBackendName("flash_2")
+    )
     olmo_model = olmo_config.build(init_device="cpu")
     sd = olmo_model.state_dict()
     load_hf_model(MODEL, sd, work_dir=WORK_DIR)
