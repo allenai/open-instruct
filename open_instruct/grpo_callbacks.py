@@ -191,12 +191,13 @@ class VLLMWeightSyncCallback(Callback):
         ray.get(self.actor_manager.set_should_stop.remote(False))
 
         sync_duration = time.perf_counter() - sync_start
-        actor_sync_times = np.asarray(actor_sync_times, dtype=np.float64)
         self.trainer.record_metric("time/weight_sync", sync_duration, reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_mean", float(actor_sync_times.mean()), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_min", float(actor_sync_times.min()), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_max", float(actor_sync_times.max()), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_median", float(np.median(actor_sync_times)), reduce_type=None)
+        if actor_sync_times:
+            actor_sync_times = np.asarray(actor_sync_times, dtype=np.float64)
+            self.trainer.record_metric("time/weight_sync_mean", float(actor_sync_times.mean()), reduce_type=None)
+            self.trainer.record_metric("time/weight_sync_min", float(actor_sync_times.min()), reduce_type=None)
+            self.trainer.record_metric("time/weight_sync_max", float(actor_sync_times.max()), reduce_type=None)
+            self.trainer.record_metric("time/weight_sync_median", float(np.median(actor_sync_times)), reduce_type=None)
 
 
 @dataclass
