@@ -22,6 +22,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct.rl_utils import masked_mean
 
@@ -298,7 +299,7 @@ class GRPOTrainModule(TransformerTrainModule):
         device: torch.device | None = None,
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
-        streaming_config: Any = None,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig | None = None,
     ):
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
