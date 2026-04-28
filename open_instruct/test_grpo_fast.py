@@ -24,6 +24,28 @@ from open_instruct.dataset_transformation import (
 )
 
 
+class TestBatchMetrics(unittest.TestCase):
+    def test_compute_avg_group_performance(self):
+        avg_group_perf = data_loader_lib._compute_avg_group_performance(
+            n_solved=2,
+            n_zero=3,
+            n_kept=5,
+            batch_avg_score=0.4,
+        )
+
+        self.assertAlmostEqual(avg_group_perf, 0.4)
+
+    def test_compute_avg_group_performance_empty(self):
+        avg_group_perf = data_loader_lib._compute_avg_group_performance(
+            n_solved=0,
+            n_zero=0,
+            n_kept=0,
+            batch_avg_score=0.4,
+        )
+
+        self.assertEqual(avg_group_perf, 0.0)
+
+
 class TestGrpoFastBase(unittest.TestCase):
     """Base class with common test utilities."""
 

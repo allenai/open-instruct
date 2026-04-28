@@ -737,6 +737,18 @@ class BatchStatistics:
     total_prompts: int
 
 
+def _compute_avg_group_performance(
+    n_solved: int,
+    n_zero: int,
+    n_kept: int,
+    batch_avg_score: float,
+) -> float:
+    total_groups = n_solved + n_zero + n_kept
+    if total_groups == 0:
+        return 0.0
+    return float((n_solved + n_kept * batch_avg_score) / total_groups)
+
+
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     assert len(examples) == 1, f"Expected 1 example, got {len(examples)}"
     example = examples[0]
@@ -1385,6 +1397,7 @@ class DataPreparationActor:
 
             scores = np.array(batch.scores)
             raw_scores = scores.copy()
+            pre_filtering_batch_avg_score = float(raw_scores.mean() / self.config.max_possible_score)
 
             concave_length_metrics: dict[str, Any] = {}
             if self.config.add_concave_length_penalty and len(scores) > 0:
@@ -1605,6 +1618,18 @@ class DataPreparationActor:
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
                     "scores": raw_scores.mean(),
+                    "val/avg_group_performance_pre_filter": _compute_avg_group_performance(
+                        n_solved=batch_stats.filtered_prompts_solved,
+                        n_zero=batch_stats.filtered_prompts_zero,
+                        n_kept=batch_stats.total_prompts,
+                        batch_avg_score=pre_filtering_batch_avg_score,
+                    ),
+                    "val/avg_group_performance_post_filter": _compute_avg_group_performance(
+                        n_solved=batch_stats.filtered_prompts_solved,
+                        n_zero=batch_stats.filtered_prompts_zero,
+                        n_kept=batch_stats.total_prompts,
+                        batch_avg_score=float(raw_scores.mean() / self.config.max_possible_score),
+                    ),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
