@@ -12,7 +12,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_it_manufac_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-NUM_NODES="${NUM_NODES:-1}"
+NUM_NODES="${NUM_NODES:-2}"
 
 uv run python mason.py \
     --cluster $CLUSTER \

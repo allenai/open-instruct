@@ -483,6 +483,7 @@ def compute_grpo_loss(
     ratio: torch.Tensor,
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
+    response_mask: torch.Tensor,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
     tv_divergence: torch.Tensor | None = None,
@@ -516,6 +517,7 @@ def compute_grpo_loss(
         ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-10.0, 10.0)
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
+        kl = torch.masked_fill(kl, ~response_mask, 0.0)
     else:
         kl = torch.zeros_like(pg_loss)
 
