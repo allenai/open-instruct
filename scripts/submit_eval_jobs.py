@@ -36,9 +36,30 @@ MAX_EXPERIMENT_NAME_LEN = 128
 EXPERIMENT_NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 DEFAULT_OLMO_EVAL_REF = "main"
+DEFAULT_BEAKER_IMAGE = "ai2/oe-data/olmo-eval-latest"
+OLMO_EVAL_REPO = "allenai/olmo-eval-internal"
 GIT_REF_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 INSTALL_SCRIPT_PATH = pathlib.Path(__file__).parent / "eval" / "install_olmo_eval.sh"
 INSTALL_HEREDOC_TAG = "OPEN_INSTRUCT_INSTALL_EOF"
+
+
+def resolve_olmo_eval_ref(ref: str) -> str:
+    """Resolve a branch/tag to a 40-char SHA so submissions are reproducible."""
+    if not GIT_REF_SAFE_RE.match(ref):
+        raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
+    if GIT_SHA_RE.match(ref):
+        return ref
+    out = subprocess.run(
+        ["gh", "api", f"repos/{OLMO_EVAL_REPO}/commits/{ref}", "--jq", ".sha"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sha = out.stdout.strip()
+    if not GIT_SHA_RE.match(sha):
+        raise RuntimeError(f"Could not resolve {ref!r} on {OLMO_EVAL_REPO} (got {sha!r}).")
+    return sha
 
 
 def build_install_block(ref: str) -> str:
@@ -80,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--beaker_image",
         type=str,
-        default="ai2-tylerm/olmo-eval-cu1281-trc290-amd64",
+        default=DEFAULT_BEAKER_IMAGE,
         help="Beaker image with olmo-eval installed.",
     )
     parser.add_argument("--revision", type=str, default=None, help="HF revision (git sha/tag).")
@@ -198,6 +219,11 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
 def main() -> None:
     args = parse_args()
     launch_utils.validate_beaker_workspace(args.workspace)
+
+    resolved_ref = resolve_olmo_eval_ref(args.olmo_eval_ref)
+    if resolved_ref != args.olmo_eval_ref:
+        print(f"Resolved olmo_eval_ref {args.olmo_eval_ref!r} -> {resolved_ref}")
+    args.olmo_eval_ref = resolved_ref
 
     model_path, dataset_id = resolve_model_mount(args.location)
     inner_cmd = build_inner_cmd(args, model_path)

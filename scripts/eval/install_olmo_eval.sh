@@ -15,7 +15,6 @@ git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-i
 cd /opt/olmo-eval-internal
 git checkout "$ref"
 
-uv pip install --cache-dir "$cache_dir" -e '.[vllm]'
-uv pip install --cache-dir "$cache_dir" --upgrade 'transformers>=5.4.0' 'numpy<2.3'
+uv pip install --cache-dir "$cache_dir" -e '.[vllm]' 'transformers>=5.4.0' 'numpy<2.3'
 
 cd /workspace
