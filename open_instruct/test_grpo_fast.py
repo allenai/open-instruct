@@ -1210,7 +1210,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         )
 
         self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
-        self.assertEqual(batch_stats.given_up_prompts_resamples, [2])
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [])
         self.assertEqual(batch_stats.prompts_resamples, [1])
         self.assertEqual(never_give_up_state.pending_best_reward, {})
 
@@ -1520,6 +1520,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(batch_stats.prompt_baseline_sample_counts, [8])
         self.assertEqual(batch_stats.prompt_baseline_reward_sums, [4.0])
         self.assertEqual(batch.scores, [1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [])
         self.assertEqual(never_give_up_state.pending_results, {})
         self.assertEqual(never_give_up_state.pending_metrics, {})
         self.assertEqual(never_give_up_state.pending_best_reward, {})

@@ -892,10 +892,14 @@ def compute_filtered_batch_metrics(
         metrics[f"{filtered_metric_prefix}/given_up_prompts/{dataset_name}"] = count
 
     if batch_stats.given_up_prompts_resamples:
+        metrics[f"{filtered_metric_prefix}/given_up_prompts_resamples_mean"] = float(
+            np.mean(batch_stats.given_up_prompts_resamples)
+        )
         metrics[f"{filtered_metric_prefix}/given_up_prompts_resamples"] = np.asarray(
             batch_stats.given_up_prompts_resamples, dtype=np.int32
         )
     if batch_stats.prompts_resamples:
+        metrics[f"{filtered_metric_prefix}/prompts_resamples_mean"] = float(np.mean(batch_stats.prompts_resamples))
         metrics[f"{filtered_metric_prefix}/prompts_resamples"] = np.asarray(
             batch_stats.prompts_resamples, dtype=np.int32
         )
@@ -1610,17 +1614,12 @@ def accumulate_inference_batches(
                 accept_this_batch = current_reward > pending_best_reward
 
         if not accept_this_batch:
+            best_reward = current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
+            solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
+            # Requeue filtered unsolved prompts with probability `never_give_up`.
+            requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
             if replenish_prompts:
                 assert param_prompt_Q is not None
-
-                best_reward = (
-                    current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
-                )
-
-                # if we filter this batch, requeue the prompt as long as we didn't hit max reward
-                # requeue with probability never_give_up
-                solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
-                requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
 
                 # if we are replenishing prompts, requeue this particular prompt if requeue_same_prompt
                 # increase the ngu_suffix so it doesn't clash with previous ids
@@ -1677,7 +1676,7 @@ def accumulate_inference_batches(
             give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
                 result.responses
             )
-            if give_up_count > 0:
+            if not solved_prompt and give_up_count > 0:
                 given_up_prompts_by_dataset[prompt_dataset_key] = (
                     given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
                 )
