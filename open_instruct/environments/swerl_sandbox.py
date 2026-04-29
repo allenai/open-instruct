@@ -16,8 +16,10 @@ import contextlib
 import io
 import os
 import random
+import shutil
 import subprocess
 import tarfile
+import time
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -101,24 +103,45 @@ class SWERLSandboxEnv(RLEnvironment):
 
     @staticmethod
     def resolve_task_data_dir(task_data_hf_repo: str) -> str:
-        """Download and extract task data once.  Call before spawning actors
-        and pass the returned path as *task_data_dir* so each actor skips
-        the redundant download."""
+        """Download and extract task data once per machine."""
         repo_dir = snapshot_download(task_data_hf_repo, repo_type="dataset")
         tarball = os.path.join(repo_dir, "task-data.tar.gz")
         if os.path.isfile(tarball):
             extract_dir = tarball + ".extracted"
-            if not os.path.isdir(extract_dir):
-                logger.info(f"Extracting {tarball} to {extract_dir}...")
-                os.makedirs(extract_dir, exist_ok=True)
-                subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
+            complete_file = os.path.join(extract_dir, ".extraction_complete")
+            lock_dir = extract_dir + ".lock"
+            while not os.path.isfile(complete_file):
+                try:
+                    os.mkdir(lock_dir)
+                except FileExistsError:
+                    time.sleep(1)
+                    continue
+                try:
+                    if os.path.isfile(complete_file):
+                        break
+                    logger.info(f"Extracting {tarball} to {extract_dir}...")
+                    if os.path.isdir(extract_dir):
+                        shutil.rmtree(extract_dir)
+                    os.makedirs(extract_dir, exist_ok=True)
+                    subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
+                    with open(complete_file, "w", encoding="utf-8") as f:
+                        f.write("ok\n")
+                finally:
+                    with contextlib.suppress(FileNotFoundError):
+                        os.rmdir(lock_dir)
             return extract_dir
         return repo_dir
 
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
-        if self._task_data_hf_repo and not self._task_data_dir:
-            logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
+        if self._task_data_hf_repo and (not self._task_data_dir or not os.path.isdir(self._task_data_dir)):
+            if self._task_data_dir:
+                logger.info(
+                    f"Task data directory {self._task_data_dir} is not available on this actor; "
+                    f"downloading from {self._task_data_hf_repo}..."
+                )
+            else:
+                logger.info(f"Downloading task data from {self._task_data_hf_repo}...")
             self._task_data_dir = self.resolve_task_data_dir(self._task_data_hf_repo)
             logger.info(f"Task data at {self._task_data_dir}")
 

@@ -137,6 +137,16 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
+def _count_sampled_episodes_for_step(
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    step_metrics: dict[str, Any],
+) -> int:
+    sampled_prompt_groups = streaming_config.num_unique_prompts_rollout
+    if streaming_config.active_sampling:
+        sampled_prompt_groups += int(step_metrics.get("batch/filtered_prompts", 0))
+    return sampled_prompt_groups * streaming_config.num_samples_per_prompt_rollout
+
+
 def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
     if checkpoint_state is None:
         return None
@@ -1697,8 +1707,8 @@ def one_training_step(
     chat_template_name: str,
     model_dims: utils.ModelDims,
     actor_manager: ActorManager | None = None,
-) -> int:
-    """Train the model for one step. Returns the number of tokens processed."""
+) -> tuple[int, int]:
+    """Train the model for one step. Returns tokens processed and the updated episode count."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
@@ -1708,7 +1718,7 @@ def one_training_step(
         metrics, array_metrics = zip(*results)
         if all(len(m) == 0 for m in metrics):
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return 0
+            return 0, episode
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
@@ -1758,6 +1768,7 @@ def one_training_step(
         average_metrics[k] = v
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
+    episode += _count_sampled_episodes_for_step(streaming_config, average_metrics)
 
     total_generation_time = average_metrics["time/getting_response"]
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
@@ -1810,7 +1821,7 @@ def one_training_step(
                 metrics_to_log[key] = value
         wandb.log(metrics_to_log, step=training_step)
 
-    return num_step_tokens
+    return num_step_tokens, episode
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -2253,8 +2264,6 @@ def run_training(
                 )
             eval_data_loader.reset()
 
-        episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-
         data_thread_metrics = {}
         try:
             data_thread_metrics |= weight_sync_metrics_Q.get_nowait()
@@ -2263,7 +2272,7 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
-        num_step_tokens = one_training_step(
+        num_step_tokens, episode = one_training_step(
             args,
             streaming_config,
             policy_group,

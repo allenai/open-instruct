@@ -16,7 +16,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
+from open_instruct.grpo_fast import _count_sampled_episodes_for_step, create_generation_configs, maybe_evaluate
 
 
 class _QueueWithSize:
@@ -25,6 +25,30 @@ class _QueueWithSize:
 
     def qsize(self) -> int:
         return self._size
+
+
+class TestEpisodeAccounting(unittest.TestCase):
+    def test_active_sampling_counts_filtered_prompt_groups(self):
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(
+            active_sampling=True,
+            num_unique_prompts_rollout=8,
+            num_samples_per_prompt_rollout=4,
+        )
+
+        episodes = _count_sampled_episodes_for_step(streaming_config, {"batch/filtered_prompts": 3})
+
+        self.assertEqual(episodes, 44)
+
+    def test_inactive_sampling_keeps_fixed_step_size(self):
+        streaming_config = data_loader_lib.StreamingDataLoaderConfig(
+            active_sampling=False,
+            num_unique_prompts_rollout=8,
+            num_samples_per_prompt_rollout=4,
+        )
+
+        episodes = _count_sampled_episodes_for_step(streaming_config, {"batch/filtered_prompts": 3})
+
+        self.assertEqual(episodes, 32)
 
 
 class TestCreateGenerationConfigs(unittest.TestCase):
