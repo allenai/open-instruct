@@ -2430,6 +2430,18 @@ def main(
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
+    if (
+        args.load_ref_policy
+        and args.ref_policy_update_freq is not None
+        and args.alpha > 0
+        and args.checkpoint_state_freq > 0
+    ):
+        assert args.checkpoint_state_freq % args.ref_policy_update_freq == 0, (
+            f"checkpoint_state_freq ({args.checkpoint_state_freq}) must be a multiple of "
+            f"ref_policy_update_freq ({args.ref_policy_update_freq}) so checkpoints land on "
+            "ref_policy update steps; otherwise the on-disk ref_policy can lag in-memory state on resume."
+        )
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         for handler in logging.getLogger().handlers:
