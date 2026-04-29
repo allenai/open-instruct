@@ -2895,6 +2895,7 @@ def run_training(
         ):
             utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=False)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+                checkpointing_start_time = time.perf_counter()
                 # Save comprehensive client state including dataloader state
                 client_state = {
                     "training_step": training_step,
@@ -2919,7 +2920,10 @@ def run_training(
                     ],
                     desc=f"Saving checkpoint state at step {training_step}",
                 )
+                checkpointing_time = time.perf_counter() - checkpointing_start_time
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                if args.with_tracking:
+                    wandb.log({"time/checkpointing": checkpointing_time}, step=training_step)
 
         if training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")

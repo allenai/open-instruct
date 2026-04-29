@@ -35,7 +35,7 @@ uv run python mason.py \
     --exp_name "${EXP_NAME}" \
     --async_steps 1 \
     --beta 0.01 \
-    --eval_pass_at_k 16 \
+    --eval_pass_at_k 8 \
     --log_train_solve_rate_metrics \
     --load_ref_policy True \
     --num_unique_prompts_rollout 32 \
@@ -59,14 +59,15 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 768000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 8 \
     --clip_higher 0.28 \
     --seed 1 \
-    --local_eval_every 25 \
-    --save_freq 25 \
-    --checkpoint_state_freq 25 \
+    --local_eval_every 50 \
+    --save_freq 100 \
+    --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub false \
+    --max_grad_norm 5 \
     "$@"
