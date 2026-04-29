@@ -430,7 +430,7 @@ def validate_frequency_capital_words(text: str, N: int, quantifier: str) -> bool
     if quantifier == "at least":
         return len(words) >= N
     elif quantifier == "around":
-        return len(words) == N
+        return abs(len(words) - N) <= max(round(N * 0.1), 1)
     elif quantifier == "at most":
         return len(words) <= N
     else:
