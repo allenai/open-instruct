@@ -742,7 +742,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             old_logprob_BT,
                             vllm_logprobs_BT,
                             response_mask_BT,
-                            self.args.truncated_importance_sampling_ratio_cap,
+                            self.args.icepop_alpha,
+                            self.args.icepop_beta,
                         )
                     else:
                         tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(

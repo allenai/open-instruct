@@ -450,7 +450,8 @@ class GRPOTrainModule(TransformerTrainModule):
                         old_logprob,
                         vllm_logprobs,
                         response_mask,
-                        self.grpo_config.truncated_importance_sampling_ratio_cap,
+                        self.grpo_config.icepop_alpha,
+                        self.grpo_config.icepop_beta,
                     )
                 else:
                     tis_clamped, tis_unclamped = grpo_utils.compute_tis_weights(
