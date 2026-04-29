@@ -1397,8 +1397,19 @@ def _broadcast_weights_ipc(
 
     if isinstance(model, FSDP):
         ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
-    else:
+    elif gather_whole_model:
         ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+    else:
+        for name, param in params:
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
+                if is_rank_0:
+                    mapped_params = [(name_mapper(name) if name_mapper else name, param.data)]
+                    for engine in vllm_engines:
+                        trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+                        IPCWeightTransferEngine.trainer_send_weights(
+                            iterator=iter(mapped_params), trainer_args=trainer_args
+                        )
+        return []
 
     with ctx:
         if is_rank_0:
