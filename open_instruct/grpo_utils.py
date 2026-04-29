@@ -328,9 +328,7 @@ def compute_tis_weights(
     return clamped, unclamped
 
 
-def combine_tis_terms(
-    *terms: torch.Tensor | None,
-) -> torch.Tensor | None:
+def combine_tis_terms(*terms: torch.Tensor | None) -> torch.Tensor | None:
     """Element-wise product of non-None TIS tensors (weights and/or masks).
 
     Returns ``None`` if every term is ``None``. Used to combine the numeric-mismatch

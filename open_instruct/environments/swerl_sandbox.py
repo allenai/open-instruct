@@ -11,9 +11,11 @@ Each task has its own files on disk at ``{task_data_dir}/{task_id}/``:
 - ``setup.sh`` — (optional) setup script run after seeding
 """
 
+import asyncio
 import contextlib
 import io
 import os
+import random
 import subprocess
 import tarfile
 from dataclasses import dataclass
@@ -68,6 +70,9 @@ class SWERLSandboxEnv(RLEnvironment):
 
     config_name = "swerl_sandbox"
     _tool_definitions = (_BASH_TOOL,)
+    _RESET_RETRY_BASE_DELAY_S = 1.0
+    _RESET_RETRY_MAX_DELAY_S = 16.0
+    _RESET_RETRY_JITTER_S = 2.0
 
     def __init__(
         self,
@@ -132,15 +137,30 @@ class SWERLSandboxEnv(RLEnvironment):
                 return self._do_reset(task_id, **kwargs)
             except Exception as e:
                 last_error = e
-                logger.warning(f"SWERLSandboxEnv.reset attempt {attempt + 1} failed: {e}. Retrying...")
                 if self._backend is not None:
                     with contextlib.suppress(Exception):
                         self._backend.close()
                     self._backend = None
+                if attempt + 1 == max_attempts:
+                    logger.warning(f"SWERLSandboxEnv.reset attempt {attempt + 1} failed: {e}. No attempts remain.")
+                    break
+                delay = self._reset_retry_delay(attempt + 1)
+                logger.warning(
+                    "SWERLSandboxEnv.reset attempt %s failed: %s. Retrying in %.2fs...",
+                    attempt + 1,
+                    e,
+                    delay,
+                )
+                await asyncio.sleep(delay)
         if last_error is not None:
             raise RuntimeError(f"Reset failed after {max_attempts} attempts: {last_error}") from last_error
         else:
             raise RuntimeError("Reset failed without capturing an error.")
+
+    @classmethod
+    def _reset_retry_delay(cls, attempt: int) -> float:
+        backoff = min(cls._RESET_RETRY_BASE_DELAY_S * (2 ** (attempt - 1)), cls._RESET_RETRY_MAX_DELAY_S)
+        return backoff + random.uniform(0.0, cls._RESET_RETRY_JITTER_S)
 
     def _do_reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         # Image must be task-specific; no fallback to default constructor image.
@@ -273,10 +293,7 @@ class SWERLSandboxEnv(RLEnvironment):
             except SandboxOOMError as e:
                 logger.warning(f"[{self._task_id}] sandbox OOM: {e}")
                 return StepResult(
-                    result=(
-                        "Sandbox container was killed by the OOM reaper. "
-                        "Ending episode with reward 0."
-                    ),
+                    result=("Sandbox container was killed by the OOM reaper. Ending episode with reward 0."),
                     reward=0.0,
                     done=True,
                     metadata={"oom_killed": True, "task_id": self._task_id},
@@ -329,9 +346,7 @@ class SWERLSandboxEnv(RLEnvironment):
             try:
                 self._upload_directory(self._tests_dir, "/tests")
             except Exception as e:
-                logger.warning(
-                    f"[{self._task_id}] tests upload attempt {attempt + 1} raised: {e}"
-                )
+                logger.warning(f"[{self._task_id}] tests upload attempt {attempt + 1} raised: {e}")
                 if attempt == 0:
                     continue
                 raise
@@ -340,14 +355,11 @@ class SWERLSandboxEnv(RLEnvironment):
             check_stdout = check.stdout.strip()
             if check_stdout == "EXISTS":
                 break
-            logger.warning(
-                f"[{self._task_id}] /tests/test.sh missing after upload attempt {attempt + 1}; retrying"
-            )
+            logger.warning(f"[{self._task_id}] /tests/test.sh missing after upload attempt {attempt + 1}; retrying")
         if check_stdout != "EXISTS":
             ls = self._backend.run_command("ls -la /tests 2>&1 || true")
             raise RuntimeError(
-                f"No test.sh found in test data for task {self._task_id}. "
-                f"/tests listing: {ls.stdout!r}"
+                f"No test.sh found in test data for task {self._task_id}. /tests listing: {ls.stdout!r}"
             )
 
         result = self._backend.run_command(f"timeout {self._test_timeout} bash /tests/test.sh")

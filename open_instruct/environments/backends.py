@@ -4,10 +4,12 @@ import atexit
 import contextlib
 import io
 import os
+import random
 import shlex
 import shutil
 import subprocess
 import tarfile
+import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -84,6 +86,11 @@ class DockerBackend(SandboxBackend):
     """
 
     _MAX_OUTPUT_BYTES = 1_000_000
+    _TRANSIENT_EXEC_API_ERROR_RETRIES = 5
+    _TRANSIENT_EXEC_RETRY_BASE_DELAY_S = 0.5
+    _TRANSIENT_EXEC_RETRY_MAX_DELAY_S = 8.0
+    _TRANSIENT_EXEC_RETRY_JITTER_S = 0.5
+    _TRANSIENT_EXEC_API_ERROR_MARKERS = ("database is locked",)
 
     def __init__(self, image: str = "python:3.12-slim", timeout: int = 1800, mem_limit: str = "4g"):
         """
@@ -153,25 +160,28 @@ class DockerBackend(SandboxBackend):
             if getattr(e, "status_code", None) == 409:
                 if self._container_was_oom_killed(container_id):
                     raise SandboxOOMError(
-                        f"Sandbox container {container_id} (image={self._image}) "
-                        f"was OOM-killed. Aborting episode."
+                        f"Sandbox container {container_id} (image={self._image}) was OOM-killed. Aborting episode."
                     ) from e
                 logger.warning(
-                    "Docker exec 409 Conflict (container=%s, image=%s): %s. "
-                    "Restarting and retrying command once.",
+                    "Docker exec 409 Conflict (container=%s, image=%s): %s. Restarting and retrying command once.",
                     container_id,
                     self._image,
                     e,
                 )
                 exit_code, output = self._restart_and_retry_exec(wrapped, container_id)
             else:
-                logger.warning(
-                    "Docker exec APIError (container=%s, image=%s): %s",
-                    container_id,
-                    self._image,
-                    e,
-                )
-                raise
+                if self._is_transient_exec_api_error(e):
+                    logger.warning(
+                        "Transient Docker exec APIError (container=%s, image=%s): %s. "
+                        "Retrying command on the same container.",
+                        container_id,
+                        self._image,
+                        e,
+                    )
+                    exit_code, output = self._retry_exec_same_container(wrapped, container_id)
+                else:
+                    logger.warning("Docker exec APIError (container=%s, image=%s): %s", container_id, self._image, e)
+                    raise
         stdout_raw = (output[0] or b"") if output else b""
         stderr_raw = (output[1] or b"") if output else b""
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
@@ -179,6 +189,48 @@ class DockerBackend(SandboxBackend):
         if exit_code == 124:
             stderr = f"Command timed out after {self._timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    @classmethod
+    def _is_transient_exec_api_error(cls, error: docker_sdk.errors.APIError) -> bool:
+        message = str(error).lower()
+        return any(marker in message for marker in cls._TRANSIENT_EXEC_API_ERROR_MARKERS)
+
+    def _retry_exec_same_container(self, wrapped: str, container_id: str):
+        """Retry an exec after a transient Docker daemon/storage error."""
+        if self._container is None:
+            raise RuntimeError("Container missing during Docker exec retry.")
+        last_error = None
+        for attempt in range(1, self._TRANSIENT_EXEC_API_ERROR_RETRIES + 1):
+            delay = self._transient_exec_retry_delay(attempt)
+            time.sleep(delay)
+            with contextlib.suppress(Exception):
+                self._container.reload()
+            logger.info(
+                "Retrying command after transient Docker exec APIError "
+                "(container=%s, image=%s, attempt=%s/%s, delay=%.2fs)",
+                container_id,
+                self._image,
+                attempt,
+                self._TRANSIENT_EXEC_API_ERROR_RETRIES,
+                delay,
+            )
+            try:
+                return self._container.exec_run(["bash", "-c", wrapped], demux=True)
+            except docker_sdk.errors.APIError as e:
+                if not self._is_transient_exec_api_error(e):
+                    raise
+                last_error = e
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Docker exec retry failed without capturing an error.")
+
+    @classmethod
+    def _transient_exec_retry_delay(cls, attempt: int) -> float:
+        backoff = min(
+            cls._TRANSIENT_EXEC_RETRY_BASE_DELAY_S * (2 ** (attempt - 1)),
+            cls._TRANSIENT_EXEC_RETRY_MAX_DELAY_S,
+        )
+        return backoff + random.uniform(0.0, cls._TRANSIENT_EXEC_RETRY_JITTER_S)
 
     def _container_was_oom_killed(self, container_id: str) -> bool:
         """Best-effort probe for ``State.OOMKilled``. Returns False on any error."""
@@ -328,11 +380,7 @@ _APPTAINER_LIVE_INSTANCES: set[str] = set()
 def _apptainer_cleanup_all() -> None:
     for name in list(_APPTAINER_LIVE_INSTANCES):
         with contextlib.suppress(Exception):
-            subprocess.run(
-                ["apptainer", "instance", "stop", name],
-                capture_output=True,
-                timeout=10,
-            )
+            subprocess.run(["apptainer", "instance", "stop", name], capture_output=True, timeout=10)
     _APPTAINER_LIVE_INSTANCES.clear()
 
 
@@ -454,10 +502,7 @@ class ApptainerBackend(SandboxBackend):
         name = f"swerl-{os.getpid()}-{uuid.uuid4().hex[:10]}"
         cmd = [self._apptainer, "instance", "start", *self._start_flags, self._image, name]
         logger.info(
-            "Starting Apptainer instance (name=%s, image=%s, flags=%s)",
-            name,
-            self._image,
-            " ".join(self._start_flags),
+            "Starting Apptainer instance (name=%s, image=%s, flags=%s)", name, self._image, " ".join(self._start_flags)
         )
         proc = subprocess.run(cmd, capture_output=True, env=self._exec_env())
         if proc.returncode != 0:
@@ -476,22 +521,14 @@ class ApptainerBackend(SandboxBackend):
         name = self._name
         logger.info(f"Closing Apptainer instance: {name}")
         with contextlib.suppress(Exception):
-            subprocess.run(
-                [self._apptainer, "instance", "stop", name],
-                capture_output=True,
-                timeout=30,
-            )
+            subprocess.run([self._apptainer, "instance", "stop", name], capture_output=True, timeout=30)
         _APPTAINER_LIVE_INSTANCES.discard(name)
         self._name = None
 
     # ---- exec -------------------------------------------------------------
 
     def _exec(
-        self,
-        argv: list[str],
-        *,
-        stdin: bytes | None = None,
-        check: bool = False,
+        self, argv: list[str], *, stdin: bytes | None = None, check: bool = False
     ) -> subprocess.CompletedProcess:
         """Run ``apptainer exec instance://<name> <argv>``.
 
@@ -501,19 +538,12 @@ class ApptainerBackend(SandboxBackend):
         """
         self._ensure_started()
         cmd = [self._apptainer, "exec", f"instance://{self._name}", *argv]
-        return subprocess.run(
-            cmd,
-            input=stdin,
-            capture_output=True,
-            env=self._exec_env(),
-            check=check,
-        )
+        return subprocess.run(cmd, input=stdin, capture_output=True, env=self._exec_env(), check=check)
 
     def run_command(self, command: str) -> ExecutionResult:
         self._ensure_started()
         wrapped = (
-            f"timeout --signal=TERM --kill-after=10 "
-            f"{shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
+            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
         )
         logger.debug(
             "Apptainer exec start (instance=%s, image=%s, timeout=%ss, command=%r)",
@@ -536,9 +566,7 @@ class ApptainerBackend(SandboxBackend):
         if isinstance(content, str):
             content = content.encode("utf-8")
         dir_part = os.path.dirname(path) or "/"
-        sh_cmd = (
-            f"mkdir -p {shlex.quote(dir_part)} && cat > {shlex.quote(path)}"
-        )
+        sh_cmd = f"mkdir -p {shlex.quote(dir_part)} && cat > {shlex.quote(path)}"
         proc = self._exec(["sh", "-c", sh_cmd], stdin=content)
         if proc.returncode != 0:
             raise RuntimeError(
@@ -559,10 +587,7 @@ class ApptainerBackend(SandboxBackend):
 
         proc = self._exec(["cat", path])
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"read_file failed for {path!r}: "
-                f"{proc.stderr.decode('utf-8', 'replace').strip()}"
-            )
+            raise RuntimeError(f"read_file failed for {path!r}: {proc.stderr.decode('utf-8', 'replace').strip()}")
         if binary:
             return proc.stdout
         return proc.stdout.decode("utf-8", errors="replace")
@@ -592,7 +617,4 @@ def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
         return DockerBackend(**kwargs)
     if backend_type == "apptainer":
         return ApptainerBackend(**kwargs)
-    raise ValueError(
-        f"Unknown backend type: {backend_type}. "
-        "Supported: 'docker', 'apptainer'."
-    )
+    raise ValueError(f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer'.")
