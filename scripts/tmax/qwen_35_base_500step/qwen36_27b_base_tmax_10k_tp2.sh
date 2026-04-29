@@ -9,7 +9,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.6-27B + max_steps=100 + no masking + TP=2" \
+       --description "SWERL tmax-10k GRPO with Qwen3.6-27B + max_steps=100 + no masking + TP=2 + SP=4" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -46,7 +46,7 @@ uv run python mason.py \
     --total_episodes 128000 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
-    --sequence_parallel_size 2 \
+    --sequence_parallel_size 4 \
     --num_epochs 1 \
     --num_learners_per_node 8 8 \
     --vllm_num_engines 8 \
@@ -75,7 +75,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen36_27b_base_tmax_10k_grpo_tp2 \
+    --exp_name swerl_qwen36_27b_base_tmax_10k_grpo_tp2_sp4 \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
