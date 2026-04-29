@@ -2290,7 +2290,6 @@ def maybe_evaluate(
             base_env_config=base_env_config,
             actor_manager=actor_manager,
             timeout=timeout,
-            active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
             max_possible_score=max_possible_score,

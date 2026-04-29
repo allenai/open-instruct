@@ -1305,7 +1305,6 @@ def accumulate_inference_batches(
     training_step: int = 0,
     actor_manager=None,
     timeout: float | None = None,
-    active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     active_sampling_max_samples_multiplier: int | None = 10,
     never_give_up: float = 0.0,
@@ -1641,7 +1640,7 @@ def accumulate_inference_batches(
                     base_env_config=base_env_config,
                     prompt_id_suffix=prompt_id_suffix,
                 )
-            if requeue_same_prompt and chain_id is not None and active_sampling:
+            if requeue_same_prompt and chain_id is not None:
                 if maintain_pending_ngu_completions:
                     pending_results.append(result)
                     pending_metrics.append(result.reward_metrics)
@@ -1664,11 +1663,13 @@ def accumulate_inference_batches(
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
                 continue
 
-            if not active_sampling and target_mode == "prompts":
+            # if we're filtering but not replenishing this prompt, still increase our progress bar accordingly
+            if not replenish_prompts and target_mode == "prompts":
                 num_prompts_sampled += 1
                 progress_bar.update(1)
                 if progress_callback is not None:
                     progress_callback(num_prompts_sampled, target_total)
+
             if chain_id is not None:
                 # We are giving up on this retry chain, so drop anything we loaded from pending NGU state
                 # instead of leaving it around for an unrelated future attempt.
@@ -2243,7 +2244,6 @@ class DataPreparationActor:
                 prompt_test_index_map=self.prompt_test_index_map,
                 prompt_test_difficulty_map=self.prompt_test_difficulty_map,
                 actor_manager=self.actor_manager,
-                active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
