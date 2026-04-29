@@ -455,6 +455,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     ratio=ratio,
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
+                    response_mask=response_mask,
                     config=self.grpo_config,
                     tis_weights=tis_clamped,
                 )

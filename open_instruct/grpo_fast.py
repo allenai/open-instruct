@@ -1000,6 +1000,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ratio=ratio_BT,
                         advantages=advantages_BT,
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                        response_mask=response_mask_BT,
                         config=self.args,
                         tis_weights=tis_clamped_BT,
                     )

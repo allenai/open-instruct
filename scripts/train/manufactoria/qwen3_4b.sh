@@ -34,10 +34,10 @@ uv run python mason.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --async_steps 1 \
-    --beta 0.0 \
+    --beta 0.01 \
     --eval_pass_at_k 16 \
     --log_train_solve_rate_metrics \
-    --load_ref_policy false \
+    --load_ref_policy True \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 16 \
     --num_mini_batches 1 \

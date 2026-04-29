@@ -513,7 +513,7 @@ def compute_grpo_loss(
         # We want the KL loss to backpropagate through the model.
         # We also clamp the KL loss to avoid numerical instability.
         # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-        ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
+        ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-10.0, 10.0)
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
     else:

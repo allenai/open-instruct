@@ -189,6 +189,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ratio=ratio,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
             config=config,
             tv_divergence=tv_divergence,
         )
@@ -204,7 +205,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.ones(1, 3)
 
         pg_loss_max, clip_mask, _ = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
+            config=config,
         )
 
         expected_clamped = torch.clamp(ratio, 0.8, 1.2)
@@ -220,7 +226,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.ones(1, 3)
 
         pg_loss_max, clip_mask, _ = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
+            config=config,
         )
 
         pg_loss_max.sum().backward()
@@ -237,10 +248,36 @@ class TestComputeGRPOLoss(unittest.TestCase):
         ref_logprobs = torch.randn(batch_size, seq_len)
 
         _, _, kl = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=ref_logprobs, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
+            config=config,
         )
 
         self.assertFalse(torch.all(kl == 0))
+
+    def test_kl_is_masked_to_response_tokens(self):
+        config = _make_grpo_config(beta=0.05, kl_estimator=2)
+        new_logprobs = torch.tensor([[-1000.0, -0.2, -1000.0]])
+        ref_logprobs = torch.tensor([[-0.1, -0.4, -0.3]])
+        ratio = torch.ones_like(new_logprobs)
+        advantages = torch.ones_like(new_logprobs)
+        response_mask = torch.tensor([[False, True, False]])
+
+        _, _, kl = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            response_mask=response_mask,
+            config=config,
+        )
+
+        self.assertEqual(kl[0, 0].item(), 0.0)
+        self.assertNotEqual(kl[0, 1].item(), 0.0)
+        self.assertEqual(kl[0, 2].item(), 0.0)
 
     def test_without_ref_logprobs(self):
         config = _make_grpo_config()
@@ -249,7 +286,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.randn(2, 4)
 
         _, _, kl = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
+            config=config,
         )
 
         torch.testing.assert_close(kl, torch.zeros_like(kl))
@@ -266,6 +308,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ratio=ratio,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
             config=config,
             tis_weights=None,
         )
@@ -275,6 +318,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ratio=ratio,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
             config=config,
             tis_weights=tis_weights,
         )
@@ -294,6 +338,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ratio=ratio,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones_like(advantages, dtype=torch.bool),
             config=config,
             tv_divergence=tv_divergence,
         )
@@ -310,6 +355,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 ratio=torch.exp(torch.randn(2, 4)),
                 advantages=torch.randn(2, 4),
                 ref_logprobs=None,
+                response_mask=torch.ones(2, 4, dtype=torch.bool),
                 config=config,
             )
 
@@ -321,6 +367,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 ratio=torch.exp(torch.randn(2, 4)),
                 advantages=torch.randn(2, 4),
                 ref_logprobs=None,
+                response_mask=torch.ones(2, 4, dtype=torch.bool),
                 config=config,
             )
 
