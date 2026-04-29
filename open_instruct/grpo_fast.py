@@ -414,8 +414,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 driver_state_path = os.path.join(path, "driver_state.pt")
-                if os.path.exists(driver_state_path):
-                    states.update(torch.load(driver_state_path, weights_only=False))
+                states.update(torch.load(driver_state_path, weights_only=False))
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
@@ -425,12 +424,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 random.setstate(rng_states["python_rng_state"])
 
                 if torch.cuda.is_available():
-                    if "torch_cuda_rng_state_all" in rng_states:
-                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
-                    elif "torch_cuda_rng_states" in rng_states:
-                        for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
-                            device_id = int(device_str.split(":")[1])
-                            torch.cuda.set_rng_state(rng_state, device_id)
+                    torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
@@ -825,7 +819,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # update_ref_policy sets self._ref_policy_dirty; from_pretrained clears it after a load.
         if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
-            if self.rank == 0 and getattr(self, "_ref_policy_dirty", True):
+            if self.rank == 0 and self._ref_policy_dirty:
                 os.makedirs(ref_policy_dir, exist_ok=True)
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
