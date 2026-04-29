@@ -922,7 +922,8 @@ async def _acquire_and_reset_pools(
         active_env_names.append(pool_name)
 
         entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
-        _, target_tools = await target_actor.reset.remote(**entry.kwargs)
+        reset_kwargs = {"max_steps": env_config.max_steps, **entry.kwargs}
+        _, target_tools = await target_actor.reset.remote(**reset_kwargs)
         target_response_role = await target_actor.get_response_role.remote()
         tool_response_roles[pool_name] = target_response_role
 

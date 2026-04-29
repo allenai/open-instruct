@@ -36,6 +36,10 @@ logger = logger_utils.setup_logger(__name__)
 
 
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+LAST_STEP_WARNING = (
+    "Warning: you only have one more tool call remaining. "
+    f"You must end your next tool call with `echo {SUBMIT_MARKER}`"
+)
 
 MAX_OUTPUT_CHARS = 10_000
 
@@ -84,6 +88,7 @@ class SWERLSandboxEnv(RLEnvironment):
         task_data_hf_repo: str = "",
         test_timeout: int = 120,
         timeout: int = 600,
+        last_step_warning: bool = False,
         **backend_kwargs: Any,
     ):
         backend_kwargs["image"] = image
@@ -98,6 +103,8 @@ class SWERLSandboxEnv(RLEnvironment):
         self._task_data_dir = task_data_dir
         self._task_data_hf_repo = task_data_hf_repo
         self._test_timeout = test_timeout
+        self._last_step_warning = last_step_warning
+        self._max_steps: int | None = None
         self._instruction = ""
         self._tests_dir: str | None = None
 
@@ -228,6 +235,7 @@ class SWERLSandboxEnv(RLEnvironment):
             self._backend.start()
         self._step_count = 0
         self._task_id = task_id
+        self._max_steps = kwargs.get("max_steps")
 
         self._backend.run_command("mkdir -p /workspace /output /logs/verifier")
 
@@ -312,7 +320,7 @@ class SWERLSandboxEnv(RLEnvironment):
         if call.name in ("bash", "execute_bash"):
             args = coerce_args(_BASH_TOOL["function"]["parameters"], call.args)
             try:
-                return self._execute_bash(args)
+                return self._with_last_step_warning(self._execute_bash(args))
             except SandboxOOMError as e:
                 logger.warning(f"[{self._task_id}] sandbox OOM: {e}")
                 return StepResult(
@@ -322,7 +330,19 @@ class SWERLSandboxEnv(RLEnvironment):
                     metadata={"oom_killed": True, "task_id": self._task_id},
                 )
         else:
-            return StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash")
+            return self._with_last_step_warning(
+                StepResult(result=f"Error: Unknown tool '{call.name}'. Available: bash")
+            )
+
+    def _with_last_step_warning(self, result: StepResult) -> StepResult:
+        if (
+            self._last_step_warning
+            and not result.done
+            and self._max_steps is not None
+            and self._step_count == self._max_steps - 1
+        ):
+            result.result = f"{result.result}\n\n{LAST_STEP_WARNING}"
+        return result
 
     # ------------------------------------------------------------------
     # execute_bash
@@ -447,3 +467,4 @@ class SWERLSandboxEnvConfig(BaseEnvConfig):
     task_data_hf_repo: str = ""
     test_timeout: int = 120
     timeout: int = 600
+    last_step_warning: bool = False

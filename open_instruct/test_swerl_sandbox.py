@@ -2,7 +2,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from open_instruct.environments.swerl_sandbox import SWERLSandboxEnv
+from open_instruct.environments.backends import ExecutionResult
+from open_instruct.environments.base import EnvCall
+from open_instruct.environments.swerl_sandbox import LAST_STEP_WARNING, SWERLSandboxEnv
+
+
+class _FakeBackend:
+    def __init__(self):
+        self.commands: list[str] = []
+
+    def run_command(self, command: str) -> ExecutionResult:
+        self.commands.append(command)
+        return ExecutionResult(stdout="ok", stderr="", exit_code=0)
 
 
 class TestSWERLSandboxTaskDataSetup(unittest.IsolatedAsyncioTestCase):
@@ -33,3 +44,16 @@ class TestSWERLSandboxTaskDataSetup(unittest.IsolatedAsyncioTestCase):
 
             resolve.assert_not_called()
             self.assertEqual(env._task_data_dir, task_data_dir)
+
+
+class TestSWERLSandboxLastStepWarning(unittest.IsolatedAsyncioTestCase):
+    async def test_warning_is_added_to_second_last_observation(self):
+        env = SWERLSandboxEnv(last_step_warning=True)
+        env._backend = _FakeBackend()
+        env._max_steps = 3
+
+        first = await env.step(EnvCall(id="1", name="bash", args={"command": "echo first"}))
+        second = await env.step(EnvCall(id="2", name="bash", args={"command": "echo second"}))
+
+        self.assertNotIn(LAST_STEP_WARNING, first.result)
+        self.assertIn(LAST_STEP_WARNING, second.result)
