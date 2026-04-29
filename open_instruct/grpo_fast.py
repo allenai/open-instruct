@@ -829,15 +829,20 @@ class PolicyTrainerRayProcess(RayProcess):
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             if self.rank == 0 and should_save_ref_policy(self.args, client_state["training_step"]):
                 os.makedirs(ref_policy_dir, exist_ok=True)
+                # Bypass deepspeed save_checkpoint: ref_policy is wrapped with DummyOptim,
+                # which has no state_dict and would crash inside deepspeed's optimizer save.
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
             client_state["ref_policy_saved"] = True
 
+        # mpu is only used for sequence parallel; deepspeed's checkpoint code paths choke on it,
+        # so detach for the save and restore after.
         old_mpu = None
         if self.model.mpu is not None:
             old_mpu = self.mpu
             self.model.mpu = None
+        # save_checkpoint must be called on every rank; only rank 0 ends up with the merged state.
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
         if self.rank == 0:
