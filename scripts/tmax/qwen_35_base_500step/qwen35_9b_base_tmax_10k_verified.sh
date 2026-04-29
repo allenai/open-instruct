@@ -24,12 +24,14 @@ uv run python mason.py \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=hamishi740 \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
+       --env PODMAN_NUM_LOCKS=65536 \
+       --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --budget ai2/oe-adapt \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=0 \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=1 \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-10k-verified 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
