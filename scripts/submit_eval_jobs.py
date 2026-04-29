@@ -63,8 +63,8 @@ def resolve_olmo_eval_ref(ref: str) -> str:
 
 
 def build_install_block(ref: str) -> str:
-    if not GIT_REF_SAFE_RE.match(ref):
-        raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
+    if not GIT_SHA_RE.match(ref):
+        raise ValueError(f"Expected a 40-char SHA (call resolve_olmo_eval_ref first); got {ref!r}.")
     body = INSTALL_SCRIPT_PATH.read_text()
     return (
         f"bash -s -- {shlex.quote(ref)} <<'{INSTALL_HEREDOC_TAG}'\n"

@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Install olmo-eval-internal at the given git ref, plus a couple of pinned
-# dependency upgrades the base image needs.
-#
-# Usage: install_olmo_eval.sh <git-ref>
-#
-# Env vars: GITHUB_TOKEN must be set (used to clone the private repo).
+# Usage: install_olmo_eval.sh <git-ref>  (requires $GITHUB_TOKEN)
 set -euo pipefail
 
 ref="${1:?missing git ref}"
