@@ -413,6 +413,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                driver_state_path = os.path.join(path, "driver_state.pt")
+                if os.path.exists(driver_state_path):
+                    states.update(torch.load(driver_state_path, weights_only=False))
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
@@ -421,13 +424,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 np.random.set_state(rng_states["numpy_rng_state"])
                 random.setstate(rng_states["python_rng_state"])
 
-                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
-                    # device_str, e.g. "cuda:0"
-                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
-                        device_id = int(device_str.split(":")[1])
-                        torch.cuda.set_rng_state(rng_state, device_id)
+                if torch.cuda.is_available():
                     if "torch_cuda_rng_state_all" in rng_states:
                         torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+                    elif "torch_cuda_rng_states" in rng_states:
+                        for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
+                            device_id = int(device_str.split(":")[1])
+                            torch.cuda.set_rng_state(rng_state, device_id)
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
@@ -470,6 +473,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
+            # Dirty if we initialized fresh weights; clean if we just loaded a saved ref_policy from disk.
+            self._ref_policy_dirty = not getattr(self, "ref_policy_checkpoint_path", None)
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
@@ -577,6 +582,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+        self._ref_policy_dirty = True
 
     def calculate_token_counts(
         self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
@@ -804,62 +810,59 @@ class PolicyTrainerRayProcess(RayProcess):
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
 
-        # Save comprehensive RNG states for each rank
         rng_states = {
             "torch_cpu_rng_state": torch.get_rng_state(),
             "numpy_rng_state": np.random.get_state(),
             "python_rng_state": random.getstate(),
         }
-
-        # Save CUDA RNG states for all devices
         if torch.cuda.is_available():
-            rng_states["torch_cuda_rng_states"] = {
-                f"cuda:{i}": torch.cuda.get_rng_state(i) for i in range(torch.cuda.device_count())
-            }
             rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
 
-        # Add RNG states to client_state
         client_state["rng_states"] = rng_states
         client_state["rank"] = self.rank
 
-        # Save reference policy checkpoint (model only, no optimizer)
+        # Save reference policy weights only when they have changed since the last save.
+        # update_ref_policy sets self._ref_policy_dirty; from_pretrained clears it after a load.
         if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
-            os.makedirs(ref_policy_dir, exist_ok=True)
-
-            # For reference policy, we save just the model weights
-            # We can't use save_checkpoint because it would try to save DummyOptim
-            # which doesn't have state_dict
-            if self.rank == 0:
-                # Only rank 0 saves the model state
+            if self.rank == 0 and getattr(self, "_ref_policy_dirty", True):
+                os.makedirs(ref_policy_dir, exist_ok=True)
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
-                # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
-
+                self._ref_policy_dirty = False
             client_state["ref_policy_saved"] = True
 
-        # Save the main model checkpoint with enhanced client state
-        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
         old_mpu = None
         if self.model.mpu is not None:
             old_mpu = self.mpu
             self.model.mpu = None
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
-        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
             if args.keep_last_n_checkpoints >= 0:
                 clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
-
-            # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
             if args.gs_checkpoint_state_dir is not None:
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
-        # add back the mpu
         if old_mpu is not None:
             self.model.mpu = old_mpu
+
+    def save_driver_state(
+        self, checkpoint_state_dir: str, dataloader_state: dict[str, Any], data_prep_actor_state: dict[str, Any]
+    ) -> None:
+        if self.rank != 0:
+            return
+        latest_file = os.path.join(checkpoint_state_dir, "latest")
+        if not os.path.exists(latest_file):
+            logger.warning(f"No 'latest' file in {checkpoint_state_dir}; skipping driver_state.pt")
+            return
+        with open(latest_file) as f:
+            latest_dir = f.read().strip()
+        target = os.path.join(checkpoint_state_dir, latest_dir, "driver_state.pt")
+        torch.save({"dataloader_state": dataloader_state, "data_prep_actor_state": data_prep_actor_state}, target)
+        logger.info(f"Saved driver state to {target}")
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         output_path = pathlib.Path(output_dir)
@@ -1790,15 +1793,20 @@ def maybe_save_checkpoint_state(
     utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
     with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
         client_state = {"training_step": training_step, "episode": episode, "num_total_tokens": num_total_tokens}
-        client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
-        data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-        client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
         ray_get_with_progress(
             [
                 policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
                 for i in range(args.world_size)
             ],
             desc=f"Saving checkpoint state at step {training_step}",
+        )
+        dataloader_state = ray.get(policy_group.models[0].get_dataloader_state.remote())
+        data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+        data_prep_actor_state = ray.get(data_prep_actor.get_state.remote())
+        ray.get(
+            policy_group.models[0].save_driver_state.remote(
+                args.checkpoint_state_dir, dataloader_state, data_prep_actor_state
+            )
         )
     save_time = timer.duration
 
