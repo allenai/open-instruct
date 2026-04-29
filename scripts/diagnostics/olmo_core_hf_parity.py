@@ -143,15 +143,26 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="Qwen/Qwen3-4B-Base")
     parser.add_argument("--attn", default="flash_2", help="OLMo-core attention backend")
+    parser.add_argument(
+        "--hf_attn",
+        default="sdpa",
+        help="HF attn_implementation (sdpa, flash_attention_2, flash_attention_3)",
+    )
     parser.add_argument("--work_dir", default="/tmp/olmo_core_parity")
     args = parser.parse_args()
 
     device = torch.device("cuda")
     dtype = torch.bfloat16
 
-    logger.info(f"Loading HF + OLMo-core ({args.model})")
+    logger.info(f"Loading HF + OLMo-core ({args.model}) [hf_attn={args.hf_attn}, olmo_attn={args.attn}]")
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.model)
-    hf_model = transformers.AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype).to(device).eval()
+    hf_model = (
+        transformers.AutoModelForCausalLM.from_pretrained(
+            args.model, torch_dtype=dtype, attn_implementation=args.hf_attn
+        )
+        .to(device)
+        .eval()
+    )
 
     hf_config = transformers.AutoConfig.from_pretrained(args.model)
     olmo_config = olmo_core_utils.get_transformer_config(args.model, hf_config.vocab_size, attn_backend=args.attn)
