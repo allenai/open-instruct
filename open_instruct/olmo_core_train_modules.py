@@ -446,7 +446,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 if self.grpo_config.use_icepop:
                     tis_clamped, tis_unclamped = None, None
-                    icepop_mask = grpo_utils.compute_icepop_mask(
+                    icepop_mask, icepop_dropped_low, icepop_dropped_high = grpo_utils.compute_icepop_mask(
                         old_logprob,
                         vllm_logprobs,
                         response_mask,
@@ -461,6 +461,8 @@ class GRPOTrainModule(TransformerTrainModule):
                         self.grpo_config.truncated_importance_sampling_ratio_cap,
                     )
                     icepop_mask = None
+                    icepop_dropped_low = None
+                    icepop_dropped_high = None
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -495,6 +497,8 @@ class GRPOTrainModule(TransformerTrainModule):
                     tis_clamped=tis_clamped,
                     tis_unclamped=tis_unclamped,
                     icepop_mask=icepop_mask,
+                    icepop_dropped_low=icepop_dropped_low,
+                    icepop_dropped_high=icepop_dropped_high,
                 )
 
                 num_steps += 1

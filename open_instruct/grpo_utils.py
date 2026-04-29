@@ -333,16 +333,22 @@ def compute_tis_weights(
 
 def compute_icepop_mask(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, alpha: float, beta: float
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """IcePop M(ρ; α, β): ρ where ρ ∈ [α, β] on response tokens, 0 elsewhere.
 
     Implements eq. (2) of https://arxiv.org/abs/2510.18855. In-range tokens are
     reweighted by ρ = π^train_old / π^infer_old (a stop-gradient IS correction
     for the train/infer engine mismatch); out-of-range tokens are dropped.
+
+    Returns (mask, dropped_low, dropped_high) where dropped_low marks tokens
+    with ρ < α and dropped_high marks ρ > β (both restricted to response tokens).
     """
     rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
-    in_range = (rho >= alpha) & (rho <= beta) & response_mask
-    return torch.where(in_range, rho, torch.zeros_like(rho))
+    dropped_low = (rho < alpha) & response_mask
+    dropped_high = (rho > beta) & response_mask
+    in_range = response_mask & ~dropped_low & ~dropped_high
+    mask = torch.where(in_range, rho, torch.zeros_like(rho))
+    return mask, dropped_low, dropped_high
 
 
 def resolve_old_logprob(
@@ -545,6 +551,8 @@ _SCALAR_LOSS_STAT_KEYS = [
     "val/tis_clipfrac",
     "val/tis_ratio",
     "val/icepop_drop_frac",
+    "val/icepop_drop_low_frac",
+    "val/icepop_drop_high_frac",
 ]
 
 
@@ -571,6 +579,8 @@ def populate_sample_loss_stats(
     tis_clamped: torch.Tensor | None = None,
     tis_unclamped: torch.Tensor | None = None,
     icepop_mask: torch.Tensor | None = None,
+    icepop_dropped_low: torch.Tensor | None = None,
+    icepop_dropped_high: torch.Tensor | None = None,
 ) -> None:
     with torch.no_grad():
         if config.load_ref_policy and ref_logprobs is not None:
@@ -588,6 +598,14 @@ def populate_sample_loss_stats(
         if icepop_mask is not None:
             dropped = (icepop_mask == 0).float()
             loss_stats_B["val/icepop_drop_frac"][sample_idx] = masked_mean(dropped, response_mask)
+        if icepop_dropped_low is not None:
+            loss_stats_B["val/icepop_drop_low_frac"][sample_idx] = masked_mean(
+                icepop_dropped_low.float(), response_mask
+            )
+        if icepop_dropped_high is not None:
+            loss_stats_B["val/icepop_drop_high_frac"][sample_idx] = masked_mean(
+                icepop_dropped_high.float(), response_mask
+            )
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss

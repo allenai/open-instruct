@@ -738,7 +738,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     ratio_BT = torch.exp(logprobs_diff_BT)
                     if self.args.use_icepop:
                         tis_clamped_BT, tis_unclamped_BT = None, None
-                        icepop_mask_BT = grpo_utils.compute_icepop_mask(
+                        icepop_mask_BT, icepop_dropped_low_BT, icepop_dropped_high_BT = grpo_utils.compute_icepop_mask(
                             old_logprob_BT,
                             vllm_logprobs_BT,
                             response_mask_BT,
@@ -753,6 +753,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.args.truncated_importance_sampling_ratio_cap,
                         )
                         icepop_mask_BT = None
+                        icepop_dropped_low_BT = None
+                        icepop_dropped_high_BT = None
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -798,6 +800,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_clamped=tis_clamped_BT,
                         tis_unclamped=tis_unclamped_BT,
                         icepop_mask=icepop_mask_BT,
+                        icepop_dropped_low=icepop_dropped_low_BT,
+                        icepop_dropped_high=icepop_dropped_high_BT,
                     )
 
             batch_metrics = batch_data["metrics"]

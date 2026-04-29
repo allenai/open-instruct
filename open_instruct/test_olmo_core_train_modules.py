@@ -274,13 +274,21 @@ class TestComputeGRPOLoss(unittest.TestCase):
         # In-range tokens are reweighted by ρ, not gated to 1.
         old_logprob = torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
         vllm_logprobs = torch.zeros_like(old_logprob)
-        mask = grpo_utils.compute_icepop_mask(old_logprob, vllm_logprobs, response_mask, alpha, beta)
+        mask, dropped_low, dropped_high = grpo_utils.compute_icepop_mask(
+            old_logprob, vllm_logprobs, response_mask, alpha, beta
+        )
         torch.testing.assert_close(mask, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
+        torch.testing.assert_close(dropped_low, torch.tensor([[True, False, False, False, False]]))
+        torch.testing.assert_close(dropped_high, torch.tensor([[False, False, False, False, True]]))
 
-        # Padding tokens (response_mask=False) should always be 0.
+        # Padding tokens (response_mask=False) should always be 0 / not counted as dropped.
         response_mask_with_pad = torch.tensor([[False, True, True, True, False]])
-        mask_pad = grpo_utils.compute_icepop_mask(old_logprob, vllm_logprobs, response_mask_with_pad, alpha, beta)
+        mask_pad, dropped_low_pad, dropped_high_pad = grpo_utils.compute_icepop_mask(
+            old_logprob, vllm_logprobs, response_mask_with_pad, alpha, beta
+        )
         torch.testing.assert_close(mask_pad, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
+        torch.testing.assert_close(dropped_low_pad, torch.zeros_like(response_mask_with_pad, dtype=torch.bool))
+        torch.testing.assert_close(dropped_high_pad, torch.zeros_like(response_mask_with_pad, dtype=torch.bool))
 
     def test_icepop_zeroes_loss(self):
         config = _make_grpo_config()
