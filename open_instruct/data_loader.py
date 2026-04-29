@@ -649,6 +649,11 @@ class StreamingDataLoaderConfig:
             raise ValueError(
                 "`num_response_tokens_rollout` and `num_response_completions_rollout` are mutually exclusive."
             )
+        assert (
+            self.active_sampling
+            or self.num_response_tokens_rollout is None
+            and self.num_response_completions_rollout is None
+        ), "`num_response_tokens_rollout` and `num_response_completions_rollout` require active_sampling."
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
@@ -1305,6 +1310,7 @@ def accumulate_inference_batches(
     training_step: int = 0,
     actor_manager=None,
     timeout: float | None = None,
+    active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     active_sampling_max_samples_multiplier: int | None = 10,
     never_give_up: float = 0.0,
@@ -1484,16 +1490,6 @@ def accumulate_inference_batches(
             pending_never_give_up_reward_sums[chain_id] = pending_reward_sum
             pending_never_give_up_attempt_counts[chain_id] = pending_attempt_count
 
-    def clear_pending_state(chain_id: str) -> None:
-        lock = never_give_up_state_lock or contextlib.nullcontext()
-        with lock:
-            pending_never_give_up_results.pop(chain_id, None)
-            pending_never_give_up_metrics.pop(chain_id, None)
-            pending_never_give_up_best_reward.pop(chain_id, None)
-            pending_never_give_up_response_counts.pop(chain_id, None)
-            pending_never_give_up_reward_sums.pop(chain_id, None)
-            pending_never_give_up_attempt_counts.pop(chain_id, None)
-
     def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
         nonlocal total_filtered_completions, filtered_completions_zero
@@ -1612,18 +1608,30 @@ def accumulate_inference_batches(
                 # if there are previous ngu samples, accept only if reward is better than previous
                 accept_this_batch = current_reward > pending_best_reward
 
+        percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
+        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+            assert iter_dataloader is not None
+            assert result.index is not None
+            iter_dataloader.exclude_index(result.index, persist=no_resampling_persist)
+            total_no_resampled += 1
+            logging.debug(
+                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
+
         if not accept_this_batch:
             best_reward = current_reward if pending_best_reward is None else max(pending_best_reward, current_reward)
+            # solved prompts are fully solved with all results having best possible score
             solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
+
             # Requeue filtered unsolved prompts with probability `never_give_up`.
             requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
+
             if replenish_prompts:
                 assert param_prompt_Q is not None
 
-                # if we are replenishing prompts, requeue this particular prompt if requeue_same_prompt
-                # increase the ngu_suffix so it doesn't clash with previous ids
                 prompt_id_suffix = None
                 if requeue_same_prompt:
+                    # if we are replenishing prompts and requeuing this particular prompt increase the ngu_suffix so it doesn't clash with previous ids
                     replacement_example = example
                     prompt_id_suffix = get_never_give_up_retry_suffix(
                         result.prompt_id, iter_dataloader._epoch if iter_dataloader is not None else 0, result.index
@@ -1640,7 +1648,15 @@ def accumulate_inference_batches(
                     base_env_config=base_env_config,
                     prompt_id_suffix=prompt_id_suffix,
                 )
-            if requeue_same_prompt:
+
+            if solved_prompt:
+                # prompt is fully solved, record it as filtered
+                for pending_result in pending_results:
+                    record_filtered_prompt(pending_result, prompt_dataset_key)
+                record_filtered_prompt(result, prompt_dataset_key)
+            elif requeue_same_prompt:
+                # didn't give up on prompt, store all info
+
                 if maintain_pending_ngu_completions:
                     pending_results.append(result)
                     pending_metrics.append(result.reward_metrics)
@@ -1661,32 +1677,29 @@ def accumulate_inference_batches(
                         current_attempt_count,
                     )
                 logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
-                continue
+            else:
+                # We are giving up on this unsolved retry chain, we don't save the pending NGU state
+                give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
+                    result.responses
+                )
+                if give_up_count > 0:
+                    given_up_prompts_by_dataset[prompt_dataset_key] = (
+                        given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
+                    )
+                    given_up_prompts_resamples.append(current_attempt_count)
 
-            # if we're filtering but not replenishing this prompt, still increase our progress bar accordingly
-            if not replenish_prompts and target_mode == "prompts":
+                # also record this prompt and all its pending results as filtered
+                for pending_result in pending_results:
+                    record_filtered_prompt(pending_result, prompt_dataset_key)
+                record_filtered_prompt(result, prompt_dataset_key)
+                logging.debug(f"[Data Preparation Thread] Filtered prompt total filtered {total_filtered_prompts}")
+
+            if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
                 if progress_callback is not None:
                     progress_callback(num_prompts_sampled, target_total)
 
-            # We are giving up on this retry chain, so drop anything we loaded from pending NGU state
-            # instead of leaving it around for an unrelated future attempt.
-            clear_pending_state(chain_id)
-            give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
-                result.responses
-            )
-            if not solved_prompt and give_up_count > 0:
-                given_up_prompts_by_dataset[prompt_dataset_key] = (
-                    given_up_prompts_by_dataset.get(prompt_dataset_key, 0) + give_up_count
-                )
-                given_up_prompts_resamples.append(current_attempt_count)
-            for pending_result in pending_results:
-                record_filtered_prompt(pending_result, prompt_dataset_key)
-            record_filtered_prompt(result, prompt_dataset_key)
-            logging.debug(
-                f"[Data Preparation Thread] Filtered prompt during active sampling, total filtered {total_filtered_prompts}"
-            )
             continue
         else:
             # if we accept this batch and must replenish prompts, add a new prompt to the queue
@@ -1787,16 +1800,6 @@ def accumulate_inference_batches(
             all_test_passes.append(test_pass)
             if relative_test_index < len(prompt_test_difficulties):
                 all_test_difficulties.append(prompt_test_difficulties[relative_test_index])
-
-        percent_solved = float(np.isclose(reward_scores, max_possible_score).mean())
-        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-            assert iter_dataloader is not None
-            assert result.index is not None
-            iter_dataloader.exclude_index(result.index, persist=no_resampling_persist)
-            total_no_resampled += 1
-            logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
-            )
 
         results.append(result)
         all_queries.extend(k_queries)
@@ -2243,6 +2246,7 @@ class DataPreparationActor:
                 prompt_test_index_map=self.prompt_test_index_map,
                 prompt_test_difficulty_map=self.prompt_test_difficulty_map,
                 actor_manager=self.actor_manager,
+                active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
