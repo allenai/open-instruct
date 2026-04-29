@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from open_instruct.grpo_fast_genvalue import GenValueExperimentConfig, segment_rollout
+from open_instruct.grpo_fast_genvalue import GenValueExperimentConfig, _get_gen_value_max_model_len, segment_rollout
 
 
 # ── segment_rollout ────────────────────────────────────────────────────────────
@@ -148,6 +148,17 @@ def test_genvalue_config_valid_conditionings():
         kwargs["gen_value_conditioning"] = cond
         cfg = GenValueExperimentConfig(**kwargs)
         assert cfg.gen_value_conditioning == cond
+
+
+def test_get_gen_value_max_model_len_includes_generation_budget():
+    kwargs = _base_kwargs()
+    kwargs["gen_value_max_new_tokens"] = 1024
+    cfg = GenValueExperimentConfig(**kwargs)
+
+    class StreamingConfig:
+        pack_length = 10_240
+
+    assert _get_gen_value_max_model_len(StreamingConfig, cfg) == 21_504
 
 
 # ── _build_sample_scoring_prompts (pure-Python, no GPU) ───────────────────────

@@ -398,6 +398,11 @@ def score_partial_rollout_batch(
     return scores, raw
 
 
+def _get_gen_value_max_model_len(streaming_config: Any, args: Any) -> int:
+    """Reserve context for gen-value scoring prompts plus the critic's answer."""
+    return streaming_config.pack_length * 2 + args.gen_value_max_new_tokens
+
+
 def _build_sample_scoring_prompts(
     args: GenValueExperimentConfig, tokenizer: Any, train_dataset: Any, n: int, ground_truths_key: str = "ground_truth"
 ) -> list[str]:
@@ -749,7 +754,7 @@ def main():
         # The gen-value engines are queried directly via score_partial_rollout_batch(); they do
         # not participate in the queue-driven rollout loop.  We pass sentinel Ray queues so the
         # LLMRayActor's internal prefetch thread doesn't crash (it blocks on an empty queue).
-        gen_value_max_model_len = streaming_config.pack_length * 2
+        gen_value_max_model_len = _get_gen_value_max_model_len(streaming_config, args)
         gen_value_prompt_Q: ray_queue.Queue = ray_queue.Queue()
         gen_value_results_Q: ray_queue.Queue = ray_queue.Queue()
         gen_value_eval_Q: ray_queue.Queue = ray_queue.Queue()
