@@ -1659,6 +1659,13 @@ def one_training_step(
 
     save_time = maybe_save_checkpoint(args, training_step, policy_group, chat_template_name, tokenizer, wandb_url)
 
+    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
+    response_lengths = array_metrics[0]["batch/response_lengths"]
+    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
+    save_time += maybe_save_checkpoint_state(
+        args, training_step, episode, num_total_tokens + num_step_tokens, policy_group
+    )
+
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     # Note: metrics contains scalar metrics from each worker, array_metrics contains list/array metrics
@@ -1697,9 +1704,6 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
-    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics[0]["batch/response_lengths"]
-    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1780,6 +1784,38 @@ def maybe_save_checkpoint(
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
+        save_time = timer.duration
+
+    return save_time
+
+
+def maybe_save_checkpoint_state(
+    args: grpo_utils.GRPOExperimentConfig,
+    training_step: int,
+    episode: int,
+    num_total_tokens: int,
+    policy_group: ModelGroup,
+) -> float:
+    save_time = 0
+    if (
+        args.checkpoint_state_freq > 0
+        and training_step % args.checkpoint_state_freq == 0
+        and args.checkpoint_state_dir is not None
+    ):
+        utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
+        with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
+            client_state = {"training_step": training_step, "episode": episode, "num_total_tokens": num_total_tokens}
+            client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
+            data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+            client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving checkpoint state at step {training_step}",
+            )
+            logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
         save_time = timer.duration
 
     return save_time
@@ -2200,38 +2236,6 @@ def run_training(
             actor_manager,
         )
         num_total_tokens += num_step_tokens
-
-        # Checkpoint after one_training_step (or even if it was skipped)
-        # This ensures we checkpoint progress even if the exact checkpoint step has no data
-        if (
-            args.checkpoint_state_freq > 0
-            and training_step % args.checkpoint_state_freq == 0
-            and args.checkpoint_state_dir is not None
-        ):
-            utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
-            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                # Save comprehensive client state including dataloader state
-                client_state = {
-                    "training_step": training_step,
-                    "episode": episode,
-                    "num_total_tokens": num_total_tokens,
-                }
-
-                # Save dataloader state from Ray actor
-                client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
-
-                # Save DataPreparationActor state
-                data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-                client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
-
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving checkpoint state at step {training_step}",
-                )
-                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         if training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
