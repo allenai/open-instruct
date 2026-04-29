@@ -133,6 +133,15 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
+def should_save_ref_policy(args: grpo_utils.GRPOExperimentConfig, training_step: int) -> bool:
+    return (
+        args.load_ref_policy
+        and args.ref_policy_update_freq is not None
+        and training_step % args.ref_policy_update_freq == 0
+        and args.alpha > 0
+    )
+
+
 def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
     if checkpoint_state is None:
         return None
@@ -414,7 +423,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 driver_state_path = os.path.join(path, "driver_state.pt")
-                states.update(torch.load(driver_state_path, weights_only=False))
+                if os.path.exists(driver_state_path):
+                    states.update(torch.load(driver_state_path, weights_only=False))
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
@@ -467,8 +477,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
-            # Dirty if we initialized fresh weights; clean if we just loaded a saved ref_policy from disk.
-            self._ref_policy_dirty = not getattr(self, "ref_policy_checkpoint_path", None)
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
@@ -576,7 +584,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
-        self._ref_policy_dirty = True
 
     def calculate_token_counts(
         self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
@@ -815,16 +822,16 @@ class PolicyTrainerRayProcess(RayProcess):
         client_state["rng_states"] = rng_states
         client_state["rank"] = self.rank
 
-        # Save reference policy weights only when they have changed since the last save.
-        # update_ref_policy sets self._ref_policy_dirty; from_pretrained clears it after a load.
+        # Only rewrite the ref_policy at the steps where it gets updated; matches the
+        # update gate in `should_save_ref_policy`. Off-cadence checkpoints reuse the
+        # ref_policy file that's already on disk from the last update.
         if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
-            if self.rank == 0 and self._ref_policy_dirty:
+            if self.rank == 0 and should_save_ref_policy(self.args, client_state["training_step"]):
                 os.makedirs(ref_policy_dir, exist_ok=True)
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
-                self._ref_policy_dirty = False
             client_state["ref_policy_saved"] = True
 
         old_mpu = None
@@ -1626,12 +1633,7 @@ def one_training_step(
         if all(len(m) == 0 for m in metrics):
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
             return 0
-        if (
-            args.load_ref_policy
-            and args.ref_policy_update_freq is not None
-            and training_step % args.ref_policy_update_freq == 0
-            and args.alpha > 0
-        ):
+        if should_save_ref_policy(args, training_step):
             update_ref_policy_future.extend(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
