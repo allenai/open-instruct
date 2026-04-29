@@ -376,6 +376,28 @@ def compute_grpo_loss(
     return pg_losses, pg_losses2, pg_loss_max, kl
 
 
+def compute_olmo_core_doc_lens(attention_mask: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
+    """Convert an integer-coded packed attention_mask to OLMo-core ``doc_lens`` / ``max_doc_lens``.
+
+    The packed-sequence collator encodes per-doc indices as positive integers (1, 2, ...) in
+    ``attention_mask``, with 0 for padding. OLMo-core's Transformer requires explicit
+    ``doc_lens`` (B, max_docs) int32 and ``max_doc_lens`` (list[int], per row) to do intra-doc
+    attention; passing ``position_ids`` alone is a silent no-op (see docs/grpo_divergence.md).
+    """
+    B = attention_mask.size(0)
+    rows: list[torch.Tensor] = []
+    for i in range(B):
+        vals, counts = torch.unique_consecutive(attention_mask[i], return_counts=True)
+        rows.append(counts[vals > 0])
+    max_docs = max((t.numel() for t in rows), default=0)
+    doc_lens = torch.zeros((B, max_docs), dtype=torch.int32, device=attention_mask.device)
+    for i, t in enumerate(rows):
+        if t.numel():
+            doc_lens[i, : t.numel()] = t.to(torch.int32)
+    max_doc_lens = [int(t.max().item()) if t.numel() else 0 for t in rows]
+    return doc_lens, max_doc_lens
+
+
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
@@ -384,9 +406,28 @@ def forward_for_logprobs(
     pad_token_id: int,
     temperature: float,
     return_entropy: bool = False,
+    pass_olmo_core_doc_lens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """Forward pass to compute log probabilities."""
-    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
+    """Forward pass to compute log probabilities.
+
+    When ``pass_olmo_core_doc_lens=True``, derives ``doc_lens`` / ``max_doc_lens`` from the
+    integer-coded ``attention_mask`` and passes them to the model (required for intra-doc
+    attention with OLMo-core's Transformer on packed sequences). The integer-coded
+    ``attention_mask`` itself is replaced with ``None`` for the forward call since OLMo-core
+    does not consume it.
+    """
+    extra_kwargs: dict = {}
+    attention_mask_kw = attention_mask
+    if pass_olmo_core_doc_lens:
+        if attention_mask is None:
+            raise ValueError("pass_olmo_core_doc_lens=True requires a non-None attention_mask")
+        doc_lens, max_doc_lens = compute_olmo_core_doc_lens(attention_mask)
+        extra_kwargs["doc_lens"] = doc_lens
+        extra_kwargs["max_doc_lens"] = max_doc_lens
+        attention_mask_kw = None
+    output = model(
+        input_ids=query_responses, attention_mask=attention_mask_kw, position_ids=position_ids, **extra_kwargs
+    )
     logits = getattr(output, "logits", output)
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
@@ -412,6 +453,7 @@ def compute_logprobs(
     temperature: float,
     use_grad: bool = False,
     batch_size: int | None = None,
+    pass_olmo_core_doc_lens: bool = False,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch."""
     logprobs_BT: list[torch.Tensor] = []
@@ -435,11 +477,12 @@ def compute_logprobs(
                     single_logprobs, _ = forward_for_logprobs(
                         model,
                         data_BT.query_responses[i],
-                        None,
+                        data_BT.attention_masks[i] if pass_olmo_core_doc_lens else None,
                         data_BT.position_ids[i],
                         pad_token_id,
                         temperature,
                         False,
+                        pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
                     )
 
                     response_mask_BT = data_BT.response_masks[i]
@@ -449,9 +492,21 @@ def compute_logprobs(
 
             batch_query_responses = torch.cat(query_responses, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
+            batch_attention_mask = (
+                torch.cat([data_BT.attention_masks[i] for i in batch_indices], dim=0)
+                if pass_olmo_core_doc_lens
+                else None
+            )
 
             batch_logprobs, _ = forward_for_logprobs(
-                model, batch_query_responses, None, batch_position_ids, pad_token_id, temperature, False
+                model,
+                batch_query_responses,
+                batch_attention_mask,
+                batch_position_ids,
+                pad_token_id,
+                temperature,
+                False,
+                pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]

@@ -76,4 +76,6 @@ uv run open_instruct/grpo.py \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
+    --output_dir "/tmp-3m/${RUN_NAME}" \
+    --checkpoint_state_dir "/tmp-3m/${RUN_NAME}" \
     --push_to_hub False "$@"
