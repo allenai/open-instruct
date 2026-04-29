@@ -1640,7 +1640,7 @@ def accumulate_inference_batches(
                     base_env_config=base_env_config,
                     prompt_id_suffix=prompt_id_suffix,
                 )
-            if requeue_same_prompt and chain_id is not None:
+            if requeue_same_prompt:
                 if maintain_pending_ngu_completions:
                     pending_results.append(result)
                     pending_metrics.append(result.reward_metrics)
@@ -1670,10 +1670,9 @@ def accumulate_inference_batches(
                 if progress_callback is not None:
                     progress_callback(num_prompts_sampled, target_total)
 
-            if chain_id is not None:
-                # We are giving up on this retry chain, so drop anything we loaded from pending NGU state
-                # instead of leaving it around for an unrelated future attempt.
-                clear_pending_state(chain_id)
+            # We are giving up on this retry chain, so drop anything we loaded from pending NGU state
+            # instead of leaving it around for an unrelated future attempt.
+            clear_pending_state(chain_id)
             give_up_count = count_pending_completion_samples(pending_results, pending_response_count) + len(
                 result.responses
             )
