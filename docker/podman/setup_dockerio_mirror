@@ -2,6 +2,10 @@
 import os
 
 
+DEFAULT_NUM_LOCKS = 8192
+STORAGE_CONF_PATH = "/etc/containers/storage.conf"
+
+
 def generate_registries_conf():
     mirror_urls = os.environ.get("MIRROR_URL", "")
 
@@ -27,5 +31,44 @@ insecure = true
         f.write(config)
 
 
+def generate_storage_conf():
+    num_locks = int(os.environ.get("PODMAN_NUM_LOCKS", DEFAULT_NUM_LOCKS))
+
+    if os.path.exists(STORAGE_CONF_PATH):
+        with open(STORAGE_CONF_PATH) as f:
+            config = f.read()
+    else:
+        config = ""
+
+    lines = config.splitlines()
+    in_storage_options = False
+    storage_options_line = None
+    num_locks_line = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_storage_options = stripped == "[storage.options]"
+            if in_storage_options:
+                storage_options_line = idx
+            continue
+        if in_storage_options and stripped.startswith("num_locks"):
+            num_locks_line = idx
+            break
+
+    if num_locks_line is not None:
+        lines[num_locks_line] = f"num_locks = {num_locks}"
+    elif storage_options_line is not None:
+        lines.insert(storage_options_line + 1, f"num_locks = {num_locks}")
+    else:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(["[storage.options]", f"num_locks = {num_locks}"])
+
+    with open(STORAGE_CONF_PATH, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 if __name__ == "__main__":
+    generate_storage_conf()
     generate_registries_conf()
