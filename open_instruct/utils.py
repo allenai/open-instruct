@@ -1854,7 +1854,7 @@ class ModelDims:
         if self.device_name is None and torch.cuda.is_available():
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
-        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.head_dim > 0, "head_dim must be positive"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
@@ -1893,7 +1893,10 @@ class ModelDims:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
                 num_sliding_window_layers = config.num_hidden_layers
-        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+        head_dim = getattr(config, "head_dim", None)
+        if head_dim is None:
+            assert hidden_size % config.num_attention_heads == 0, "hidden_size must be divisible by num_attention_heads"
+            head_dim = hidden_size // config.num_attention_heads
         return cls(
             num_layers=config.num_hidden_layers,
             hidden_size=hidden_size,
