@@ -3,8 +3,9 @@ import datetime
 import json
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import asdict, dataclass, field, is_dataclass
+from enum import Enum
 from typing import Generic, TypeVar
 
 import numpy as np
@@ -17,6 +18,29 @@ logger = logger_utils.setup_logger(__name__)
 
 _rollout_executor = ThreadPoolExecutor(max_workers=2)
 ROLLOUT_SHARD_SIZE = 10000
+
+
+def _json_default(obj):
+    if is_dataclass(obj):
+        return asdict(obj)
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().tolist()
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    return str(obj)
+
+
+def _log_rollout_save_failure(future: Future) -> None:
+    try:
+        future.result()
+    except Exception:
+        logger.exception("Failed to save rollout traces")
 
 
 @dataclass
@@ -63,7 +87,7 @@ def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None)
     metadata_path = os.path.join(save_path, f"{run_name}_metadata.jsonl")
     os.makedirs(save_path, exist_ok=True)
     with open(metadata_path, "w") as f:
-        f.write(json.dumps(asdict(metadata)) + "\n")
+        f.write(json.dumps(asdict(metadata), default=_json_default) + "\n")
     logger.info(f"Saved rollout metadata to {metadata_path}")
 
 
@@ -124,7 +148,7 @@ def _save_rollouts(
 
     with open(filepath, "a") as f:
         for record in records:
-            f.write(json.dumps(record) + "\n")
+            f.write(json.dumps(record, default=_json_default) + "\n")
     logger.info(f"Saved {len(records)} rollouts to {filepath}")
 
 
@@ -146,7 +170,7 @@ def _save_trainer_logprobs(
                 "trainer_logprobs": lp_cpu,
                 "response_mask": mask_cpu,
             }
-            f.write(json.dumps(record) + "\n")
+            f.write(json.dumps(record, default=_json_default) + "\n")
     logger.info(f"Saved trainer logprobs for step {step} ({len(trainer_logprobs)} samples) to {filepath}")
 
 
@@ -160,9 +184,10 @@ def save_trainer_logprobs_to_disk(
     saved tensors represent only the local SP slice; downstream consumers
     must gather across ranks themselves.
     """
-    _rollout_executor.submit(
+    future = _rollout_executor.submit(
         _save_trainer_logprobs, save_path, run_name, step, trainer_logprobs, response_masks, sp_size
     )
+    future.add_done_callback(_log_rollout_save_failure)
 
 
 def save_rollouts_to_disk(
@@ -191,9 +216,10 @@ def save_rollouts_to_disk(
         total_samples_written: Total samples written so far, used for sharding.
     """
     shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
-    _rollout_executor.submit(
+    future = _rollout_executor.submit(
         _save_rollouts, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
     )
+    future.add_done_callback(_log_rollout_save_failure)
 
 
 @dataclass

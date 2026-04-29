@@ -169,8 +169,8 @@ EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 def _build_vlm_name_mapper(model_name: str):
     """Sometimes we have different weight names btw vLLM and HF, so we build
-    a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in vLLM but not HF."""
-    if "qwen3.5" in model_name.lower():
+    a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF."""
+    if any(qwen_version in model_name.lower() for qwen_version in ("qwen3.5", "qwen3.6")):
         return lambda name: f"language_model.{name}"
     return None
 
