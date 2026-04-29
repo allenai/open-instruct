@@ -2,7 +2,7 @@
 # Usage: install_olmo_eval.sh <git-ref>  (requires $GITHUB_TOKEN)
 set -euo pipefail
 
-ref="${1:?missing git ref}"
+ref="$1"
 
 cache_dir=/weka/oe-eval-default/olmo-eval-pypi-cache
 
