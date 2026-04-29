@@ -30,6 +30,7 @@ uv run python mason.py \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=hamishi740 \
+       --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --budget ai2/oe-adapt \
        --mount_docker_socket \
