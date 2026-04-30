@@ -11,15 +11,7 @@ class _FakeDockerContainer:
     short_id = "abc123"
 
     def __init__(self, *, exec_errors=None):
-        self.attrs = {
-            "State": {
-                "Status": "running",
-                "Running": True,
-                "ExitCode": 0,
-                "OOMKilled": False,
-                "Error": "",
-            }
-        }
+        self.attrs = {"State": {"Status": "running", "Running": True, "ExitCode": 0, "OOMKilled": False, "Error": ""}}
         self.exec_calls = 0
         self.reload_calls = 0
         self.exec_errors = list(exec_errors or [])
@@ -36,6 +28,38 @@ class _FakeDockerContainer:
 
 def _api_error(message: str) -> docker_sdk.errors.APIError:
     return docker_sdk.errors.APIError(message)
+
+
+def test_create_client_uses_explicit_docker_host():
+    backend = DockerBackend(image="test-image", docker_host="unix:///tmp/podman-1.sock")
+    expected_client = MagicMock()
+
+    with (
+        patch(
+            "open_instruct.environments.backends.docker_sdk.DockerClient", return_value=expected_client
+        ) as docker_client,
+        patch("open_instruct.environments.backends.docker_sdk.from_env") as from_env,
+    ):
+        client = backend._create_client()
+
+    assert client is expected_client
+    docker_client.assert_called_once_with(base_url="unix:///tmp/podman-1.sock", timeout=300)
+    from_env.assert_not_called()
+
+
+def test_create_client_uses_environment_without_explicit_docker_host():
+    backend = DockerBackend(image="test-image")
+    expected_client = MagicMock()
+
+    with (
+        patch("open_instruct.environments.backends.docker_sdk.DockerClient") as docker_client,
+        patch("open_instruct.environments.backends.docker_sdk.from_env", return_value=expected_client) as from_env,
+    ):
+        client = backend._create_client()
+
+    assert client is expected_client
+    from_env.assert_called_once_with(timeout=300)
+    docker_client.assert_not_called()
 
 
 def test_run_command_retries_database_locked_exec_error_on_same_container():

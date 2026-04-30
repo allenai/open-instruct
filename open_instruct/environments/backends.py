@@ -156,40 +156,50 @@ class DockerBackend(SandboxBackend):
     _TRANSIENT_EXEC_RETRY_BASE_DELAY_S = 0.5
     _TRANSIENT_EXEC_RETRY_MAX_DELAY_S = 8.0
     _TRANSIENT_EXEC_RETRY_JITTER_S = 0.5
-    _TRANSIENT_EXEC_API_ERROR_MARKERS = (
-        "database is locked",
-        "retrieving exec session",
-        "timed out waiting for file",
-    )
+    _TRANSIENT_EXEC_API_ERROR_MARKERS = ("database is locked", "retrieving exec session", "timed out waiting for file")
     _START_SEMAPHORE = _FileSlotSemaphore("docker-start", _env_int("SWERL_DOCKER_START_CONCURRENCY", 64))
     _EXEC_SEMAPHORE = _FileSlotSemaphore("docker-exec", _env_int("SWERL_DOCKER_EXEC_CONCURRENCY", 256))
     _TIMING_LOGS = _env_flag("SWERL_SANDBOX_TIMING_LOGS", False)
     _TIMING_LOG_THRESHOLD_S = _env_float("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", 1.0)
 
-    def __init__(self, image: str = "python:3.12-slim", timeout: int = 1800, mem_limit: str = "4g"):
+    def __init__(
+        self,
+        image: str = "python:3.12-slim",
+        timeout: int = 1800,
+        mem_limit: str = "4g",
+        docker_host: str | None = None,
+    ):
         """
         Args:
             image: Docker image to use (default: python:3.12-slim)
             timeout: Per-command timeout in seconds (default: 1800 / 30 min)
             mem_limit: Memory limit for the container (default: 4g)
+            docker_host: Optional Docker API endpoint, e.g. ``unix:///tmp/podman.sock``.
         """
         self._image = image
         self._timeout = timeout
         self._mem_limit = mem_limit
+        self._docker_host = docker_host
         self._auto_remove = _env_flag("SWERL_DOCKER_AUTO_REMOVE", True)
         self._container = None
         self._client = None
 
+    def _create_client(self):
+        if self._docker_host:
+            return docker_sdk.DockerClient(base_url=self._docker_host, timeout=300)
+        return docker_sdk.from_env(timeout=300)
+
     def start(self) -> None:
         previous_cid = self._container.short_id if self._container is not None else None
         logger.info(
-            "Starting Docker container (image=%s, previous_container=%s, auto_remove=%s)",
+            "Starting Docker container (image=%s, previous_container=%s, auto_remove=%s, docker_host=%s)",
             self._image,
             previous_cid,
             self._auto_remove,
+            self._docker_host or "<from_env>",
         )
         if self._client is None:
-            self._client = docker_sdk.from_env(timeout=300)
+            self._client = self._create_client()
         start_time = time.perf_counter()
         with self._START_SEMAPHORE.acquire() as semaphore_wait_s:
             lifecycle_start_time = time.perf_counter()
@@ -355,8 +365,7 @@ class DockerBackend(SandboxBackend):
     @classmethod
     def _transient_exec_retry_delay(cls, attempt: int) -> float:
         backoff = min(
-            cls._TRANSIENT_EXEC_RETRY_BASE_DELAY_S * (2 ** (attempt - 1)),
-            cls._TRANSIENT_EXEC_RETRY_MAX_DELAY_S,
+            cls._TRANSIENT_EXEC_RETRY_BASE_DELAY_S * (2 ** (attempt - 1)), cls._TRANSIENT_EXEC_RETRY_MAX_DELAY_S
         )
         return backoff + random.uniform(0.0, cls._TRANSIENT_EXEC_RETRY_JITTER_S)
 

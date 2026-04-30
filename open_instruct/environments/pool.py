@@ -1,6 +1,7 @@
 """Pool of Ray actors with acquire/release semantics."""
 
 import asyncio
+import os
 from typing import Any
 
 import ray
@@ -12,6 +13,18 @@ logger = logger_utils.setup_logger(__name__)
 DEFAULT_ACQUIRE_TIMEOUT_S = 7200
 ACQUIRE_CONCURRENCY = 1000
 RELEASE_CONCURRENCY = 128
+
+
+def _podman_docker_hosts_from_env() -> list[str]:
+    hosts = os.getenv("SWERL_PODMAN_DOCKER_HOSTS", "")
+    return [host.strip() for host in hosts.split(",") if host.strip()]
+
+
+def _actor_kwargs_for_slot(actor_kwargs: dict[str, Any], slot_index: int, docker_hosts: list[str]) -> dict[str, Any]:
+    kwargs = dict(actor_kwargs)
+    if docker_hosts and kwargs.get("backend") == "docker" and "docker_host" not in kwargs:
+        kwargs["docker_host"] = docker_hosts[slot_index % len(docker_hosts)]
+    return kwargs
 
 
 @ray.remote(concurrency_groups={"acquire": ACQUIRE_CONCURRENCY, "release": RELEASE_CONCURRENCY})
@@ -31,9 +44,20 @@ class EnvironmentPool:
     ):
         self._acquire_timeout = acquire_timeout
         remote_class = ray.remote(actor_class)
+        docker_hosts = _podman_docker_hosts_from_env()
 
         logger.info(f"Creating pool of {pool_size} {actor_class.__name__} actors")
-        self._actors = [remote_class.remote(**actor_kwargs) for _ in range(pool_size)]
+        if docker_hosts:
+            logger.info(
+                "Assigning %s %s actors across %s Podman Docker hosts",
+                pool_size,
+                actor_class.__name__,
+                len(docker_hosts),
+            )
+        self._actors = [
+            remote_class.remote(**_actor_kwargs_for_slot(actor_kwargs, slot_index, docker_hosts))
+            for slot_index in range(pool_size)
+        ]
 
         setup_tasks = [actor.setup.remote() for actor in self._actors]
         ray.get(setup_tasks)
