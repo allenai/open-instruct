@@ -157,7 +157,7 @@ class VLLMWeightSyncCallback(Callback):
 
         model = self.train_module.model
 
-        utils.ray_get_with_progress(
+        _, actor_sync_times = utils.ray_get_with_progress(
             vllm_utils.broadcast_weights_to_vllm(
                 model=model,
                 vllm_engines=self.vllm_engines,
@@ -174,11 +174,10 @@ class VLLMWeightSyncCallback(Callback):
         ray.get(self.actor_manager.set_should_stop.remote(False))
 
         sync_duration = time.perf_counter() - sync_start
-        actor_sync_times = np.asarray([sync_duration], dtype=np.float64)
         self.trainer.record_metric("time/weight_sync", sync_duration, reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_mean", float(actor_sync_times.mean()), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_min", float(actor_sync_times.min()), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_max", float(actor_sync_times.max()), reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_mean", float(np.mean(actor_sync_times)), reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_min", float(np.min(actor_sync_times)), reduce_type=None)
+        self.trainer.record_metric("time/weight_sync_max", float(np.max(actor_sync_times)), reduce_type=None)
         self.trainer.record_metric("time/weight_sync_median", float(np.median(actor_sync_times)), reduce_type=None)
 
 
