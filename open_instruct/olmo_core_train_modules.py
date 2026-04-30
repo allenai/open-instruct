@@ -23,7 +23,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
+from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
