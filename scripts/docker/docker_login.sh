@@ -11,6 +11,9 @@ PODMAN_SERVICE_LOG="${PODMAN_LOG_DIR}/podman-system-service.log"
 PODMAN_INFO_LOG="${PODMAN_LOG_DIR}/podman-info.log"
 SWERL_PODMAN_SERVICE_COUNT="${SWERL_PODMAN_SERVICE_COUNT:-1}"
 SWERL_PODMAN_SERVICE_DIR="${SWERL_PODMAN_SERVICE_DIR:-/tmp/podman-services}"
+SWERL_PODMAN_GRAPHROOT_BASE="${SWERL_PODMAN_GRAPHROOT_BASE:-/var/lib/containers/swerl-podman-shards}"
+SWERL_PODMAN_RUNROOT_BASE="${SWERL_PODMAN_RUNROOT_BASE:-/run/containers/swerl-podman-shards}"
+SWERL_PODMAN_TMPDIR_BASE="${SWERL_PODMAN_TMPDIR_BASE:-/var/tmp/swerl-podman-shards}"
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
 
@@ -39,9 +42,9 @@ for ((shard = 0; shard < SWERL_PODMAN_SERVICE_COUNT; shard++)); do
         shard_dir="${SWERL_PODMAN_SERVICE_DIR}/${shard}"
         socket_path="${shard_dir}/podman.sock"
         service_log="${shard_dir}/podman-system-service.log"
-        graphroot="${shard_dir}/graphroot"
-        runroot="${shard_dir}/runroot"
-        tmpdir="${shard_dir}/tmp"
+        graphroot="${SWERL_PODMAN_GRAPHROOT_BASE}/${shard}"
+        runroot="${SWERL_PODMAN_RUNROOT_BASE}/${shard}"
+        tmpdir="${SWERL_PODMAN_TMPDIR_BASE}/${shard}"
         mkdir -p "$graphroot" "$runroot" "$tmpdir"
     fi
     mkdir -p "$(dirname "$socket_path")" "$(dirname "$service_log")"
