@@ -74,7 +74,6 @@ class StepTimingCallback(Callback):
     num_training_gpus: int = 1
 
     _step_start: float = field(default=0.0, init=False, repr=False)
-    _train_start: float = field(default=0.0, init=False, repr=False)
     _train_duration: float = field(default=0.0, init=False, repr=False)
     _training_start: float = field(default=0.0, init=False, repr=False)
     _num_total_tokens: int = field(default=0, init=False, repr=False)
@@ -86,16 +85,14 @@ class StepTimingCallback(Callback):
         self._training_start = time.perf_counter()
 
     def pre_step(self, batch: dict[str, Any]) -> None:
-        now = time.perf_counter()
-        self._step_start = now
-        self._train_start = now
+        self._step_start = time.perf_counter()
         metrics = batch["metrics"]
         self._prompt_lengths = list(metrics["batch/prompt_lengths"])
         self._response_lengths = list(metrics["batch/response_lengths"])
         self._total_generation_time = float(metrics["time/getting_response"])
 
     def post_train_batch(self) -> None:
-        self._train_duration = time.perf_counter() - self._train_start
+        self._train_duration = time.perf_counter() - self._step_start
 
     def post_step(self) -> None:
         now = time.perf_counter()
@@ -108,7 +105,6 @@ class StepTimingCallback(Callback):
 
         self.trainer.record_metric("time/total", step_time, reduce_type=None)
         self.trainer.record_metric("time/training", self._train_duration, reduce_type=None)
-        self.trainer.record_metric("time/saving", 0.0, reduce_type=None)
         self.trainer.record_metric("learner_tokens_per_second_step", num_step_tokens / step_time, reduce_type=None)
         self.trainer.record_metric(
             "learner_tokens_per_second_overall", self._num_total_tokens / total_training_time, reduce_type=None
@@ -145,7 +141,6 @@ class VLLMWeightSyncCallback(Callback):
     actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
-    inflight_updates: bool = False
 
     @property
     def train_module(self) -> TransformerTrainModule:
