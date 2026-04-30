@@ -47,9 +47,9 @@ uv run python mason.py \
         --sft_messages_key messages \
         --total_episodes 10_000 \
         --fsdp_shard_degree 8 \
-        --fsdp_num_replicas 2 \
+        --fsdp_num_replicas 1 \
         --activation_memory_budget 0.5 \
-        --num_learners_per_node 8 8 \
+        --num_learners_per_node 8 \
         --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
