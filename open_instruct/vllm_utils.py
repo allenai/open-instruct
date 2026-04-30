@@ -23,6 +23,7 @@ import queue
 import sys
 import threading
 import time
+import traceback
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from concurrent import futures
@@ -830,13 +831,20 @@ class LLMRayActor:
         self.current_model_step = model_step
 
     def check_background_threads(self) -> None:
-        if self._prefetch_future.done():
-            self._prefetch_future.result()
-        if self._process_future.done():
-            self._process_future.result()
-        for task in self.active_tasks.values():
-            if task.done():
-                task.result()
+        def check_future(source: str, future: futures.Future) -> None:
+            if not future.done():
+                return
+            try:
+                future.result()
+            except Exception as e:
+                raise RuntimeError(
+                    f"{source} failed with {type(e).__name__}: {e}\n{traceback.format_exc()}"
+                ) from None
+
+        check_future("vLLM prefetch worker", self._prefetch_future)
+        check_future("vLLM completion worker", self._process_future)
+        for request_id, task in list(self.active_tasks.items()):
+            check_future(f"vLLM request task {request_id}", task)
         if not self.loop_thread.is_alive():
             raise RuntimeError(
                 "vLLM engine loop thread has died. Check logs for errors in EngineCore or async engine."
