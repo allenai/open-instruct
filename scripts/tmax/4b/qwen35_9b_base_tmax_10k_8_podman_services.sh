@@ -63,6 +63,7 @@ uv run python mason.py \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
+    --vllm_gdn_prefill_backend triton \
     --push_to_hub false \
     --with_tracking \
     --save_traces \

@@ -1276,6 +1276,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    vllm_gdn_prefill_backend: str | None = None,
     inference_batch_size: int | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
@@ -1365,6 +1366,7 @@ def create_vllm_engines(
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
                 inference_batch_size=inference_batch_size,
+                **({"gdn_prefill_backend": vllm_gdn_prefill_backend} if vllm_gdn_prefill_backend is not None else {}),
             )
         )
 
