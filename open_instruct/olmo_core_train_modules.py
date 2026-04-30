@@ -444,25 +444,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
-                if self.grpo_config.use_icepop:
-                    tis_clamped, tis_unclamped = None, None
-                    icepop_mask, icepop_dropped_low, icepop_dropped_high = grpo_utils.compute_icepop_mask(
-                        old_logprob,
-                        vllm_logprobs,
-                        response_mask,
-                        self.grpo_config.icepop_alpha,
-                        self.grpo_config.icepop_beta,
-                    )
-                else:
-                    tis_clamped, tis_unclamped = grpo_utils.compute_tis_weights(
-                        old_logprob,
-                        vllm_logprobs,
-                        response_mask,
-                        self.grpo_config.truncated_importance_sampling_ratio_cap,
-                    )
-                    icepop_mask = None
-                    icepop_dropped_low = None
-                    icepop_dropped_high = None
+                rho = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, self.grpo_config)
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -470,8 +452,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
-                    tis_weights=tis_clamped,
-                    icepop_mask=icepop_mask,
+                    rho_weights=rho.weights,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
@@ -494,11 +475,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     entropy,
                     self.grpo_config,
-                    tis_clamped=tis_clamped,
-                    tis_unclamped=tis_unclamped,
-                    icepop_mask=icepop_mask,
-                    icepop_dropped_low=icepop_dropped_low,
-                    icepop_dropped_high=icepop_dropped_high,
+                    rho_metrics=rho.metrics,
                 )
 
                 num_steps += 1

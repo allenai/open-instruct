@@ -351,6 +351,45 @@ def compute_icepop_mask(
     return mask, dropped_low, dropped_high
 
 
+@dataclass
+class RhoCorrection:
+    """Per-token stop-gradient correction for the train/infer engine mismatch.
+
+    ``weights`` is multiplied into the policy loss (None disables the correction).
+    ``metrics`` maps wandb keys to per-token tensors that get reduced by
+    ``masked_mean(., response_mask)`` at logging time.
+    """
+
+    weights: torch.Tensor | None
+    metrics: dict[str, torch.Tensor]
+
+
+def compute_rho_correction(
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
+) -> RhoCorrection:
+    """Dispatch between TIS and IcePop train/infer corrections."""
+    if config.use_icepop:
+        mask, dropped_low, dropped_high = compute_icepop_mask(
+            old_logprob, vllm_logprobs, response_mask, config.icepop_alpha, config.icepop_beta
+        )
+        return RhoCorrection(
+            weights=mask,
+            metrics={
+                "val/icepop_drop_frac": (mask == 0).float(),
+                "val/icepop_drop_low_frac": dropped_low.float(),
+                "val/icepop_drop_high_frac": dropped_high.float(),
+            },
+        )
+    clamped, unclamped = compute_tis_weights(
+        old_logprob, vllm_logprobs, response_mask, config.truncated_importance_sampling_ratio_cap
+    )
+    if clamped is None or unclamped is None:
+        return RhoCorrection(weights=None, metrics={})
+    return RhoCorrection(
+        weights=clamped, metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < unclamped).float()}
+    )
+
+
 def resolve_old_logprob(
     old_logprobs_cache: list[torch.Tensor | None],
     sample_idx: int,
@@ -386,8 +425,7 @@ def compute_grpo_loss(
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    tis_weights: torch.Tensor | None = None,
-    icepop_mask: torch.Tensor | None = None,
+    rho_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -400,13 +438,9 @@ def compute_grpo_loss(
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    if tis_weights is not None:
-        pg_losses = pg_losses * tis_weights
-        pg_losses2 = pg_losses2 * tis_weights
-
-    if icepop_mask is not None:
-        pg_losses = pg_losses * icepop_mask
-        pg_losses2 = pg_losses2 * icepop_mask
+    if rho_weights is not None:
+        pg_losses = pg_losses * rho_weights
+        pg_losses2 = pg_losses2 * rho_weights
 
     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
@@ -576,11 +610,7 @@ def populate_sample_loss_stats(
     ref_logprobs: torch.Tensor | None,
     entropy: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    tis_clamped: torch.Tensor | None = None,
-    tis_unclamped: torch.Tensor | None = None,
-    icepop_mask: torch.Tensor | None = None,
-    icepop_dropped_low: torch.Tensor | None = None,
-    icepop_dropped_high: torch.Tensor | None = None,
+    rho_metrics: dict[str, torch.Tensor] | None = None,
 ) -> None:
     with torch.no_grad():
         if config.load_ref_policy and ref_logprobs is not None:
@@ -590,22 +620,9 @@ def populate_sample_loss_stats(
             for j in range(4):
                 loss_stats_B[f"objective/kl{j}_avg"][sample_idx] = kl_values[j]
             loss_stats_B["loss/kl_avg"][sample_idx] = kl_values[config.kl_estimator] * config.beta
-        if tis_clamped is not None and tis_unclamped is not None:
-            loss_stats_B["val/tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
-            loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
-                (tis_clamped < tis_unclamped).float(), response_mask
-            )
-        if icepop_mask is not None:
-            dropped = (icepop_mask == 0).float()
-            loss_stats_B["val/icepop_drop_frac"][sample_idx] = masked_mean(dropped, response_mask)
-        if icepop_dropped_low is not None:
-            loss_stats_B["val/icepop_drop_low_frac"][sample_idx] = masked_mean(
-                icepop_dropped_low.float(), response_mask
-            )
-        if icepop_dropped_high is not None:
-            loss_stats_B["val/icepop_drop_high_frac"][sample_idx] = masked_mean(
-                icepop_dropped_high.float(), response_mask
-            )
+        if rho_metrics is not None:
+            for key, value in rho_metrics.items():
+                loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss

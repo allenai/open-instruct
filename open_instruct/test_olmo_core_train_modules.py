@@ -239,33 +239,33 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
         torch.testing.assert_close(kl, torch.zeros_like(kl))
 
-    def test_tis_weights(self):
+    def test_rho_weights(self):
         config = _make_grpo_config()
         new_logprobs = torch.randn(2, 4)
         ratio = torch.exp(torch.randn(2, 4))
         advantages = torch.randn(2, 4)
-        tis_weights = torch.full((2, 4), 2.0)
+        rho_weights = torch.full((2, 4), 2.0)
 
-        pg_no_tis, pg2_no_tis, _, _ = grpo_utils.compute_grpo_loss(
+        pg_no_rho, pg2_no_rho, _, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
             ref_logprobs=None,
             config=config,
-            tis_weights=None,
+            rho_weights=None,
         )
 
-        pg_tis, pg2_tis, _, _ = grpo_utils.compute_grpo_loss(
+        pg_rho, pg2_rho, _, _ = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
             ref_logprobs=None,
             config=config,
-            tis_weights=tis_weights,
+            rho_weights=rho_weights,
         )
 
-        torch.testing.assert_close(pg_tis, pg_no_tis * 2.0)
-        torch.testing.assert_close(pg2_tis, pg2_no_tis * 2.0)
+        torch.testing.assert_close(pg_rho, pg_no_rho * 2.0)
+        torch.testing.assert_close(pg2_rho, pg2_no_rho * 2.0)
 
     def test_icepop_mask(self):
         alpha, beta = 0.5, 2.0
@@ -303,7 +303,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=advantages,
             ref_logprobs=None,
             config=config,
-            icepop_mask=icepop_mask,
+            rho_weights=icepop_mask,
         )
         self.assertEqual(pg_losses[0, 1].item(), 0.0)
         self.assertEqual(pg_losses2[0, 1].item(), 0.0)
