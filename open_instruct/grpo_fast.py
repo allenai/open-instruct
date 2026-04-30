@@ -865,9 +865,9 @@ class PolicyTrainerRayProcess(RayProcess):
     def dummy_optimizer_step(self) -> None:
         """Run one zero-loss optimizer step to initialize ZeRO-3's internal NCCL
         communicators and parameter-partition pointers before setup_model_update_group
-        is called on resume.  Loss is multiplied by 0 so autograd gradients are zero;
+        is called.  Loss is multiplied by 0 so autograd gradients are zero;
         the optimizer still fires (advancing momentum/variance slightly) but weight
-        changes are negligible compared to the N-step resume drift we're avoiding.
+        changes should be negligible before the immediate vLLM sync.
 
         After the step we invalidate ZeRO-3's parameter-fetch trace so that the
         first real training step (which may use different code paths, e.g. the
@@ -2216,17 +2216,14 @@ def run_training(
     # before the first optimizer step — doing so causes GatheredParameters to
     # broadcast NaN weights to vLLM.
     #
-    # On resume with ZeRO-3: run a dummy zero-loss step first so ZeRO-3's NCCL
-    # communicators and partition pointers are valid, then immediately sync
-    # checkpoint weights to vLLM before generating the first rollout batch.
-    #
-    # On fresh starts (resume_training_step == 1): vLLM and the trainer share
-    # the same base model, so no pre-loop sync is needed; defer to after step 1.
+    # Always use this path for ZeRO-3 so setup_model_update_group runs before
+    # data prep starts generating with vLLM/tool actors. This avoids initializing
+    # the trainer<->vLLM NCCL group while sandbox Docker work is already active.
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-    if resume_training_step > 1 and args.deepspeed_stage == 3:
-        logger.info("[Main Thread] ZeRO-3 resume: running dummy optimizer step to prime NCCL state.")
+    if args.deepspeed_stage == 3:
+        logger.info("[Main Thread] ZeRO-3: running dummy optimizer step to prime NCCL state.")
         ray_get_with_progress(
-            [m.dummy_optimizer_step.remote() for m in policy_group.models], desc="ZeRO-3 resume dummy step"
+            [m.dummy_optimizer_step.remote() for m in policy_group.models], desc="ZeRO-3 dummy step"
         )
         weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
@@ -2347,9 +2344,9 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
         elif training_step == resume_training_step:
-            # Fresh starts and non-ZeRO-3 resumes: initialise weight sync after
-            # the first training step.  ZeRO-3 resumes are handled pre-loop via
-            # a dummy step, so weight_sync_trigger is already set in that case.
+            # Non-ZeRO-3 runs initialise weight sync after the first training
+            # step. ZeRO-3 is handled pre-loop via a dummy step, so
+            # weight_sync_trigger is already set in that case.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
         last_eval_collected = maybe_evaluate(
