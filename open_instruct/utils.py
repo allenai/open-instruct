@@ -211,12 +211,11 @@ def ray_get_with_progress(
     """
     t0 = time.perf_counter()
 
-    ray_refs = list(ray_refs)
     ray_futures = [ref.future() for ref in ray_refs]
     fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
 
-    results = [None] * len(ray_refs)
-    completion_times = [None] * len(ray_refs)
+    results = [None] * len(ray_futures)
+    completion_times = [None] * len(ray_futures)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:

@@ -26,7 +26,7 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from concurrent import futures
-from typing import Any
+from typing import Any, TypedDict
 
 import aiohttp
 import backoff
@@ -121,6 +121,17 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
         num_sliding_window_layers=num_sliding_window_layers,
         device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
     )
+
+
+class WeightUpdateInfo(TypedDict):
+    names: list[str]
+    dtype_names: list[str]
+    shapes: list[list[int]]
+    packed: bool
+
+
+class WeightUpdateRPCArgs(TypedDict):
+    update_info: WeightUpdateInfo
 
 
 @dataclasses.dataclass
@@ -780,7 +791,7 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, update_info: dict, model_step: int) -> None:
+    def update_weights(self, update_info: WeightUpdateRPCArgs, model_step: int) -> None:
         # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
         # `dict(update_info=...)`. NCCL callers must match that shape.
         while not self.inflight_updates and len(self.active_tasks) > 0:
@@ -1393,7 +1404,7 @@ def broadcast_weights_to_vllm(
     if is_rank_0:
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
-    if model_update_group is None and is_rank_0:
+    if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
