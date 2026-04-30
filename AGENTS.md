@@ -16,6 +16,9 @@
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
   - `scripts/train/debug/large_test_script.sh`: two 8x GPU nodes, no tools (~32 minutes).
+- For OLMo-core SFT, we have two test scripts:
+  - `scripts/train/debug/oc_sft.sh`: single GPU on Beaker.
+  - `scripts/train/debug/oc_sft_multinode.sh`: two 8x GPU nodes on Beaker.
 - For DPO, we have three test scripts:
   - `scripts/train/debug/dpo/local.sh`: local single GPU (no Beaker).
   - `scripts/train/debug/dpo/single_gpu.sh`: single GPU on Beaker.
@@ -23,13 +26,22 @@
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - Launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
 - Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
+- Launch OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh`.
+- Launch multi-node OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_multinode.sh`.
 - Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.
 - Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh`.
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
-- When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely.
+- When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 - Experiment launch scripts that call `mason.py` must include `--no_auto_dataset_cache` (before the `--` separator) because vllm is not installed locally on macOS. Without this flag, mason.py tries to cache the dataset locally which fails on the `import vllm` in `data_loader.py`.
 - The `oe-eval-internal` directory is required in the Docker image for experiments that use `--try_launch_beaker_eval_jobs_on_weka`. If it's missing (e.g. in a fresh clone or worktree), clone it with: `git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal`.
+- When updating PR bodies with experiment results, use the "Runs:" format (numbered list with Beaker links):
+  ```
+  Runs:
+
+  1. Description: [Beaker](https://beaker.org/ex/EXPERIMENT_ID)
+  2. Description: [Beaker](https://beaker.org/ex/EXPERIMENT_ID)
+  ```
 
 # Naming conventions
 - Models OLMo and OLMo 2 (versions <=2) use the "OLMo" capitalization style.

@@ -8,7 +8,7 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -17,15 +17,13 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
-from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
-from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
+from open_instruct.olmo_core_callbacks import PerfCallback
 from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
@@ -51,38 +49,23 @@ def export_to_hf(
         )
 
 
-def _setup_scheduler(args: dpo_utils.DPOExperimentConfig, num_training_steps: int):
-    """Return scheduler."""
-    warmup_steps = int(num_training_steps * args.warmup_ratio)
-    if args.lr_scheduler_type == "cosine":
-        scheduler = olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
-    elif args.lr_scheduler_type == "linear":
-        scheduler = olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
-    else:
-        scheduler = olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
-    return scheduler
-
-
 def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
-    trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
-    trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
+    run_name = args.run_name or args.exp_name
+    trainer_callbacks: dict[str, callbacks.Callback] = olmo_core_utils.build_base_callbacks(
+        config_dict=json_config,
+        run_name=run_name,
+        checkpointing_steps=args.checkpointing_steps,
+        ephemeral_save_interval=args.ephemeral_save_interval,
+        with_tracking=args.with_tracking,
+        wandb_project=args.wandb_project,
+        wandb_entity=args.wandb_entity,
+        save_async=False,
+    )
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:
-        trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(
-            name=args.run_name or args.exp_name, webhook_url=slack_webhook_url
-        )
-    if args.with_tracking:
-        trainer_callbacks["wandb"] = callbacks.WandBCallback(
-            name=args.run_name or args.exp_name,
-            project=args.wandb_project,
-            entity=args.wandb_entity,
-            config=json_config,
-        )
-    trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-        args.checkpointing_steps, args.ephemeral_save_interval, save_async=False
-    )
+        trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(name=run_name, webhook_url=slack_webhook_url)
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
@@ -184,21 +167,14 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
-    train.prepare_training_environment(seed=args.seed)
-
+    global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(seed=args.seed)
     tp_degree = args.tensor_parallel_degree
-    global_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
     dp_rank = global_rank // tp_degree
-    is_main_process = global_rank == 0
+    dp_world_size = world_size // tp_degree
 
     dataset = olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
-
-    world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    dp_world_size = world_size // args.tensor_parallel_degree
-
-    logger_utils.setup_logger(rank=global_rank)
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
 
@@ -209,9 +185,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = olmo_core_utils.setup_model(
-        args.model_name_or_path, args.config_name, cast(AttentionBackendName, args.attn_implementation)
-    )
+    model, model_config = olmo_core_utils.setup_model(args)
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
@@ -289,7 +263,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         )
     else:
         raise ValueError(f"Unknown optimizer_type: {args.optimizer_type!r}. Must be 'adamw' or 'muon'.")
-    scheduler = _setup_scheduler(args, effective_steps)
+    scheduler = olmo_core_utils.build_scheduler(args.lr_scheduler_type, args.warmup_ratio, effective_steps)
     dp_config = transformer_config.TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
         num_replicas=args.fsdp_num_replicas,
@@ -321,12 +295,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         device=device,
     )
 
-    # TransformerTrainModule.__init__ calls parallelize_model which calls init_weights,
-    # reinitializing all model weights from scratch. We must reload the HF checkpoint.
-    logger.info("Reloading HuggingFace weights after parallelization...")
-    sd = train_module.model.state_dict()
-    load_hf_model(args.model_name_or_path, sd, work_dir=args.output_dir)
-    train_module.model.load_state_dict(sd)
+    olmo_core_utils.reload_hf_checkpoint_after_parallelization(train_module, args.model_name_or_path, args.output_dir)
 
     logger.info("Caching reference logprobs...")
     train_module.reference_cache = dpo_utils.build_reference_logprobs_cache(model=train_module.model, **cache_kwargs)

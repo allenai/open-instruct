@@ -1237,7 +1237,7 @@ def launch_ai2_evals_on_weka(
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
     command = f"""\
-python scripts/submit_eval_jobs.py \
+python scripts/submit_eval_jobs_old.py \
 --model_name {leaderboard_name} \
 --location {path} \
 --is_tuned \
