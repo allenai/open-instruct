@@ -11,8 +11,8 @@ PODMAN_SERVICE_LOG="${PODMAN_LOG_DIR}/podman-system-service.log"
 PODMAN_INFO_LOG="${PODMAN_LOG_DIR}/podman-info.log"
 SWERL_PODMAN_SERVICE_COUNT="${SWERL_PODMAN_SERVICE_COUNT:-1}"
 SWERL_PODMAN_SERVICE_DIR="${SWERL_PODMAN_SERVICE_DIR:-/tmp/podman-services}"
-SWERL_PODMAN_GRAPHROOT_BASE="${SWERL_PODMAN_GRAPHROOT_BASE:-/var/lib/containers/swerl-podman-shards}"
-SWERL_PODMAN_RUNROOT_BASE="${SWERL_PODMAN_RUNROOT_BASE:-/run/containers/swerl-podman-shards}"
+SWERL_PODMAN_GRAPHROOT_BASE="${SWERL_PODMAN_GRAPHROOT_BASE:-/var/lib/containers/storage/swerl-podman-shards}"
+SWERL_PODMAN_RUNROOT_BASE="${SWERL_PODMAN_RUNROOT_BASE:-/run/containers/storage/swerl-podman-shards}"
 SWERL_PODMAN_TMPDIR_BASE="${SWERL_PODMAN_TMPDIR_BASE:-/var/tmp/swerl-podman-shards}"
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
