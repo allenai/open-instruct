@@ -10,7 +10,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "SWERL tmax-10k GRPO with Qwen3.5-4B" \
        --pure_docker_mode \
-       --workspace ai2/olmo-instruct \
+       --workspace ai2/dr-tulu-ablations \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \
@@ -23,6 +23,10 @@ uv run python mason.py \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=hamishi740 \
+       --env SWERL_SANDBOX_TIMING_LOGS=1 \
+       --env SWERL_DOCKER_AUTO_REMOVE=1 \
+       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
@@ -31,7 +35,7 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=1 \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -49,8 +53,8 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
     --num_epochs 1 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 28 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 24 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \
@@ -63,7 +67,7 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --pool_size 1024 \
     --max_steps 100 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
