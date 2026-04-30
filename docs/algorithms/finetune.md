@@ -7,61 +7,59 @@ We support Supervised finetuning (SFT) on a variety of datasets.
 - **OLMo-core SFT** (recommended): Uses OLMo-core's native training infrastructure. Most users should use this — it is more GPU-efficient and supports OLMo, Qwen, and other models. See `open_instruct/olmo_core_utils.py` for the current list of supported models.
 - `finetune.py` is the legacy SFT implementation using DeepSpeed/Accelerate. Use this only if you need a model architecture not yet supported by OLMo-core.
 
-## OLMo-core SFT
+## `olmo_core_finetune.py` (OLMo-core)
 
-The recommended SFT implementation uses [OLMo-core's SFT training script](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft).
+The recommended SFT implementation uses OLMo-core's native training infrastructure (FSDP/HSDP). It supports `torch.compile`, padding-free training, budget-mode activation checkpointing, and W&B tracking. It is launched via `build_image_and_launch.sh`, just like DPO and GRPO.
 
-### Setup
+### Debug Scripts
 
-OLMo-core SFT requires a **separate OLMo-core clone** — the `build_image_and_launch.sh` script only works for open-instruct jobs (DPO, RL), not for SFT.
-
-1. Clone OLMo-core: `git clone https://github.com/allenai/OLMo-core.git`
-2. Follow the [OLMo-core setup instructions](https://github.com/allenai/OLMo-core) to install dependencies.
-3. Run the SFT training script from the OLMo-core checkout. For example:
-
-```bash
-cd /path/to/OLMo-core
-python src/scripts/train/sft/OLMo-sft.py train \
-    my-experiment-name \
-    gs://my-bucket/checkpoint/path \
-    ai2/jupiter \
-    --trainer.max_duration.value=2 \
-    --train_module.optim.lr=8e-5 \
-    --seq_len=32768 \
-    --launch.num_gpus=8 \
-    --num_nodes=4 \
-    --global_batch_size=1048576 \
-    --model_name=olmo3-7b
-```
+| Script | Scale | Description | Launch |
+|--------|-------|-------------|--------|
+| `scripts/train/debug/oc_sft.sh` | 1 GPU, Beaker | Single-GPU test with Qwen3-0.6B. | `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh` |
+| `scripts/train/debug/oc_sft_multinode.sh` | 2 nodes (16 GPUs), Beaker | Multi-node test with Qwen3-0.6B. Exercises HSDP sharding. | `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_multinode.sh` |
 
 ### Key Flags
 
-OLMo-core SFT uses **CLI flags** (not YAML config files). Key options include:
+| Group | Flag | Description | Default |
+|-------|------|-------------|---------|
+| **Experiment** | `--exp_name` | Name of this experiment | `"sft"` |
+| | `--run_name` | Unique run name (for W&B) | `None` |
+| | `--seed` | Random seed for initialization and dataset shuffling | `42` |
+| **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
+| | `--config_name` | Pretrained config name or path if different from model | `None` |
+| | `--attn_implementation` | Attention backend: `flash-2`, `flash-3`, `torch` (auto-detected if unset) | `None` |
+| **Training** | `--learning_rate` | Initial learning rate | `8e-5` |
+| | `--num_epochs` | Total number of training epochs | `3` |
+| | `--max_train_steps` | If set, overrides `num_epochs` | `None` |
+| | `--per_device_train_batch_size` | Batch size per GPU | `8` |
+| | `--gradient_accumulation_steps` | Gradient accumulation steps | `1` |
+| | `--max_seq_length` | Maximum sequence length after tokenization | `4096` |
+| | `--warmup_ratio` | Linear warmup fraction of total steps | `0.03` |
+| | `--weight_decay` | Weight decay for AdamW | `0.0` |
+| | `--max_grad_norm` | Maximum gradient norm for clipping (-1 = no clipping) | `-1` |
+| | `--compile_model` | Apply `torch.compile` to model blocks | `True` |
+| | `--activation_memory_budget` | Activation checkpointing budget (0.0–1.0); values < 1.0 enable budget-mode checkpointing | `1.0` |
+| **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | `allenai/tulu-3-sft-olmo-2-mixture` |
+| | `--mixer_list_splits` | Dataset splits for training | `["train"]` |
+| | `--transform_fn` | List of transform functions to apply to the dataset | `sft_tulu_tokenize_and_truncate_v1`, `sft_tulu_filter_v1` |
+| | `--cache_dataset_only` | Exit after caching the dataset | `False` |
+| | `--skip_cache` | Skip dataset caching | `False` |
+| **Checkpointing** | `--output_dir` | Output directory for checkpoints | `output/` |
+| | `--checkpointing_steps` | Save a persistent checkpoint every N steps | `500` |
+| | `--ephemeral_save_interval` | Temporary checkpoint cadence (must be ≤ `checkpointing_steps`) | `500` |
+| **Logging** | `--with_tracking` | Enable Weights and Biases tracking | `False` |
+| | `--wandb_project` | W&B project name | `"open_instruct_internal"` |
+| | `--wandb_entity` | W&B entity (team) | `None` |
+| | `--logging_steps` | Log metrics every N steps | `1` |
 
-| Flag | Description |
-|------|-------------|
-| `--trainer.max_duration.value` | Number of training epochs |
-| `--train_module.optim.lr` | Learning rate |
-| `--seq_len` | Maximum sequence length |
-| `--launch.num_gpus` | GPUs per node |
-| `--num_nodes` | Number of nodes |
-| `--global_batch_size` | Global batch size in tokens |
-| `--model_name` | Model architecture (e.g., `olmo3-7b`, `olmo3-32b`) |
-| `--dataset_path` | Path to the SFT dataset |
-| `--trainer.callbacks.wandb.enabled` | Enable W&B logging |
+### Parallelism
 
-See the [OLMo-core documentation](https://github.com/allenai/OLMo-core) for the full list of options.
+The script automatically selects the data-parallel strategy based on the number of nodes:
 
-### Olmo 3 SFT Scripts
+- **Single node**: FSDP (Fully Sharded Data Parallel)
+- **Multiple nodes**: HSDP (Hybrid Sharded Data Parallel) — shards within each node, replicates across nodes
 
-These scripts are run from the OLMo-core checkout, not via `build_image_and_launch.sh`.
-
-| Script | Scale | Description |
-|--------|-------|-------------|
-| `scripts/train/olmo3/7b_instruct_sft.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Instruct SFT, 32k sequence length |
-| `scripts/train/olmo3/7b_think_sft.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Think SFT, 32k sequence length |
-| `scripts/train/olmo3/32b_instruct_sft.sh` | 8 nodes (64 GPUs) | Olmo 3 32B Instruct SFT, 32k sequence length |
-| `scripts/train/olmo3/32b_think_sft.sh` | 32 nodes (256 GPUs) | Olmo 3 32B Think SFT, 32k sequence length |
+See [OLMo-core Sharding and Parallelism](olmo_core_sharding.md) for more details on parallelism configuration.
 
 ---
 

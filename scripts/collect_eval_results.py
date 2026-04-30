@@ -38,7 +38,7 @@ def make_parser():
     ]
 
     parser = argparse.ArgumentParser(
-        description="""Point this script at a Beaker job created by `submit_eval_jobs.py`.
+        description="""Point this script at a Beaker job created by `submit_eval_jobs_old.py`.
                     It will will collect all evaluation metrics and dump them in a json
                     file. It will also collect summary metrics for each task.""",
         epilog="""Usage example:

@@ -380,9 +380,7 @@ class GRPOTrainModule(TransformerTrainModule):
         - Importance sampling with clipping
         """
         self.model.train()
-        data_BT: data_types.CollatedBatchData = batch["batch"]
-
-        data_BT = data_BT.to(self.device)
+        data_BT = batch["batch"].to(self.device)
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
