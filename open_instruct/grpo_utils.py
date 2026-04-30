@@ -622,11 +622,10 @@ def perform_weight_sync(
         )
     finally:
         ray.get(actor_manager.set_should_stop.remote(False))
-    sync_time_stats = {
-        "time/weight_sync": time.perf_counter() - start,
-        "time/weight_sync_mean": float(np.mean(actor_sync_times)),
-        "time/weight_sync_min": float(np.min(actor_sync_times)),
-        "time/weight_sync_max": float(np.max(actor_sync_times)),
-        "time/weight_sync_median": float(np.median(actor_sync_times)),
-    }
+    sync_time_stats = {"time/weight_sync": time.perf_counter() - start}
+    if actor_sync_times:
+        sync_time_stats["time/weight_sync_mean"] = float(np.mean(actor_sync_times))
+        sync_time_stats["time/weight_sync_min"] = float(np.min(actor_sync_times))
+        sync_time_stats["time/weight_sync_max"] = float(np.max(actor_sync_times))
+        sync_time_stats["time/weight_sync_median"] = float(np.median(actor_sync_times))
     return sync_time_stats, results
