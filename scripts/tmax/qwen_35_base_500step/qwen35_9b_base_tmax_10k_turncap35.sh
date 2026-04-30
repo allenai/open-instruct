@@ -28,6 +28,11 @@ uv run python mason.py \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=hamishi740 \
+       --env SWERL_SANDBOX_TIMING_LOGS=1 \
+       --env SWERL_DOCKER_AUTO_REMOVE=1 \
+       --env SWERL_PODMAN_SERVICE_COUNT=8 \
+       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
@@ -36,7 +41,7 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=1 \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
