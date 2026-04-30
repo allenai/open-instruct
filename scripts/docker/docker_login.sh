@@ -27,6 +27,8 @@ if command -v podman >/dev/null 2>&1; then
     podman info --debug >"$PODMAN_INFO_LOG" 2>&1 || echo "WARNING: podman info failed; details in $PODMAN_INFO_LOG"
 
     if [ ! -S "$PODMAN_SOCKET_PATH" ]; then
+        ulimit -n 1048576 || true
+        ulimit -u 1048576 || true
         echo "Starting Podman service for Docker SDK: podman system service --time=0 $DOCKER_HOST"
         rm -f "$PODMAN_SOCKET_PATH"
         : >"$PODMAN_SERVICE_LOG"

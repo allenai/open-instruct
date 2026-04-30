@@ -2,6 +2,8 @@
 
 import atexit
 import contextlib
+import errno
+import fcntl
 import io
 import os
 import random
@@ -26,6 +28,57 @@ def _env_flag(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer for %s=%r; using default %s", name, value, default)
+        return default
+
+
+class _FileSlotSemaphore:
+    """Small cross-process semaphore using advisory locks on per-node files."""
+
+    def __init__(self, name: str, slots: int):
+        self.name = name
+        self.slots = max(0, slots)
+        self.lock_dir = os.getenv("SWERL_DOCKER_LOCK_DIR", "/tmp/open_instruct_docker_locks")
+        if self.slots > 0:
+            os.makedirs(self.lock_dir, exist_ok=True)
+
+    @contextlib.contextmanager
+    def acquire(self):
+        if self.slots <= 0:
+            yield
+            return
+
+        handle = None
+        while handle is None:
+            for slot in range(self.slots):
+                path = os.path.join(self.lock_dir, f"{self.name}.{slot}.lock")
+                candidate = open(path, "a+")
+                try:
+                    fcntl.flock(candidate.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as e:
+                    candidate.close()
+                    if e.errno in (errno.EACCES, errno.EAGAIN):
+                        continue
+                    raise
+                handle = candidate
+                break
+            if handle is None:
+                time.sleep(0.05 + random.uniform(0.0, 0.05))
+
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
 
 
 @dataclass
@@ -90,7 +143,13 @@ class DockerBackend(SandboxBackend):
     _TRANSIENT_EXEC_RETRY_BASE_DELAY_S = 0.5
     _TRANSIENT_EXEC_RETRY_MAX_DELAY_S = 8.0
     _TRANSIENT_EXEC_RETRY_JITTER_S = 0.5
-    _TRANSIENT_EXEC_API_ERROR_MARKERS = ("database is locked",)
+    _TRANSIENT_EXEC_API_ERROR_MARKERS = (
+        "database is locked",
+        "retrieving exec session",
+        "timed out waiting for file",
+    )
+    _START_SEMAPHORE = _FileSlotSemaphore("docker-start", _env_int("SWERL_DOCKER_START_CONCURRENCY", 64))
+    _EXEC_SEMAPHORE = _FileSlotSemaphore("docker-exec", _env_int("SWERL_DOCKER_EXEC_CONCURRENCY", 256))
 
     def __init__(self, image: str = "python:3.12-slim", timeout: int = 1800, mem_limit: str = "4g"):
         """
@@ -116,14 +175,15 @@ class DockerBackend(SandboxBackend):
         )
         if self._client is None:
             self._client = docker_sdk.from_env(timeout=300)
-        self._container = self._client.containers.run(
-            self._image,
-            command="sleep infinity",
-            detach=True,
-            remove=self._auto_remove,
-            mem_limit=self._mem_limit,
-            memswap_limit=self._mem_limit,
-        )
+        with self._START_SEMAPHORE.acquire():
+            self._container = self._client.containers.run(
+                self._image,
+                command="sleep infinity",
+                detach=True,
+                remove=self._auto_remove,
+                mem_limit=self._mem_limit,
+                memswap_limit=self._mem_limit,
+            )
         logger.info(f"Docker container started: {self._container.short_id}")
 
     def run_command(self, command: str) -> ExecutionResult:
@@ -142,7 +202,7 @@ class DockerBackend(SandboxBackend):
             f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
         )
         try:
-            exit_code, output = self._container.exec_run(["bash", "-c", wrapped], demux=True)
+            exit_code, output = self._exec_run(wrapped)
         except docker_sdk.errors.NotFound:
             self._log_container_state("exec_not_found", container_id)
             logger.warning(
@@ -195,6 +255,12 @@ class DockerBackend(SandboxBackend):
         message = str(error).lower()
         return any(marker in message for marker in cls._TRANSIENT_EXEC_API_ERROR_MARKERS)
 
+    def _exec_run(self, wrapped: str):
+        if self._container is None:
+            raise RuntimeError("Container missing during Docker exec.")
+        with self._EXEC_SEMAPHORE.acquire():
+            return self._container.exec_run(["bash", "-c", wrapped], demux=True)
+
     def _retry_exec_same_container(self, wrapped: str, container_id: str):
         """Retry an exec after a transient Docker daemon/storage error."""
         if self._container is None:
@@ -215,7 +281,7 @@ class DockerBackend(SandboxBackend):
                 delay,
             )
             try:
-                return self._container.exec_run(["bash", "-c", wrapped], demux=True)
+                return self._exec_run(wrapped)
             except docker_sdk.errors.APIError as e:
                 if not self._is_transient_exec_api_error(e):
                     raise
@@ -258,7 +324,7 @@ class DockerBackend(SandboxBackend):
             old_container_id,
             self._container.short_id,
         )
-        return self._container.exec_run(["bash", "-c", wrapped], demux=True)
+        return self._exec_run(wrapped)
 
     def _log_container_state(self, reason: str, container_id: str) -> None:
         """Best-effort container state diagnostics for flaky lifecycle issues."""
