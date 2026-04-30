@@ -182,6 +182,7 @@ split-on-trailing-comma = false
 [tool.ty.rules]
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
+unused-ignore-comment = "ignore"
 
 [tool.ty.src]
 include = [
