@@ -136,8 +136,8 @@ class VLLMWeightSyncCallback(Callback):
     """
 
     vllm_engines: list[ray.actor.ActorHandle]
+    actor_manager: ray.actor.ActorHandle
     model_update_group: Any | None = None
-    actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
 
@@ -149,31 +149,19 @@ class VLLMWeightSyncCallback(Callback):
         if self.trainer.global_step % self.sync_interval != 0:
             return
 
-        sync_start = time.perf_counter()
         torch.cuda.empty_cache()
 
-        ray.get(self.actor_manager.set_should_stop.remote(True))
-
-        model = self.train_module.model
-
-        _, actor_sync_times = utils.ray_get_with_progress(
-            vllm_utils.broadcast_weights_to_vllm(
-                model=model,
-                vllm_engines=self.vllm_engines,
-                model_update_group=self.model_update_group,
-                model_step=self.trainer.global_step,
-                name_mapper=self.name_mapper,
-            ),
-            desc="Broadcasting weights to vLLM engines",
-            enable=False,
+        broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
+            model=self.train_module.model,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            model_step=self.trainer.global_step,
+            name_mapper=self.name_mapper,
         )
-        utils.ray_get_with_progress(
-            [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
+        sync_time_stats, _ = grpo_utils.perform_weight_sync(
+            broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
         )
-        ray.get(self.actor_manager.set_should_stop.remote(False))
-
-        sync_duration = time.perf_counter() - sync_start
-        for name, value in grpo_utils.weight_sync_stats(actor_sync_times, sync_duration).items():
+        for name, value in sync_time_stats.items():
             self.trainer.record_metric(name, value, reduce_type=None)
 
 

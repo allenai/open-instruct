@@ -1,14 +1,17 @@
 import enum
+import itertools
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+import ray
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -588,12 +591,42 @@ def compute_metrics_from_loss_stats(
     return metrics
 
 
-def weight_sync_stats(actor_sync_times, total_duration: float) -> dict[str, float]:
-    """Build weight-sync timing metrics from per-actor completion times and a wall-clock total."""
-    return {
-        "time/weight_sync": float(total_duration),
+def perform_weight_sync(
+    broadcast_refs: list[ray.ObjectRef],
+    vllm_engines: list[ray.actor.ActorHandle],
+    actor_manager: ray.actor.ActorHandle,
+    *,
+    progress: bool = False,
+    inflight_updates: bool = False,
+) -> tuple[dict[str, float], list]:
+    """Pause actors, broadcast weights, await/skip inner engine RPCs, wake engines, resume actors.
+
+    With `inflight_updates=False`, broadcast results are treated as
+    list-of-lists of inner engine-update ObjectRefs which get flattened and
+    awaited before waking. Pass `inflight_updates=True` to skip that inner
+    await — either because `broadcast_refs` are already engine RPC refs, or
+    because updates are intentionally left in flight.
+    """
+    start = time.perf_counter()
+    ray.get(actor_manager.set_should_stop.remote(True))
+    try:
+        results, actor_sync_times = utils.ray_get_with_progress(
+            broadcast_refs, desc="Broadcasting weights to vLLM engines", enable=progress
+        )
+        if not inflight_updates:
+            utils.ray_get_with_progress(
+                itertools.chain.from_iterable(results), desc="Waiting for vLLM engine update RPCs", enable=progress
+            )
+        utils.ray_get_with_progress(
+            [e.wake_up.remote() for e in vllm_engines], desc="Waking up vLLM engines", enable=progress
+        )
+    finally:
+        ray.get(actor_manager.set_should_stop.remote(False))
+    sync_time_stats = {
+        "time/weight_sync": time.perf_counter() - start,
         "time/weight_sync_mean": float(np.mean(actor_sync_times)),
         "time/weight_sync_min": float(np.min(actor_sync_times)),
         "time/weight_sync_max": float(np.max(actor_sync_times)),
         "time/weight_sync_median": float(np.median(actor_sync_times)),
     }
+    return sync_time_stats, results

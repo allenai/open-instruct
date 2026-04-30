@@ -191,12 +191,12 @@ def repeat_each(seq, k):
 
 
 def ray_get_with_progress(
-    ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
+    ray_refs: Iterable[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
     """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
-        ray_refs: List of ray object references
+        ray_refs: Iterable of ray object references (materialized internally)
         desc: Description for the progress bar
         enable: Whether to show the progress bar (default: True)
         timeout: Optional timeout in seconds for all operations to complete
@@ -211,6 +211,7 @@ def ray_get_with_progress(
     """
     t0 = time.perf_counter()
 
+    ray_refs = list(ray_refs)
     ray_futures = [ref.future() for ref in ray_refs]
     fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
 

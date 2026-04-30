@@ -287,7 +287,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
                 vllm_engines=self.vllm_engines,
                 model_update_group=self.model_update_group,
-                actor_manager=self.actor_manager,
+                actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
                 name_mapper=olmo_core_to_hf_name,
             )
 
