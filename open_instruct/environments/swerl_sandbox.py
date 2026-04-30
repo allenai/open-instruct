@@ -42,6 +42,8 @@ LAST_STEP_WARNING = (
 )
 
 MAX_OUTPUT_CHARS = 10_000
+TIMING_LOGS = os.getenv("SWERL_SANDBOX_TIMING_LOGS", "").strip().lower() not in {"", "0", "false", "no", "off"}
+TIMING_LOG_THRESHOLD_S = float(os.getenv("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", "1.0"))
 
 _BASH_TOOL = {
     "type": "function",
@@ -193,6 +195,16 @@ class SWERLSandboxEnv(RLEnvironment):
         return backoff + random.uniform(0.0, cls._RESET_RETRY_JITTER_S)
 
     def _do_reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
+        reset_start_time = time.perf_counter()
+        phase_start_time = reset_start_time
+        timings: dict[str, float] = {}
+
+        def record_phase(name: str) -> None:
+            nonlocal phase_start_time
+            now = time.perf_counter()
+            timings[name] = timings.get(name, 0.0) + (now - phase_start_time)
+            phase_start_time = now
+
         # Image must be task-specific; no fallback to default constructor image.
         # Rely on sample-level reset kwargs for image selection.
         resolved_image = kwargs.get("image")
@@ -222,22 +234,28 @@ class SWERLSandboxEnv(RLEnvironment):
                 "Set env_config.image or provide image.txt in task data."
             )
         self._backend_kwargs["image"] = resolved_image
+        record_phase("resolve_image")
 
         if self._backend is not None:
             self._backend.close()
+            record_phase("close")
             # Update image in case it changed per-sample
             self._backend._image = self._backend_kwargs.get("image", self._backend._image)
             self._backend.start()
+            record_phase("start")
         else:
             bkwargs = dict(self._backend_kwargs)
             bkwargs.setdefault("timeout", self._timeout)
             self._backend = create_backend(self._backend_type, **bkwargs)
+            record_phase("create_backend")
             self._backend.start()
+            record_phase("start")
         self._step_count = 0
         self._task_id = task_id
         self._max_steps = kwargs.get("max_steps")
 
         self._backend.run_command("mkdir -p /workspace /output /logs/verifier")
+        record_phase("mkdir")
 
         # Load task data if available
         self._instruction = ""
@@ -246,6 +264,17 @@ class SWERLSandboxEnv(RLEnvironment):
             task_dir = os.path.join(self._task_data_dir, task_id)
         if task_dir and os.path.isdir(task_dir):
             self._load_task_data(task_dir)
+        record_phase("load_task_data")
+
+        reset_total_s = time.perf_counter() - reset_start_time
+        if TIMING_LOGS and reset_total_s >= TIMING_LOG_THRESHOLD_S:
+            logger.info(
+                "SWERLSandboxEnv.reset timing task_id=%s image=%s total=%.3fs phases=%s",
+                task_id,
+                resolved_image,
+                reset_total_s,
+                {key: round(value, 3) for key, value in timings.items()},
+            )
 
         observation = self._instruction or "Sandbox ready."
         if not self._instruction and task_id:

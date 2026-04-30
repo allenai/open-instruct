@@ -41,6 +41,17 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning("Invalid float for %s=%r; using default %s", name, value, default)
+        return default
+
+
 class _FileSlotSemaphore:
     """Small cross-process semaphore using advisory locks on per-node files."""
 
@@ -54,9 +65,10 @@ class _FileSlotSemaphore:
     @contextlib.contextmanager
     def acquire(self):
         if self.slots <= 0:
-            yield
+            yield 0.0
             return
 
+        start_time = time.perf_counter()
         handle = None
         while handle is None:
             for slot in range(self.slots):
@@ -74,8 +86,9 @@ class _FileSlotSemaphore:
             if handle is None:
                 time.sleep(0.05 + random.uniform(0.0, 0.05))
 
+        wait_s = time.perf_counter() - start_time
         try:
-            yield
+            yield wait_s
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             handle.close()
@@ -150,6 +163,8 @@ class DockerBackend(SandboxBackend):
     )
     _START_SEMAPHORE = _FileSlotSemaphore("docker-start", _env_int("SWERL_DOCKER_START_CONCURRENCY", 64))
     _EXEC_SEMAPHORE = _FileSlotSemaphore("docker-exec", _env_int("SWERL_DOCKER_EXEC_CONCURRENCY", 256))
+    _TIMING_LOGS = _env_flag("SWERL_SANDBOX_TIMING_LOGS", False)
+    _TIMING_LOG_THRESHOLD_S = _env_float("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", 1.0)
 
     def __init__(self, image: str = "python:3.12-slim", timeout: int = 1800, mem_limit: str = "4g"):
         """
@@ -175,7 +190,9 @@ class DockerBackend(SandboxBackend):
         )
         if self._client is None:
             self._client = docker_sdk.from_env(timeout=300)
-        with self._START_SEMAPHORE.acquire():
+        start_time = time.perf_counter()
+        with self._START_SEMAPHORE.acquire() as semaphore_wait_s:
+            create_start_time = time.perf_counter()
             self._container = self._client.containers.run(
                 self._image,
                 command="sleep infinity",
@@ -183,6 +200,17 @@ class DockerBackend(SandboxBackend):
                 remove=self._auto_remove,
                 mem_limit=self._mem_limit,
                 memswap_limit=self._mem_limit,
+            )
+        elapsed_s = time.perf_counter() - start_time
+        create_s = time.perf_counter() - create_start_time
+        if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
+            logger.info(
+                "DockerBackend.start timing image=%s container=%s total=%.3fs semaphore_wait=%.3fs create_start=%.3fs",
+                self._image,
+                self._container.short_id,
+                elapsed_s,
+                semaphore_wait_s,
+                create_s,
             )
         logger.info(f"Docker container started: {self._container.short_id}")
 
@@ -258,8 +286,22 @@ class DockerBackend(SandboxBackend):
     def _exec_run(self, wrapped: str):
         if self._container is None:
             raise RuntimeError("Container missing during Docker exec.")
-        with self._EXEC_SEMAPHORE.acquire():
-            return self._container.exec_run(["bash", "-c", wrapped], demux=True)
+        start_time = time.perf_counter()
+        with self._EXEC_SEMAPHORE.acquire() as semaphore_wait_s:
+            exec_start_time = time.perf_counter()
+            result = self._container.exec_run(["bash", "-c", wrapped], demux=True)
+        elapsed_s = time.perf_counter() - start_time
+        exec_s = time.perf_counter() - exec_start_time
+        if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
+            logger.info(
+                "DockerBackend.exec timing image=%s container=%s total=%.3fs semaphore_wait=%.3fs exec=%.3fs",
+                self._image,
+                self._container.short_id,
+                elapsed_s,
+                semaphore_wait_s,
+                exec_s,
+            )
+        return result
 
     def _retry_exec_same_container(self, wrapped: str, container_id: str):
         """Retry an exec after a transient Docker daemon/storage error."""
@@ -414,7 +456,18 @@ class DockerBackend(SandboxBackend):
     def put_archive(self, root: str, tar_bytes: bytes) -> None:
         if self._container is None:
             raise RuntimeError("Container not started. Call start() first.")
+        start_time = time.perf_counter()
         self._container.put_archive(root, tar_bytes)
+        elapsed_s = time.perf_counter() - start_time
+        if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
+            logger.info(
+                "DockerBackend.put_archive timing image=%s container=%s root=%s bytes=%s total=%.3fs",
+                self._image,
+                self._container.short_id,
+                root,
+                len(tar_bytes),
+                elapsed_s,
+            )
 
     def close(self) -> None:
         if self._container is not None:
