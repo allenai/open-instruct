@@ -57,7 +57,7 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --enable_prefix_caching \
+    --vllm_enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
