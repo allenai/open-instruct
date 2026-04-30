@@ -211,6 +211,7 @@ class DockerBackend(SandboxBackend):
                 command="sleep infinity",
                 detach=True,
                 auto_remove=self._auto_remove,
+                labels={"open_instruct": "swerl_sandbox"},
                 mem_limit=self._mem_limit,
                 memswap_limit=self._mem_limit,
             )

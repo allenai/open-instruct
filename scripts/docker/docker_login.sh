@@ -55,6 +55,35 @@ if command -v podman >/dev/null 2>&1; then
 
     if [ -S "$PODMAN_SOCKET_PATH" ]; then
         echo "Docker SDK configured to use Podman socket at $DOCKER_HOST"
+        janitor_enabled="${SWERL_DOCKER_JANITOR_ENABLED:-}"
+        if [ -z "$janitor_enabled" ] && [ "${SWERL_DOCKER_AUTO_REMOVE:-1}" = "0" ]; then
+            janitor_enabled=1
+        fi
+        if [ "${janitor_enabled:-0}" = "1" ]; then
+            JANITOR_LOG="${PODMAN_LOG_DIR}/podman-janitor.log"
+            JANITOR_INTERVAL="${SWERL_DOCKER_JANITOR_INTERVAL_S:-60}"
+            JANITOR_BATCH="${SWERL_DOCKER_JANITOR_BATCH_SIZE:-20}"
+            echo "Starting Podman janitor (interval=${JANITOR_INTERVAL}s, batch=${JANITOR_BATCH})"
+            (
+                while true; do
+                    mapfile -t exited_ids < <(
+                        podman ps -aq \
+                            --filter status=exited \
+                            --filter label=open_instruct=swerl_sandbox 2>>"$JANITOR_LOG" \
+                            | head -n "$JANITOR_BATCH"
+                    )
+                    if [ "${#exited_ids[@]}" -gt 0 ]; then
+                        echo "$(date -Is) removing ${#exited_ids[@]} exited sandbox containers" >>"$JANITOR_LOG"
+                    fi
+                    for cid in "${exited_ids[@]}"; do
+                        podman rm "$cid" >>"$JANITOR_LOG" 2>&1 || true
+                    done
+                    sleep "$JANITOR_INTERVAL"
+                done
+            ) &
+            export PODMAN_JANITOR_PID=$!
+            echo "Podman janitor PID: $PODMAN_JANITOR_PID"
+        fi
     else
         echo "WARNING: Podman socket was not created at $PODMAN_SOCKET_PATH"
         if [ -e "$PODMAN_SOCKET_PATH" ]; then

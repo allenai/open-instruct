@@ -54,6 +54,112 @@ logger = logging.getLogger(__name__)
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer for %s=%r; using default %s", name, value, default)
+        return default
+
+
+@ray.remote
+class ImagePrewarmActor:
+    """Best-effort per-node image prewarmer for Docker/Podman-backed sandboxes."""
+
+    def __init__(self, concurrency: int | None = None, max_queued: int | None = None):
+        self.concurrency = concurrency or _env_int("SWERL_DOCKER_PREWARM_CONCURRENCY", 4)
+        self.max_queued = max_queued or _env_int("SWERL_DOCKER_PREWARM_MAX_QUEUED", 4096)
+        self.enabled = _env_flag("SWERL_DOCKER_PREWARM_ENABLED", False)
+        self._executor = ThreadPoolExecutor(max_workers=max(1, self.concurrency), thread_name_prefix="ImagePrewarm")
+        self._lock = threading.Lock()
+        self._seen: set[str] = set()
+        self._inflight: set[str] = set()
+        self._stats = {"scheduled": 0, "skipped": 0, "dropped": 0, "ok": 0, "failed": 0}
+        logger.info(
+            "[ImagePrewarmActor] initialized enabled=%s concurrency=%s max_queued=%s",
+            self.enabled,
+            self.concurrency,
+            self.max_queued,
+        )
+
+    def prewarm(self, images: list[str]) -> dict[str, int]:
+        if not self.enabled:
+            return dict(self._stats)
+        scheduled = 0
+        with self._lock:
+            for image in images:
+                if not image or image in self._seen:
+                    self._stats["skipped"] += 1
+                    continue
+                if len(self._inflight) >= self.max_queued:
+                    self._stats["dropped"] += 1
+                    continue
+                self._seen.add(image)
+                self._inflight.add(image)
+                self._stats["scheduled"] += 1
+                scheduled += 1
+                future = self._executor.submit(self._pull_image, image)
+                future.add_done_callback(lambda fut, image=image: self._finish_pull(image, fut))
+        if scheduled:
+            logger.info("[ImagePrewarmActor] scheduled %s images; stats=%s", scheduled, self._stats)
+        return dict(self._stats)
+
+    def get_stats(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._stats) | {"seen": len(self._seen), "inflight": len(self._inflight)}
+
+    def _pull_image(self, image: str) -> None:
+        import docker as docker_sdk
+
+        client = docker_sdk.from_env(timeout=300)
+        try:
+            client.images.get(image)
+            return
+        except docker_sdk.errors.ImageNotFound:
+            client.images.pull(image)
+
+    def _finish_pull(self, image: str, future) -> None:
+        try:
+            future.result()
+        except Exception as e:
+            logger.warning("[ImagePrewarmActor] failed to prewarm image=%s: %s", image, e)
+            ok = False
+        else:
+            ok = True
+        with self._lock:
+            self._inflight.discard(image)
+            self._stats["ok" if ok else "failed"] += 1
+
+
+def _images_from_env_config(env_config: EnvConfig) -> list[str]:
+    images: list[str] = []
+    for entry in env_config.env_configs.values():
+        image = entry.kwargs.get("image")
+        if isinstance(image, str) and image:
+            images.append(image)
+    return images
+
+
+def _prewarm_env_images(env_config: EnvConfig, image_prewarm_actors: list[ray.actor.ActorHandle] | None) -> None:
+    if not image_prewarm_actors:
+        return
+    images = sorted(set(_images_from_env_config(env_config)))
+    if not images:
+        return
+    for actor in image_prewarm_actors:
+        actor.prewarm.remote(images)
+
+
 def concave_length_penalty(x: np.ndarray, k: float, q: float) -> np.ndarray:
     """Box-Cox-style concave length penalty.
 
@@ -815,11 +921,13 @@ def add_prompt_to_generator(
     is_eval: bool,
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
+    image_prewarm_actors: list[ray.actor.ActorHandle] | None = None,
 ) -> None:
     index = int(example["index"])
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
+    _prewarm_env_images(env_config, image_prewarm_actors)
 
     ground_truth = ground_truth_overrides.get(index) if ground_truth_overrides else None
 
@@ -858,6 +966,7 @@ def accumulate_inference_batches(
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
     ground_truth_overrides: dict[int, Any] | None = None,
+    image_prewarm_actors: list[ray.actor.ActorHandle] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -945,6 +1054,7 @@ def accumulate_inference_batches(
                 is_eval=False,
                 base_env_config=base_env_config,
                 ground_truth_overrides=ground_truth_overrides,
+                image_prewarm_actors=image_prewarm_actors,
             )
 
         for i in range(len(result.finish_reasons)):
@@ -1244,6 +1354,7 @@ class DataPreparationActor:
         run_name: str,
         model_name: str | None,
         base_env_config: EnvConfig,
+        image_prewarm_actors: list[ray.actor.ActorHandle] | None = None,
         initial_state: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
@@ -1265,6 +1376,7 @@ class DataPreparationActor:
         self.run_name = run_name
         self.model_name = model_name
         self.base_env_config = base_env_config
+        self.image_prewarm_actors = image_prewarm_actors or []
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1323,6 +1435,7 @@ class DataPreparationActor:
                 is_eval=False,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
+                image_prewarm_actors=self.image_prewarm_actors,
             )
 
         for step in range(self.training_step, self.num_training_steps):
@@ -1356,6 +1469,7 @@ class DataPreparationActor:
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
+                image_prewarm_actors=self.image_prewarm_actors,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"

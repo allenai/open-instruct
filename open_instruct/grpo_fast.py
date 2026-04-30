@@ -1415,6 +1415,25 @@ def create_model_and_optimizer(
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
+    image_prewarm_actors = []
+    if os.getenv("SWERL_DOCKER_PREWARM_ENABLED", "").strip().lower() not in {"", "0", "false", "no", "off"}:
+        for node in ray.nodes():
+            if not node.get("Alive", False):
+                continue
+            node_ip = node.get("NodeManagerAddress")
+            if not node_ip:
+                continue
+            try:
+                image_prewarm_actors.append(
+                    data_loader_lib.ImagePrewarmActor.options(
+                        num_cpus=0.1,
+                        resources={f"node:{node_ip}": 0.001},
+                    ).remote()
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create ImagePrewarmActor on node {node_ip}: {e}")
+        logger.info(f"Created {len(image_prewarm_actors)} ImagePrewarmActor(s)")
+
     # Create DataPreparationActor FIRST so StreamingDataLoader can find it
     _data_prep_actor = data_loader_lib.DataPreparationActor.options(
         name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
@@ -1440,6 +1459,7 @@ def create_model_and_optimizer(
         model_name=model_config.model_name_or_path,
         initial_state=None,
         base_env_config=base_env_config,
+        image_prewarm_actors=image_prewarm_actors,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
