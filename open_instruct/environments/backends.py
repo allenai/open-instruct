@@ -192,8 +192,21 @@ class DockerBackend(SandboxBackend):
             self._client = docker_sdk.from_env(timeout=300)
         start_time = time.perf_counter()
         with self._START_SEMAPHORE.acquire() as semaphore_wait_s:
-            create_start_time = time.perf_counter()
-            self._container = self._client.containers.run(
+            lifecycle_start_time = time.perf_counter()
+            phase_timings: dict[str, float] = {}
+
+            phase_start_time = time.perf_counter()
+            try:
+                self._client.images.get(self._image)
+                phase_timings["image_get"] = time.perf_counter() - phase_start_time
+            except docker_sdk.errors.ImageNotFound:
+                phase_timings["image_get"] = time.perf_counter() - phase_start_time
+                phase_start_time = time.perf_counter()
+                self._client.images.pull(self._image)
+                phase_timings["image_pull"] = time.perf_counter() - phase_start_time
+
+            phase_start_time = time.perf_counter()
+            self._container = self._client.containers.create(
                 self._image,
                 command="sleep infinity",
                 detach=True,
@@ -201,16 +214,22 @@ class DockerBackend(SandboxBackend):
                 mem_limit=self._mem_limit,
                 memswap_limit=self._mem_limit,
             )
+            phase_timings["container_create"] = time.perf_counter() - phase_start_time
+
+            phase_start_time = time.perf_counter()
+            self._container.start()
+            phase_timings["container_start"] = time.perf_counter() - phase_start_time
         elapsed_s = time.perf_counter() - start_time
-        create_s = time.perf_counter() - create_start_time
+        create_s = time.perf_counter() - lifecycle_start_time
         if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
             logger.info(
-                "DockerBackend.start timing image=%s container=%s total=%.3fs semaphore_wait=%.3fs create_start=%.3fs",
+                "DockerBackend.start timing image=%s container=%s total=%.3fs semaphore_wait=%.3fs create_start=%.3fs phases=%s",
                 self._image,
                 self._container.short_id,
                 elapsed_s,
                 semaphore_wait_s,
                 create_s,
+                {key: round(value, 3) for key, value in phase_timings.items()},
             )
         logger.info(f"Docker container started: {self._container.short_id}")
 
