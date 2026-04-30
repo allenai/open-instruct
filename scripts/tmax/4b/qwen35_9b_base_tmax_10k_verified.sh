@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-10k
+# RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-10k
 # 4 nodes x 8 GPUs (32 GPUs total)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -8,7 +8,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k-verified GRPO with Qwen3.5-4B" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -32,7 +32,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=1 \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/swerl-tmax-10k-verified 1.0 \
+    --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 32768 \
