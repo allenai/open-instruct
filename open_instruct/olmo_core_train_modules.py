@@ -490,7 +490,6 @@ class GRPOTrainModule(TransformerTrainModule):
                     pg_losses2,
                     pg_loss,
                     ratio,
-                    loss,
                     response_mask,
                     new_logprobs,
                     ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,

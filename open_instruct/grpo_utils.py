@@ -575,7 +575,6 @@ def populate_sample_loss_stats(
     pg_losses2: torch.Tensor,
     pg_loss: torch.Tensor,
     ratio: torch.Tensor,
-    loss: torch.Tensor,
     response_mask: torch.Tensor,
     new_logprobs: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
@@ -599,7 +598,9 @@ def populate_sample_loss_stats(
             )
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
-        loss_stats_B["loss/total_avg"][sample_idx] = loss
+        loss_stats_B["loss/total_avg"][sample_idx] = (
+            loss_stats_B["loss/policy_avg"][sample_idx] + loss_stats_B["loss/kl_avg"][sample_idx]
+        )
         loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)
         if entropy is not None:
             loss_stats_B["policy/entropy_avg"][sample_idx] = masked_mean(entropy, response_mask).float()

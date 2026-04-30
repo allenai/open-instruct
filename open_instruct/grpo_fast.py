@@ -777,7 +777,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_losses2_BT,
                         pg_loss_max_BT,
                         ratio_BT,
-                        loss,
                         response_mask_BT,
                         new_logprobs_BT,
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
