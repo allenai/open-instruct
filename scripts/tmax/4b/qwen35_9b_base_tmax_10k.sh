@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-10k-verified
+# RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-10k
 # 4 nodes x 8 GPUs (32 GPUs total)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -8,7 +8,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k-verified GRPO with Qwen3.5-4B + last_step_warning" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -32,7 +32,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& export SWERL_DOCKER_AUTO_REMOVE=1 \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/swerl-tmax-10k-verified 1.0 \
+    --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 32768 \
@@ -40,7 +40,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
-    --async_steps 4 \
+    --async_steps 8 \
     --model_name_or_path Qwen/Qwen3.5-4B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
@@ -57,12 +57,12 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --vllm_enforce_eager \
+    --enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k-verified", "test_timeout": 120, "image": "python:3.12-slim", "last_step_warning": true}' \
+    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
     --max_steps 100 \
     --verification_reward 1.0 \
@@ -75,7 +75,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo_last_step_warning \
+    --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False

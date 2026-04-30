@@ -8,7 +8,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-4B" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B + last_step_warning" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -40,7 +40,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
-    --async_steps 8 \
+    --async_steps 4 \
     --model_name_or_path Qwen/Qwen3.5-4B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
@@ -57,12 +57,12 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --enable_prefix_caching \
+    --vllm_enforce_eager \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
     --tools swerl_sandbox \
-    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k-verified", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k", "test_timeout": 120, "image": "python:3.12-slim", "last_step_warning": true}' \
     --pool_size 512 \
     --max_steps 100 \
     --verification_reward 1.0 \
@@ -75,7 +75,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo \
+    --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo_last_step_warning \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
