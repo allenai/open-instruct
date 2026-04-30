@@ -1572,14 +1572,7 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
-        # Calculate distribution statistics
-        sync_time_stats = {
-            "time/weight_sync": timer.duration,
-            "time/weight_sync_mean": np.mean(actor_sync_times),
-            "time/weight_sync_min": np.min(actor_sync_times),
-            "time/weight_sync_max": np.max(actor_sync_times),
-            "time/weight_sync_median": np.median(actor_sync_times),
-        }
+        sync_time_stats = grpo_utils.weight_sync_stats(actor_sync_times, timer.duration)
 
         try:
             weight_sync_metrics_Q.put_nowait(sync_time_stats)

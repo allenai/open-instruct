@@ -13,7 +13,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-import numpy as np
 import ray
 import ray.exceptions
 import torch
@@ -24,7 +23,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -174,11 +173,8 @@ class VLLMWeightSyncCallback(Callback):
         ray.get(self.actor_manager.set_should_stop.remote(False))
 
         sync_duration = time.perf_counter() - sync_start
-        self.trainer.record_metric("time/weight_sync", sync_duration, reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_mean", float(np.mean(actor_sync_times)), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_min", float(np.min(actor_sync_times)), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_max", float(np.max(actor_sync_times)), reduce_type=None)
-        self.trainer.record_metric("time/weight_sync_median", float(np.median(actor_sync_times)), reduce_type=None)
+        for name, value in grpo_utils.weight_sync_stats(actor_sync_times, sync_duration).items():
+            self.trainer.record_metric(name, value, reduce_type=None)
 
 
 @dataclass

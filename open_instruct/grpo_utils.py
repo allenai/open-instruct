@@ -586,3 +586,14 @@ def compute_metrics_from_loss_stats(
         metrics[key] = (loss_stats_B[key] * weights).sum().item()
     metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
     return metrics
+
+
+def weight_sync_stats(actor_sync_times, total_duration: float) -> dict[str, float]:
+    """Build weight-sync timing metrics from per-actor completion times and a wall-clock total."""
+    return {
+        "time/weight_sync": float(total_duration),
+        "time/weight_sync_mean": float(np.mean(actor_sync_times)),
+        "time/weight_sync_min": float(np.min(actor_sync_times)),
+        "time/weight_sync_max": float(np.max(actor_sync_times)),
+        "time/weight_sync_median": float(np.median(actor_sync_times)),
+    }
