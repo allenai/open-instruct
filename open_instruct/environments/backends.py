@@ -210,7 +210,7 @@ class DockerBackend(SandboxBackend):
                 self._image,
                 command="sleep infinity",
                 detach=True,
-                remove=self._auto_remove,
+                auto_remove=self._auto_remove,
                 mem_limit=self._mem_limit,
                 memswap_limit=self._mem_limit,
             )
