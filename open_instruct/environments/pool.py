@@ -10,9 +10,11 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 DEFAULT_ACQUIRE_TIMEOUT_S = 7200
+ACQUIRE_CONCURRENCY = 1000
+RELEASE_CONCURRENCY = 128
 
 
-@ray.remote
+@ray.remote(concurrency_groups={"acquire": ACQUIRE_CONCURRENCY, "release": RELEASE_CONCURRENCY})
 class EnvironmentPool:
     """Shared pool of RLEnvironment Ray actors for concurrent rollouts.
 
@@ -41,6 +43,7 @@ class EnvironmentPool:
             self._available.put_nowait(actor)
         logger.info(f"Pool ready: {pool_size} {actor_class.__name__} actors")
 
+    @ray.method(concurrency_group="acquire")
     async def acquire(self) -> ray.actor.ActorHandle:
         try:
             return await asyncio.wait_for(self._available.get(), timeout=self._acquire_timeout)
@@ -51,6 +54,7 @@ class EnvironmentPool:
                 f"An actor may have crashed without being released."
             ) from e
 
+    @ray.method(concurrency_group="release")
     async def release(self, actor: ray.actor.ActorHandle) -> None:
         await self._available.put(actor)
 
