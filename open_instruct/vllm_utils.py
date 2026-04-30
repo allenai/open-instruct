@@ -68,6 +68,14 @@ from open_instruct.environments.tools.parsers import ToolParser, create_tool_par
 from open_instruct.ground_truth_utils import RewardConfig
 
 logger = logger_utils.setup_logger(__name__)
+SANDBOX_TIMING_LOGS = os.getenv("SWERL_SANDBOX_TIMING_LOGS", "").strip().lower() not in {
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+}
+SANDBOX_TIMING_LOG_THRESHOLD_S = float(os.getenv("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", "1.0"))
 
 # ---------------------------------------------------------------------------
 # Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
@@ -960,7 +968,15 @@ async def _acquire_and_reset_pools(
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool/environment support."""
+    request_start_time = time.perf_counter()
+    timings: dict[str, float] = defaultdict(float)
+    counts: dict[str, int] = defaultdict(int)
+
+    def add_timing(name: str, start_time: float) -> None:
+        timings[name] += time.perf_counter() - start_time
+
     await _check_health(actor.server_port)
+    add_timing("health_check", request_start_time)
 
     response_tokens: list[int] = []
     response_logprobs: list[float] = []
@@ -998,7 +1014,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 f"Available envs/tools: {sorted(configured_tools)}"
             )
 
+        phase_start_time = time.perf_counter()
         pool_setup = await _acquire_and_reset_pools(actor.pools, configured_tools, env_config, allowed_tools)
+        add_timing("acquire_reset_pools", phase_start_time)
         actor_map = pool_setup.actor_map
         allowed_tools = pool_setup.allowed_tools
         tool_response_roles = pool_setup.tool_response_roles
@@ -1018,6 +1036,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            counts["generation_calls"] += 1
+            phase_start_time = time.perf_counter()
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
@@ -1030,8 +1050,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 },
                 **params_dict,
             )
+            add_timing("generation", phase_start_time)
 
             output = api_response.choices[0]
+            phase_start_time = time.perf_counter()
             model_tokens = list(output.token_ids)
             response_tokens.extend(model_tokens)
             current_prompt.extend(model_tokens)
@@ -1047,6 +1069,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # Text envs: inject a shadow tool call so dispatch handles it uniformly
             for text_env_name in text_env_names:
                 tool_calls.append(EnvCall(id="", name=text_env_name, args={"text": output.text}))
+            add_timing("process_generation_output", phase_start_time)
 
             if not tool_calls:
                 break
@@ -1066,10 +1089,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 rollout.step_count += 1
 
                 try:
+                    counts["tool_calls"] += 1
+                    phase_start_time = time.perf_counter()
                     step_result: StepResult = await asyncio.wait_for(
                         target.step.remote(EnvCall(id=str(rollout.step_count), name=tc.name, args=tc.args)),
                         timeout=actor.tool_call_timeout,
                     )
+                    add_timing("tool_step", phase_start_time)
                     observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
                     rollout.tool_output += step_result.result
                     rollout.rewards.append(step_result.reward)
@@ -1087,6 +1113,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         )
                     )
                 except asyncio.TimeoutError:
+                    add_timing("tool_step", phase_start_time)
                     error_msg = f"Step '{tc.name}' timed out after {actor.tool_call_timeout}s. Args: {tc.args}"
                     logger.warning(error_msg)
                     observations.append((error_msg, "tool"))
@@ -1097,6 +1124,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout)
                     )
                 except Exception as e:
+                    add_timing("tool_step", phase_start_time)
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
                     observations.append((error_msg, "tool"))
@@ -1109,6 +1137,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             if observations:
                 exceeded_context_budget = False
+                phase_start_time = time.perf_counter()
                 for observation, response_role in observations:
                     tokens, logprobs, masks, excess = process_tool_tokens(
                         [observation],
@@ -1128,9 +1157,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     if excess > 0:
                         exceeded_context_budget = True
                         break
+                add_timing("process_tool_outputs", phase_start_time)
                 if exceeded_context_budget:
                     break
     finally:
+        phase_start_time = time.perf_counter()
         env_metrics: dict[str, dict[str, float]] = {}
         for env_name in pool_setup.active_env_names:
             if env_name in pool_setup.acquired:
@@ -1144,6 +1175,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             rollout.info["env_metrics"] = env_metrics
         for pool, acq_actor in pool_setup.acquired.values():
             pool.release.remote(acq_actor)
+        add_timing("env_metrics_and_release", phase_start_time)
 
     if len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
@@ -1163,6 +1195,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         rollout_state=dataclasses.asdict(rollout),
     )
 
+    phase_start_time = time.perf_counter()
     actor.active_tasks.pop(sub_request_id, None)
     actor.completion_queue.put(
         {
@@ -1176,6 +1209,22 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             "use_tools": bool(actor.pools),
         }
     )
+    add_timing("enqueue_completion", phase_start_time)
+    total_s = time.perf_counter() - request_start_time
+    if SANDBOX_TIMING_LOGS and total_s >= SANDBOX_TIMING_LOG_THRESHOLD_S:
+        logger.info(
+            "LLMRayActor.rollout timing request_id=%s base_request_id=%s total=%.3fs counts=%s timings=%s "
+            "tokens=%s masks=%s done=%s timeout=%s",
+            sub_request_id,
+            base_request_id,
+            total_s,
+            dict(counts),
+            {key: round(value, 3) for key, value in timings.items()},
+            len(response_tokens),
+            len(response_masks),
+            rollout.done,
+            rollout.timeout,
+        )
 
 
 def get_cuda_arch_list() -> str:
