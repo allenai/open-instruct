@@ -290,6 +290,7 @@ class GRPOTrainModule(TransformerTrainModule):
         grpo_config: grpo_utils.GRPOExperimentConfig,
         temperature: float,
         tokenizer: PreTrainedTokenizer,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
@@ -299,7 +300,6 @@ class GRPOTrainModule(TransformerTrainModule):
         device: torch.device | None = None,
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
-        streaming_config: data_loader_lib.StreamingDataLoaderConfig | None = None,
     ):
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
@@ -343,7 +343,7 @@ class GRPOTrainModule(TransformerTrainModule):
         pass
 
     def zero_grads(self) -> None:
-        # No-op: train_batch invokes _do_zero_grads internally after each optim step.
+        # No-op: train_batch zeroes grads internally after each optim step.
         pass
 
     def _do_optim_step(self) -> None:
@@ -358,9 +358,6 @@ class GRPOTrainModule(TransformerTrainModule):
         if grad_norm is not None:
             grad_norm_val = grad_norm.item() if hasattr(grad_norm, "item") else grad_norm
             self._grad_norms.append(float(grad_norm_val))
-
-    def _do_zero_grads(self) -> None:
-        self.optim.zero_grad(set_to_none=True)
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
@@ -446,7 +443,8 @@ class GRPOTrainModule(TransformerTrainModule):
             num_samples, self.device, record_entropy=self.grpo_config.record_entropy
         )
 
-        debug_metrics: dict[str, float] | None = None
+        debug_metrics_sum: dict[str, float] = {}
+        debug_metrics_count = 0
 
         num_steps = 0
         local_step = 0
@@ -468,10 +466,12 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
 
-                if epoch_idx == 0 and sample_idx == 0:
-                    debug_metrics = grpo_utils.compute_vllm_local_debug_metrics(
-                        local_logprobs=new_logprobs, vllm_logprobs=vllm_logprobs, response_mask=response_mask
-                    )
+                step_debug_metrics = grpo_utils.compute_vllm_local_debug_metrics(
+                    local_logprobs=new_logprobs, vllm_logprobs=vllm_logprobs, response_mask=response_mask
+                )
+                for k, v in step_debug_metrics.items():
+                    debug_metrics_sum[k] = debug_metrics_sum.get(k, 0.0) + v
+                debug_metrics_count += 1
 
                 old_logprob = grpo_utils.resolve_old_logprob(
                     old_logprobs_BT,
@@ -531,12 +531,12 @@ class GRPOTrainModule(TransformerTrainModule):
                 if local_step % accumulation_steps == 0:
                     if not dry_run:
                         self._do_optim_step()
-                    self._do_zero_grads()
+                    self.optim.zero_grad(set_to_none=True)
 
         if local_step % accumulation_steps != 0:
             if not dry_run:
                 self._do_optim_step()
-            self._do_zero_grads()
+            self.optim.zero_grad(set_to_none=True)
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
@@ -561,9 +561,8 @@ class GRPOTrainModule(TransformerTrainModule):
 
             self._record_step_counter_metrics(int(global_tokens))
             self._record_data_prep_metrics(batch.get("metrics") or {})
-            if debug_metrics is not None:
-                for k, v in debug_metrics.items():
-                    self.record_metric(k, v, reduce_type=None)
+            for k, v in debug_metrics_sum.items():
+                self.record_metric(k, v / debug_metrics_count, reduce_type=None)
 
             if self._grad_norms:
                 self.record_metric("optim/grad_norm", sum(self._grad_norms) / len(self._grad_norms), reduce_type=None)
@@ -577,28 +576,11 @@ class GRPOTrainModule(TransformerTrainModule):
         self.record_metric("val/num_step_tokens", float(global_tokens), reduce_type=None)
         self.record_metric("val/num_total_tokens", float(self._num_total_tokens), reduce_type=None)
 
-        if self.streaming_config is not None:
-            samples_per_step = (
-                self.streaming_config.num_unique_prompts_rollout * self.streaming_config.num_samples_per_prompt_rollout
-            )
-            episode = self.trainer.global_step * samples_per_step
-            self.record_metric("episode", float(episode), reduce_type=None)
-            dataset_len = self._get_train_dataset_len()
-            if dataset_len:
-                self.record_metric(
-                    "epoch",
-                    episode / self.streaming_config.num_samples_per_prompt_rollout / dataset_len,
-                    reduce_type=None,
-                )
-
-    def _get_train_dataset_len(self) -> int | None:
-        dataset = getattr(self.trainer.data_loader, "dataset", None)
-        if dataset is None:
-            return None
-        try:
-            return len(dataset)
-        except TypeError:
-            return None
+        samples_per_step = (
+            self.streaming_config.num_unique_prompts_rollout * self.streaming_config.num_samples_per_prompt_rollout
+        )
+        episode = self.trainer.global_step * samples_per_step
+        self.record_metric("episode", float(episode), reduce_type=None)
 
     def _record_data_prep_metrics(self, data_prep_metrics: dict[str, Any]) -> None:
         histogram_metrics: dict[str, Any] = {}
