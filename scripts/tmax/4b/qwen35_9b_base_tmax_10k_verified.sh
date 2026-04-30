@@ -40,7 +40,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
-    --async_steps 4 \
+    --async_steps 8 \
     --model_name_or_path Qwen/Qwen3.5-4B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
@@ -57,7 +57,7 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --vllm_enforce_eager \
+    --enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
