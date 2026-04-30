@@ -196,7 +196,7 @@ def ray_get_with_progress(
     """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
-        ray_refs: Iterable of ray object references (materialized internally)
+        ray_refs: Iterable of ray object references
         desc: Description for the progress bar
         enable: Whether to show the progress bar (default: True)
         timeout: Optional timeout in seconds for all operations to complete
