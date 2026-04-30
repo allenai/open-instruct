@@ -701,12 +701,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
-                    for k, v in grpo_utils.compute_vllm_local_debug_metrics(
-                        local_logprobs=local_logprobs_BT,
-                        vllm_logprobs=vllm_logprobs_BT,
-                        response_mask=response_mask_BT,
-                    ).items():
-                        self.local_metrics[k] = v
+                    self.local_metrics.update(
+                        grpo_utils.compute_vllm_local_debug_metrics(
+                            local_logprobs=local_logprobs_BT,
+                            vllm_logprobs=vllm_logprobs_BT,
+                            response_mask=response_mask_BT,
+                        )
+                    )
 
                     new_logprobs_BT = local_logprobs_BT
 

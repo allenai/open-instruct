@@ -165,6 +165,10 @@ class MetricsTracker:
         idx = self._maybe_register_metric(name)
         self.metrics[idx] = value
 
+    def update(self, metrics: dict) -> None:
+        for name, value in metrics.items():
+            self[name] = value
+
     def get_metrics_list(self) -> dict[str, float]:
         # Convert to Python floats for logging systems (wandb, tensorboard)
         metrics_list = self.metrics.tolist()
