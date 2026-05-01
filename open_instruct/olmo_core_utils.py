@@ -291,5 +291,7 @@ def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_nam
         os.makedirs(save_dir, exist_ok=True)
         torch.save(state_dict, os.path.join(save_dir, "model_state_dict.pt"))
     tokenizer.save_pretrained(save_dir)
+    from open_instruct.model_utils import sanitize_saved_tokenizer_config
+    sanitize_saved_tokenizer_config(save_dir)
     original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
     original_config.save_pretrained(save_dir)

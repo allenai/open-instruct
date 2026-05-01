@@ -928,6 +928,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             self.tokenizer.save_pretrained(output_dir)
+            from open_instruct.model_utils import sanitize_saved_tokenizer_config
+            sanitize_saved_tokenizer_config(output_dir)
             marker_path.touch()
 
     # we need this because we don't know which node is rank 0 is on

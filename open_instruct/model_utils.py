@@ -586,7 +586,31 @@ def save_with_accelerate(
 
     if accelerator.is_main_process:
         tokenizer.save_pretrained(output_dir)
+        sanitize_saved_tokenizer_config(output_dir)
     # customize model card (TODO (Costa): this can be prettier)
+
+
+def sanitize_saved_tokenizer_config(output_dir) -> None:
+    """Strip ``tokenizer_class: TokenizersBackend`` from a just-saved tokenizer.
+
+    OLMo-3 ships with this custom class name; pinned/older ``transformers``
+    versions can't import it, so downstream
+    ``AutoTokenizer.from_pretrained(<saved-checkpoint>)`` fails with
+    ``Tokenizer class TokenizersBackend does not exist``. Removing the field
+    lets AutoTokenizer auto-detect from ``tokenizer.json`` (typically
+    GPTNeoXTokenizerFast for OLMo-3). No-op for non-OLMo checkpoints.
+    """
+    import json as _json
+    _tok_cfg = pathlib.Path(output_dir) / "tokenizer_config.json"
+    if not _tok_cfg.exists():
+        return
+    try:
+        _d = _json.load(open(_tok_cfg))
+        if _d.get("tokenizer_class") == "TokenizersBackend":
+            del _d["tokenizer_class"]
+            _json.dump(_d, open(_tok_cfg, "w"), indent=2)
+    except Exception:
+        pass
 
 
 @torch.compile(dynamic=True)
