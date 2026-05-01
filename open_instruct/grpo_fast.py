@@ -1799,6 +1799,7 @@ def create_model_and_optimizer(
         data_prep_actor_state = _build_data_prep_actor_resume_state(
             checkpoint_state, ignore_never_give_up_state=args.ignore_resume_never_give_up_state
         )
+        logger.info("Got checkpoint state and restoring")
         if data_prep_actor_state is not None:
             ray_get_with_progress(
                 [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
