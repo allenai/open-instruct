@@ -7,6 +7,7 @@ CLUSTER=ai2/jupiter
 WORKSPACE=ai2/olmo-instruct
 PRIORITY=urgent
 BEAKER_IMAGE=nathanl/open_instruct_auto
+TRACE_DIR=/weka/oe-adapt-default/tylerm/deletable_rollouts/${EXP_NAME}/${RUN_NAME}
 
 uv run python mason.py \
   --task_name "${EXP_NAME}" \
@@ -24,6 +25,8 @@ uv run python mason.py \
   --budget ai2/oe-adapt \
   -- \
 uv run open_instruct/benchmark_generators.py \
+  --run_name "${RUN_NAME}" \
+  --exp_name "${EXP_NAME}" \
   --model_name_or_path "Qwen/Qwen3-4B-Base" \
   --tokenizer_name_or_path "Qwen/Qwen3-4B-Base" \
   --chat_template_name qwen_instruct_user_boxed_math \
@@ -41,4 +44,5 @@ uv run open_instruct/benchmark_generators.py \
   --apply_verifiable_reward true \
   --verification_reward 10.0 \
   --save_traces \
+  --rollouts_save_path "${TRACE_DIR}" \
   --seed 1
