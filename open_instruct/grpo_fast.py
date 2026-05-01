@@ -1528,58 +1528,13 @@ def weight_sync_thread(
         # Clear the event for next iteration
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
-            with Timer("[Weight Sync]") as timer:
-                logger.debug("[Weight Sync Thread] Starting weight sync")
-
-                # Set actors to stop
-                ray.get(actor_manager.set_should_stop.remote(True))
-                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
-
-                # Broadcast weights to vLLM engines. model_step is stamped onto vLLM
-                # engines as part of the update_weights RPC — no separate set_model_step RPC.
-                weight_broadcast_futures: list[ray.ObjectRef] = [
-                    m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models
-                ]
-
-                # Wait for all trainer-side broadcasts to finish and collect timing stats.
-                # NOTE: these results are lists of engine.update_weight ObjectRefs (empty on non-rank-0 workers).
-                weight_broadcast_results, actor_sync_times = ray_get_with_progress(
-                    weight_broadcast_futures,
-                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                    enable=args.verbose,
-                )
-
-                if not inflight_updates:
-                    # Ensure all vLLM engine update RPCs have completed before unpausing actors.
-                    # Without waiting here, should_stop may flip to False while updates are still queued.
-                    engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-                    if engine_update_refs:
-                        ray_get_with_progress(
-                            engine_update_refs,
-                            desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
-                            enable=False,
-                        )
-
-                ray_get_with_progress(
-                    [engine.wake_up.remote() for engine in vllm_engines],
-                    desc="[Weight Sync Thread] Waking up vLLM engines",
-                    enable=False,
-                )
+            broadcast_refs = [m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models]
+            sync_time_stats, _ = grpo_utils.perform_weight_sync(
+                broadcast_refs, vllm_engines, actor_manager, progress=args.verbose, inflight_updates=inflight_updates
+            )
         except Exception as e:
             logger.exception("[Weight Sync Thread] Weight Sync failed")
             raise RuntimeError from e
-        finally:
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-        # Calculate distribution statistics
-        sync_time_stats = {
-            "time/weight_sync": timer.duration,
-            "time/weight_sync_mean": np.mean(actor_sync_times),
-            "time/weight_sync_min": np.min(actor_sync_times),
-            "time/weight_sync_max": np.max(actor_sync_times),
-            "time/weight_sync_median": np.median(actor_sync_times),
-        }
 
         try:
             weight_sync_metrics_Q.put_nowait(sync_time_stats)

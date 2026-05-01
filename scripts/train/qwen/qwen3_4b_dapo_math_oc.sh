@@ -58,7 +58,6 @@ uv run open_instruct/grpo.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
-    --deepspeed_stage 2 \
     --fsdp_shard_degree 4 \
     --fsdp_num_replicas 1 \
     --activation_memory_budget 0.5 \

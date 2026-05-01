@@ -1,12 +1,12 @@
 # OLMo-core Sharding and Parallelism
 
-The DPO and GRPO trainers in open-instruct use OLMo-core's parallelism primitives for distributed training. This page documents their shared sharding architecture and per-algorithm differences.
+The SFT, DPO, and GRPO trainers in open-instruct use OLMo-core's parallelism primitives for distributed training. This page documents their shared sharding architecture and per-algorithm differences.
 
 ## Overview
 
 OLMo-core uses **Hybrid Sharded Data Parallelism (HSDP)** via PyTorch's DTensor-based FSDP2. HSDP combines full sharding within a group of GPUs with replication across groups, balancing memory savings with communication efficiency.
 
-DPO and GRPO share these defaults:
+SFT, DPO, and GRPO share these defaults:
 
 | Setting | Value |
 |---------|-------|
@@ -37,14 +37,14 @@ See [`DataParallelConfig.get_replicate_and_shard_degree()`](https://github.com/a
 
 ### Wrapping Strategy
 
-Both trainers use the `blocks` wrapping strategy, which wraps each Transformer block as an individual FSDP unit. This provides a good balance between:
+The trainers use the `blocks` wrapping strategy, which wraps each Transformer block as an individual FSDP unit. This provides a good balance between:
 
 - **Communication overhead**: Fewer FSDP units means fewer all-gather/reduce-scatter operations.
 - **Memory efficiency**: Each block's parameters can be gathered and freed independently.
 
 ## Sharding Flags
 
-Both DPO and GRPO expose the same HSDP sharding flags:
+DPO and GRPO expose the following HSDP sharding flags (SFT auto-detects these based on the number of nodes):
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -55,7 +55,7 @@ GRPO additionally validates that the sharding configuration is consistent with t
 
 ## Per-Algorithm Configuration
 
-Both DPO and GRPO create `TransformerDataParallelConfig` with the same structure:
+SFT, DPO, and GRPO all create `TransformerDataParallelConfig` with the same structure:
 
 ```python
 dp_config = TransformerDataParallelConfig(
@@ -67,6 +67,10 @@ dp_config = TransformerDataParallelConfig(
     wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
 )
 ```
+
+### SFT
+
+SFT (`open_instruct/olmo_core_finetune.py`) auto-detects the parallelism strategy: FSDP for single-node and HSDP for multi-node. It does not expose `--fsdp_shard_degree` or `--fsdp_num_replicas` flags — the shard degree is set to the number of GPUs per node automatically.
 
 ### DPO
 
@@ -88,13 +92,14 @@ GRPO (`open_instruct/grpo_olmo_core_actor.py`) differs from DPO in:
 
 ## Comparison
 
-DPO and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The table below shows where they differ:
+SFT, DPO, and GRPO share HSDP with `blocks` wrapping and `float32` reductions. The table below shows where they differ:
 
-| Aspect | DPO | GRPO |
-|--------|-----|------|
-| Tensor parallelism | Yes | No |
-| Context parallelism | No | No |
-| Training coordinator | `torch.distributed` | Ray actors |
+| Aspect | SFT | DPO | GRPO |
+|--------|-----|-----|------|
+| Tensor parallelism | No | Yes | No |
+| Context parallelism | No | No | No |
+| Manual shard/replica flags | No (auto) | Yes | Yes |
+| Training coordinator | `torch.distributed` | `torch.distributed` | Ray actors |
 
 ## Choosing Parallelism Settings
 
@@ -108,10 +113,10 @@ For very large models (32B+), consider enabling tensor parallelism (`--tensor_pa
 
 ## FSDP-First Loading Pattern
 
-DPO and GRPO follow the same model initialization sequence:
+SFT, DPO, and GRPO follow the same model initialization sequence:
 
 1. Build the OLMo-core `Transformer` model on CPU.
 2. Create the `TrainModule`, which calls `parallelize_model()` internally. This applies FSDP sharding and reinitializes weights from scratch.
 3. Reload the HuggingFace checkpoint into the now-sharded model via `load_hf_model()`.
 
-This "FSDP-first" pattern ensures that FSDP metadata is set up before any real weights are loaded, avoiding the need to hold a full unsharded copy in memory. See `DPOTrainModule` in `open_instruct/olmo_core_train_modules.py` and `PolicyTrainerOLMoCoreProcess.setup_model()` in `open_instruct/grpo_olmo_core_actor.py` for the DPO and GRPO implementations respectively.
+This "FSDP-first" pattern ensures that FSDP metadata is set up before any real weights are loaded, avoiding the need to hold a full unsharded copy in memory. See `main()` in `open_instruct/olmo_core_finetune.py` for SFT, `DPOTrainModule` in `open_instruct/olmo_core_train_modules.py` for DPO, and `PolicyTrainerOLMoCoreProcess.setup_model()` in `open_instruct/grpo_olmo_core_actor.py` for GRPO.

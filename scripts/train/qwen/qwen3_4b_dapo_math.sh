@@ -4,16 +4,17 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
-CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
-PRIORITY="${PRIORITY:-high}"
+CLUSTER="${CLUSTER:-ai2/jupiter}"
+PRIORITY="${PRIORITY:-urgent}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace ${WORKSPACE} \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --no_auto_dataset_cache \
@@ -43,7 +44,7 @@ uv run open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits "train" \
-    --dataset_mixer_eval_list mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 allenai/brumo_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \

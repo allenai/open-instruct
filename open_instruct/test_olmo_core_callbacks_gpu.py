@@ -156,6 +156,7 @@ class TestBeakerCallbackPostStep(unittest.TestCase):
 
         trainer_mock = Mock()
         trainer_mock.metrics_collect_interval = 100
+        trainer_mock.global_step = step
         callback._trainer = trainer_mock
         callback._step = step
 
