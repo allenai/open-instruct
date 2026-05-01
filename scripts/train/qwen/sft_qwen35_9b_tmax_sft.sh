@@ -3,13 +3,13 @@
 # SFT for Qwen3.5-9B on hamishivi/tmax-sft-full-20260317 (sft), all splits.
 # 4 nodes x 8 GPUs = 32 GPUs, SP=2, 32k seq len.
 
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 MODEL="Qwen/Qwen3.5-9B"
 DATASET="hamishivi/tmax-sft-full-20260317"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/dr-tulu-ablations \
+    --workspace ai2/general-tool-use \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -17,7 +17,7 @@ uv run python mason.py \
     --num_nodes 4 \
     --env BEAKER_ALLOW_SUBCONTAINERS=1 \
     --env BEAKER_SKIP_DOCKER_SOCKET=1 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 \
     -- \
     accelerate launch \
