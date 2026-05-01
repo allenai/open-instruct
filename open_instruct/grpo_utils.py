@@ -232,6 +232,8 @@ class GRPOExperimentConfig(
     """If set, load this DeepSpeed checkpoint tag (must be ``global_step`` followed by digits, e.g.
     ``global_step4000``) instead of the ``latest`` pointer. Requires ``checkpoint_state_dir`` or
     ``resume_checkpoint_dir`` and DeepSpeed backend."""
+    ignore_resume_never_give_up_state: bool = False
+    """Whether to discard ``never_give_up_state`` from restored data prep actor state when resuming."""
     warn_if_low_disk_space: bool = False
     """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None

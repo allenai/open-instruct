@@ -182,7 +182,9 @@ def update_dataset_solve_rate(
     return float(np.mean(solved_prompt_mask))
 
 
-def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
+def _build_data_prep_actor_resume_state(
+    checkpoint_state: dict[str, Any] | None, *, ignore_never_give_up_state: bool = False
+) -> dict[str, Any] | None:
     if checkpoint_state is None:
         return None
 
@@ -204,6 +206,9 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 
     resume_state["last_consumed_step"] = last_consumed_step
     resume_state["training_step"] = last_consumed_step + 1
+    if ignore_never_give_up_state and "never_give_up_state" in resume_state:
+        resume_state.pop("never_give_up_state", None)
+        logger.info("Ignoring restored never_give_up_state from checkpoint resume state")
     return resume_state
 
 
@@ -1791,7 +1796,9 @@ def create_model_and_optimizer(
         )
         logger.info("======== ✅ all models initialized =========")
 
-        data_prep_actor_state = _build_data_prep_actor_resume_state(checkpoint_state)
+        data_prep_actor_state = _build_data_prep_actor_resume_state(
+            checkpoint_state, ignore_never_give_up_state=args.ignore_resume_never_give_up_state
+        )
         if data_prep_actor_state is not None:
             ray_get_with_progress(
                 [_data_prep_actor.set_state.remote(data_prep_actor_state)], desc="Restoring data prep actor state"
