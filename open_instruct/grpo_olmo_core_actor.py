@@ -233,11 +233,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
 
     def run_initial_weight_sync(self) -> None:
-        """Broadcast initial learner weights to vLLM engines before training starts.
-
-        Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync) so the
-        first NCCL weight-broadcast collective fires from a known-good state.
-        """
+        """Broadcast initial learner weights to vLLM engines before training starts."""
         if self.rank == 0:
             ray.get(self.actor_manager.set_should_stop.remote(True))
         refs = vllm_utils.broadcast_weights_to_vllm(

@@ -67,13 +67,12 @@ def olmo_core_to_hf_name(name: str) -> str:
 class StepTimingCallback(Callback):
     """Records outer-loop timing and utilization metrics per step."""
 
-    model_dims: utils.ModelDims | None = None
+    model_dims: utils.ModelDims
     vllm_num_engines: int = 1
     vllm_tensor_parallel_size: int = 1
     samples_per_prompt: int = 1
     num_training_gpus: int = 1
 
-    _step_start: float = field(default=0.0, init=False, repr=False)
     _train_start: float = field(default=0.0, init=False, repr=False)
     _train_duration: float = field(default=0.0, init=False, repr=False)
     _training_start: float = field(default=0.0, init=False, repr=False)
@@ -88,16 +87,10 @@ class StepTimingCallback(Callback):
         self._last_post_step = self._training_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
-        now = time.perf_counter()
-        self._step_start = now
-        self._train_start = now
-        metrics = batch.get("metrics") or {}
-        prompt_lengths = metrics.get("batch/prompt_lengths")
-        response_lengths = metrics.get("batch/response_lengths")
-        self._prompt_lengths = list(prompt_lengths) if prompt_lengths is not None else []
-        self._response_lengths = list(response_lengths) if response_lengths is not None else []
-        gen_time = metrics.get("time/getting_response", 0.0)
-        self._total_generation_time = float(gen_time) if gen_time is not None else 0.0
+        self._train_start = time.perf_counter()
+        self._prompt_lengths = list(batch["metrics"]["batch/prompt_lengths"])
+        self._response_lengths = list(batch["metrics"]["batch/response_lengths"])
+        self._total_generation_time = float(batch["metrics"]["time/getting_response"])
 
     def post_train_batch(self) -> None:
         self._train_duration = time.perf_counter() - self._train_start
@@ -113,36 +106,27 @@ class StepTimingCallback(Callback):
 
         self.trainer.record_metric("time/total", step_time, reduce_type=None)
         self.trainer.record_metric("time/training", self._train_duration, reduce_type=None)
-        self.trainer.record_metric("time/saving", 0.0, reduce_type=None)
 
-        if step_time > 0:
-            self.trainer.record_metric("learner_tokens_per_second_step", num_step_tokens / step_time, reduce_type=None)
-        if total_training_time > 0:
-            self.trainer.record_metric(
-                "learner_tokens_per_second_overall", self._num_total_tokens / total_training_time, reduce_type=None
-            )
+        self.trainer.record_metric("learner_tokens_per_second_step", num_step_tokens / step_time, reduce_type=None)
+        self.trainer.record_metric(
+            "learner_tokens_per_second_overall", self._num_total_tokens / total_training_time, reduce_type=None
+        )
 
-        if (
-            self.model_dims is not None
-            and self._prompt_lengths
-            and self._response_lengths
-            and len(self._response_lengths) == len(self._prompt_lengths) * self.samples_per_prompt
-            and self._total_generation_time > 0
-            and step_time > 0
-        ):
-            utilization = utils.calculate_utilization_metrics(
-                model_dims=self.model_dims,
-                prompt_lengths=self._prompt_lengths,
-                response_lengths=self._response_lengths,
-                total_generation_time=self._total_generation_time,
-                samples_per_prompt=self.samples_per_prompt,
-                num_engines=self.vllm_num_engines,
-                num_gpus_per_engine=self.vllm_tensor_parallel_size,
-                training_time=step_time,
-                num_training_gpus=self.num_training_gpus,
-            )
-            for key, value in utilization.items():
-                self.trainer.record_metric(key, float(value), reduce_type=None)
+        assert len(self._response_lengths) == len(self._prompt_lengths) * self.samples_per_prompt
+
+        utilization = utils.calculate_utilization_metrics(
+            model_dims=self.model_dims,
+            prompt_lengths=self._prompt_lengths,
+            response_lengths=self._response_lengths,
+            total_generation_time=self._total_generation_time,
+            samples_per_prompt=self.samples_per_prompt,
+            num_engines=self.vllm_num_engines,
+            num_gpus_per_engine=self.vllm_tensor_parallel_size,
+            training_time=step_time,
+            num_training_gpus=self.num_training_gpus,
+        )
+        for key, value in utilization.items():
+            self.trainer.record_metric(key, float(value), reduce_type=None)
 
 
 @dataclass

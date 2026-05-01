@@ -593,12 +593,9 @@ class GRPOTrainModule(TransformerTrainModule):
 
     def _get_train_dataset_len(self) -> int | None:
         dataset = getattr(self.trainer.data_loader, "dataset", None)
-        if dataset is None:
+        if dataset is None or not hasattr(dataset, "__len__"):
             return None
-        try:
-            return len(dataset)
-        except TypeError:
-            return None
+        return len(dataset)
 
     def _record_data_prep_metrics(self, data_prep_metrics: dict[str, Any]) -> None:
         histogram_metrics: dict[str, Any] = {}

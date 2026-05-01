@@ -27,22 +27,20 @@ def discover_keys(run: wandb.apis.public.Run) -> set[str]:
     return keys
 
 
-def fetch_key(run: wandb.apis.public.Run, key: str, max_steps: int | None) -> list[float]:
-    values: list[float] = []
-    for row in run.scan_history(keys=[key, "_step"], page_size=2000):
+def fetch_keys(run: wandb.apis.public.Run, keys: list[str], max_steps: int | None) -> dict[str, list[float]]:
+    values: dict[str, list[float]] = {k: [] for k in keys}
+    for row in run.scan_history(keys=[*keys, "_step"], page_size=2000):
         step = row.get("_step")
         if max_steps is not None and step is not None and step > max_steps:
             continue
-        v = row.get(key)
-        if v is None:
-            continue
-        try:
+        for key in keys:
+            v = row.get(key)
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                continue
             f = float(v)
-        except (TypeError, ValueError):
-            continue
-        if math.isnan(f):
-            continue
-        values.append(f)
+            if math.isnan(f):
+                continue
+            values[key].append(f)
     return values
 
 
@@ -106,24 +104,27 @@ def main() -> None:
     )
     logger.info("-" * 120)
 
+    new_values = fetch_keys(new_run, shared, args.max_steps)
+    old_values = fetch_keys(old_run, shared, args.max_steps)
+
     for key in shared:
-        new_vals = fetch_key(new_run, key, args.max_steps)
-        old_vals = fetch_key(old_run, key, args.max_steps)
-        ns = summarize(new_vals)
-        os_ = summarize(old_vals)
-        if ns["n"] == 0 or os_["n"] == 0:
-            logger.info("%-44s n_new=%d n_old=%d (no data in window)", key, ns["n"], os_["n"])
+        new_summary = summarize(new_values[key])
+        old_summary = summarize(old_values[key])
+        if new_summary["n"] == 0 or old_summary["n"] == 0:
+            logger.info(
+                "%-44s n_new=%d n_old=%d (no data in window)", key, new_summary["n"], old_summary["n"]
+            )
             continue
-        ratio = ns["mean"] / os_["mean"] if os_["mean"] != 0 else float("inf")
+        ratio = new_summary["mean"] / old_summary["mean"] if old_summary["mean"] != 0 else float("inf")
         logger.info(
             "%-44s %5d %10.4g %10.4g   %5d %10.4g %10.4g   %.3fx",
             key,
-            ns["n"],
-            ns["mean"],
-            ns["median"],
-            os_["n"],
-            os_["mean"],
-            os_["median"],
+            new_summary["n"],
+            new_summary["mean"],
+            new_summary["median"],
+            old_summary["n"],
+            old_summary["mean"],
+            old_summary["median"],
             ratio,
         )
 
