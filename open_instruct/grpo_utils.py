@@ -330,16 +330,6 @@ def compute_vllm_local_debug_metrics(
     }
 
 
-def _compute_train_infer_ratio(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor
-) -> torch.Tensor:
-    """ρ = exp(old_logprob - vllm_logprobs) on response tokens, 1.0 on padding."""
-    logprob_diff = torch.where(
-        response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
-    )
-    return torch.exp(logprob_diff)
-
-
 def _icepop_mask_from_rho(
     rho: torch.Tensor, response_mask: torch.Tensor, beta: float
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -371,7 +361,10 @@ def compute_rho_correction(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
 ) -> RhoCorrection:
     """Dispatch between TIS and IcePop train/infer corrections."""
-    rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
+    logprob_diff = torch.where(
+        response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
+    )
+    rho = torch.exp(logprob_diff)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
     if config.use_icepop:
         mask, dropped_low, dropped_high = _icepop_mask_from_rho(rho, response_mask, config.icepop_beta)
