@@ -168,6 +168,16 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
     return cmd
 
 
+def get_git_info() -> tuple[str, str]:
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False, capture_output=True, text=True
+    ).stdout.strip() or "unknown"
+    commit = subprocess.run(
+        ["git", "rev-parse", "--short=12", "HEAD"], check=False, capture_output=True, text=True
+    ).stdout.strip() or "unknown"
+    return branch, commit
+
+
 def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str | None, experiment_name: str) -> dict:
     non_weka_clusters = [c for c in args.cluster if c not in launch_utils.WEKA_CLUSTERS]
     if non_weka_clusters:
@@ -186,12 +196,16 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
     full_command = (
         "set -euo pipefail\n"
         f"{build_install_block(args.olmo_eval_ref)}\n"
+        "export VLLM_PYTHON=/opt/vllm-venv/bin/python\n"
         f"{shlex.join(inner_cmd)}\n"
     )
 
+    git_branch, git_commit = get_git_info()
+    description = f"{experiment_name} (branch={git_branch}, commit={git_commit})"
+
     return {
         "version": "v2",
-        "description": experiment_name,
+        "description": description,
         "budget": args.budget,
         "retry": {"allowedTaskRetries": 2},
         "tasks": [
