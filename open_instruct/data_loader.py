@@ -47,7 +47,7 @@ from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.rubrics import RubricManager
-from open_instruct.utils import combine_reward_metrics, repeat_each
+from open_instruct.utils import combine_reward_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -739,12 +739,7 @@ def add_prompt_to_generator(
 
 @dataclass
 class Group:
-    """All the samples for a single GRPO group (one prompt, n samples).
-
-    Per-group fields (singular): result, query, ground_truth, dataset,
-    raw_query, active_tools, index, reward_metrics, percent_solved.
-    Per-sample fields (length n): decoded_responses, reward_scores.
-    """
+    """All samples for one GRPO group: a single prompt with n generations."""
 
     result: data_types.GenerationResult
     query: list[int]
@@ -790,9 +785,7 @@ def process_group(
     sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
     if replenish_prompts:
-        assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
-            "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
-        )
+        assert iter_dataloader is not None and param_prompt_Q is not None
         example = next(iter_dataloader)
         add_prompt_to_generator(
             example,
@@ -829,17 +822,24 @@ def process_group(
         active_tools=sample_active_tools,
         index=result.index,
         decoded_responses=decoded_responses,
-        reward_scores=list(result.reward_scores),
+        reward_scores=result.reward_scores,
         reward_metrics=result.reward_metrics or {},
         percent_solved=percent_solved,
     )
 
 
 def make_batch_from_groups(
-    groups: list[Group], generation_config: vllm.SamplingParams, training_step: int, actor_manager=None
-) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics] | tuple[None, None, None, None]:
-    if len(groups) == 0:
-        return None, None, None, None
+    groups: list[Group],
+    generation_config: vllm.SamplingParams,
+    training_step: int,
+    actor_manager=None,
+    filtered_prompts: int = 0,
+    filtered_prompts_zero: int = 0,
+    filtered_prompts_solved: int = 0,
+    filtered_prompts_nonzero: int = 0,
+    no_resampled_prompts: int = 0,
+) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]:
+    assert len(groups) > 0, "make_batch_from_groups requires at least one group"
 
     all_queries = []
     all_ground_truths = []
@@ -876,12 +876,12 @@ def make_batch_from_groups(
 
     for group in groups:
         result = group.result
-        all_queries.extend(repeat_each([group.query], generation_config.n))
-        all_ground_truths.extend(repeat_each([group.ground_truth], generation_config.n))
-        all_datasets.extend(repeat_each([group.dataset], generation_config.n))
-        all_raw_queries.extend(repeat_each([group.raw_query], generation_config.n))
-        all_active_tools.extend(repeat_each([group.active_tools], generation_config.n))
-        all_indices.extend(repeat_each([group.index], generation_config.n))
+        all_queries.extend([group.query] * generation_config.n)
+        all_ground_truths.extend([group.ground_truth] * generation_config.n)
+        all_datasets.extend([group.dataset] * generation_config.n)
+        all_raw_queries.extend([group.raw_query] * generation_config.n)
+        all_active_tools.extend([group.active_tools] * generation_config.n)
+        all_indices.extend([group.index] * generation_config.n)
         all_decoded_responses.extend(group.decoded_responses)
         all_scores.extend(group.reward_scores)
         all_reward_metrics.append(group.reward_metrics)
@@ -968,13 +968,13 @@ def make_batch_from_groups(
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
-        filtered_prompts=0,
-        filtered_prompts_zero=0,
-        filtered_prompts_solved=0,
-        filtered_prompts_nonzero=0,
+        filtered_prompts=filtered_prompts,
+        filtered_prompts_zero=filtered_prompts_zero,
+        filtered_prompts_solved=filtered_prompts_solved,
+        filtered_prompts_nonzero=filtered_prompts_nonzero,
         percent_solved_mean=percent_solved_mean,
         percent_solved_hist=np.array(all_percent_solved),
-        no_resampled_prompts=0,
+        no_resampled_prompts=no_resampled_prompts,
         total_prompts=len(groups),
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
@@ -1029,7 +1029,7 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
-    collected_results = []  # Track results for potential requeue on timeout
+    collected_results = []
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
@@ -1102,19 +1102,17 @@ def accumulate_inference_batches(
         )
         return None, None, None, None
 
-    combined_result, batch, combined_reward_metrics, batch_stats = make_batch_from_groups(
-        groups, generation_config, training_step, actor_manager
+    return make_batch_from_groups(
+        groups,
+        generation_config,
+        training_step,
+        actor_manager,
+        filtered_prompts=total_filtered_prompts,
+        filtered_prompts_zero=filtered_prompt_zero,
+        filtered_prompts_solved=filtered_prompt_solved,
+        filtered_prompts_nonzero=filtered_prompt_nonzero,
+        no_resampled_prompts=total_no_resampled,
     )
-    assert combined_result is not None
-    assert batch is not None
-    assert combined_reward_metrics is not None
-    assert batch_stats is not None
-    batch_stats.filtered_prompts = total_filtered_prompts
-    batch_stats.filtered_prompts_zero = filtered_prompt_zero
-    batch_stats.filtered_prompts_solved = filtered_prompt_solved
-    batch_stats.filtered_prompts_nonzero = filtered_prompt_nonzero
-    batch_stats.no_resampled_prompts = total_no_resampled
-    return combined_result, batch, combined_reward_metrics, batch_stats
 
 
 def prepare_collated_data_for_workers(
