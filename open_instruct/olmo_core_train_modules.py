@@ -10,6 +10,7 @@ from typing import Any, Literal
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
+import wandb
 from olmo_core.distributed import utils as dist_utils
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
@@ -411,6 +412,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         num_steps = 0
         local_step = 0
+        rho_histograms: dict[str, list[torch.Tensor]] = {}
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
@@ -445,6 +447,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 ratio = torch.exp(log_ratio)
 
                 rho = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, self.grpo_config)
+                for hist_key, hist_values in rho.histogram_metrics.items():
+                    rho_histograms.setdefault(hist_key, []).append(hist_values.detach().cpu())
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -516,3 +520,10 @@ class GRPOTrainModule(TransformerTrainModule):
             for metric_key, metric_value in data_prep_metrics.items():
                 if isinstance(metric_value, (int, float)):
                     self.record_metric(metric_key, float(metric_value), reduce_type=None)
+
+            if dist_utils.get_rank() == 0 and wandb.run is not None:
+                hist_log = {
+                    hist_key: wandb.Histogram(torch.cat(hist_chunks).numpy())
+                    for hist_key, hist_chunks in rho_histograms.items()
+                }
+                wandb.log(hist_log, step=self.trainer.global_step)

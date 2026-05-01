@@ -101,15 +101,13 @@ class GRPOExperimentConfig(
     truncated_importance_sampling_ratio_cap: float = 2.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)."""
     use_icepop: bool = False
-    """If True, replace truncated importance sampling with the IcePop M(ρ; α, β)
+    """If True, replace truncated importance sampling with the IcePop M(ρ; 1/β, β)
     operator from https://arxiv.org/abs/2510.18855: tokens whose train/infer
-    mismatch ratio ρ = π^train_old / π^infer_old falls in [α, β] are reweighted
+    mismatch ratio ρ = π^train_old / π^infer_old falls in [1/β, β] are reweighted
     by ρ (an IS correction); tokens outside that band have their per-token
     policy loss zeroed out."""
-    icepop_alpha: float = 0.5
-    """IcePop lower bound α (paper default: 0.5)."""
     icepop_beta: float = 5.0
-    """IcePop upper bound β (paper default: 5.0)."""
+    """IcePop bound β (paper default: 5.0); the in-range band is [1/β, β]."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -293,11 +291,8 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
-        if self.use_icepop and not (0.0 < self.icepop_alpha < 1.0 < self.icepop_beta):
-            raise ValueError(
-                "IcePop requires 0 < icepop_alpha < 1 < icepop_beta. "
-                f"Got icepop_alpha={self.icepop_alpha}, icepop_beta={self.icepop_beta}."
-            )
+        if self.use_icepop and self.icepop_beta <= 1.0:
+            raise ValueError(f"IcePop requires icepop_beta > 1. Got icepop_beta={self.icepop_beta}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -332,19 +327,19 @@ def compute_tis_weights(
 
 
 def compute_icepop_mask(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, alpha: float, beta: float
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, beta: float
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """IcePop M(ρ; α, β): ρ where ρ ∈ [α, β] on response tokens, 0 elsewhere.
+    """IcePop M(ρ; 1/β, β): ρ where ρ ∈ [1/β, β] on response tokens, 0 elsewhere.
 
     Implements eq. (2) of https://arxiv.org/abs/2510.18855. In-range tokens are
     reweighted by ρ = π^train_old / π^infer_old (a stop-gradient IS correction
     for the train/infer engine mismatch); out-of-range tokens are dropped.
 
     Returns (mask, dropped_low, dropped_high) where dropped_low marks tokens
-    with ρ < α and dropped_high marks ρ > β (both restricted to response tokens).
+    with ρ < 1/β and dropped_high marks ρ > β (both restricted to response tokens).
     """
     rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
-    dropped_low = (rho < alpha) & response_mask
+    dropped_low = (rho < 1.0 / beta) & response_mask
     dropped_high = (rho > beta) & response_mask
     in_range = response_mask & ~dropped_low & ~dropped_high
     mask = torch.where(in_range, rho, torch.zeros_like(rho))
@@ -358,19 +353,25 @@ class RhoCorrection:
     ``weights`` is multiplied into the policy loss (None disables the correction).
     ``metrics`` maps wandb keys to per-token tensors that get reduced by
     ``masked_mean(., response_mask)`` at logging time.
+    ``histogram_metrics`` maps wandb keys to flat 1D tensors of values
+    (response tokens only); these bypass the scalar reduction and are
+    concatenated across micro-batches and logged as wandb histograms.
     """
 
     weights: torch.Tensor | None
     metrics: dict[str, torch.Tensor]
+    histogram_metrics: dict[str, torch.Tensor] = field(default_factory=dict)
 
 
 def compute_rho_correction(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
 ) -> RhoCorrection:
     """Dispatch between TIS and IcePop train/infer corrections."""
+    rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
+    rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
     if config.use_icepop:
         mask, dropped_low, dropped_high = compute_icepop_mask(
-            old_logprob, vllm_logprobs, response_mask, config.icepop_alpha, config.icepop_beta
+            old_logprob, vllm_logprobs, response_mask, config.icepop_beta
         )
         return RhoCorrection(
             weights=mask,
@@ -379,14 +380,17 @@ def compute_rho_correction(
                 "val/icepop_drop_low_frac": dropped_low.float(),
                 "val/icepop_drop_high_frac": dropped_high.float(),
             },
+            histogram_metrics=rho_hist,
         )
     clamped, unclamped = compute_tis_weights(
         old_logprob, vllm_logprobs, response_mask, config.truncated_importance_sampling_ratio_cap
     )
     if clamped is None or unclamped is None:
-        return RhoCorrection(weights=None, metrics={})
+        return RhoCorrection(weights=None, metrics={}, histogram_metrics=rho_hist)
     return RhoCorrection(
-        weights=clamped, metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < unclamped).float()}
+        weights=clamped,
+        metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < unclamped).float()},
+        histogram_metrics=rho_hist,
     )
 
 

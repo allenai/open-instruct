@@ -668,6 +668,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        rho_histograms: dict[str, list[torch.Tensor]] = {}
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -739,6 +740,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     rho_BT = grpo_utils.compute_rho_correction(
                         old_logprob_BT, vllm_logprobs_BT, response_mask_BT, self.args
                     )
+                    for hist_key, hist_values in rho_BT.histogram_metrics.items():
+                        rho_histograms.setdefault(hist_key, []).append(hist_values.detach().cpu())
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -795,6 +798,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics[key] = value
                     else:
                         array_metrics[key] = value
+                for hist_key, hist_chunks in rho_histograms.items():
+                    array_metrics[hist_key] = torch.cat(hist_chunks).numpy()
                 return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:

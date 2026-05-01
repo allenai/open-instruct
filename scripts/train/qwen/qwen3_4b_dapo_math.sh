@@ -38,8 +38,7 @@ uv run open_instruct/grpo_fast.py \
     --inflight_updates \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --use_icepop \
-    --icepop_alpha 0.5 \
-    --icepop_beta 5.0 \
+    --icepop_beta 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
