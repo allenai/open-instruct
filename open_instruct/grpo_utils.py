@@ -1,14 +1,17 @@
 import enum
+import itertools
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+import ray
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -204,6 +207,8 @@ class GRPOExperimentConfig(
     """Whether to run local evaluation at training step 0. Defaults to False."""
     eval_pass_at_k: int = 1
     """Number of completions per eval prompt for local pass@k metrics."""
+    eval_top_p: float | None = None
+    """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
@@ -279,6 +284,8 @@ class GRPOExperimentConfig(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
+            raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -286,6 +293,31 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
     vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
     return vllm_logprobs
+
+
+def compute_vllm_local_debug_metrics(
+    local_logprobs: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor
+) -> dict[str, float]:
+    """Compute debug metrics comparing vLLM logprobs against locally-recomputed logprobs."""
+    with torch.no_grad():
+        valid_mask = response_mask & ~torch.isnan(vllm_logprobs)
+        valid_count = valid_mask.sum()
+        diff = (local_logprobs - vllm_logprobs).abs()
+        masked_diff = torch.masked_fill(diff, ~valid_mask, 0.0)
+        mean_diff = masked_diff.sum() / valid_count if valid_count > 0 else torch.tensor(0.0)
+        max_diff = masked_diff.max() if valid_count > 0 else torch.tensor(0.0)
+        std_diff = masked_diff[valid_mask].std() if valid_count > 1 else torch.tensor(0.0)
+
+        reverse_kl = torch.exp(vllm_logprobs) * (vllm_logprobs - local_logprobs)
+        masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
+        mean_reverse_kl = masked_reverse_kl.sum() / valid_count if valid_count > 0 else torch.tensor(0.0)
+
+    return {
+        "debug/vllm_vs_local_logprob_diff_mean": float(mean_diff),
+        "debug/vllm_vs_local_logprob_diff_max": float(max_diff),
+        "debug/vllm_vs_local_logprob_diff_std": float(std_diff),
+        "debug/vllm_local_reverse_kl": float(mean_reverse_kl),
+    }
 
 
 def compute_tis_weights(
@@ -375,7 +407,7 @@ def compute_grpo_loss(
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
-    attention_mask: torch.Tensor,
+    attention_mask: torch.Tensor | None,
     position_ids: torch.Tensor,
     pad_token_id: int,
     temperature: float,
@@ -423,7 +455,6 @@ def compute_logprobs(
             batch_indices = list(range(start_idx, end_idx))
 
             query_responses = [data_BT.query_responses[i] for i in batch_indices]
-            attention_masks = [data_BT.attention_masks[i] for i in batch_indices]
             position_ids = [data_BT.position_ids[i] for i in batch_indices]
             shapes = [tuple(t.shape) for t in query_responses]
 
@@ -432,7 +463,7 @@ def compute_logprobs(
                     single_logprobs, _ = forward_for_logprobs(
                         model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
+                        None,
                         data_BT.position_ids[i],
                         pad_token_id,
                         temperature,
@@ -445,17 +476,10 @@ def compute_logprobs(
                 continue
 
             batch_query_responses = torch.cat(query_responses, dim=0)
-            batch_attention_masks = torch.cat(attention_masks, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
-                model,
-                batch_query_responses,
-                batch_attention_masks,
-                batch_position_ids,
-                pad_token_id,
-                temperature,
-                False,
+                model, batch_query_responses, None, batch_position_ids, pad_token_id, temperature, False
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
@@ -565,3 +589,43 @@ def compute_metrics_from_loss_stats(
         metrics[key] = (loss_stats_B[key] * weights).sum().item()
     metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
     return metrics
+
+
+def perform_weight_sync(
+    broadcast_refs: list[ray.ObjectRef],
+    vllm_engines: list[ray.actor.ActorHandle],
+    actor_manager: ray.actor.ActorHandle,
+    *,
+    progress: bool = False,
+    inflight_updates: bool = False,
+) -> tuple[dict[str, float], list]:
+    """Pause actors, broadcast weights, await/skip inner engine RPCs, wake engines, resume actors.
+
+    With `inflight_updates=False`, broadcast results are treated as
+    list-of-lists of inner engine-update ObjectRefs which get flattened and
+    awaited before waking. Pass `inflight_updates=True` to skip that inner
+    await — either because `broadcast_refs` are already engine RPC refs, or
+    because updates are intentionally left in flight.
+    """
+    start = time.perf_counter()
+    ray.get(actor_manager.set_should_stop.remote(True))
+    try:
+        results, actor_sync_times = utils.ray_get_with_progress(
+            broadcast_refs, desc="Broadcasting weights to vLLM engines", enable=progress
+        )
+        if not inflight_updates:
+            utils.ray_get_with_progress(
+                itertools.chain.from_iterable(results), desc="Waiting for vLLM engine update RPCs", enable=progress
+            )
+        utils.ray_get_with_progress(
+            [e.wake_up.remote() for e in vllm_engines], desc="Waking up vLLM engines", enable=progress
+        )
+    finally:
+        ray.get(actor_manager.set_should_stop.remote(False))
+    sync_time_stats = {"time/weight_sync": time.perf_counter() - start}
+    if actor_sync_times:
+        sync_time_stats["time/weight_sync_mean"] = float(np.mean(actor_sync_times))
+        sync_time_stats["time/weight_sync_min"] = float(np.min(actor_sync_times))
+        sync_time_stats["time/weight_sync_max"] = float(np.max(actor_sync_times))
+        sync_time_stats["time/weight_sync_median"] = float(np.median(actor_sync_times))
+    return sync_time_stats, results

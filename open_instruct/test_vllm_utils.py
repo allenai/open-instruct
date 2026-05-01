@@ -106,6 +106,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
+                "model_step": 0,
             }
         }
 
@@ -177,6 +178,7 @@ class TestVllmUtils3(unittest.TestCase):
                 "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
+                "model_step": 0,
             }
         }
 

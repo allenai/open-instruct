@@ -836,7 +836,7 @@ def process_group(
 
 
 def make_batch_from_groups(
-    groups: list[Group], generation_config: vllm.SamplingParams, actor_manager=None
+    groups: list[Group], generation_config: vllm.SamplingParams, training_step: int, actor_manager=None
 ) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics] | tuple[None, None, None, None]:
     if len(groups) == 0:
         return None, None, None, None
@@ -886,8 +886,7 @@ def make_batch_from_groups(
         all_scores.extend(group.reward_scores)
         all_reward_metrics.append(group.reward_metrics)
         all_percent_solved.append(group.percent_solved)
-        if group.result.model_step is not None:
-            all_model_steps.append(group.result.model_step)
+        all_model_steps.extend([result.model_step] * len(result.responses))
 
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
@@ -955,14 +954,15 @@ def make_batch_from_groups(
         indices=all_indices,
         scores=all_scores,
         active_tools=all_active_tools if any(all_active_tools) else None,
+        model_steps=all_model_steps,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
-    if all_model_steps:
-        model_steps_array = np.array(all_model_steps, dtype=float)
-        combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
-        combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
-        combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    model_steps_array = np.array(all_model_steps, dtype=float)
+    combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+    combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+    combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
@@ -988,6 +988,7 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     base_env_config: EnvConfig,
+    training_step: int,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -996,7 +997,6 @@ def accumulate_inference_batches(
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
-    training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
@@ -1103,7 +1103,7 @@ def accumulate_inference_batches(
         return None, None, None, None
 
     combined_result, batch, combined_reward_metrics, batch_stats = make_batch_from_groups(
-        groups, generation_config, actor_manager
+        groups, generation_config, training_step, actor_manager
     )
     assert combined_result is not None
     assert batch is not None
@@ -1272,7 +1272,6 @@ class DataPreparationActor:
         self.current_prepared_step = -1
         self._last_consumed_step = -1
         self.lock = threading.Lock()
-        self.shutdown_requested = False
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
@@ -1317,13 +1316,8 @@ class DataPreparationActor:
             )
 
         for step in range(self.training_step, self.num_training_steps):
-            if self.shutdown_requested:
-                return
-
             generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
-                if self.shutdown_requested:
-                    return
                 logger.info(
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )

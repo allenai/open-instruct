@@ -39,14 +39,25 @@ class ToolParser(ABC):
         """Extract tool calls from model outputs."""
         pass
 
-    @abstractmethod
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def format_tool_outputs(self, tool_outputs: list[Any], role: str = "tool") -> str:
         """Format tool outputs with any necessary prefixes/postfixes.
 
+        Coerces non-string inputs/output to strings defensively and strips
+        null bytes that the fast tokenizer's Rust backend rejects.
+
         Args:
-            tool_outputs: Raw output strings from tool/env calls.
+            tool_outputs: Raw outputs from tool/env calls (coerced to strings).
             role: The output role (e.g. "tool", "user" for text envs).
         """
+        coerced = [str(o) if o is not None else "" for o in tool_outputs]
+        formatted = self._format_tool_outputs(coerced, role=role)
+        if not isinstance(formatted, str):
+            formatted = str(formatted)
+        return formatted.replace("\x00", "")
+
+    @abstractmethod
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        """Subclass implementation: format pre-coerced string outputs."""
         pass
 
 
@@ -109,7 +120,7 @@ class OpenInstructLegacyToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
 
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
@@ -143,7 +154,7 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # ty: ignore[invalid-argument-type]
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.
@@ -178,7 +189,7 @@ class VllmToolParser(ToolParser):
         template = self._role_templates[role]
         return template.format(output=tool_output)
 
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return f"{self._output_prefix}{''.join(self._format_tool_output(output, role) for output in tool_outputs)}{self._output_postfix}"
 
 
@@ -239,14 +250,16 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
         },
         output_postfix="<|im_start|>assistant\n",
     ),
-    # Qwen3 XML tool-calling templates (<tool_call><function=...><parameter=...>)
-    "vllm_qwen3xml": VllmParserConfig(
+    # Qwen3.5 XML-style tool calling. Tool responses use the user role and
+    # are wrapped in <tool_response> per the Qwen3.5 chat template.
+    # The generation prompt starts a <think> block as the Qwen3.5 default is thinking mode.
+    "vllm_qwen3_xml": VllmParserConfig(
         import_path="vllm.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
         role_templates={
             "tool": "<|im_start|>user\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
             "user": "<|im_start|>user\n{output}<|im_end|>\n",
         },
-        output_postfix="<|im_start|>assistant\n",
+        output_postfix="<|im_start|>assistant\n<think>\n",
     ),
 }
 
@@ -315,7 +328,7 @@ class DRTuluToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<tool_output>\n{tool_output}\n</tool_output>\n"
 
-    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+    def _format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
