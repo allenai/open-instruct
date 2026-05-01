@@ -19,6 +19,7 @@ Example:
 """
 
 import argparse
+import pathlib
 import re
 import shlex
 import subprocess
@@ -35,22 +36,40 @@ MAX_EXPERIMENT_NAME_LEN = 128
 EXPERIMENT_NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 DEFAULT_OLMO_EVAL_REF = "main"
+DEFAULT_BEAKER_IMAGE = "ai2/oe-data/olmo-eval-latest"
+OLMO_EVAL_REPO = "allenai/olmo-eval-internal"
 GIT_REF_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+INSTALL_SCRIPT_PATH = pathlib.Path(__file__).parent / "eval" / "install_olmo_eval.sh"
+INSTALL_HEREDOC_TAG = "OPEN_INSTRUCT_INSTALL_EOF"
 
 
-def build_install_script(ref: str) -> str:
+def resolve_olmo_eval_ref(ref: str) -> str:
+    """Resolve a branch/tag to a 40-char SHA so submissions are reproducible."""
     if not GIT_REF_SAFE_RE.match(ref):
         raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
+    if GIT_SHA_RE.match(ref):
+        return ref
+    out = subprocess.run(
+        ["gh", "api", f"repos/{OLMO_EVAL_REPO}/commits/{ref}", "--jq", ".sha"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sha = out.stdout.strip()
+    if not GIT_SHA_RE.match(sha):
+        raise RuntimeError(f"Could not resolve {ref!r} on {OLMO_EVAL_REPO} (got {sha!r}).")
+    return sha
+
+
+def build_install_block(ref: str) -> str:
+    if not GIT_SHA_RE.match(ref):
+        raise ValueError(f"Expected a 40-char SHA (call resolve_olmo_eval_ref first); got {ref!r}.")
+    body = INSTALL_SCRIPT_PATH.read_text()
     return (
-        "set -euo pipefail && "
-        "git clone "
-        "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
-        "/opt/olmo-eval-internal && "
-        f"cd /opt/olmo-eval-internal && git checkout {shlex.quote(ref)} && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
-        "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
-        "cd /workspace"
+        f"bash -s -- {shlex.quote(ref)} <<'{INSTALL_HEREDOC_TAG}'\n"
+        f"{body}"
+        f"{INSTALL_HEREDOC_TAG}"
     )
 
 
@@ -82,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--beaker_image",
         type=str,
-        default="ai2-tylerm/olmo-eval-cu1281-trc290-amd64",
+        default=DEFAULT_BEAKER_IMAGE,
         help="Beaker image with olmo-eval installed.",
     )
     parser.add_argument("--revision", type=str, default=None, help="HF revision (git sha/tag).")
@@ -143,10 +162,20 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
             continue
         cmd += ["-t", task]
         if args.sampling_max_tokens is not None:
-            cmd += ["-o", f"max_tokens={args.sampling_max_tokens}"]
+            cmd += ["-o", f"sampling_params.max_tokens={args.sampling_max_tokens}"]
     cmd += ["--num-gpus", str(args.num_gpus)]
     cmd += ["--output-dir", "/results"]
     return cmd
+
+
+def get_git_info() -> tuple[str, str]:
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False, capture_output=True, text=True
+    ).stdout.strip() or "unknown"
+    commit = subprocess.run(
+        ["git", "rev-parse", "--short=12", "HEAD"], check=False, capture_output=True, text=True
+    ).stdout.strip() or "unknown"
+    return branch, commit
 
 
 def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str | None, experiment_name: str) -> dict:
@@ -164,11 +193,19 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
     if dataset_id:
         datasets.append({"mountPath": "/model", "source": {"beaker": dataset_id}})
 
-    full_command = f"{build_install_script(args.olmo_eval_ref)} && {shlex.join(inner_cmd)}"
+    full_command = (
+        "set -euo pipefail\n"
+        f"{build_install_block(args.olmo_eval_ref)}\n"
+        "export VLLM_PYTHON=/opt/vllm-venv/bin/python\n"
+        f"{shlex.join(inner_cmd)}\n"
+    )
+
+    git_branch, git_commit = get_git_info()
+    description = f"{experiment_name} (branch={git_branch}, commit={git_commit})"
 
     return {
         "version": "v2",
-        "description": experiment_name,
+        "description": description,
         "budget": args.budget,
         "retry": {"allowedTaskRetries": 2},
         "tasks": [
@@ -196,6 +233,11 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
 def main() -> None:
     args = parse_args()
     launch_utils.validate_beaker_workspace(args.workspace)
+
+    resolved_ref = resolve_olmo_eval_ref(args.olmo_eval_ref)
+    if resolved_ref != args.olmo_eval_ref:
+        print(f"Resolved olmo_eval_ref {args.olmo_eval_ref!r} -> {resolved_ref}")
+    args.olmo_eval_ref = resolved_ref
 
     model_path, dataset_id = resolve_model_mount(args.location)
     inner_cmd = build_inner_cmd(args, model_path)
