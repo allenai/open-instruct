@@ -9,6 +9,7 @@ import transformers
 from parameterized import parameterized
 
 from open_instruct import rl_utils
+from open_instruct.data_types import GenerationResult, RequestInfo
 
 PACK_LENGTH = 40
 PROMPT_MAX_LEN = 20
@@ -335,6 +336,64 @@ class TestRLUtils(unittest.TestCase):
         # Verify no empty sequences
         for seq in packed_with_min.query_responses:
             self.assertGreater(len(seq), 0)
+
+
+class TestRolloutTraceSaving(unittest.TestCase):
+    def _make_generation_result(self, reward_scores: list[float]) -> GenerationResult:
+        num_samples = len(reward_scores)
+        return GenerationResult(
+            responses=[[10, sample_idx] for sample_idx in range(num_samples)],
+            finish_reasons=["stop"] * num_samples,
+            masks=[[1, 1]] * num_samples,
+            request_info=RequestInfo(
+                num_calls=[0] * num_samples,
+                timeouts=[0] * num_samples,
+                tool_errors=[""] * num_samples,
+                tool_outputs=[""] * num_samples,
+                tool_runtimes=[0.0] * num_samples,
+                tool_calleds=[False] * num_samples,
+                tool_call_stats=[[] for _ in range(num_samples)],
+                rollout_states=[{} for _ in range(num_samples)],
+            ),
+            index=3,
+            prompt_id="prompt_3",
+            reward_scores=reward_scores,
+            logprobs=[[0.1, 0.2]] * num_samples,
+            model_step=7,
+        )
+
+    def test_build_rollout_batch_and_advantages_preserves_scores(self):
+        result = self._make_generation_result([10.0, 0.0])
+
+        batch, advantages = rl_utils.build_rollout_batch_and_advantages(
+            result,
+            prompt_tokens=[1, 2, 3],
+            ground_truth="4",
+            dataset_name="math",
+            raw_query="user: solve 2+2",
+            advantage_normalization_type="centered",
+        )
+
+        self.assertEqual(batch.queries, [[1, 2, 3], [1, 2, 3]])
+        self.assertEqual(batch.ground_truths, ["4", "4"])
+        self.assertEqual(batch.datasets, ["math", "math"])
+        self.assertEqual(batch.indices, [3, 3])
+        self.assertEqual(batch.scores, [10.0, 0.0])
+        np.testing.assert_allclose(advantages, np.array([5.0, -5.0]))
+
+    def test_build_rollout_batch_and_advantages_raises_without_scores(self):
+        result = self._make_generation_result([1.0, 0.0])
+        result.reward_scores = None
+
+        with self.assertRaises(ValueError):
+            rl_utils.build_rollout_batch_and_advantages(
+                result,
+                prompt_tokens=[1, 2, 3],
+                ground_truth="4",
+                dataset_name="math",
+                raw_query="user: solve 2+2",
+                advantage_normalization_type="centered",
+            )
 
 
 class TestMaskedMean(unittest.TestCase):

@@ -29,8 +29,9 @@ from ray.util import queue as ray_queue
 
 from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_types import PromptRequest
+from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
+from open_instruct.rl_utils import build_rollout_batch_and_advantages, save_rollout_metadata, save_rollouts_to_disk
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -146,6 +147,52 @@ def save_benchmark_results_to_csv(
             writer.writeheader()
         writer.writerow(row_data)
     logger.info(f"Saved benchmark results to {csv_path}")
+
+
+def resolve_run_name(args: grpo_utils.GRPOExperimentConfig, timestamp: int) -> str:
+    """Resolve a stable run name for optional rollout trace persistence."""
+    return args.run_name or f"{args.exp_name}__{timestamp}"
+
+
+def maybe_save_scored_rollout_traces(
+    batch_results: list[GenerationResult],
+    dataset: datasets.Dataset,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
+    *,
+    run_name: str,
+    step: int,
+    total_samples_written: int,
+) -> int:
+    """Persist raw per-sample reward traces when explicitly requested."""
+    if not streaming_config.save_traces:
+        return total_samples_written
+
+    for result in batch_results:
+        if result.index is None:
+            raise ValueError("Cannot save scored rollout traces because the result is missing its dataset index.")
+
+        example = dataset[result.index]
+        batch, advantages = build_rollout_batch_and_advantages(
+            result,
+            prompt_tokens=list(example[dataset_transformation.INPUT_IDS_PROMPT_KEY]),
+            ground_truth=example[dataset_transformation.GROUND_TRUTHS_KEY],
+            dataset_name=example[dataset_transformation.VERIFIER_SOURCE_KEY],
+            raw_query=example[dataset_transformation.RAW_PROMPT_KEY],
+            advantage_normalization_type=streaming_config.advantage_normalization_type,
+        )
+        save_rollouts_to_disk(
+            streaming_config.rollouts_save_path,
+            run_name,
+            step,
+            batch,
+            result,
+            advantages,
+            len(result.responses),
+            total_samples_written,
+        )
+        total_samples_written += len(result.responses)
+
+    return total_samples_written
 
 
 def free_all_gpu_memory(device: int | str = 0) -> None:
@@ -360,6 +407,7 @@ def run_benchmark(
     streaming_config: data_loader.StreamingDataLoaderConfig,
     vllm_config: data_loader.VLLMConfig,
     model_config: model_utils.ModelConfig,
+    run_name: str,
     timestamp: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
@@ -384,6 +432,7 @@ def run_benchmark(
     executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="benchmark")
 
     results = []
+    total_samples_written = 0
     # Get the model dimensions from one of the engines without loading weights
     model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
 
@@ -433,6 +482,14 @@ def run_benchmark(
         logger.info(
             f"Warmup batch completed with {total_warmup_responses} total responses from {len(warmup_results)} prompts"
         )
+        total_samples_written = maybe_save_scored_rollout_traces(
+            warmup_results,
+            dataset,
+            streaming_config,
+            run_name=run_name,
+            step=0,
+            total_samples_written=total_samples_written,
+        )
         logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
         submission_future = executor.submit(
             submission_thread,
@@ -461,6 +518,15 @@ def run_benchmark(
                 except Empty:
                     if time.time() > batch_deadline:
                         raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
+
+            total_samples_written = maybe_save_scored_rollout_traces(
+                batch_results,
+                dataset,
+                streaming_config,
+                run_name=run_name,
+                step=batch_idx,
+                total_samples_written=total_samples_written,
+            )
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
@@ -720,7 +786,10 @@ def main() -> None:
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
+    args.run_name = resolve_run_name(args, timestamp)
     save_config(args, tokenizer_config, model_config, streaming_config, timestamp)
+    if streaming_config.save_traces:
+        save_rollout_metadata(streaming_config.rollouts_save_path, args.run_name, model_config.model_name_or_path)
     run_benchmark(
         dataset,
         vllm_engines,
@@ -731,6 +800,7 @@ def main() -> None:
         streaming_config,
         vllm_config,
         model_config,
+        args.run_name,
         timestamp,
     )
 

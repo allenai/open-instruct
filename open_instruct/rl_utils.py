@@ -5,7 +5,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 import torch
@@ -157,6 +157,50 @@ def save_rollouts_to_disk(
     _rollout_executor.submit(
         _save_rollouts, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
     )
+
+
+def build_rollout_batch_and_advantages(
+    result: data_types.GenerationResult,
+    *,
+    prompt_tokens: list[int],
+    ground_truth: Any,
+    dataset_name: str,
+    raw_query: str,
+    advantage_normalization_type: str,
+) -> tuple[model_utils.Batch, np.ndarray]:
+    """Convert a scored inference result into the rollout format used by difficulty bucketing."""
+    if result.reward_scores is None:
+        raise ValueError("Cannot save scored rollout traces because reward_scores is missing from GenerationResult.")
+
+    num_samples = len(result.responses)
+    if len(result.reward_scores) != num_samples:
+        raise ValueError(
+            "Cannot save scored rollout traces because reward_scores length does not match the number of responses."
+        )
+
+    scores = [float(score) for score in result.reward_scores]
+    indices = [result.index] * num_samples if result.index is not None else None
+    batch = model_utils.Batch(
+        queries=[list(prompt_tokens)] * num_samples,
+        ground_truths=[ground_truth] * num_samples,
+        datasets=[dataset_name] * num_samples,
+        raw_queries=[raw_query] * num_samples,
+        decoded_responses=None,
+        indices=indices,
+        scores=scores,
+        model_steps=[result.model_step] * num_samples,
+    )
+
+    score_array = np.asarray(scores, dtype=float)
+    mean_score = score_array.mean()
+    if advantage_normalization_type == "standard":
+        advantages = (score_array - mean_score) / (score_array.std() + 1e-8)
+    elif advantage_normalization_type == "centered":
+        advantages = score_array - mean_score
+    else:
+        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
+
+    return batch, advantages
 
 
 @dataclass
