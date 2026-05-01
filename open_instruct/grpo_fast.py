@@ -1641,9 +1641,6 @@ def one_training_step(
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
-    save_time += maybe_save_checkpoint_state(
-        args, training_step, episode, num_total_tokens + num_step_tokens, policy_group
-    )
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
@@ -2215,6 +2212,8 @@ def run_training(
             actor_manager,
         )
         num_total_tokens += num_step_tokens
+
+        maybe_save_checkpoint_state(args, training_step, episode, num_total_tokens, policy_group)
 
         if training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")

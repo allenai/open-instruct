@@ -375,7 +375,7 @@ def compute_rho_correction(
         return RhoCorrection(
             weights=mask,
             metrics={
-                "val/icepop_drop_frac": (mask == 0).float(),
+                "val/icepop_drop_frac": (dropped_low | dropped_high).float(),
                 "val/icepop_drop_low_frac": dropped_low.float(),
                 "val/icepop_drop_high_frac": dropped_high.float(),
             },
