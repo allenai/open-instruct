@@ -1643,10 +1643,6 @@ def one_training_step(
 
     save_time = maybe_save_checkpoint(args, training_step, policy_group, chat_template_name, tokenizer, wandb_url)
 
-    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics[0]["batch/response_lengths"]
-    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
-
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     # Note: metrics contains scalar metrics from each worker, array_metrics contains list/array metrics
@@ -1685,6 +1681,9 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
+    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
+    response_lengths = array_metrics[0]["batch/response_lengths"]
+    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
