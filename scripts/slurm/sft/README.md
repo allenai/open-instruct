@@ -63,12 +63,10 @@ sbatch train_dolci_instruct.sh
 
 ### Resume Support
 
-Data preparation supports automatic resume after interruption:
-- Checkpoints saved every 50,000 samples to `_checkpoint.json`
-- Just resubmit the same script to resume
-- Checkpoint is removed on successful completion
-
-Useful for time-limited queues, preemptible instances, and fault tolerance.
+Tokens, labels, and document boundaries stream to `_*.partial.bin` files in the
+output directory as they're produced. Passing `--resume` makes a re-run pick up
+where the last one left off by truncating those files to a consistent sample
+boundary and continuing. The partial files are deleted on successful completion.
 
 ### Configuration
 

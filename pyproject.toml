@@ -182,6 +182,7 @@ split-on-trailing-comma = false
 [tool.ty.rules]
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
+unused-ignore-comment = "ignore"
 
 [tool.ty.src]
 include = [
@@ -198,6 +199,7 @@ include = [
     "open_instruct/dpo_utils.py",
     "open_instruct/grpo.py",
     "open_instruct/grpo_callbacks.py",
+    "open_instruct/olmo_core_finetune.py",
     "open_instruct/grpo_olmo_core_actor.py",
     "open_instruct/grpo_utils.py",
     "open_instruct/launch_utils.py",

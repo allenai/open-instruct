@@ -85,6 +85,7 @@ nav:
     - algorithms/olmo_core_sharding.md
     - algorithms/tool_training.md
     - algorithms/reward_modeling.md
+    - verify-tokenization.md
     - slack-alerts.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md

@@ -31,6 +31,7 @@ from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils
 from open_instruct.grpo_callbacks import (
     RefPolicyUpdateCallback,
     StepTimerCallback,
+    StepTimingCallback,
     VLLMWeightSyncCallback,
     olmo_core_to_hf_name,
 )
@@ -76,7 +77,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
-        self.vllm_engines = None
+        self.vllm_engines: list[ray.actor.ActorHandle] = []
         self.model_update_group = None
         self.actor_manager = None
         self.with_tracking = False
@@ -111,17 +112,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
-        vocab_size = hf_config.vocab_size
-
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        self.model_config = olmo_core_utils.get_transformer_config(
-            self.model_name_or_path, vocab_size, attn_backend=self.attn_implementation
+        model_config_args = olmo_core_utils.ModelConfig(
+            model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
-        self.model = self.model_config.build(init_device="cpu")
+        self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
@@ -163,7 +161,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 shard_degree=self.grpo_config.fsdp_shard_degree,
                 param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
-                wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+                wrapping_strategy=TransformerDataParallelWrappingStrategy.full,
             )
 
         ac_config = olmo_core_utils.build_ac_config(
@@ -185,6 +183,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
+            streaming_config=self.streaming_config,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
@@ -291,7 +290,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
                 vllm_engines=self.vllm_engines,
                 model_update_group=self.model_update_group,
-                actor_manager=self.actor_manager,
+                actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
                 name_mapper=olmo_core_to_hf_name,
             )
 
@@ -302,6 +301,16 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
+
+        model_dims = utils.ModelDims.from_hf_config(self.model_name_or_path)
+
+        trainer_callbacks["step_timing"] = StepTimingCallback(
+            model_dims=model_dims,
+            vllm_num_engines=self.vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=self.vllm_config.vllm_tensor_parallel_size,
+            samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
+            num_training_gpus=self.world_size,
+        )
 
         if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(
