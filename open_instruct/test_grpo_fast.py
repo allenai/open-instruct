@@ -18,7 +18,7 @@ from transformers import AutoTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast, grpo_utils, rl_utils, utils
-from open_instruct.data_loader_utils import expand_grouped_scores
+from open_instruct.data_loader_utils import compute_grouped_advantages
 from open_instruct.data_types import EnvConfig, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -1177,13 +1177,14 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(batch_stats.prompts_resamples, [2])
         self.assertEqual(batch_stats.given_up_prompts_resamples, [])
         self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
-        mean_grouped_rewards, _ = expand_grouped_scores(
+        advantages = compute_grouped_advantages(
             np.array(batch.scores),
             batch_stats.prompt_sample_counts,
             batch_stats.prompt_baseline_sample_counts,
             batch_stats.prompt_baseline_reward_sums,
+            advantage_normalization_type="centered",
         )
-        self.assertTrue(np.allclose(mean_grouped_rewards, np.full(4, 0.25)))
+        self.assertTrue(np.allclose(advantages, np.array([-0.25, 0.75, -0.25, 0.75])))
         self.assertEqual(never_give_up_state.pending_response_counts, {})
         self.assertEqual(never_give_up_state.pending_reward_sums, {})
 
@@ -1685,15 +1686,16 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(restored_state.pending_results, {})
         self.assertEqual(restored_state.pending_metrics, {})
 
-    def test_expand_grouped_scores_uses_effective_baseline_counts(self):
+    def test_compute_grouped_advantages_uses_ngu_baseline_mean(self):
         scores = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
-
-        mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
-            scores, prompt_sample_counts=[4], prompt_baseline_sample_counts=[8], prompt_baseline_reward_sums=[2.0]
+        advantages = compute_grouped_advantages(
+            scores,
+            prompt_sample_counts=[4],
+            prompt_baseline_sample_counts=[8],
+            prompt_baseline_reward_sums=[2.0],
+            advantage_normalization_type="centered",
         )
-
-        self.assertTrue(np.allclose(mean_grouped_rewards, np.full(4, 0.25)))
-        self.assertTrue(np.allclose(std_grouped_rewards, np.full(4, np.sqrt(0.15625))))
+        self.assertTrue(np.allclose(advantages, np.array([-0.25, 0.75, -0.25, 0.75])))
 
     def test_data_preparation_actor_get_state_copies_never_give_up_state(self):
         actor_cls = data_loader_lib.DataPreparationActor.__ray_actor_class__

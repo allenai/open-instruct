@@ -19,58 +19,39 @@ from typing import Literal
 import numpy as np
 
 
-def expand_grouped_scores(
-    scores: np.ndarray,
-    prompt_sample_counts: list[int],
-    prompt_baseline_sample_counts: list[int] | None = None,
-    prompt_baseline_reward_sums: list[float] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Expand per-group means/stds back to per-sample arrays for advantage normalization."""
+def _expand_per_group_values(values: list[float], prompt_sample_counts: list[int], dtype) -> np.ndarray:
+    """Expand per-group scalars into a per-sample array by repeating each value ``sample_count`` times."""
+    if len(values) != len(prompt_sample_counts):
+        raise ValueError(
+            f"Mismatch between values and prompt_sample_counts: {len(values)} vs {len(prompt_sample_counts)}."
+        )
+    return np.concatenate(
+        [np.full(sample_count, value, dtype=dtype) for value, sample_count in zip(values, prompt_sample_counts)]
+    )
+
+
+def expand_grouped_scores(scores: np.ndarray, prompt_sample_counts: list[int]) -> tuple[np.ndarray, np.ndarray]:
+    """Compute per-group mean/std from ``scores`` grouped by ``prompt_sample_counts`` and expand back to per-sample
+    arrays for advantage normalization."""
     if sum(prompt_sample_counts) != len(scores):
         raise ValueError(
             "Mismatch between prompt_sample_counts and scores: "
             f"{sum(prompt_sample_counts)} grouped samples vs {len(scores)} scores."
         )
-    if prompt_baseline_sample_counts is None:
-        prompt_baseline_sample_counts = prompt_sample_counts
-    if prompt_baseline_reward_sums is None:
-        prompt_baseline_reward_sums = []
-        start = 0
-        for sample_count in prompt_sample_counts:
-            group_scores = scores[start : start + sample_count]
-            prompt_baseline_reward_sums.append(float(group_scores.sum()))
-            start += sample_count
-    if len(prompt_sample_counts) != len(prompt_baseline_sample_counts):
-        raise ValueError(
-            "Mismatch between prompt_sample_counts and prompt_baseline_sample_counts: "
-            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_sample_counts)}."
-        )
-    if len(prompt_sample_counts) != len(prompt_baseline_reward_sums):
-        raise ValueError(
-            "Mismatch between prompt_sample_counts and prompt_baseline_reward_sums: "
-            f"{len(prompt_sample_counts)} vs {len(prompt_baseline_reward_sums)}."
-        )
 
-    mean_grouped_rewards = []
-    std_grouped_rewards = []
+    group_means = []
+    group_stds = []
     start = 0
-    for sample_count, baseline_sample_count, baseline_reward_sum in zip(
-        prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums, strict=True
-    ):
+    for sample_count in prompt_sample_counts:
         group_scores = scores[start : start + sample_count]
-        if baseline_sample_count < sample_count:
-            raise ValueError(
-                "Each prompt_baseline_sample_count must be >= its prompt_sample_count, got "
-                f"{baseline_sample_count} < {sample_count}."
-            )
-        group_mean = baseline_reward_sum / baseline_sample_count
-        centered_sum_squares = float(np.square(group_scores - group_mean).sum())
-        group_std = np.sqrt(centered_sum_squares / baseline_sample_count)
-        mean_grouped_rewards.append(np.full(sample_count, group_mean, dtype=scores.dtype))
-        std_grouped_rewards.append(np.full(sample_count, group_std, dtype=scores.dtype))
+        group_means.append(float(group_scores.mean()))
+        group_stds.append(float(group_scores.std()))
         start += sample_count
 
-    return np.concatenate(mean_grouped_rewards), np.concatenate(std_grouped_rewards)
+    return (
+        _expand_per_group_values(group_means, prompt_sample_counts, dtype=scores.dtype),
+        _expand_per_group_values(group_stds, prompt_sample_counts, dtype=scores.dtype),
+    )
 
 
 def _apply_anchor_pos_advantage_rescaling(
@@ -142,9 +123,18 @@ def compute_grouped_advantages(
     prompt_baseline_sample_counts: list[int] | None = None,
     prompt_baseline_reward_sums: list[float] | None = None,
     advantage_normalization_type: str = "centered",
-    ngu_count_rescale: Literal["anchor_pos", "ratio"] | None = None,
+    ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = None,
+    ngu_count_baseline: bool = True,
 ) -> np.ndarray:
     """Compute per-sample advantages from raw scores grouped by prompt.
+
+    ``ngu_count_baseline`` controls whether the NGU pending sums/counts are used for the GRPO mean baseline:
+
+    * ``True`` (default): use ``prompt_baseline_reward_sums`` / ``prompt_baseline_sample_counts`` (which include
+      discarded NGU attempts) for the baseline mean. Std is always computed from the in-batch scores only since NGU
+      tracks aggregate sums but not individual reward values.
+    * ``False``: ignore pending NGU sums/counts and compute the mean from the in-batch scores only (standard GRPO
+      mean over the training batch).
 
     ``ngu_count_rescale`` controls never-give-up baseline handling (applied after mean/std normalization):
 
@@ -152,10 +142,18 @@ def compute_grouped_advantages(
     * ``anchor_pos``: after normalization, per prompt group keep advantages at max-reward samples (by raw ``scores``)
       fixed and scale other advantages so the group sum is zero.
     * ``ratio``: multiply each advantage by ``sample_count / baseline_sample_count``.
+    * ``count_ratio``: divide each advantage by the per-group NGU-count mean baseline (computed from
+      ``prompt_baseline_reward_sums`` / ``prompt_baseline_sample_counts``), regardless of ``ngu_count_baseline``.
     """
-    mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(
-        scores, prompt_sample_counts, prompt_baseline_sample_counts, prompt_baseline_reward_sums
-    )
+    mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(scores, prompt_sample_counts)
+
+    have_ngu_baseline = prompt_baseline_sample_counts is not None and prompt_baseline_reward_sums is not None
+    if have_ngu_baseline:
+        ngu_group_means = [s / c for s, c in zip(prompt_baseline_reward_sums, prompt_baseline_sample_counts)]
+        ngu_mean_baseline = _expand_per_group_values(ngu_group_means, prompt_sample_counts, dtype=scores.dtype)
+
+        if ngu_count_baseline:
+            mean_grouped_rewards = ngu_mean_baseline
 
     if advantage_normalization_type == "standard":
         advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
@@ -170,5 +168,7 @@ def compute_grouped_advantages(
         advantages = _apply_anchor_pos_advantage_rescaling(advantages, scores, prompt_sample_counts)
     elif ngu_count_rescale == "ratio":
         advantages = advantages * expand_grouped_advantage_scales(prompt_sample_counts, prompt_baseline_sample_counts)
+    elif ngu_count_rescale == "count_ratio":
+        advantages = advantages / (ngu_mean_baseline + 1e-8)
 
     return advantages

@@ -485,7 +485,12 @@ class StreamingDataLoaderConfig:
     with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the baseline even though their
     completions are not retained for merging. Advantage rescaling by ``sample_count / baseline_count`` is separate; see
     :attr:`maintain_pending_ngu_count_rescale`."""
-    maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio"] | None = None
+    ngu_count_baseline: bool = True
+    """When True (default), the GRPO mean/std baseline uses ``prompt_baseline_reward_sums`` and
+    ``prompt_baseline_sample_counts`` from pending NGU counts (i.e. includes discarded NGU attempts in the baseline).
+    When False, the baseline is computed from the average of the scores in the training batch only, ignoring
+    pending NGU sums/counts. Has no effect unless :attr:`maintain_pending_ngu_counts` is True."""
+    maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = None
     """How to adjust grouped advantages when NGU merges extra completions into the baseline count (see
     :func:`open_instruct.data_loader_utils.compute_grouped_advantages`).
 
@@ -494,6 +499,8 @@ class StreamingDataLoaderConfig:
       when :attr:`maintain_pending_ngu_counts` inflates the baseline count).
     * ``anchor_pos``: after mean/std normalization, keep advantages at max-reward samples (by raw reward) fixed and scale
       other advantages so the group sum is zero.
+    * ``count_ratio``: after normalization, divide each advantage by the per-group NGU-count mean baseline (computed
+      from the pending NGU sums/counts), regardless of :attr:`ngu_count_baseline`.
     """
     no_resampling_pass_rate: float | None = None
     no_resampling_persist: bool = True
@@ -630,10 +637,15 @@ class StreamingDataLoaderConfig:
             )
         if self.maintain_pending_ngu_age < 0:
             raise ValueError(f"`maintain_pending_ngu_age` must be non-negative, got {self.maintain_pending_ngu_age}.")
-        if self.maintain_pending_ngu_count_rescale not in (None, "anchor_pos", "ratio"):
+        if self.maintain_pending_ngu_count_rescale not in (None, "anchor_pos", "ratio", "count_ratio"):
             raise ValueError(
-                "`maintain_pending_ngu_count_rescale` must be None, 'anchor_pos', or 'ratio', "
+                "`maintain_pending_ngu_count_rescale` must be None, 'anchor_pos', 'ratio', or 'count_ratio', "
                 f"got {self.maintain_pending_ngu_count_rescale!r}."
+            )
+        if self.maintain_pending_ngu_count_rescale == "count_ratio" and not self.maintain_pending_ngu_counts:
+            raise ValueError(
+                "`maintain_pending_ngu_count_rescale='count_ratio'` requires `maintain_pending_ngu_counts=True` "
+                "since it divides advantages by the NGU-count mean baseline."
             )
         if self.max_samples_multiplier is not None and self.max_samples_multiplier < 0:
             raise ValueError(
@@ -2344,6 +2356,7 @@ class DataPreparationActor:
                 batch_stats.prompt_baseline_reward_sums,
                 advantage_normalization_type=self.config.advantage_normalization_type,
                 ngu_count_rescale=self.config.maintain_pending_ngu_count_rescale,
+                ngu_count_baseline=self.config.ngu_count_baseline,
             )
 
             if self.config.save_traces and self.config.rollouts_save_path:
