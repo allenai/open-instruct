@@ -36,7 +36,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen3-4B \
+        --model_name_or_path Qwen/Qwen2.5-7B \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
@@ -50,8 +50,8 @@ uv run python mason.py \
         --fsdp_num_replicas 1 \
         --activation_memory_budget 0.25 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 8 \
-        --vllm_tensor_parallel_size 1 \
+        --vllm_num_engines 4 \
+        --vllm_tensor_parallel_size 2 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
