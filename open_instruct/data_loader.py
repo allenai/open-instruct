@@ -473,7 +473,7 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
-    never_give_up: float = 0.0
+    never_give_up: int | float = 0.0
     never_give_up_accept_on: Literal["better", "different"] = "better"
     """When to accept a never-give-up retry against the chain's previous best reward."""
     maintain_pending_ngu_age: int = 2
@@ -615,8 +615,15 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
-        if not 0.0 <= self.never_give_up <= 1.0:
-            raise ValueError(f"`never_give_up` must be in [0.0, 1.0], got {self.never_give_up}.")
+        if not isinstance(self.never_give_up, (int, float)):
+            raise ValueError(f"`never_give_up` must be an int or float, got {self.never_give_up!r}.")
+        if isinstance(self.never_give_up, int):
+            if self.never_give_up < 0:
+                raise ValueError(
+                    f"`never_give_up` integer retry limit must be non-negative, got {self.never_give_up}."
+                )
+        elif not 0.0 <= self.never_give_up <= 1.0:
+            raise ValueError(f"`never_give_up` float probability must be in [0.0, 1.0], got {self.never_give_up}.")
         if self.never_give_up_accept_on not in ("better", "different"):
             raise ValueError(
                 f"`never_give_up_accept_on` must be 'better' or 'different', got {self.never_give_up_accept_on!r}."
@@ -1216,6 +1223,13 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
     raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
 
 
+def should_requeue_never_give_up(never_give_up: int | float, resample_number: int) -> bool:
+    if isinstance(never_give_up, int):
+        return resample_number < never_give_up
+    else:
+        return np.random.random() < never_give_up
+
+
 def merge_generation_results(
     results: list[data_types.GenerationResult], reward_metrics: list[dict[str, Any] | None]
 ) -> tuple[data_types.GenerationResult, dict[str, Any]]:
@@ -1319,7 +1333,7 @@ def accumulate_inference_batches(
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     active_sampling_max_samples_multiplier: int | None = 10,
-    never_give_up: float = 0.0,
+    never_give_up: int | float = 0.0,
     never_give_up_accept_on: Literal["better", "different"] = "better",
     replenish_prompts: bool = False,
     sync_sampling: bool = False,
@@ -1630,8 +1644,10 @@ def accumulate_inference_batches(
             # solved prompts are fully solved with all results having best possible score
             solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
 
-            # Requeue filtered unsolved prompts with probability `never_give_up`.
-            requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
+            # Requeue filtered unsolved prompts by probability for float settings, or by retry limit for ints.
+            requeue_same_prompt = not solved_prompt and should_requeue_never_give_up(
+                never_give_up, resample_number=current_attempt_count - 1
+            )
             gave_up_prompt = not solved_prompt and not requeue_same_prompt
 
             if replenish_prompts or (requeue_same_prompt and sync_sampling):
