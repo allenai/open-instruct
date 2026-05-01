@@ -156,7 +156,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 shard_degree=self.grpo_config.fsdp_shard_degree,
                 param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
-                wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+                wrapping_strategy=TransformerDataParallelWrappingStrategy.full,
             )
 
         ac_config = olmo_core_utils.build_ac_config(
