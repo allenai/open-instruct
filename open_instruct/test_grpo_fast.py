@@ -933,7 +933,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(replacement_prompt.index, 1)
         self.assertEqual(replacement_prompt.prompt_id, "7_1")
 
-    def test_sync_accumulation_requeues_never_give_up_without_regular_replenish(self):
+    def test_sync_sampling_requeues_never_give_up_without_regular_replenish(self):
         num_samples_per_prompt = 4
         queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
 
@@ -968,7 +968,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
                 active_sampling_max_samples_multiplier=1,
                 never_give_up=1.0,
                 replenish_prompts=False,
-                requeue_never_give_up_prompts=True,
+                sync_sampling=True,
                 iter_dataloader=FakeIterDataLoader(),
                 param_prompt_Q=param_prompt_Q,
                 max_possible_score=1.0,
@@ -983,6 +983,48 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         requeued_prompt = param_prompt_Q.get(timeout=1)
         self.assertEqual(requeued_prompt.index, 0)
         self.assertEqual(requeued_prompt.prompt_id, "7_0_1")
+
+    def test_sync_sampling_counts_given_up_prompt_toward_target(self):
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
+
+        inference_results_Q = Queue(maxsize=2)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        inference_results_Q.put(
+            self.create_mock_result(
+                0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0] * num_samples_per_prompt
+            )
+        )
+        inference_results_Q.put(
+            self.create_mock_result(
+                1, "0_1", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0, 1.0, 0.0, 1.0]
+            )
+        )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        _, batch, _, batch_stats = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=2,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            never_give_up=0.0,
+            sync_sampling=True,
+            max_possible_score=1.0,
+            show_progress_bar=False,
+        )
+
+        self.assertEqual(batch.scores, [0.0, 1.0, 0.0, 1.0])
+        self.assertEqual(batch_stats.given_up_prompts_by_dataset, {"dataset_0": 4})
+        self.assertEqual(batch_stats.given_up_prompts_resamples, [1])
 
     def test_active_sampling_never_give_up_discards_buffer_when_retry_stops(self):
         num_samples_per_prompt = 4
@@ -1893,6 +1935,10 @@ class TestDataPreparation(TestGrpoFastBase):
 
 
 class TestSetupRuntimeVariables(unittest.TestCase):
+    def test_sync_sampling_rejects_max_samples_multiplier(self):
+        with self.assertRaisesRegex(ValueError, "`max_samples_multiplier` must be None"):
+            data_loader_lib.StreamingDataLoaderConfig(sync_sampling=True, async_steps=1, max_samples_multiplier=1)
+
     def test_eval_only_aligns_response_length_with_eval_response_length(self):
         args = grpo_utils.ExperimentConfig(eval_only=True, push_to_hub=False, save_freq=-1)
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(

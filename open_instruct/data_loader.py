@@ -519,7 +519,7 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
-    sync: bool = False
+    sync_sampling: bool = False
     """When True, enqueue rollout prompts step-by-step instead of continuously replenishing from the dataloader."""
     log_train_solve_rate_metrics: bool = False
 
@@ -658,8 +658,10 @@ class StreamingDataLoaderConfig:
         ), "`num_response_tokens_rollout` and `num_response_completions_rollout` require active_sampling."
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0.")
-        if self.sync and self.async_steps != 1:
-            raise ValueError("`async_steps` must be 1 when `sync` is True.")
+        if self.sync_sampling and self.async_steps != 1:
+            raise ValueError("`async_steps` must be 1 when `sync_sampling` is True.")
+        if self.sync_sampling and self.max_samples_multiplier is not None:
+            raise ValueError("`max_samples_multiplier` must be None when `sync_sampling` is True.")
 
         assert (
             self.apply_verifiable_reward
@@ -1320,7 +1322,7 @@ def accumulate_inference_batches(
     never_give_up: float = 0.0,
     never_give_up_accept_on: Literal["better", "different"] = "better",
     replenish_prompts: bool = False,
-    requeue_never_give_up_prompts: bool = False,
+    sync_sampling: bool = False,
     no_resampling_pass_rate: float | None = None,
     no_resampling_persist: bool = True,
     iter_dataloader: HFDataLoader | None = None,
@@ -1630,8 +1632,9 @@ def accumulate_inference_batches(
 
             # Requeue filtered unsolved prompts with probability `never_give_up`.
             requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
+            gave_up_prompt = not solved_prompt and not requeue_same_prompt
 
-            if replenish_prompts or (requeue_same_prompt and requeue_never_give_up_prompts):
+            if replenish_prompts or (requeue_same_prompt and sync_sampling):
                 assert param_prompt_Q is not None
                 assert iter_dataloader is not None
 
@@ -1699,7 +1702,7 @@ def accumulate_inference_batches(
                 record_filtered_prompt(result, prompt_dataset_key)
                 logging.debug(f"[Data Preparation Thread] Filtered prompt total filtered {total_filtered_prompts}")
 
-            if not active_sampling:
+            if not active_sampling or (sync_sampling and gave_up_prompt):
                 num_prompts_sampled += 1
                 progress_bar.update(1)
                 if progress_callback is not None:
@@ -2259,8 +2262,8 @@ class DataPreparationActor:
                 active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
                 never_give_up_accept_on=self.config.never_give_up_accept_on,
-                replenish_prompts=not self.config.sync,
-                requeue_never_give_up_prompts=self.config.sync,
+                replenish_prompts=not self.config.sync_sampling,
+                sync_sampling=self.config.sync_sampling,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 no_resampling_persist=self.config.no_resampling_persist,
                 iter_dataloader=self.iter_dataloader,
@@ -2284,9 +2287,9 @@ class DataPreparationActor:
             if isinstance(result, data_types.ShutdownSentinel):
                 return
 
-            if self.config.sync and step + 1 < self.num_training_steps:
+            if self.config.sync_sampling and step + 1 < self.num_training_steps:
                 logger.info(
-                    f"[DataPreparationActor] Step {step}: sync mode pushing {self.global_batch_size} prompts to param_prompt_Q"
+                    f"[DataPreparationActor] Step {step}: sync sampling pushing {self.global_batch_size} prompts to param_prompt_Q"
                 )
                 self._enqueue_training_prompts(self.global_batch_size)
 
