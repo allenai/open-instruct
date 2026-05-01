@@ -193,10 +193,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
-        if torch.cuda.is_available():
-            alloc = torch.cuda.memory_allocated() / 1e9
-            reserved = torch.cuda.memory_reserved() / 1e9
-            logger.info(f"[MEM rank={self.rank}] post_setup_model alloc={alloc:.2f}GB reserved={reserved:.2f}GB")
         return 1
 
     def setup_model_update_group(self, vllm_engines: list) -> None:

@@ -29,16 +29,6 @@ from open_instruct.rl_utils import masked_mean
 logger = logger_utils.setup_logger(__name__)
 
 
-def _log_mem(tag: str) -> None:
-    if not torch.cuda.is_available():
-        return
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    alloc = torch.cuda.memory_allocated() / 1e9
-    reserved = torch.cuda.memory_reserved() / 1e9
-    peak = torch.cuda.max_memory_allocated() / 1e9
-    logger.info(f"[MEM rank={rank}] {tag} alloc={alloc:.2f}GB reserved={reserved:.2f}GB peak={peak:.2f}GB")
-
-
 class DPOLMHead(LMHead):
     """LM head that returns per-token log-probabilities for DPO training.
 
@@ -390,9 +380,7 @@ class GRPOTrainModule(TransformerTrainModule):
         - Importance sampling with clipping
         """
         self.model.train()
-        _log_mem("train_batch:enter")
         data_BT = batch["batch"].to(self.device)
-        _log_mem("train_batch:after_data_to_device")
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
@@ -459,11 +447,8 @@ class GRPOTrainModule(TransformerTrainModule):
         num_steps = 0
         local_step = 0
 
-        _log_mem("train_batch:before_sample_loop")
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
-                if sample_idx < 3 or sample_idx == num_samples - 1:
-                    _log_mem(f"train_batch:sample_{sample_idx}_start")
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
                     data_BT.query_responses[sample_idx],
@@ -519,11 +504,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
 
                 loss = loss * dp_world_size
-                if sample_idx < 3 or sample_idx == num_samples - 1:
-                    _log_mem(f"train_batch:sample_{sample_idx}_pre_backward")
                 loss.backward()
-                if sample_idx < 3 or sample_idx == num_samples - 1:
-                    _log_mem(f"train_batch:sample_{sample_idx}_post_backward")
 
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
@@ -546,12 +527,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 local_step += 1
 
                 if local_step % accumulation_steps == 0:
-                    _log_mem(f"train_batch:sample_{sample_idx}_pre_optim_step")
                     if not dry_run:
                         self._do_optim_step()
-                    _log_mem(f"train_batch:sample_{sample_idx}_post_optim_step")
                     self.optim.zero_grad(set_to_none=True)
-                    _log_mem(f"train_batch:sample_{sample_idx}_post_zero_grad")
 
         if local_step % accumulation_steps != 0:
             if not dry_run:
