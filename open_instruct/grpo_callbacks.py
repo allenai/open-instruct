@@ -79,6 +79,7 @@ class StepTimingCallback(Callback):
     num_training_gpus: int = 1
 
     _step_start: float = field(default=0.0, init=False, repr=False)
+    _last_step_end: float = field(default=0.0, init=False, repr=False)
     _train_duration: float = field(default=0.0, init=False, repr=False)
     _training_start: float = field(default=0.0, init=False, repr=False)
     _num_total_tokens: int = field(default=0, init=False, repr=False)
@@ -88,6 +89,7 @@ class StepTimingCallback(Callback):
 
     def pre_train(self) -> None:
         self._training_start = time.perf_counter()
+        self._last_step_end = self._training_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
         self._step_start = time.perf_counter()
@@ -101,8 +103,9 @@ class StepTimingCallback(Callback):
 
     def post_step(self) -> None:
         now = time.perf_counter()
-        step_time = now - self._step_start
+        step_time = now - self._last_step_end
         total_training_time = now - self._training_start
+        self._last_step_end = now
 
         train_module = cast(Any, self.trainer.train_module)
         num_step_tokens = int(train_module._last_num_step_tokens)
