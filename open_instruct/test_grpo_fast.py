@@ -856,6 +856,47 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(batch_stats.total_prompts, 2)
         self.assertEqual([call.args for call in progress_callback.call_args_list], [(4, 8), (8, 8)])
 
+    def test_completion_targets_count_accepted_completions(self):
+        num_prompts = 3
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(num_prompts)
+
+        inference_results_Q = Queue(maxsize=4)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        inference_results_Q.put(
+            self.create_mock_result(0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0] * 4)
+        )
+        inference_results_Q.put(self.create_mock_result(1, "0_1", num_samples_per_prompt=num_samples_per_prompt))
+        inference_results_Q.put(self.create_mock_result(2, "0_2", num_samples_per_prompt=num_samples_per_prompt))
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+        progress_callback = MagicMock()
+
+        result, batch, reward_metrics, batch_stats = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=99,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            num_completions=8,
+            base_env_config=EnvConfig(),
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            show_progress_bar=False,
+            progress_callback=progress_callback,
+        )
+
+        self.assertEqual(len(result.responses), 8)
+        self.assertEqual(len(batch.queries), 8)
+        self.assertEqual(batch_stats.generated_completions, 12)
+        self.assertEqual(batch_stats.filtered_completions, 4)
+        self.assertEqual(batch_stats.prompt_sample_counts, [4, 4])
+        self.assertEqual([call.args for call in progress_callback.call_args_list], [(4, 8), (8, 8)])
+
     def test_get_never_give_up_retry_suffix_increments_existing_suffix(self):
         self.assertEqual(data_loader_lib.get_never_give_up_retry_suffix("7_0", epoch_number=7, index=0), "_1")
         self.assertEqual(data_loader_lib.get_never_give_up_retry_suffix("7_0_1", epoch_number=7, index=0), "_2")

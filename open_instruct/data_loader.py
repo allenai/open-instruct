@@ -1452,6 +1452,7 @@ def accumulate_inference_batches(
     )
     num_prompts_sampled = 0
     num_tokens_sampled = 0
+    num_completions_sampled = 0
     prompts_consumed = 0
     total_generated_completions = 0
     total_generated_tokens = 0
@@ -1566,7 +1567,7 @@ def accumulate_inference_batches(
     while (
         num_tokens_sampled < target_total
         if target_mode == "tokens"
-        else total_generated_completions < target_total
+        else num_completions_sampled < target_total
         if target_mode == "completions"
         else num_prompts_sampled < target_total
     ) and (max_prompts_to_sample is None or prompts_consumed < max_prompts_to_sample):
@@ -1801,9 +1802,10 @@ def accumulate_inference_batches(
             if progress_callback is not None:
                 progress_callback(num_tokens_sampled, target_total)
         elif target_mode == "completions":
+            num_completions_sampled += sample_count
             progress_bar.update(sample_count)
             if progress_callback is not None:
-                progress_callback(total_generated_completions, target_total)
+                progress_callback(num_completions_sampled, target_total)
         else:
             num_prompts_sampled += 1
             progress_bar.update(1)
@@ -1869,7 +1871,7 @@ def accumulate_inference_batches(
     accepted_target_total = (
         num_tokens_sampled
         if target_mode == "tokens"
-        else sum(len(result.responses) for result in results)
+        else num_completions_sampled
         if target_mode == "completions"
         else num_prompts_sampled
     )
