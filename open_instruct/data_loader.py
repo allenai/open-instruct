@@ -473,7 +473,12 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     max_samples_multiplier: int | None = None
-    never_give_up: int | float = 0.0
+    never_give_up: float = 0.0
+    """Probability in ``[0.0, 1.0]`` that a zero-std prompt is requeued as a never-give-up retry. Mutually exclusive
+    with :attr:`never_give_up_int`."""
+    never_give_up_int: int = 0
+    """Maximum number of never-give-up retries per prompt (each zero-std prompt is requeued until this many retries are
+    exhausted). Mutually exclusive with :attr:`never_give_up`."""
     never_give_up_accept_on: Literal["better", "different"] = "better"
     """When to accept a never-give-up retry against the chain's previous best reward."""
     maintain_pending_ngu_age: int = 2
@@ -622,15 +627,19 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
-        if not isinstance(self.never_give_up, (int, float)):
-            raise ValueError(f"`never_give_up` must be an int or float, got {self.never_give_up!r}.")
-        if isinstance(self.never_give_up, int):
-            if self.never_give_up < 0:
-                raise ValueError(
-                    f"`never_give_up` integer retry limit must be non-negative, got {self.never_give_up}."
-                )
-        elif not 0.0 <= self.never_give_up <= 1.0:
+        if not isinstance(self.never_give_up, float):
+            raise ValueError(f"`never_give_up` must be a float, got {self.never_give_up!r}.")
+        if not 0.0 <= self.never_give_up <= 1.0:
             raise ValueError(f"`never_give_up` float probability must be in [0.0, 1.0], got {self.never_give_up}.")
+        if not isinstance(self.never_give_up_int, int) or isinstance(self.never_give_up_int, bool):
+            raise ValueError(f"`never_give_up_int` must be an int, got {self.never_give_up_int!r}.")
+        if self.never_give_up_int < 0:
+            raise ValueError(f"`never_give_up_int` retry limit must be non-negative, got {self.never_give_up_int}.")
+        if self.never_give_up > 0.0 and self.never_give_up_int > 0:
+            raise ValueError(
+                "`never_give_up` and `never_give_up_int` are mutually exclusive; set at most one of them, got "
+                f"never_give_up={self.never_give_up}, never_give_up_int={self.never_give_up_int}."
+            )
         if self.never_give_up_accept_on not in ("better", "different"):
             raise ValueError(
                 f"`never_give_up_accept_on` must be 'better' or 'different', got {self.never_give_up_accept_on!r}."
@@ -1235,9 +1244,9 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
     raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
 
 
-def should_requeue_never_give_up(never_give_up: int | float, resample_number: int) -> bool:
-    if isinstance(never_give_up, int):
-        return resample_number < never_give_up
+def should_requeue_never_give_up(never_give_up: float, never_give_up_int: int, resample_number: int) -> bool:
+    if never_give_up_int > 0:
+        return resample_number < never_give_up_int
     else:
         return np.random.random() < never_give_up
 
@@ -1345,7 +1354,8 @@ def accumulate_inference_batches(
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     active_sampling_max_samples_multiplier: int | None = 10,
-    never_give_up: int | float = 0.0,
+    never_give_up: float = 0.0,
+    never_give_up_int: int = 0,
     never_give_up_accept_on: Literal["better", "different"] = "better",
     replenish_prompts: bool = False,
     sync_sampling: bool = False,
@@ -1658,7 +1668,7 @@ def accumulate_inference_batches(
 
             # Requeue filtered unsolved prompts by probability for float settings, or by retry limit for ints.
             requeue_same_prompt = not solved_prompt and should_requeue_never_give_up(
-                never_give_up, resample_number=current_attempt_count - 1
+                never_give_up, never_give_up_int, resample_number=current_attempt_count - 1
             )
             gave_up_prompt = not solved_prompt and not requeue_same_prompt
 
@@ -2289,6 +2299,7 @@ class DataPreparationActor:
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
+                never_give_up_int=self.config.never_give_up_int,
                 never_give_up_accept_on=self.config.never_give_up_accept_on,
                 replenish_prompts=not self.config.sync_sampling,
                 sync_sampling=self.config.sync_sampling,
