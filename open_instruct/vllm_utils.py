@@ -629,6 +629,7 @@ class LLMRayActor:
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.current_model_step: int = 0
+        self._generation_paused = False
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -791,11 +792,24 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
+    def _drain_active_tasks(self, reason: str) -> None:
+        if len(self.active_tasks) > 0:
+            logger.info(f"Waiting for {len(self.active_tasks)} active vLLM request(s) before {reason}")
+        while len(self.active_tasks) > 0:
+            self.check_background_threads()
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+
     def sleep(self) -> None:
-        return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
+        if not self.inflight_updates:
+            self._drain_active_tasks("pause generation")
+        self._run_async(self.llm_engine.pause_generation(mode="keep", clear_cache=False))
+        self._generation_paused = True
 
     def wake_up(self) -> None:
-        return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
+        if not self._generation_paused:
+            return
+        self._run_async(self.llm_engine.resume_generation())
+        self._generation_paused = False
 
     def update_weights(
         self,
@@ -804,9 +818,8 @@ class LLMRayActor:
         shapes: list[list[int]] | None = None,
         packed: bool = True,
     ) -> None:
-        while not self.inflight_updates and len(self.active_tasks) > 0:
-            self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        if not self.inflight_updates:
+            self._drain_active_tasks("weight update")
         if isinstance(names_or_update_dict, dict):
             # IPC path (single_gpu_mode): called as update_weights({"update_info": {...}})
             update_info = names_or_update_dict["update_info"]
