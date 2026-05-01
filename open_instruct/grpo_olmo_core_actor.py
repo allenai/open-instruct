@@ -30,7 +30,6 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import (
     RefPolicyUpdateCallback,
-    StepTimerCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
     olmo_core_to_hf_name,
@@ -240,7 +239,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync) so the
         first NCCL weight-broadcast collective fires from a known-good state.
         """
-        assert self.vllm_engines is not None, "vllm_engines must be set via setup_model_update_group()"
         if self.rank == 0:
             ray.get(self.actor_manager.set_should_stop.remote(True))
         refs = vllm_utils.broadcast_weights_to_vllm(
@@ -284,15 +282,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         This method sets up callbacks for weight sync, ref policy updates,
         Beaker progress tracking, and wandb logging, then calls trainer.fit().
         """
-        trainer_callbacks: dict[str, callbacks.Callback] = {"step_timer": StepTimerCallback()}
+        trainer_callbacks: dict[str, callbacks.Callback] = {}
 
-        if self.vllm_engines:
-            trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
-                vllm_engines=self.vllm_engines,
-                model_update_group=self.model_update_group,
-                actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
-                name_mapper=olmo_core_to_hf_name,
-            )
+        trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
+            name_mapper=olmo_core_to_hf_name,
+        )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
             trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(

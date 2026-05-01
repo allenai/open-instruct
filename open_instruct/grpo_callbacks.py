@@ -64,7 +64,13 @@ def olmo_core_to_hf_name(name: str) -> str:
 
 @dataclass
 class StepTimingCallback(Callback):
-    """Records outer-loop timing and utilization metrics per step."""
+    """Records outer-loop timing and utilization metrics per step.
+
+    Priority is set very low so its post_step runs after every other callback
+    (e.g. VLLMWeightSyncCallback), making time/total an end-to-end step duration.
+    """
+
+    priority: ClassVar[int] = -1000
 
     model_dims: utils.ModelDims
     vllm_num_engines: int = 1
@@ -149,8 +155,6 @@ class VLLMWeightSyncCallback(Callback):
         if self.trainer.global_step % self.sync_interval != 0:
             return
 
-        start = time.perf_counter()
-
         torch.cuda.empty_cache()
 
         broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
@@ -165,8 +169,6 @@ class VLLMWeightSyncCallback(Callback):
         )
         for name, value in sync_time_stats.items():
             self.trainer.record_metric(name, value, reduce_type=None)
-
-        self.trainer.record_metric("time/weight_sync", time.perf_counter() - start, reduce_type=None)
 
 
 @dataclass
@@ -217,28 +219,6 @@ class RefPolicyUpdateCallback(Callback):
         finally:
             for m in fsdp2_submodules:
                 m.reshard()
-
-
-@dataclass
-class StepTimerCallback(Callback):
-    """Records per-step wall-clock timings: time/total spans pre_step → post_step.
-
-    Priority is set very low so its post_step runs after every other callback (e.g.
-    VLLMWeightSyncCallback), making time/total an end-to-end step duration.
-    """
-
-    priority: ClassVar[int] = -1000
-
-    _step_start: float | None = field(default=None, init=False, repr=False)
-
-    def pre_step(self, batch: dict[str, Any]) -> None:
-        self._step_start = time.perf_counter()
-
-    def post_step(self) -> None:
-        if self._step_start is None:
-            return
-        self.trainer.record_metric("time/total", time.perf_counter() - self._step_start, reduce_type=None)
-        self._step_start = None
 
 
 @dataclass
