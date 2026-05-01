@@ -48,7 +48,7 @@ uv run python mason.py \
         --total_episodes 10_000 \
         --fsdp_shard_degree 8 \
         --fsdp_num_replicas 1 \
-        --activation_memory_budget 0.5 \
+        --activation_memory_budget 0.25 \
         --num_learners_per_node 8 \
         --vllm_num_engines 8 \
         --vllm_tensor_parallel_size 1 \
