@@ -933,6 +933,57 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertEqual(replacement_prompt.index, 1)
         self.assertEqual(replacement_prompt.prompt_id, "7_1")
 
+    def test_sync_accumulation_requeues_never_give_up_without_regular_replenish(self):
+        num_samples_per_prompt = 4
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
+
+        inference_results_Q = Queue(maxsize=1)
+        param_prompt_Q = Queue(maxsize=2)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        inference_results_Q.put(
+            self.create_mock_result(
+                0, "0_0", num_samples_per_prompt=num_samples_per_prompt, reward_scores=[0.0] * num_samples_per_prompt
+            )
+        )
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_llama7b_model_dims()
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        class FakeIterDataLoader:
+            _epoch = 7
+
+        with unittest.mock.patch("open_instruct.data_loader.np.random.random", return_value=0.0):
+            result, batch, reward_metrics, batch_stats = data_loader_lib.accumulate_inference_batches(
+                inference_results_Q,
+                mock_generation_config,
+                num_prompts=1,
+                model_dims=mock_model_dims,
+                tokenizer=tokenizer,
+                dataset=mock_dataset,
+                base_env_config=EnvConfig(),
+                active_sampling=True,
+                filter_zero_std_samples=True,
+                active_sampling_max_samples_multiplier=1,
+                never_give_up=1.0,
+                replenish_prompts=False,
+                requeue_never_give_up_prompts=True,
+                iter_dataloader=FakeIterDataLoader(),
+                param_prompt_Q=param_prompt_Q,
+                max_possible_score=1.0,
+                show_progress_bar=False,
+            )
+
+        self.assertIsNone(result)
+        self.assertIsNone(batch)
+        self.assertIsNone(reward_metrics)
+        self.assertIsNone(batch_stats)
+        self.assertEqual(param_prompt_Q.qsize(), 1)
+        requeued_prompt = param_prompt_Q.get(timeout=1)
+        self.assertEqual(requeued_prompt.index, 0)
+        self.assertEqual(requeued_prompt.prompt_id, "7_0_1")
+
     def test_active_sampling_never_give_up_discards_buffer_when_retry_stops(self):
         num_samples_per_prompt = 4
         queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)

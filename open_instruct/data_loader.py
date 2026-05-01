@@ -519,6 +519,8 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
+    sync: bool = False
+    """When True, enqueue rollout prompts step-by-step instead of continuously replenishing from the dataloader."""
     log_train_solve_rate_metrics: bool = False
 
     # Reward - R1 style format reward
@@ -655,7 +657,9 @@ class StreamingDataLoaderConfig:
             and self.num_response_completions_rollout is None
         ), "`num_response_tokens_rollout` and `num_response_completions_rollout` require active_sampling."
         if self.async_steps < 1:
-            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+            raise ValueError("`async_steps` must be greater than 0.")
+        if self.sync and self.async_steps != 1:
+            raise ValueError("`async_steps` must be 1 when `sync` is True.")
 
         assert (
             self.apply_verifiable_reward
@@ -1316,6 +1320,7 @@ def accumulate_inference_batches(
     never_give_up: float = 0.0,
     never_give_up_accept_on: Literal["better", "different"] = "better",
     replenish_prompts: bool = False,
+    requeue_never_give_up_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     no_resampling_persist: bool = True,
     iter_dataloader: HFDataLoader | None = None,
@@ -1626,22 +1631,22 @@ def accumulate_inference_batches(
             # Requeue filtered unsolved prompts with probability `never_give_up`.
             requeue_same_prompt = not solved_prompt and np.random.random() < never_give_up
 
-            if replenish_prompts:
+            if replenish_prompts or (requeue_same_prompt and requeue_never_give_up_prompts):
                 assert param_prompt_Q is not None
+                assert iter_dataloader is not None
 
                 prompt_id_suffix = None
                 if requeue_same_prompt:
                     # if we are replenishing prompts and requeuing this particular prompt increase the ngu_suffix so it doesn't clash with previous ids
                     replacement_example = example
                     prompt_id_suffix = get_never_give_up_retry_suffix(
-                        result.prompt_id, iter_dataloader._epoch if iter_dataloader is not None else 0, result.index
+                        result.prompt_id, iter_dataloader._epoch, result.index
                     )
                 else:
-                    assert iter_dataloader is not None
                     replacement_example = next(iter_dataloader)
                 add_prompt_to_generator(
                     replacement_example,
-                    iter_dataloader._epoch if iter_dataloader is not None else 0,
+                    iter_dataloader._epoch,
                     param_prompt_Q,
                     generation_config,
                     is_eval=False,
@@ -2178,6 +2183,17 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
         logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
+    def _enqueue_training_prompts(self, num_prompts: int) -> None:
+        for _ in range(num_prompts):
+            add_prompt_to_generator(
+                next(self.iter_dataloader),
+                self.iter_dataloader._epoch,
+                self.param_prompt_Q,
+                self.generation_config,
+                is_eval=False,
+                base_env_config=self.base_env_config,
+            )
+
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
 
@@ -2187,15 +2203,7 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        for _ in range(num_initial_prompts):
-            add_prompt_to_generator(
-                next(self.iter_dataloader),
-                self.iter_dataloader._epoch,
-                self.param_prompt_Q,
-                self.generation_config,
-                is_eval=False,
-                base_env_config=self.base_env_config,
-            )
+        self._enqueue_training_prompts(num_initial_prompts)
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
@@ -2251,7 +2259,8 @@ class DataPreparationActor:
                 active_sampling_max_samples_multiplier=self.config.max_samples_multiplier,
                 never_give_up=self.config.never_give_up,
                 never_give_up_accept_on=self.config.never_give_up_accept_on,
-                replenish_prompts=True,
+                replenish_prompts=not self.config.sync,
+                requeue_never_give_up_prompts=self.config.sync,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 no_resampling_persist=self.config.no_resampling_persist,
                 iter_dataloader=self.iter_dataloader,
@@ -2274,6 +2283,12 @@ class DataPreparationActor:
 
             if isinstance(result, data_types.ShutdownSentinel):
                 return
+
+            if self.config.sync and step + 1 < self.num_training_steps:
+                logger.info(
+                    f"[DataPreparationActor] Step {step}: sync mode pushing {self.global_batch_size} prompts to param_prompt_Q"
+                )
+                self._enqueue_training_prompts(self.global_batch_size)
 
             if result is None:
                 empty_data = [
