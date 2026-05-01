@@ -72,7 +72,7 @@ class StepTimingCallback(Callback):
     samples_per_prompt: int = 1
     num_training_gpus: int = 1
 
-    _train_start: float = field(default=0.0, init=False, repr=False)
+    _step_start: float = field(default=0.0, init=False, repr=False)
     _train_duration: float = field(default=0.0, init=False, repr=False)
     _training_start: float = field(default=0.0, init=False, repr=False)
     _last_post_step: float = field(default=0.0, init=False, repr=False)
@@ -86,14 +86,14 @@ class StepTimingCallback(Callback):
         self._last_post_step = self._training_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
-        self._train_start = time.perf_counter()
+        self._step_start = time.perf_counter()
         metrics = batch["metrics"]
         self._prompt_lengths = list(metrics["batch/prompt_lengths"])
         self._response_lengths = list(metrics["batch/response_lengths"])
         self._total_generation_time = float(metrics["time/getting_response"])
 
     def post_train_batch(self) -> None:
-        self._train_duration = time.perf_counter() - self._train_start
+        self._train_duration = time.perf_counter() - self._step_start
 
     def post_step(self) -> None:
         now = time.perf_counter()
@@ -142,7 +142,7 @@ class VLLMWeightSyncCallback(Callback):
     model_update_group: Any | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
-    inflight_updates: bool = False
+    inflight_updates: bool = field(kw_only=True)
 
     @property
     def train_module(self) -> TransformerTrainModule:
