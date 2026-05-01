@@ -301,6 +301,7 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "Qwen/Qwen3-0.6B-Base": "qwen3_0_6B",
     "Qwen/Qwen3-1.7B": "qwen3_1_7B",
     "Qwen/Qwen3-4B": "qwen3_4B",
+    "Qwen/Qwen3-4B-Base": "qwen3_4B",
     "Qwen/Qwen3-8B": "qwen3_8B",
     "Qwen/Qwen3-14B": "qwen3_14B",
     "Qwen/Qwen3-32B": "qwen3_32B",

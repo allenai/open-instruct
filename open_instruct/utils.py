@@ -165,6 +165,10 @@ class MetricsTracker:
         idx = self._maybe_register_metric(name)
         self.metrics[idx] = value
 
+    def update(self, metrics: dict) -> None:
+        for name, value in metrics.items():
+            self[name] = value
+
     def get_metrics_list(self) -> dict[str, float]:
         # Convert to Python floats for logging systems (wandb, tensorboard)
         metrics_list = self.metrics.tolist()
@@ -191,12 +195,12 @@ def repeat_each(seq, k):
 
 
 def ray_get_with_progress(
-    ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
+    ray_refs: Iterable[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
     """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
-        ray_refs: List of ray object references
+        ray_refs: Iterable of ray object references
         desc: Description for the progress bar
         enable: Whether to show the progress bar (default: True)
         timeout: Optional timeout in seconds for all operations to complete
@@ -214,8 +218,8 @@ def ray_get_with_progress(
     ray_futures = [ref.future() for ref in ray_refs]
     fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
 
-    results = [None] * len(ray_refs)
-    completion_times = [None] * len(ray_refs)
+    results = [None] * len(ray_futures)
+    completion_times = [None] * len(ray_futures)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:

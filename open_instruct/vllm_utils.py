@@ -26,7 +26,7 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from concurrent import futures
-from typing import Any
+from typing import Any, TypedDict
 
 import aiohttp
 import backoff
@@ -121,6 +121,17 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
         num_sliding_window_layers=num_sliding_window_layers,
         device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
     )
+
+
+class WeightUpdateInfo(TypedDict):
+    names: list[str]
+    dtype_names: list[str]
+    shapes: list[list[int]]
+    packed: bool
+
+
+class WeightUpdateRPCArgs(TypedDict):
+    update_info: WeightUpdateInfo
 
 
 @dataclasses.dataclass
@@ -780,15 +791,15 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[tuple[int, ...]], packed: bool, model_step: int
-    ) -> None:
+    def update_weights(self, update_info: WeightUpdateRPCArgs, model_step: int | None = None) -> None:
+        # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
+        # `dict(update_info=...)` and no model_step; NCCL callers pass model_step explicitly.
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
-        self.current_model_step = model_step
+        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        if model_step is not None:
+            self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1318,17 +1329,11 @@ def _prepare_params_for_sync(
     DS3 gathered tensors may be non-contiguous or views into temporary buffers.
     Cloning ensures we send independent, contiguous tensors over NCCL.
     """
-    mapped_params = []
-    for n, p in params:
-        mapped_name = name_mapper(n) if name_mapper else n
-        mapped_params.append((mapped_name, p.data.contiguous().clone()))
-    return mapped_params
+    return [(name_mapper(n) if name_mapper else n, p.data.contiguous().clone()) for n, p in params]
 
 
 def _collect_weight_metadata(
-    model: torch.nn.Module,
-    name_mapper: Callable[[str], str] | None,
-    fsdp_submodules: list[tuple[str, FSDPModule]] | None = None,
+    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
 ) -> tuple[list[str], list[str], list[list[int]]]:
     """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
 
@@ -1338,25 +1343,12 @@ def _collect_weight_metadata(
     names: list[str] = []
     dtype_names: list[str] = []
     shapes: list[list[int]] = []
-
-    if isinstance(model, FSDPModule):
-        if fsdp_submodules is None:
-            fsdp_submodules = _get_fsdp2_submodules(model)
-        for block_name, block in fsdp_submodules:
-            for name, param in block.named_parameters():
-                full_name = f"{block_name}.{name}" if block_name else name
-                mapped_name = name_mapper(full_name) if name_mapper else full_name
-                names.append(mapped_name)
-                dtype_names.append(str(param.dtype).split(".")[-1])
-                shapes.append(list(param.shape))
-    else:
-        for name, param in model.named_parameters():
-            mapped_name = name_mapper(name) if name_mapper else name
-            names.append(mapped_name)
-            dtype_names.append(str(param.dtype).split(".")[-1])
-            shape = getattr(param, "ds_shape", param.shape)
-            shapes.append(list(shape))
-
+    for name, param in model.named_parameters():
+        mapped_name = name_mapper(name) if name_mapper else name
+        names.append(mapped_name)
+        dtype_names.append(str(param.dtype).split(".")[-1])
+        shape = getattr(param, "ds_shape", param.shape)
+        shapes.append(list(shape))
     return names, dtype_names, shapes
 
 
@@ -1413,39 +1405,57 @@ def broadcast_weights_to_vllm(
     if is_rank_0:
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
-    if model_update_group is None:
+    if model_update_group is None and is_rank_0:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
     use_packed = False
-
-    if is_rank_0:
-        refs = [
-            engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
-        ]
-    else:
-        refs = []
-
     trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=use_packed)
 
     if isinstance(model, FSDPModule):
         if not fsdp_submodules:
             raise ValueError("FSDP2 model has no FSDP submodules.")
-        for block_name, block in fsdp_submodules:
+        if not gather_whole_model:
+            raise ValueError(
+                "FSDP2 weight sync requires gather_whole_model=True. "
+                "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
+                "collectives interleave with the trainer->vLLM NCCL sends."
+            )
+        for _, block in fsdp_submodules:
             block.unshard()
-            try:
-                if is_rank_0:
-                    block_params = [
-                        (name_mapper(f"{block_name}.{n}") if name_mapper else f"{block_name}.{n}", p.data)
-                        for n, p in block.named_parameters()
-                    ]
-                    NCCLWeightTransferEngine.trainer_send_weights(
-                        iterator=iter(block_params), trainer_args=trainer_args
-                    )
-            finally:
+        # The root FSDPModule wraps params not inside any submodule (e.g. model.norm,
+        # lm_head). _get_fsdp2_submodules excludes the root, so unshard it explicitly
+        # or those root-level DTensor params will fail NCCL broadcast with an illegal
+        # memory access (their `.contiguous().clone()` produces a buffer with global
+        # stride backed by only the local shard).
+        model.unshard()
+        torch.cuda.synchronize()
+        try:
+            if is_rank_0:
+                mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
+                names = [n for n, _ in mapped_params]
+                dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
+                shapes = [list(t.shape) for _, t in mapped_params]
+                update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
+                refs = [
+                    engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines
+                ]
+                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+            else:
+                refs = []
+        finally:
+            for _, block in fsdp_submodules:
                 block.reshard()
+            model.reshard()
         return refs
+
+    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
+
+    if is_rank_0:
+        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
+        refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
+    else:
+        refs = []
 
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
