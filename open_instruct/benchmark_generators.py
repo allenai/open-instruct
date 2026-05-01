@@ -36,13 +36,27 @@ from open_instruct.rl_utils import build_rollout_batch_and_advantages, save_roll
 logger = logger_utils.setup_logger(__name__)
 
 
-# Determine data directory
-if pathlib.Path("/weka").exists():
-    DATA_DIR = pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
-elif pathlib.Path("/root").exists():
-    DATA_DIR = pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
-else:
-    DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
+def get_default_data_dir() -> pathlib.Path:
+    """Return the legacy default directory for benchmark artifacts."""
+    if pathlib.Path("/weka").exists():
+        return pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
+    if pathlib.Path("/root").exists():
+        return pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
+    return pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
+
+
+DATA_DIR = get_default_data_dir()
+
+
+def resolve_data_dir(
+    args: grpo_utils.GRPOExperimentConfig, streaming_config: data_loader.StreamingDataLoaderConfig
+) -> pathlib.Path:
+    """Resolve where benchmark artifacts should be written for this run."""
+    if args.output_dir.rstrip("/") != "output":
+        return pathlib.Path(args.output_dir)
+    if streaming_config.save_traces and streaming_config.rollouts_save_path:
+        return pathlib.Path(streaming_config.rollouts_save_path)
+    return get_default_data_dir()
 
 
 def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int):
@@ -746,6 +760,8 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.
 
 def main() -> None:
     """Main benchmark function."""
+    global DATA_DIR
+
     # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
         (
@@ -768,8 +784,11 @@ def main() -> None:
         parser.parse_args_into_dataclasses(),
     )
 
+    DATA_DIR = resolve_data_dir(args, streaming_config)
+
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Writing benchmark artifacts to {DATA_DIR}")
 
     # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")

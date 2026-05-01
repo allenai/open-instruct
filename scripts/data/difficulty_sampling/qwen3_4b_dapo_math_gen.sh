@@ -27,6 +27,7 @@ uv run python mason.py \
 uv run open_instruct/benchmark_generators.py \
   --run_name "${RUN_NAME}" \
   --exp_name "${EXP_NAME}" \
+  --output_dir "${TRACE_DIR}" \
   --model_name_or_path "Qwen/Qwen3-4B-Base" \
   --tokenizer_name_or_path "Qwen/Qwen3-4B-Base" \
   --chat_template_name qwen_instruct_user_boxed_math \
