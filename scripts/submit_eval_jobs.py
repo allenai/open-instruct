@@ -34,7 +34,7 @@ DEFAULT_CLUSTERS = ("ai2/jupiter",)
 MAX_EXPERIMENT_NAME_LEN = 128
 EXPERIMENT_NAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
-DEFAULT_OLMO_EVAL_REF = "d69080d2a65239921448fe875c150df159cacde1"
+DEFAULT_OLMO_EVAL_REF = "main"
 GIT_REF_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 
@@ -43,20 +43,13 @@ def build_install_script(ref: str) -> str:
         raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
     return (
         "set -euo pipefail && "
-        "export UV_PROJECT_ENVIRONMENT=/opt/venv && "
-        "export UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache && "
         "git clone "
         "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
         "/opt/olmo-eval-internal && "
         f"cd /opt/olmo-eval-internal && git checkout {shlex.quote(ref)} && "
-        "uv pip freeze -q | grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt && "
-        "uv venv /opt/vllm-venv && "
-        "for pkg in /opt/venv/lib/python*/site-packages/torch* /opt/venv/lib/python*/site-packages/nvidia*; do "
-        "ln -sf \"$pkg\" /opt/vllm-venv/lib/python*/site-packages/; done && "
-        "VIRTUAL_ENV=/opt/vllm-venv uv pip install --cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]' && "
-        "export VLLM_PYTHON=/opt/vllm-venv/bin/python && "
-        "uv pip install -e '.[s3,clients,hf]' -c /tmp/cuda-constraints.txt && "
-        "uv pip install 'antlr4-python3-runtime' -c /tmp/cuda-constraints.txt && "
+        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
+        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
+        "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
         "cd /workspace"
     )
 
@@ -156,16 +149,6 @@ def build_inner_cmd(args: argparse.Namespace, model_path: str) -> list[str]:
     return cmd
 
 
-def get_git_info() -> tuple[str, str]:
-    branch = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], check=False, capture_output=True, text=True
-    ).stdout.strip() or "unknown"
-    commit = subprocess.run(
-        ["git", "rev-parse", "--short=12", "HEAD"], check=False, capture_output=True, text=True
-    ).stdout.strip() or "unknown"
-    return branch, commit
-
-
 def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str | None, experiment_name: str) -> dict:
     non_weka_clusters = [c for c in args.cluster if c not in launch_utils.WEKA_CLUSTERS]
     if non_weka_clusters:
@@ -183,12 +166,9 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
 
     full_command = f"{build_install_script(args.olmo_eval_ref)} && {shlex.join(inner_cmd)}"
 
-    git_branch, git_commit = get_git_info()
-    description = f"{experiment_name} (branch={git_branch}, commit={git_commit})"
-
     return {
         "version": "v2",
-        "description": description,
+        "description": experiment_name,
         "budget": args.budget,
         "retry": {"allowedTaskRetries": 2},
         "tasks": [
