@@ -447,8 +447,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 ratio = torch.exp(log_ratio)
 
                 rho = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, self.grpo_config)
-                for hist_key, hist_values in rho.histogram_metrics.items():
-                    rho_histograms.setdefault(hist_key, []).append(hist_values.detach().cpu())
+                grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -523,7 +522,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
             if dist_utils.get_rank() == 0 and wandb.run is not None:
                 hist_log = {
-                    hist_key: wandb.Histogram(torch.cat(hist_chunks).numpy())
-                    for hist_key, hist_chunks in rho_histograms.items()
+                    key: wandb.Histogram(values)  # ty: ignore[invalid-argument-type]
+                    for key, values in grpo_utils.finalize_rho_histograms(rho_histograms).items()
                 }
                 wandb.log(hist_log, step=self.trainer.global_step)

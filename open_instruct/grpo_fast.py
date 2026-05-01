@@ -740,8 +740,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     rho_BT = grpo_utils.compute_rho_correction(
                         old_logprob_BT, vllm_logprobs_BT, response_mask_BT, self.args
                     )
-                    for hist_key, hist_values in rho_BT.histogram_metrics.items():
-                        rho_histograms.setdefault(hist_key, []).append(hist_values.detach().cpu())
+                    grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -798,8 +797,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics[key] = value
                     else:
                         array_metrics[key] = value
-                for hist_key, hist_chunks in rho_histograms.items():
-                    array_metrics[hist_key] = torch.cat(hist_chunks).numpy()
+                array_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
                 return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:

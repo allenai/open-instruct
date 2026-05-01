@@ -312,18 +312,14 @@ def _compute_train_infer_ratio(
     return torch.exp(logprob_diff)
 
 
-def compute_tis_weights(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
-) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """Compute truncated importance sampling weights: clamp(π_old / π_vllm, max=cap).
-
-    Returns (clamped, unclamped) tuple, both None when cap <= 0 (disabled).
-    """
-    if cap <= 0:
-        return None, None
-    unclamped = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
-    clamped = torch.clamp(unclamped, max=cap)
-    return clamped, unclamped
+def _icepop_mask_from_rho(
+    rho: torch.Tensor, response_mask: torch.Tensor, beta: float
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    dropped_low = (rho < 1.0 / beta) & response_mask
+    dropped_high = (rho > beta) & response_mask
+    in_range = response_mask & ~dropped_low & ~dropped_high
+    mask = torch.where(in_range, rho, torch.zeros_like(rho))
+    return mask, dropped_low, dropped_high
 
 
 def compute_icepop_mask(
@@ -339,11 +335,7 @@ def compute_icepop_mask(
     with ρ < 1/β and dropped_high marks ρ > β (both restricted to response tokens).
     """
     rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
-    dropped_low = (rho < 1.0 / beta) & response_mask
-    dropped_high = (rho > beta) & response_mask
-    in_range = response_mask & ~dropped_low & ~dropped_high
-    mask = torch.where(in_range, rho, torch.zeros_like(rho))
-    return mask, dropped_low, dropped_high
+    return _icepop_mask_from_rho(rho, response_mask, beta)
 
 
 @dataclass
@@ -370,9 +362,7 @@ def compute_rho_correction(
     rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
     if config.use_icepop:
-        mask, dropped_low, dropped_high = compute_icepop_mask(
-            old_logprob, vllm_logprobs, response_mask, config.icepop_beta
-        )
+        mask, dropped_low, dropped_high = _icepop_mask_from_rho(rho, response_mask, config.icepop_beta)
         return RhoCorrection(
             weights=mask,
             metrics={
@@ -382,16 +372,24 @@ def compute_rho_correction(
             },
             histogram_metrics=rho_hist,
         )
-    clamped, unclamped = compute_tis_weights(
-        old_logprob, vllm_logprobs, response_mask, config.truncated_importance_sampling_ratio_cap
-    )
-    if clamped is None or unclamped is None:
+    cap = config.truncated_importance_sampling_ratio_cap
+    if cap <= 0:
         return RhoCorrection(weights=None, metrics={}, histogram_metrics=rho_hist)
+    clamped = torch.clamp(rho, max=cap)
     return RhoCorrection(
         weights=clamped,
-        metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < unclamped).float()},
+        metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < rho).float()},
         histogram_metrics=rho_hist,
     )
+
+
+def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: RhoCorrection) -> None:
+    for key, values in correction.histogram_metrics.items():
+        acc.setdefault(key, []).append(values.detach().cpu())
+
+
+def finalize_rho_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.ndarray]:
+    return {key: torch.cat(chunks).numpy() for key, chunks in acc.items()}
 
 
 def resolve_old_logprob(
