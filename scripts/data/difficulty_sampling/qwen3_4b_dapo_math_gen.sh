@@ -1,3 +1,5 @@
+#!/bin/bash
+
 EXP_NAME=qwen3_4b_base_dapo_rollout_probe
 RUN_NAME=${EXP_NAME}_$(date +%Y%m%d_%H%M%S)
 NUM_GPUS=1
@@ -6,7 +8,7 @@ WORKSPACE=ai2/olmo-instruct
 PRIORITY=urgent
 BEAKER_IMAGE=nathanl/open_instruct_auto
 
-uv run mason.py \
+uv run python mason.py \
   --task_name "${EXP_NAME}" \
   --description "${RUN_NAME}" \
   --cluster "${CLUSTER}" \
