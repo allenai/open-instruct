@@ -809,6 +809,8 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             advantages=[dummy_advantage],
             response_masks=[dummy_response_mask],
             vllm_logprobs=[torch.zeros_like(dummy_qr, dtype=torch.float)],
+            prompt_masks=[torch.tensor([[1, 0]], dtype=torch.long)],
+            rollout_sample_ids=[torch.tensor([[0, 0]], dtype=torch.long)],
         )
         return {"batch": batch, "metrics": {}}
 
@@ -1282,6 +1284,18 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        if packed_sequences.prompt_masks is None:
+            per_device_packed_prompt_masks = [
+                torch.zeros_like(t, dtype=torch.long) for t in per_device_packed_query_responses
+            ]
+        else:
+            per_device_packed_prompt_masks = packed_sequences.prompt_masks[B * i : B * (i + 1)]
+        if packed_sequences.rollout_sample_ids is None:
+            per_device_packed_rollout_sample_ids = [
+                torch.full_like(t, -1, dtype=torch.long) for t in per_device_packed_query_responses
+            ]
+        else:
+            per_device_packed_rollout_sample_ids = packed_sequences.rollout_sample_ids[B * i : B * (i + 1)]
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1289,6 +1303,8 @@ def prepare_collated_data_for_workers(
         collated_attention_masks = []
         collated_position_ids = []
         collated_response_masks = []
+        collated_prompt_masks = []
+        collated_rollout_sample_ids = []
         collated_advantages = []
         collated_vllm_logprobs = []
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
@@ -1305,6 +1321,12 @@ def prepare_collated_data_for_workers(
             collated_response_masks.append(
                 collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
             )
+            collated_prompt_masks.append(
+                collate_fn([per_device_packed_prompt_masks[idx] for idx in micro_range], 0, pin_memory)
+            )
+            collated_rollout_sample_ids.append(
+                collate_fn([per_device_packed_rollout_sample_ids[idx] for idx in micro_range], -1, pin_memory)
+            )
             collated_advantages.append(
                 collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
             )
@@ -1319,6 +1341,8 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                prompt_masks=collated_prompt_masks,
+                rollout_sample_ids=collated_rollout_sample_ids,
             )
         )
     return collated_data
@@ -1488,6 +1512,8 @@ class DataPreparationActor:
                         advantages=[],
                         response_masks=[],
                         vllm_logprobs=[],
+                        prompt_masks=[],
+                        rollout_sample_ids=[],
                     )
                     for _ in range(self.dp_world_size)
                 ]
@@ -1601,6 +1627,8 @@ class DataPreparationActor:
                 )
                 self.total_samples_written += len(batch.queries)
 
+            rollout_sample_ids = list(range(len(batch.queries)))
+
             # Truncated-completion stats are computed on the unfiltered batch so
             # they stay meaningful regardless of whether `mask_truncated_completions`
             # is actually dropping the rollouts downstream.
@@ -1683,6 +1711,7 @@ class DataPreparationActor:
                 result.responses = [result.responses[i] for i in keep_idxes_list]
                 result.masks = [result.masks[i] for i in keep_idxes_list]
                 result.finish_reasons = [result.finish_reasons[i] for i in keep_idxes_list]
+                rollout_sample_ids = [rollout_sample_ids[i] for i in keep_idxes_list]
                 assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in keep_idxes_list]
 
@@ -1694,6 +1723,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                rollout_sample_ids=rollout_sample_ids,
                 mask_tool_use=self.config.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )

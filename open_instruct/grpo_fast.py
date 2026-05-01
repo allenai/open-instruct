@@ -670,11 +670,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Save trainer-side logprobs alongside rollouts for offline analysis.
         # ``compute_logprobs`` runs a distributed forward (ZeRO-3 all-gathers +
-        # Ulysses SP all-to-alls), so every rank must participate — gating the
-        # whole block on rank 0 would deadlock the collective. Only rank 0
-        # actually writes the resulting tensors to disk; with SP>1 each rank
-        # sees a partial sequence, so the saved tensors are best-effort for
-        # the local slice only.
+        # Ulysses SP all-to-alls), so every rank must participate. Every rank
+        # writes its local trace to a rank-scoped file; under SP those files can
+        # be stitched together offline by (dp_rank, sample_idx, sp_rank).
         if self.streaming_config.save_traces and self.streaming_config.rollouts_save_path:
             with Timer("Trainer logprobs trace save", noop=self.rank != 0), torch.no_grad():
                 if all(x is None for x in old_logprobs_BT):
@@ -693,15 +691,33 @@ class PolicyTrainerRayProcess(RayProcess):
                         else torch.zeros_like(data_BT.response_masks[i][:, 1:], dtype=torch.float32)
                         for i, lp in enumerate(old_logprobs_BT)
                     ]
-                if self.rank == 0:
-                    rl_utils.save_trainer_logprobs_to_disk(
-                        save_path=self.streaming_config.rollouts_save_path,
-                        run_name=self.args.run_name,
-                        step=training_step,
-                        trainer_logprobs=trace_logprobs_BT,
-                        response_masks=[m[:, 1:] for m in data_BT.response_masks],
-                        sp_size=getattr(self.args, "sequence_parallel_size", 1),
-                    )
+                sp_size = getattr(self.args, "sequence_parallel_size", 1)
+                trace_prompt_masks = (
+                    [m[:, 1:] for m in data_BT.prompt_masks] if data_BT.prompt_masks is not None else None
+                )
+                trace_rollout_sample_ids = (
+                    [ids[:, 1:] for ids in data_BT.rollout_sample_ids]
+                    if data_BT.rollout_sample_ids is not None
+                    else None
+                )
+                rl_utils.save_trainer_logprobs_to_disk(
+                    save_path=self.streaming_config.rollouts_save_path,
+                    run_name=self.args.run_name,
+                    step=training_step,
+                    trainer_logprobs=trace_logprobs_BT,
+                    response_masks=[m[:, 1:] for m in data_BT.response_masks],
+                    sp_size=sp_size,
+                    input_token_ids=data_BT.query_responses,
+                    token_ids=[qr[:, 1:] for qr in data_BT.query_responses],
+                    prompt_masks=trace_prompt_masks,
+                    attention_masks=[m[:, 1:] for m in data_BT.attention_masks],
+                    rollout_sample_ids=trace_rollout_sample_ids,
+                    vllm_logprobs=[lp[:, 1:] for lp in data_BT.vllm_logprobs],
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    dp_rank=self.rank // sp_size,
+                    sp_rank=self.rank % sp_size,
+                )
 
         local_step = 0
         num_samples = len(data_BT.query_responses)

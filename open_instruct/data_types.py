@@ -111,6 +111,8 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    prompt_masks: list[torch.Tensor] | None = None
+    rollout_sample_ids: list[torch.Tensor] | None = None
     # Pre-Ulysses-split ``position_ids`` for each sample. Only populated when
     # ``sequence_parallel_size > 1``; lets downstream code (the Qwen3.5 packing
     # patch + FLA CP context) reconstruct the global ``cu_seqlens`` so that

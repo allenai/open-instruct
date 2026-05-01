@@ -170,6 +170,8 @@ class TestGrpoFastBase(unittest.TestCase):
             attention_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
             response_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
             original_responses=[[i] * seq_length for i in range(batch_size)],
+            prompt_masks=[torch.zeros(length, dtype=torch.long) for length in lengths],
+            rollout_sample_ids=[torch.full((length,), i, dtype=torch.long) for i, length in enumerate(lengths)],
             advantages=[torch.randn(length) for length in lengths],
             position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
             vllm_logprobs=[torch.randn(length) for length in lengths],
@@ -831,8 +833,12 @@ class TestDataPreparation(TestGrpoFastBase):
             "position_ids",
             "advantages",
             "response_masks",
+            "prompt_masks",
+            "rollout_sample_ids",
             "vllm_logprobs",
+            "global_position_ids",
         }
+        tensor_fields = expected_fields - {"global_position_ids"}
 
         expected_samples_per_worker = batch_size // world_size
         expected_num_microbatches = (
@@ -847,8 +853,9 @@ class TestDataPreparation(TestGrpoFastBase):
 
             num_microbatches = len(worker_data.query_responses)
             self.assertEqual(num_microbatches, expected_num_microbatches)
+            self.assertIsNone(worker_data.global_position_ids)
 
-            for field_name in expected_fields:
+            for field_name in tensor_fields:
                 value = getattr(worker_data, field_name)
                 self.assertIsInstance(value, list)
                 self.assertEqual(len(value), expected_num_microbatches)

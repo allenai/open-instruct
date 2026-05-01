@@ -2650,6 +2650,8 @@ class UlyssesSPSplitter:
                 pad_value = self.pad_token_id
             elif field.name == "vllm_logprobs":
                 pad_value = INVALID_LOGPROB
+            elif field.name == "rollout_sample_ids":
+                pad_value = -1
             else:
                 pad_value = 0
             val = getattr(data, field.name)
