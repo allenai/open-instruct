@@ -322,22 +322,6 @@ def _icepop_mask_from_rho(
     return mask, dropped_low, dropped_high
 
 
-def compute_icepop_mask(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, beta: float
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """IcePop M(ρ; 1/β, β): ρ where ρ ∈ [1/β, β] on response tokens, 0 elsewhere.
-
-    Implements eq. (2) of https://arxiv.org/abs/2510.18855. In-range tokens are
-    reweighted by ρ = π^train_old / π^infer_old (a stop-gradient IS correction
-    for the train/infer engine mismatch); out-of-range tokens are dropped.
-
-    Returns (mask, dropped_low, dropped_high) where dropped_low marks tokens
-    with ρ < 1/β and dropped_high marks ρ > β (both restricted to response tokens).
-    """
-    rho = _compute_train_infer_ratio(old_logprob, vllm_logprobs, response_mask)
-    return _icepop_mask_from_rho(rho, response_mask, beta)
-
-
 @dataclass
 class RhoCorrection:
     """Per-token stop-gradient correction for the train/infer engine mismatch.
