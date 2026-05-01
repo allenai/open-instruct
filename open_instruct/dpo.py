@@ -49,20 +49,6 @@ def export_to_hf(
         )
 
 
-def _setup_scheduler(args: dpo_utils.DPOExperimentConfig, num_training_steps: int):
-    """Return scheduler."""
-    warmup_steps = int(num_training_steps * args.warmup_ratio)
-    if args.lr_scheduler_type == "cosine":
-        scheduler = olmo_optim.CosWithWarmup(warmup_steps=warmup_steps)
-    elif args.lr_scheduler_type == "linear":
-        scheduler = olmo_optim.LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
-    elif args.lr_scheduler_type == "constant":
-        scheduler = olmo_optim.ConstantWithWarmup(warmup_steps=warmup_steps)
-    else:
-        raise ValueError(f"Unsupported lr_scheduler_type: {args.lr_scheduler_type}")
-    return scheduler
-
-
 def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
