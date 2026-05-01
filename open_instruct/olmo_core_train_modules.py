@@ -330,7 +330,6 @@ class GRPOTrainModule(TransformerTrainModule):
         self.streaming_config = streaming_config
         self._num_total_tokens = 0
         self._grad_norms: list[float] = []
-        self._last_num_step_tokens: int = 0
 
     def pre_train(self):
         # GRPO batches are prompt-grouped and do their own accumulation/token normalization
@@ -565,7 +564,6 @@ class GRPOTrainModule(TransformerTrainModule):
             if self._grad_norms:
                 self.record_metric("optim/grad_norm", sum(self._grad_norms) / len(self._grad_norms), reduce_type=None)
             self._grad_norms = []
-            self._last_num_step_tokens = int(global_tokens)
 
     def _record_step_counter_metrics(self, global_tokens: int) -> None:
         self._num_total_tokens += global_tokens
