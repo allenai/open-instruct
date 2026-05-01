@@ -785,7 +785,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics[key] = value
                     else:
                         array_metrics[key] = value
-                array_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
+                if self.rank == 0:
+                    array_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
                 return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1602,6 +1603,9 @@ def one_training_step(
         "policy/entropy_avg",
         "val/ratio",
         "val/ratio_var",
+        "val/icepop_drop_frac",
+        "val/icepop_drop_low_frac",
+        "val/icepop_drop_high_frac",
     }
     average_metrics = {}
     # Average scalar metrics from each worker
@@ -1622,8 +1626,10 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
-    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics[0]["batch/response_lengths"]
+    sp = max(args.sequence_parallel_size, 1)
+    sp_leader_metrics = [am for r, am in enumerate(array_metrics) if r % sp == 0]
+    prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
+    response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
