@@ -2112,6 +2112,9 @@ def one_training_step(
         training_step * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
+    num_step_completions = (
+        sum(prompt_sample_counts) if isinstance(prompt_sample_counts, list | np.ndarray) else len(response_lengths)
+    )
 
     utilization_metrics = {}
     if total_generation_time is not None:
@@ -2135,6 +2138,7 @@ def one_training_step(
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "val/num_step_tokens": num_step_tokens,
+        "val/num_step_completions": num_step_completions,
         "epoch": train_episode / streaming_config.num_samples_per_prompt_rollout / len(train_dataset),
         "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
         "learner_tokens_per_second_step": num_step_tokens / step_time,
