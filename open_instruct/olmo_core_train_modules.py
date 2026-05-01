@@ -343,7 +343,7 @@ class GRPOTrainModule(TransformerTrainModule):
         pass
 
     def zero_grads(self) -> None:
-        # No-op: train_batch invokes _do_zero_grads internally after each optim step.
+        # No-op: train_batch zeroes grads internally after each optim step.
         pass
 
     def _do_optim_step(self) -> None:
@@ -358,9 +358,6 @@ class GRPOTrainModule(TransformerTrainModule):
         if grad_norm is not None:
             grad_norm_val = grad_norm.item() if hasattr(grad_norm, "item") else grad_norm
             self._grad_norms.append(float(grad_norm_val))
-
-    def _do_zero_grads(self) -> None:
-        self.optim.zero_grad(set_to_none=True)
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
@@ -532,25 +529,25 @@ class GRPOTrainModule(TransformerTrainModule):
                 if local_step % accumulation_steps == 0:
                     if not dry_run:
                         self._do_optim_step()
-                    self._do_zero_grads()
+                    self.optim.zero_grad(set_to_none=True)
 
         if local_step % accumulation_steps != 0:
             if not dry_run:
                 self._do_optim_step()
-            self._do_zero_grads()
+            self.optim.zero_grad(set_to_none=True)
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
-            global_tokens = token_counts.sum().item()
+            local_tokens = token_counts.sum().item()
 
             keys = sorted(local_metrics.keys())
-            values = [local_metrics[k] * global_tokens for k in keys]
+            values = [local_tokens] + [local_metrics[k] * local_tokens for k in keys]
             tensor = torch.tensor(values, device=self.device)
             dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 
-            denom = global_tokens * dist.get_world_size(self.trainer.dp_process_group)
+            global_tokens = tensor[0].item()
             for i, k in enumerate(keys):
-                self.record_metric(k, (tensor[i] / denom).item(), reduce_type=None)
+                self.record_metric(k, (tensor[i + 1] / global_tokens).item(), reduce_type=None)
             if self.scheduler is not None and self.trainer.max_steps is not None:
                 lr = self.scheduler.get_lr(
                     self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
