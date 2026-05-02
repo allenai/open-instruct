@@ -12,6 +12,7 @@ LOCAL_EVAL_SPLITS="${LOCAL_EVAL_SPLITS:-test}"
 
 BEAKER_IMAGE="${BEAKER_IMAGE:-michaeln/open_instruct}"
 
+WORKSPACE=${WORKSPACE:-ai2/oe-adapt-code}
 CLUSTER="${CLUSTER:-ai2/neptune ai2/rhea ai2/saturn}"
 PRIORITY="${PRIORITY:-high}"
 NUM_GPUS="${NUM_GPUS:-4}"
@@ -20,7 +21,7 @@ uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/oe-adapt-code \
+    --workspace ${WORKSPACE} \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
