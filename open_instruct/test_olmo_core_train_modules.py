@@ -268,9 +268,9 @@ class TestComputeGRPOLoss(unittest.TestCase):
         torch.testing.assert_close(pg2_rho, pg2_no_rho * 2.0)
 
     def test_icepop_mask(self):
-        config = _make_grpo_config(use_icepop=True, icepop_beta=2.0)
+        config = _make_grpo_config(use_icepop=True, icepop_lower_bound=0.5, icepop_upper_bound=2.0)
         response_mask = torch.tensor([[True, True, True, True, True]])
-        # ρ values: 0.25 (drop, < 1/β=0.5), 0.5 (keep), 1.0 (keep), 2.0 (keep), 4.0 (drop).
+        # ρ values: 0.25 (drop, < lower=0.5), 0.5 (keep), 1.0 (keep), 2.0 (keep), 4.0 (drop, > upper=2.0).
         # In-range tokens are reweighted by ρ, not gated to 1.
         old_logprob = torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
         vllm_logprobs = torch.zeros_like(old_logprob)

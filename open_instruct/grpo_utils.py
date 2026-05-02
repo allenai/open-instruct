@@ -109,8 +109,10 @@ class GRPOExperimentConfig(
     mismatch ratio ρ = π^train_old / π^infer_old falls in [1/β, β] are reweighted
     by ρ (an IS correction); tokens outside that band have their per-token
     policy loss zeroed out."""
-    icepop_beta: float = 5.0
-    """IcePop bound β (paper default: 5.0); the in-range band is [1/β, β]."""
+    icepop_lower_bound: float = 0.5
+    """IcePop lower bound on the train/infer ratio ρ; tokens with ρ below this are dropped."""
+    icepop_upper_bound: float = 2.0
+    """IcePop upper bound on the train/infer ratio ρ; tokens with ρ above this are dropped."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -294,8 +296,11 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
-        if self.use_icepop and self.icepop_beta <= 1.0:
-            raise ValueError(f"IcePop requires icepop_beta > 1. Got icepop_beta={self.icepop_beta}.")
+        if self.use_icepop and not (0.0 < self.icepop_lower_bound < 1.0 < self.icepop_upper_bound):
+            raise ValueError(
+                "IcePop requires 0 < icepop_lower_bound < 1 < icepop_upper_bound. "
+                f"Got icepop_lower_bound={self.icepop_lower_bound}, icepop_upper_bound={self.icepop_upper_bound}."
+            )
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -331,10 +336,10 @@ def compute_vllm_local_debug_metrics(
 
 
 def _icepop_mask_from_rho(
-    rho: torch.Tensor, response_mask: torch.Tensor, beta: float
+    rho: torch.Tensor, response_mask: torch.Tensor, lower: float, upper: float
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    dropped_low = (rho < 1.0 / beta) & response_mask
-    dropped_high = (rho > beta) & response_mask
+    dropped_low = (rho < lower) & response_mask
+    dropped_high = (rho > upper) & response_mask
     in_range = response_mask & ~dropped_low & ~dropped_high
     mask = torch.where(in_range, rho, torch.zeros_like(rho))
     return mask, dropped_low, dropped_high
@@ -367,7 +372,9 @@ def compute_rho_correction(
     rho = torch.exp(logprob_diff)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
     if config.use_icepop:
-        mask, dropped_low, dropped_high = _icepop_mask_from_rho(rho, response_mask, config.icepop_beta)
+        mask, dropped_low, dropped_high = _icepop_mask_from_rho(
+            rho, response_mask, config.icepop_lower_bound, config.icepop_upper_bound
+        )
         return RhoCorrection(
             weights=mask,
             metrics={
