@@ -133,6 +133,15 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
+def should_save_ref_policy(args: grpo_utils.GRPOExperimentConfig, training_step: int) -> bool:
+    return (
+        args.load_ref_policy
+        and args.ref_policy_update_freq is not None
+        and training_step % args.ref_policy_update_freq == 0
+        and args.alpha > 0
+    )
+
+
 def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
     if checkpoint_state is None:
         return None
@@ -413,6 +422,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                driver_state_path = os.path.join(path, "driver_state.pt")
+                if os.path.exists(driver_state_path):
+                    states.update(torch.load(driver_state_path, weights_only=False))
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
@@ -421,13 +433,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 np.random.set_state(rng_states["numpy_rng_state"])
                 random.setstate(rng_states["python_rng_state"])
 
-                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
-                    # device_str, e.g. "cuda:0"
-                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
-                        device_id = int(device_str.split(":")[1])
-                        torch.cuda.set_rng_state(rng_state, device_id)
-                    if "torch_cuda_rng_state_all" in rng_states:
-                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
@@ -792,62 +799,64 @@ class PolicyTrainerRayProcess(RayProcess):
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
 
-        # Save comprehensive RNG states for each rank
         rng_states = {
             "torch_cpu_rng_state": torch.get_rng_state(),
             "numpy_rng_state": np.random.get_state(),
             "python_rng_state": random.getstate(),
         }
-
-        # Save CUDA RNG states for all devices
         if torch.cuda.is_available():
-            rng_states["torch_cuda_rng_states"] = {
-                f"cuda:{i}": torch.cuda.get_rng_state(i) for i in range(torch.cuda.device_count())
-            }
             rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
 
-        # Add RNG states to client_state
         client_state["rng_states"] = rng_states
         client_state["rank"] = self.rank
 
-        # Save reference policy checkpoint (model only, no optimizer)
+        # Only rewrite the ref_policy at the steps where it gets updated; matches the
+        # update gate in `should_save_ref_policy`. Off-cadence checkpoints reuse the
+        # ref_policy file that's already on disk from the last update.
         if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
-            os.makedirs(ref_policy_dir, exist_ok=True)
-
-            # For reference policy, we save just the model weights
-            # We can't use save_checkpoint because it would try to save DummyOptim
-            # which doesn't have state_dict
-            if self.rank == 0:
-                # Only rank 0 saves the model state
+            if self.rank == 0 and should_save_ref_policy(self.args, client_state["training_step"]):
+                os.makedirs(ref_policy_dir, exist_ok=True)
+                # Bypass deepspeed save_checkpoint: ref_policy is wrapped with DummyOptim,
+                # which has no state_dict and would crash inside deepspeed's optimizer save.
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
-                # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
-
             client_state["ref_policy_saved"] = True
 
-        # Save the main model checkpoint with enhanced client state
-        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
+        # mpu is only used for sequence parallel; deepspeed's checkpoint code paths choke on it,
+        # so detach for the save and restore after.
         old_mpu = None
         if self.model.mpu is not None:
             old_mpu = self.mpu
             self.model.mpu = None
+        # save_checkpoint must be called on every rank; only rank 0 ends up with the merged state.
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
-        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
             if args.keep_last_n_checkpoints >= 0:
                 clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
-
-            # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
             if args.gs_checkpoint_state_dir is not None:
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
-        # add back the mpu
         if old_mpu is not None:
             self.model.mpu = old_mpu
+
+    def save_driver_state(
+        self, checkpoint_state_dir: str, dataloader_state: dict[str, Any], data_prep_actor_state: dict[str, Any]
+    ) -> None:
+        if self.rank != 0:
+            return
+        latest_file = os.path.join(checkpoint_state_dir, "latest")
+        if not os.path.exists(latest_file):
+            logger.warning(f"No 'latest' file in {checkpoint_state_dir}; skipping driver_state.pt")
+            return
+        with open(latest_file) as f:
+            latest_dir = f.read().strip()
+        target = os.path.join(checkpoint_state_dir, latest_dir, "driver_state.pt")
+        torch.save({"dataloader_state": dataloader_state, "data_prep_actor_state": data_prep_actor_state}, target)
+        logger.info(f"Saved driver state to {target}")
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         output_path = pathlib.Path(output_dir)
@@ -1572,18 +1581,20 @@ def one_training_step(
         if all(len(m) == 0 for m in metrics):
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
             return 0
-        if (
-            args.load_ref_policy
-            and args.ref_policy_update_freq is not None
-            and training_step % args.ref_policy_update_freq == 0
-            and args.alpha > 0
-        ):
+        if should_save_ref_policy(args, training_step):
             update_ref_policy_future.extend(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
             ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
     save_time = maybe_save_checkpoint(args, training_step, policy_group, chat_template_name, tokenizer, wandb_url)
+
+    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
+    response_lengths = array_metrics[0]["batch/response_lengths"]
+    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
+    save_time += maybe_save_checkpoint_state(
+        args, training_step, episode, num_total_tokens + num_step_tokens, policy_group
+    )
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
@@ -1623,9 +1634,6 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
-    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics[0]["batch/response_lengths"]
-    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1707,6 +1715,67 @@ def maybe_save_checkpoint(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
         save_time = timer.duration
+
+    return save_time
+
+
+def maybe_save_checkpoint_state(
+    args: grpo_utils.GRPOExperimentConfig,
+    training_step: int,
+    episode: int,
+    num_total_tokens: int,
+    policy_group: ModelGroup,
+) -> float:
+    save_time = 0.0
+    if not (
+        args.checkpoint_state_freq > 0
+        and training_step % args.checkpoint_state_freq == 0
+        and args.checkpoint_state_dir is not None
+    ):
+        return save_time
+
+    utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
+    with Timer("[Main Thread] 🗡️ Saving checkpoint state") as timer:
+        client_state = {"training_step": training_step, "episode": episode, "num_total_tokens": num_total_tokens}
+        ray_get_with_progress(
+            [
+                policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                for i in range(args.world_size)
+            ],
+            desc=f"Saving checkpoint state at step {training_step}",
+        )
+        dataloader_state = ray.get(policy_group.models[0].get_dataloader_state.remote())
+        data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+        data_prep_actor_state = ray.get(data_prep_actor.get_state.remote())
+        ray.get(
+            policy_group.models[0].save_driver_state.remote(
+                args.checkpoint_state_dir, dataloader_state, data_prep_actor_state
+            )
+        )
+    save_time = timer.duration
+
+    step_dirs = [
+        d
+        for d in os.listdir(args.checkpoint_state_dir)
+        if d.startswith("global_step")
+        and d[len("global_step") :].isdigit()
+        and os.path.isdir(os.path.join(args.checkpoint_state_dir, d))
+    ]
+    if step_dirs:
+        latest_dir = os.path.join(
+            args.checkpoint_state_dir, max(step_dirs, key=lambda d: int(d[len("global_step") :]))
+        )
+        total_bytes = sum(
+            os.path.getsize(os.path.join(root, f)) for root, _, files in os.walk(latest_dir) for f in files
+        )
+        size_gib = total_bytes / 1024**3
+        bandwidth_mib_s = (total_bytes / 1024**2) / save_time if save_time > 0 else 0.0
+        logger.info(
+            f"Saved checkpoint state at step {training_step} to {latest_dir} "
+            f"({size_gib:.2f} GiB, {bandwidth_mib_s:.1f} MiB/s avg bandwidth)"
+        )
+    else:
+        logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
     return save_time
 
@@ -2127,38 +2196,6 @@ def run_training(
         )
         num_total_tokens += num_step_tokens
 
-        # Checkpoint after one_training_step (or even if it was skipped)
-        # This ensures we checkpoint progress even if the exact checkpoint step has no data
-        if (
-            args.checkpoint_state_freq > 0
-            and training_step % args.checkpoint_state_freq == 0
-            and args.checkpoint_state_dir is not None
-        ):
-            utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
-            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                # Save comprehensive client state including dataloader state
-                client_state = {
-                    "training_step": training_step,
-                    "episode": episode,
-                    "num_total_tokens": num_total_tokens,
-                }
-
-                # Save dataloader state from Ray actor
-                client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
-
-                # Save DataPreparationActor state
-                data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-                client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
-
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving checkpoint state at step {training_step}",
-                )
-                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
-
         if training_step > resume_training_step:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
@@ -2340,6 +2377,18 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+
+    if (
+        args.load_ref_policy
+        and args.ref_policy_update_freq is not None
+        and args.alpha > 0
+        and args.checkpoint_state_freq > 0
+    ):
+        assert args.checkpoint_state_freq % args.ref_policy_update_freq == 0, (
+            f"checkpoint_state_freq ({args.checkpoint_state_freq}) must be a multiple of "
+            f"ref_policy_update_freq ({args.ref_policy_update_freq}) so checkpoints land on "
+            "ref_policy update steps; otherwise the on-disk ref_policy can lag in-memory state on resume."
+        )
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
