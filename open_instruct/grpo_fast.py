@@ -2254,6 +2254,7 @@ def maybe_evaluate(
     base_env_config: EnvConfig | None = None,
     actor_manager=None,
     generation_episode: int | None = None,
+    eval_episode: int | None = None,
     legacy_episode: int | None = None,
 ) -> bool:
     """Optionally evaluate the model.
@@ -2418,6 +2419,8 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
+        if eval_episode is not None:
+            eval_metrics["eval_episode"] = eval_episode
         if getattr(args, "eval_only", False):
             eval_metrics["episode"] = 0
             eval_metrics["global_step"] = 0
@@ -2619,6 +2622,7 @@ def run_eval_only_round(
     resume_training_step: int,
     train_episode: int,
     generation_episode: int,
+    eval_episode: int,
     eval_dataset: Dataset | None,
     eval_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
@@ -2671,6 +2675,7 @@ def run_eval_only_round(
         base_env_config=base_env_config,
         actor_manager=actor_manager,
         generation_episode=generation_episode,
+        eval_episode=eval_episode + 1,
         legacy_episode=train_episode,
     )
     if not eval_collected:
@@ -2683,7 +2688,7 @@ def run_eval_only_round(
         wandb_url=wandb_url,
         progress_label="eval",
     )
-    return train_episode, generation_episode
+    return train_episode, generation_episode, eval_episode + 1
 
 
 def run_training(
@@ -2698,6 +2703,7 @@ def run_training(
     resume_training_step,
     train_episode,
     generation_episode,
+    eval_episode,
     wandb_url,
     tc,
     stop_event,
@@ -2914,6 +2920,7 @@ def run_training(
                     "episode": train_episode,
                     "train_episode": train_episode,
                     "generation_episode": generation_episode,
+                    "eval_episode": eval_episode,
                     "num_total_tokens": num_total_tokens,
                     "solved_prompt_mask": solved_prompt_mask,
                 }
@@ -2954,12 +2961,15 @@ def run_training(
             base_env_config,
             actor_manager,
             generation_episode=generation_episode,
+            eval_episode=eval_episode + 1,
             legacy_episode=(
                 training_step
                 * streaming_config.num_unique_prompts_rollout
                 * streaming_config.num_samples_per_prompt_rollout
             ),
         )
+        if last_eval_collected and eval_dataset is not None:
+            eval_episode += 1
 
         maybe_update_beaker_description(
             current_step=training_step,
@@ -2972,7 +2982,7 @@ def run_training(
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
-    return train_episode, generation_episode
+    return train_episode, generation_episode, eval_episode
 
 
 def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
@@ -3248,6 +3258,7 @@ def main(
 
     train_episode = initial_episode
     generation_episode = initial_episode
+    eval_episode = 0
     if args.eval_only:
         resume_training_step = args.eval_only_set_checkpoint if args.eval_only_set_checkpoint is not None else 1
     elif checkpoint_state:
@@ -3255,8 +3266,12 @@ def main(
         generation_episode = int(
             checkpoint_state.get("generation_episode", checkpoint_state.get("episode", initial_episode))
         )
+        eval_episode = int(checkpoint_state.get("eval_episode", 0))
         logger.info(
-            "Restored episode counts: train_episode=%s generation_episode=%s", train_episode, generation_episode
+            "Restored episode counts: train_episode=%s generation_episode=%s eval_episode=%s",
+            train_episode,
+            generation_episode,
+            eval_episode,
         )
 
     stop_event = threading.Event()
@@ -3281,6 +3296,7 @@ def main(
                 resume_training_step,
                 train_episode,
                 generation_episode,
+                eval_episode,
                 eval_dataset,
                 eval_prompt_Q,
                 evaluation_inference_results_Q,
@@ -3296,7 +3312,7 @@ def main(
             )
         else:
             weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
-            train_episode, generation_episode = run_training(
+            train_episode, generation_episode, eval_episode = run_training(
                 args,
                 streaming_config,
                 tokenizer,
@@ -3308,6 +3324,7 @@ def main(
                 resume_training_step,
                 train_episode,
                 generation_episode,
+                eval_episode,
                 wandb_url,
                 tc,
                 stop_event,
