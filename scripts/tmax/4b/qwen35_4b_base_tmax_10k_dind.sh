@@ -11,7 +11,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "SWERL tmax-10k GRPO with Qwen3.5-4B (DinD dockerd)" \
        --pure_docker_mode \
-       --workspace ai2/dr-tulu-ablations \
+       --workspace ai2/open-instruct-dev \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \
@@ -26,8 +26,8 @@ uv run python mason.py \
        --env DOCKERHUB_USERNAME=hamishi740 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_DOCKER_AUTO_REMOVE=1 \
-       --env SWERL_DOCKER_START_CONCURRENCY=8 \
-       --env SWERL_DOCKER_EXEC_CONCURRENCY=64 \
+       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_DOCKER_EXEC_CONCURRENCY=256 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env DIND_STORAGE_DRIVER=vfs \
