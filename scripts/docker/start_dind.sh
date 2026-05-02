@@ -14,6 +14,8 @@ DIND_STORAGE_DRIVER="${DIND_STORAGE_DRIVER:-vfs}"
 DIND_DISABLE_BRIDGE="${DIND_DISABLE_BRIDGE:-1}"
 DIND_SMOKE_TEST="${DIND_SMOKE_TEST:-1}"
 DIND_SMOKE_IMAGE="${DIND_SMOKE_IMAGE:-python:3.12-slim}"
+DIND_AUTO_INSTALL_DOCKER="${DIND_AUTO_INSTALL_DOCKER:-1}"
+DIND_DOCKER_CLI="${DIND_DOCKER_CLI:-}"
 
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
@@ -47,22 +49,55 @@ else
     echo "WARNING: DOCKER_PAT not set, skipping Docker Hub login (pulls will be rate-limited)"
 fi
 
+install_docker_if_needed() {
+    if command -v dockerd >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$DIND_AUTO_INSTALL_DOCKER" != "1" ]; then
+        return 1
+    fi
+    if ! command -v apt-get >/dev/null 2>&1; then
+        return 1
+    fi
+    echo "dockerd not found; installing docker.io with apt-get"
+    apt-get update
+    apt-get install -y --no-install-recommends docker.io
+}
+
+find_docker_cli() {
+    if [ -n "$DIND_DOCKER_CLI" ] && [ -x "$DIND_DOCKER_CLI" ]; then
+        return 0
+    fi
+    if [ -x /usr/bin/docker ] && /usr/bin/docker --version 2>/dev/null | grep -qi "Docker"; then
+        DIND_DOCKER_CLI=/usr/bin/docker
+        return 0
+    fi
+    if command -v docker >/dev/null 2>&1 && docker --version 2>/dev/null | grep -qi "Docker"; then
+        DIND_DOCKER_CLI="$(command -v docker)"
+        return 0
+    fi
+    return 1
+}
+
+install_docker_if_needed || true
+
 if ! command -v dockerd >/dev/null 2>&1; then
-    echo "ERROR: dockerd not found in PATH"
+    echo "ERROR: dockerd not found in PATH. Rebuild the Beaker image with docker.io installed or set DIND_AUTO_INSTALL_DOCKER=1 in an apt-based image."
     return 1 2>/dev/null || exit 1
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-    echo "ERROR: docker CLI not found in PATH"
+if ! find_docker_cli; then
+    echo "ERROR: Docker CLI not found. Note: /usr/local/bin/docker may be a Podman shim; DinD needs the real Docker CLI, usually /usr/bin/docker."
     return 1 2>/dev/null || exit 1
 fi
+export DIND_DOCKER_CLI
 
 export DOCKER_HOST="unix://${DIND_SOCKET}"
 # Reuse the existing EnvironmentPool fanout hook. With one entry, all sandbox
 # actors get an explicit docker_host pointed at the local DinD socket.
 export SWERL_PODMAN_DOCKER_HOSTS="${DOCKER_HOST}"
 
-if [ -S "$DIND_SOCKET" ] && docker info >/dev/null 2>&1; then
+if [ -S "$DIND_SOCKET" ] && "$DIND_DOCKER_CLI" info >/dev/null 2>&1; then
     echo "Docker daemon already running at ${DOCKER_HOST}"
 else
     rm -f "$DIND_SOCKET"
@@ -99,7 +134,7 @@ else
     echo "dockerd PID: ${DIND_DOCKERD_PID}; log: ${DIND_LOG}"
 
     for attempt in $(seq 1 120); do
-        if docker info >/dev/null 2>&1; then
+        if "$DIND_DOCKER_CLI" info >/dev/null 2>&1; then
             break
         fi
         if ! kill -0 "$DIND_DOCKERD_PID" >/dev/null 2>&1; then
@@ -116,7 +151,7 @@ else
     done
 fi
 
-if ! docker info; then
+if ! "$DIND_DOCKER_CLI" info; then
     echo "ERROR: docker info failed for ${DOCKER_HOST}"
     if [ -s "$DIND_LOG" ]; then
         sed -n '1,240p' "$DIND_LOG"
@@ -126,7 +161,7 @@ fi
 
 if [ "$DIND_SMOKE_TEST" = "1" ]; then
     echo "Running DinD smoke test with ${DIND_SMOKE_IMAGE}"
-    if ! docker run --rm "$DIND_SMOKE_IMAGE" python -c 'print("dind ok")'; then
+    if ! "$DIND_DOCKER_CLI" run --rm "$DIND_SMOKE_IMAGE" python -c 'print("dind ok")'; then
         echo "ERROR: DinD smoke test failed"
         if [ -s "$DIND_LOG" ]; then
             sed -n '1,240p' "$DIND_LOG"

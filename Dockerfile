@@ -86,6 +86,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsystemd-dev \
     libtool \
     libyajl-dev \
+    docker.io \
     netavark \
     passt \
     pkg-config \
@@ -114,7 +115,8 @@ RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/cr
     && make install \
     && rm -rf /tmp/crun
 
-# Translate Docker CLI calls from sandbox code to Podman.
+# Translate Docker CLI calls from sandbox code to Podman by default.
+# DinD scripts call /usr/bin/docker explicitly when they need the real Docker CLI.
 RUN ln -sf "$(which podman)" /usr/local/bin/docker
 
 RUN echo "root:10000:11165536" >> /etc/subuid \
