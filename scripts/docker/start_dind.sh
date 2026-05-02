@@ -4,23 +4,43 @@
 # This is intentionally separate from docker_login.sh, which starts Podman services.
 # Source this before Ray starts so Ray worker actors inherit DOCKER_HOST.
 
-DIND_DIR="${DIND_DIR:-/tmp/open-instruct-dind}"
-DIND_SOCKET="${DIND_SOCKET:-${DIND_DIR}/docker.sock}"
-DIND_DATA_ROOT="${DIND_DATA_ROOT:-/var/lib/docker-dind}"
-DIND_EXEC_ROOT="${DIND_EXEC_ROOT:-/run/docker-dind}"
+DOCKER_VERSION="${DIND_DOCKER_VERSION:-${DOCKER_VERSION:-27.3.1}}"
+PREFIX="${DIND_PREFIX:-/opt/docker}"
+RUNDIR="${DIND_RUN_DIR:-/run/docker}"
+DATAROOT="${DIND_DATA_ROOT:-/var/lib/docker}"
+SOCK="${DIND_SOCKET:-${RUNDIR}/docker.sock}"
 DIND_LOG_DIR="${DIND_LOG_DIR:-/output/tmp}"
 DIND_LOG="${DIND_LOG:-${DIND_LOG_DIR}/dockerd.log}"
+DIND_SLIRP_LOG="${DIND_SLIRP_LOG:-${DIND_LOG_DIR}/slirp.log}"
+DIND_NS_PID_FILE="${DIND_NS_PID_FILE:-/tmp/dind_ns_pid}"
+DIND_SLIRP_READY_FILE="${DIND_SLIRP_READY_FILE:-/tmp/dind_slirp_ready}"
 DIND_STORAGE_DRIVER="${DIND_STORAGE_DRIVER:-vfs}"
-DIND_DISABLE_BRIDGE="${DIND_DISABLE_BRIDGE:-1}"
 DIND_SMOKE_TEST="${DIND_SMOKE_TEST:-1}"
 DIND_SMOKE_IMAGE="${DIND_SMOKE_IMAGE:-python:3.12-slim}"
-DIND_AUTO_INSTALL_DOCKER="${DIND_AUTO_INSTALL_DOCKER:-1}"
-DIND_DOCKER_CLI="${DIND_DOCKER_CLI:-}"
 
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
 
-mkdir -p "$DIND_DIR" "$DIND_DATA_ROOT" "$DIND_EXEC_ROOT" "$DIND_LOG_DIR"
+export DOCKER_HOST="unix://${SOCK}"
+export DIND_DOCKER_CLI="${PREFIX}/docker"
+# Reuse the existing EnvironmentPool fanout hook. With one entry, all sandbox
+# actors get an explicit docker_host pointed at the local DinD socket.
+export SWERL_PODMAN_DOCKER_HOSTS="${DOCKER_HOST}"
+
+dind_fail() {
+    echo "ERROR: $*" >&2
+    return 1 2>/dev/null || exit 1
+}
+
+dind_show_log() {
+    local log_file="$1"
+    if [ -s "$log_file" ]; then
+        echo "===== ${log_file} ====="
+        sed -n '1,240p' "$log_file"
+    fi
+}
+
+mkdir -p "$PREFIX" "$RUNDIR" "$DATAROOT" "$DIND_LOG_DIR"
 
 if [ -x /usr/local/bin/setup_dockerio_mirror ]; then
     /usr/local/bin/setup_dockerio_mirror || true
@@ -49,100 +69,170 @@ else
     echo "WARNING: DOCKER_PAT not set, skipping Docker Hub login (pulls will be rate-limited)"
 fi
 
-install_docker_if_needed() {
-    if command -v dockerd >/dev/null 2>&1; then
-        return 0
-    fi
-    if [ "$DIND_AUTO_INSTALL_DOCKER" != "1" ]; then
-        return 1
-    fi
-    if ! command -v apt-get >/dev/null 2>&1; then
-        return 1
-    fi
-    echo "dockerd not found; installing docker.io with apt-get"
-    apt-get update
-    apt-get install -y --no-install-recommends docker.io
+need_pkgs() {
+    for p in slirp4netns jq iproute2 gcc libc6-dev curl ca-certificates; do
+        dpkg -s "$p" >/dev/null 2>&1 || return 1
+    done
 }
 
-find_docker_cli() {
-    if [ -n "$DIND_DOCKER_CLI" ] && [ -x "$DIND_DOCKER_CLI" ]; then
-        return 0
-    fi
-    if [ -x /usr/bin/docker ] && /usr/bin/docker --version 2>/dev/null | grep -qi "Docker"; then
-        DIND_DOCKER_CLI=/usr/bin/docker
-        return 0
-    fi
-    if command -v docker >/dev/null 2>&1 && docker --version 2>/dev/null | grep -qi "Docker"; then
-        DIND_DOCKER_CLI="$(command -v docker)"
-        return 0
-    fi
-    return 1
-}
-
-install_docker_if_needed || true
-
-if ! command -v dockerd >/dev/null 2>&1; then
-    echo "ERROR: dockerd not found in PATH. Rebuild the Beaker image with docker.io installed or set DIND_AUTO_INSTALL_DOCKER=1 in an apt-based image."
-    return 1 2>/dev/null || exit 1
+if ! need_pkgs; then
+    command -v apt-get >/dev/null 2>&1 || dind_fail "apt-get not found; cannot install DinD prerequisites"
+    apt-get update -qq || dind_fail "apt-get update failed"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        slirp4netns jq iproute2 gcc libc6-dev curl ca-certificates >/dev/null \
+        || dind_fail "failed to install DinD prerequisites"
 fi
 
-if ! find_docker_cli; then
-    echo "ERROR: Docker CLI not found. Note: /usr/local/bin/docker may be a Podman shim; DinD needs the real Docker CLI, usually /usr/bin/docker."
-    return 1 2>/dev/null || exit 1
+if [ ! -x "$PREFIX/dockerd" ]; then
+    curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" \
+        | tar xz -C "$PREFIX" --strip-components=1 \
+        || dind_fail "failed to install Docker ${DOCKER_VERSION}"
+    ln -sf "$PREFIX/docker" /usr/local/bin/docker || dind_fail "failed to link Docker CLI"
 fi
-export DIND_DOCKER_CLI
 
-export DOCKER_HOST="unix://${DIND_SOCKET}"
-# Reuse the existing EnvironmentPool fanout hook. With one entry, all sandbox
-# actors get an explicit docker_host pointed at the local DinD socket.
-export SWERL_PODMAN_DOCKER_HOSTS="${DOCKER_HOST}"
+[ -x "$PREFIX/runc" ] || dind_fail "Docker install did not create $PREFIX/runc"
+[ -e "$PREFIX/runc.real" ] || mv "$PREFIX/runc" "$PREFIX/runc.real"
+cat >"$PREFIX/runc-wrap" <<WRAP
+#!/bin/bash
+REAL="$PREFIX/runc.real"
+BUNDLE=
+for ((i=1;i<=\$#;i++)); do
+    a="\${!i}"
+    if [ "\$a" = "--bundle" ] || [ "\$a" = "-b" ]; then j=\$((i+1)); BUNDLE="\${!j}"; break; fi
+done
+case " \$* " in *" create "*|*" run "*)
+    if [ -n "\$BUNDLE" ] && [ -f "\$BUNDLE/config.json" ]; then
+        cp "\$BUNDLE/config.json" "\$BUNDLE/config.json.orig"
+        jq '
+          (.linux.sysctl // {}) as \$s
+          | .linux.sysctl = (\$s | with_entries(select(.key as \$k | (\$k | startswith("net.")) | not)))
+          | .mounts |= map(
+              if .type=="proc"   then {destination:"/proc",type:"none",source:"/proc",options:["rbind","nosuid","noexec","nodev"]}
+              elif .type=="sysfs"  then {destination:.destination,type:"none",source:"/sys",options:["rbind","nosuid","noexec","nodev","ro"]}
+              elif .type=="mqueue" then {destination:.destination,type:"none",source:"/dev/mqueue",options:["rbind","nosuid","noexec","nodev"]}
+              elif .type=="devpts" then {destination:.destination,type:"devpts",source:"devpts",options:["nosuid","noexec"]}
+              else . end)
+        ' "\$BUNDLE/config.json.orig" > "\$BUNDLE/config.json"
+    fi ;;
+esac
+exec "\$REAL" "\$@"
+WRAP
+chmod +x "$PREFIX/runc-wrap"
+ln -sf "$PREFIX/runc-wrap" "$PREFIX/runc"
 
-if [ -S "$DIND_SOCKET" ] && "$DIND_DOCKER_CLI" info >/dev/null 2>&1; then
+if [ ! -x "$PREFIX/userns_launcher" ]; then
+    cat >/tmp/userns_launcher.c <<'C'
+#define _GNU_SOURCE
+#include <sched.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/wait.h>
+#include <signal.h>
+static int wf(const char *p, const char *d){int f=open(p,O_WRONLY);if(f<0)return -1;ssize_t r=write(f,d,strlen(d));close(f);return r==(ssize_t)strlen(d)?0:-1;}
+int main(int argc,char**argv){
+    if(argc<2)return 2;
+    int sp[2],ap[2]; if(pipe(sp)||pipe(ap))return 1;
+    int flags=CLONE_NEWUSER|CLONE_NEWNS|CLONE_NEWNET|CLONE_NEWCGROUP|CLONE_NEWIPC|CLONE_NEWUTS;
+    pid_t pid=fork(); if(pid<0)return 1;
+    if(pid==0){close(sp[1]);close(ap[0]);
+        if(unshare(flags)<0){perror("unshare");_exit(1);}
+        if(write(ap[1],"u",1)!=1)_exit(1); close(ap[1]);
+        char c; if(read(sp[0],&c,1)!=1)_exit(1); close(sp[0]);
+        execvp(argv[1],&argv[1]); perror("exec"); _exit(127);}
+    close(sp[0]);close(ap[1]); char c;
+    if(read(ap[0],&c,1)!=1){kill(pid,9);return 1;} close(ap[0]);
+    char path[256];
+    snprintf(path,sizeof path,"/proc/%d/uid_map",pid);
+    if(wf(path,"0 0 1\n1 100000 65536\n")<0){perror("uid_map");kill(pid,9);return 1;}
+    snprintf(path,sizeof path,"/proc/%d/gid_map",pid);
+    if(wf(path,"0 0 1\n1 100000 65536\n")<0){perror("gid_map");kill(pid,9);return 1;}
+    if(write(sp[1],"x",1)!=1){kill(pid,9);return 1;} close(sp[1]);
+    fprintf(stderr,"USERNS_PID=%d\n",pid); fflush(stderr);
+    int s; waitpid(pid,&s,0); return WIFEXITED(s)?WEXITSTATUS(s):1;}
+C
+    gcc -O2 -o "$PREFIX/userns_launcher" /tmp/userns_launcher.c || dind_fail "failed to build userns launcher"
+fi
+[ -x "$PREFIX/userns_launcher" ] || dind_fail "userns launcher missing at $PREFIX/userns_launcher"
+
+cat >"$PREFIX/inside_dockerd.sh" <<EOF
+#!/bin/bash
+set -e
+export PATH=$PREFIX:\$PATH
+mount --make-rprivate /
+mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg && mount --bind /tmp/cg /sys/fs/cgroup
+ip link set lo up
+echo \$\$ > "$DIND_NS_PID_FILE"
+while [ ! -f "$DIND_SLIRP_READY_FILE" ]; do sleep 0.1; done
+echo "nameserver 10.0.2.3" > /tmp/resolv.conf
+mount --bind /tmp/resolv.conf /etc/resolv.conf
+mkdir -p "$DATAROOT" "$RUNDIR"
+dockerd_args=(
+    --data-root="$DATAROOT"
+    --exec-root="$RUNDIR"
+    --pidfile="$RUNDIR/docker.pid"
+    --storage-driver="$DIND_STORAGE_DRIVER"
+    --iptables=false
+    --ip6tables=false
+    --bridge=none
+    --ip-forward=false
+    --userland-proxy-path="$PREFIX/docker-proxy"
+    --dns=10.0.2.3
+    --host=unix://"$SOCK"
+)
+if [ -n "\${MIRROR_URL:-}" ]; then
+    dockerd_args+=(--registry-mirror "http://\${MIRROR_URL}" --insecure-registry "\${MIRROR_URL}")
+fi
+exec "$PREFIX/dockerd" "\${dockerd_args[@]}"
+EOF
+chmod +x "$PREFIX/inside_dockerd.sh"
+
+if [ -S "$SOCK" ] && "$DIND_DOCKER_CLI" info >/dev/null 2>&1; then
     echo "Docker daemon already running at ${DOCKER_HOST}"
 else
-    rm -f "$DIND_SOCKET"
-
-    dockerd_args=(
-        --host "$DOCKER_HOST"
-        --data-root "$DIND_DATA_ROOT"
-        --exec-root "$DIND_EXEC_ROOT"
-        --pidfile "$DIND_DIR/docker.pid"
-        --storage-driver "$DIND_STORAGE_DRIVER"
-    )
-
-    if [ -n "${MIRROR_URL:-}" ]; then
-        dockerd_args+=(
-            --registry-mirror "http://${MIRROR_URL}"
-            --insecure-registry "${MIRROR_URL}"
-        )
-    fi
-
-    if [ "$DIND_DISABLE_BRIDGE" = "1" ]; then
-        dockerd_args+=(
-            --bridge=none
-            --iptables=false
-            --ip-forward=false
-            --ip-masq=false
-        )
-    fi
+    [ -e /dev/net/tun ] || { mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 666 /dev/net/tun; } \
+        || dind_fail "failed to create /dev/net/tun"
+    rm -f "$DIND_NS_PID_FILE" "$DIND_SLIRP_READY_FILE" "$SOCK" "$RUNDIR/docker.pid"
 
     echo "Starting dockerd for Docker SDK at ${DOCKER_HOST}"
-    echo "dockerd data-root=${DIND_DATA_ROOT} exec-root=${DIND_EXEC_ROOT} storage-driver=${DIND_STORAGE_DRIVER}"
+    echo "dockerd data-root=${DATAROOT} exec-root=${RUNDIR} storage-driver=${DIND_STORAGE_DRIVER}"
     : >"$DIND_LOG"
-    dockerd "${dockerd_args[@]}" >"$DIND_LOG" 2>&1 &
-    export DIND_DOCKERD_PID=$!
-    echo "dockerd PID: ${DIND_DOCKERD_PID}; log: ${DIND_LOG}"
+    : >"$DIND_SLIRP_LOG"
+    "$PREFIX/userns_launcher" "$PREFIX/inside_dockerd.sh" >"$DIND_LOG" 2>&1 &
+    export DIND_USERNS_LAUNCHER_PID=$!
+    echo "userns launcher PID: ${DIND_USERNS_LAUNCHER_PID}; dockerd log: ${DIND_LOG}"
+
+    for attempt in $(seq 1 50); do
+        [ -f "$DIND_NS_PID_FILE" ] && break
+        if ! kill -0 "$DIND_USERNS_LAUNCHER_PID" >/dev/null 2>&1; then
+            dind_show_log "$DIND_LOG"
+            dind_fail "userns launcher exited before writing ${DIND_NS_PID_FILE}"
+        fi
+        sleep 0.1
+    done
+    [ -f "$DIND_NS_PID_FILE" ] || { dind_show_log "$DIND_LOG"; dind_fail "timed out waiting for ${DIND_NS_PID_FILE}"; }
+
+    NS_PID="$(sed -n '1p' "$DIND_NS_PID_FILE")"
+    slirp4netns --configure --mtu=65520 --disable-host-loopback "$NS_PID" tap0 >"$DIND_SLIRP_LOG" 2>&1 &
+    export DIND_SLIRP_PID=$!
+    echo "slirp4netns PID: ${DIND_SLIRP_PID}; log: ${DIND_SLIRP_LOG}"
+    sleep 2
+    if ! kill -0 "$DIND_SLIRP_PID" >/dev/null 2>&1; then
+        dind_show_log "$DIND_SLIRP_LOG"
+        dind_fail "slirp4netns exited before dockerd startup"
+    fi
+    touch "$DIND_SLIRP_READY_FILE"
 
     for attempt in $(seq 1 120); do
         if "$DIND_DOCKER_CLI" info >/dev/null 2>&1; then
             break
         fi
-        if ! kill -0 "$DIND_DOCKERD_PID" >/dev/null 2>&1; then
-            echo "ERROR: dockerd exited before becoming ready"
-            if [ -s "$DIND_LOG" ]; then
-                sed -n '1,240p' "$DIND_LOG"
-            fi
-            return 1 2>/dev/null || exit 1
+        if ! kill -0 "$DIND_USERNS_LAUNCHER_PID" >/dev/null 2>&1; then
+            dind_show_log "$DIND_LOG"
+            dind_show_log "$DIND_SLIRP_LOG"
+            dind_fail "dockerd exited before becoming ready"
         fi
         if [ "$attempt" = "10" ] || [ "$attempt" = "30" ] || [ "$attempt" = "60" ] || [ "$attempt" = "120" ]; then
             echo "Waiting for dockerd at ${DOCKER_HOST} (attempt ${attempt}/120)"
@@ -152,21 +242,17 @@ else
 fi
 
 if ! "$DIND_DOCKER_CLI" info; then
-    echo "ERROR: docker info failed for ${DOCKER_HOST}"
-    if [ -s "$DIND_LOG" ]; then
-        sed -n '1,240p' "$DIND_LOG"
-    fi
-    return 1 2>/dev/null || exit 1
+    dind_show_log "$DIND_LOG"
+    dind_show_log "$DIND_SLIRP_LOG"
+    dind_fail "docker info failed for ${DOCKER_HOST}"
 fi
 
 if [ "$DIND_SMOKE_TEST" = "1" ]; then
     echo "Running DinD smoke test with ${DIND_SMOKE_IMAGE}"
     if ! "$DIND_DOCKER_CLI" run --rm "$DIND_SMOKE_IMAGE" python -c 'print("dind ok")'; then
-        echo "ERROR: DinD smoke test failed"
-        if [ -s "$DIND_LOG" ]; then
-            sed -n '1,240p' "$DIND_LOG"
-        fi
-        return 1 2>/dev/null || exit 1
+        dind_show_log "$DIND_LOG"
+        dind_show_log "$DIND_SLIRP_LOG"
+        dind_fail "DinD smoke test failed"
     fi
 fi
 

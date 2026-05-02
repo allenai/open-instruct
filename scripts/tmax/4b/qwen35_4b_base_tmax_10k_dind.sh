@@ -31,7 +31,6 @@ uv run python mason.py \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env DIND_STORAGE_DRIVER=vfs \
-       --env DIND_DISABLE_BRIDGE=1 \
        --env DIND_SMOKE_TEST=1 \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --budget ai2/oe-adapt \
