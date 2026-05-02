@@ -485,7 +485,7 @@ class StreamingDataLoaderConfig:
     maintain_pending_ngu_completions: bool = True
     """Keep full ``GenerationResult`` objects across zero-std never-give-up retries so they can be merged into one
     training batch. Independent of :attr:`maintain_pending_ngu_counts`, which controls advantage baseline statistics."""
-    maintain_pending_ngu_counts: bool = True
+    maintain_pending_ngu_counts: bool = False
     """Include discarded never-give-up attempts in the grouped reward **baseline** (mean and std denominators). When True
     with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the baseline even though their
     completions are not retained for merging. Advantage rescaling by ``sample_count / baseline_count`` is separate; see
