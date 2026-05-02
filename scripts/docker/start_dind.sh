@@ -106,6 +106,8 @@ case " \$* " in *" create "*|*" run "*)
         jq '
           (.linux.sysctl // {}) as \$s
           | .linux.sysctl = (\$s | with_entries(select(.key as \$k | (\$k | startswith("net.")) | not)))
+          | del(.linux.cgroupsPath)
+          | del(.linux.resources)
           | .mounts |= map(
               if .type=="proc"   then {destination:"/proc",type:"none",source:"/proc",options:["rbind","nosuid","noexec","nodev"]}
               elif .type=="sysfs"  then {destination:.destination,type:"none",source:"/sys",options:["rbind","nosuid","noexec","nodev","ro"]}
