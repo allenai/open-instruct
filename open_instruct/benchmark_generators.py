@@ -48,6 +48,27 @@ def get_default_data_dir() -> pathlib.Path:
 DATA_DIR = get_default_data_dir()
 
 
+@dataclasses.dataclass
+class BenchmarkConfig:
+    """Benchmark-only controls for benchmark_generators.py."""
+
+    num_batches: int = 5
+    """Total number of benchmark batches to run, including the initial warmup batch."""
+    run_all_instances: bool = False
+    """If True, ignore num_batches and run enough batches to cover the entire dataset."""
+
+    def __post_init__(self) -> None:
+        if self.num_batches < 1:
+            raise ValueError(f"num_batches must be >= 1, got {self.num_batches}")
+
+
+def resolve_num_batches(*, dataset_len: int, prompts_per_batch: int, benchmark_config: BenchmarkConfig) -> int:
+    """Resolve the total number of benchmark batches to run, including warmup."""
+    if benchmark_config.run_all_instances:
+        return max(1, -(-dataset_len // prompts_per_batch))
+    return benchmark_config.num_batches
+
+
 def resolve_data_dir(
     args: grpo_utils.GRPOExperimentConfig, streaming_config: data_loader.StreamingDataLoaderConfig
 ) -> pathlib.Path:
@@ -82,7 +103,13 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
 
 
 def save_config(
-    args, tokenizer_config, model_config, streaming_config: data_loader.StreamingDataLoaderConfig, timestamp: int
+    args,
+    tokenizer_config,
+    model_config,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
+    benchmark_config: BenchmarkConfig,
+    resolved_num_batches: int,
+    timestamp: int,
 ):
     """
     Save configuration to JSON file.
@@ -92,6 +119,8 @@ def save_config(
         tokenizer_config: TokenizerConfig dataclass
         model_config: ModelConfig dataclass
         streaming_config: StreamingDataLoaderConfig dataclass
+        benchmark_config: Benchmark-specific config dataclass
+        resolved_num_batches: Effective total number of benchmark batches that will run
         timestamp: Unix timestamp
     """
     config_path = DATA_DIR / f"config_{timestamp}.json"
@@ -102,6 +131,8 @@ def save_config(
         "tokenizer_config": dataclasses.asdict(tokenizer_config),
         "model_config": dataclasses.asdict(model_config),
         "streaming_config": dataclasses.asdict(streaming_config),
+        "benchmark_config": dataclasses.asdict(benchmark_config),
+        "resolved_num_batches": resolved_num_batches,
         "timestamp": timestamp,
         "experiment_id": os.environ.get("BEAKER_WORKLOAD_ID") or None,
     }
@@ -829,16 +860,18 @@ def main() -> None:
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
             data_loader.VLLMConfig,
+            BenchmarkConfig,
         )  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
+    args, tokenizer_config, model_config, streaming_config, vllm_config, benchmark_config = cast(
         tuple[
             grpo_utils.GRPOExperimentConfig,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
             data_loader.VLLMConfig,
+            BenchmarkConfig,
         ],
         parser.parse_args_into_dataclasses(),
     )
@@ -857,6 +890,20 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, streaming_config, tokenizer_config)
+    resolved_num_batches = resolve_num_batches(
+        dataset_len=len(dataset),
+        prompts_per_batch=streaming_config.num_unique_prompts_rollout,
+        benchmark_config=benchmark_config,
+    )
+    if benchmark_config.run_all_instances:
+        logger.info(
+            "Resolved run_all_instances=True to %s total batch(es) for %s dataset prompt(s) at %s prompt(s) per batch.",
+            resolved_num_batches,
+            len(dataset),
+            streaming_config.num_unique_prompts_rollout,
+        )
+    else:
+        logger.info("Using configured num_batches=%s.", resolved_num_batches)
     max_model_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
         args, streaming_config, vllm_config, tokenizer_config, model_config, max_model_len, dataset
@@ -865,7 +912,9 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     args.run_name = resolve_run_name(args, timestamp)
-    save_config(args, tokenizer_config, model_config, streaming_config, timestamp)
+    save_config(
+        args, tokenizer_config, model_config, streaming_config, benchmark_config, resolved_num_batches, timestamp
+    )
     if streaming_config.save_traces:
         save_rollout_metadata(streaming_config.rollouts_save_path, args.run_name, model_config.model_name_or_path)
     run_benchmark(
@@ -880,6 +929,7 @@ def main() -> None:
         model_config,
         args.run_name,
         timestamp,
+        num_batches=resolved_num_batches,
     )
 
     cleanup(vllm_engines, actor_manager)
