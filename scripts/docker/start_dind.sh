@@ -98,17 +98,6 @@ else
 fi
 export DIND_SLIRP4NETNS_BIN
 
-if command -v nsenter >/dev/null 2>&1; then
-    DIND_NSENTER_BIN="$(command -v nsenter)"
-elif [ -x /usr/bin/nsenter ]; then
-    DIND_NSENTER_BIN=/usr/bin/nsenter
-elif [ -x /bin/nsenter ]; then
-    DIND_NSENTER_BIN=/bin/nsenter
-else
-    DIND_NSENTER_BIN=""
-fi
-export DIND_NSENTER_BIN
-
 if [ ! -x "$PREFIX/dockerd" ]; then
     curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" \
         | tar xz -C "$PREFIX" --strip-components=1 \
@@ -194,6 +183,16 @@ mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg && mount --bind /tmp/cg /sys/f
 ip link set lo up
 echo \$\$ > "$DIND_NS_PID_FILE"
 while [ ! -f "$DIND_SLIRP_READY_FILE" ]; do sleep 0.1; done
+for attempt in \$(seq 1 50); do
+    if ip addr show tap0 >/dev/null 2>&1 && ip route get 10.0.2.3 >/dev/null 2>&1; then
+        break
+    fi
+    if [ "\$attempt" = "50" ]; then
+        echo "ERROR: slirp4netns did not configure tap0 networking" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
 echo "nameserver 10.0.2.3" > /tmp/resolv.conf
 mount --bind /tmp/resolv.conf /etc/resolv.conf
 mkdir -p "$DATAROOT" "$RUNDIR"
@@ -250,19 +249,6 @@ else
     if ! kill -0 "$DIND_SLIRP_PID" >/dev/null 2>&1; then
         dind_show_log "$DIND_SLIRP_LOG"
         dind_fail "slirp4netns exited before dockerd startup"
-    fi
-    if [ -n "$DIND_NSENTER_BIN" ]; then
-        for attempt in $(seq 1 50); do
-            if "$DIND_NSENTER_BIN" -t "$NS_PID" -n ip addr show tap0 >/dev/null 2>&1 \
-                && "$DIND_NSENTER_BIN" -t "$NS_PID" -n ip route get 10.0.2.3 >/dev/null 2>&1; then
-                break
-            fi
-            if [ "$attempt" = "50" ]; then
-                dind_show_log "$DIND_SLIRP_LOG"
-                dind_fail "slirp4netns did not configure tap0 networking"
-            fi
-            sleep 0.1
-        done
     fi
     touch "$DIND_SLIRP_READY_FILE"
 
