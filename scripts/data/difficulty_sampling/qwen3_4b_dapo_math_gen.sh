@@ -39,7 +39,6 @@ uv run open_instruct/benchmark_generators.py \
   --chat_template_name qwen_instruct_user_boxed_math \
   --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
   --dataset_mixer_list_splits train \
-  --num_unique_prompts_rollout 8 \
   --num_unique_prompts_rollout 64 \
   --vllm_num_engines 8 \
   --max_prompt_token_length 2048 \
