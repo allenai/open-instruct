@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
         default="mnoukhov/gsm8k-platinum-openinstruct-qwen2.5-0.5b-instruct-1024samples-userprompt-quartiles",
         help="Target HF dataset repo to push to.",
     )
+    parser.add_argument("--dataset-name-prefix", default="gsm8k")
     parser.add_argument("--private", action="store_true")
     return parser.parse_args()
 
@@ -73,8 +74,8 @@ def normalize_schema(ds: Dataset) -> Dataset:
     return ds
 
 
-def split_to_dataset_name(quartile_id: int) -> str:
-    return f"gsm8k_quartile{quartile_id}"
+def split_to_dataset_name(dataset_name_prefix: str, quartile_id: int) -> str:
+    return f"{dataset_name_prefix}_quartile{quartile_id}"
 
 
 def main() -> None:
@@ -93,7 +94,9 @@ def main() -> None:
 
     quartile_outputs: list[tuple[str, Dataset]] = []
     for quartile_id, quartile_idx in enumerate(quartile_indices):
-        quartile_ds = with_dataset_name(ds.select(quartile_idx.tolist()), split_to_dataset_name(quartile_id))
+        quartile_ds = with_dataset_name(
+            ds.select(quartile_idx.tolist()), split_to_dataset_name(args.dataset_name_prefix, quartile_id)
+        )
         quartile_split_name = f"{args.split}_{quartile_id}"
         quartile_outputs.append((quartile_split_name, quartile_ds))
         logger.info(

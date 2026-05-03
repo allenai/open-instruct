@@ -1,8 +1,9 @@
 for i in 1 2 3; do 
-    export NAME="ngu_comp_age_8"
+    export NAME="ngu_nocomp_count_ratio"
 
-    WORKSPACE=ai2/olmo-instruct \
-    PRIORITY=urgent \
+    # WORKSPACE=ai2/olmo-instruct \
+    # PRIORITY=urgent \
+
     BEAKER_IMAGE=michaeln/open-instruct-integration-test-michaeln-merge \
     EXP="${NAME}_seed${i}" \
     bash scripts/train/qwen/qwen2.5_0.5b_gsm8k_buckets.sh \
@@ -16,6 +17,9 @@ for i in 1 2 3; do
     --active_sampling \
     --never_give_up 0.95 \
     --num_response_tokens_rollout 50000 \
-    --maintain_pending_ngu_age 8
+    --maintain_pending_ngu_completions False \
+    --maintain_pending_ngu_counts True \
+    --maintain_pending_ngu_count_rescale ratio
+
 
 done
