@@ -15,7 +15,7 @@ The script accepts one or more local rollout directories, metadata ``.jsonl``
 files, or rollout shard ``.jsonl`` files written by ``open_instruct.rl_utils``.
 For each traced prompt instance it:
 
-1. loads rollout shards written by ``save_rollouts_to_disk()``,
+1. loads rollout shards written by ``save_rollouts_to_disk()``, including compact score-only shards,
 2. groups attempts by source dataset identity when available, otherwise by a
    deterministic fingerprint over task name, prompt tokens, and ground truth,
 3. normalizes binary verifiable rewards from ``{0, C}`` back to ``{0, 1}``
@@ -434,7 +434,7 @@ def build_rollout_contribution(
 
     prompt_tokens = normalize_token_list(record.get("prompt_tokens"))
     if prompt_tokens is None and (source_dataset is None or source_dataset_id is None):
-        raise ValueError("missing or invalid prompt_tokens")
+        raise ValueError("missing prompt_tokens and source dataset identity (source_dataset/source_row_id)")
 
     reward = extract_numeric_reward(record.get("reward"))
     if reward is None:

@@ -216,10 +216,20 @@ def maybe_save_scored_rollout_traces(
             raise ValueError("Cannot save scored rollout traces because the result is missing its dataset index.")
 
         example = dataset[result.index]
+        prompt_tokens = (
+            list(example[dataset_transformation.INPUT_IDS_PROMPT_KEY])
+            if streaming_config.rollout_save_format == "full"
+            else []
+        )
+        ground_truth = (
+            example[dataset_transformation.GROUND_TRUTHS_KEY]
+            if streaming_config.rollout_save_format == "full"
+            else None
+        )
         batch, advantages = build_rollout_batch_and_advantages(
             result,
-            prompt_tokens=list(example[dataset_transformation.INPUT_IDS_PROMPT_KEY]),
-            ground_truth=example[dataset_transformation.GROUND_TRUTHS_KEY],
+            prompt_tokens=prompt_tokens,
+            ground_truth=ground_truth,
             dataset_name=example[dataset_transformation.VERIFIER_SOURCE_KEY],
             raw_query=example[dataset_transformation.RAW_PROMPT_KEY],
             advantage_normalization_type=streaming_config.advantage_normalization_type,
@@ -235,6 +245,7 @@ def maybe_save_scored_rollout_traces(
             advantages,
             len(result.responses),
             total_samples_written,
+            record_format=streaming_config.rollout_save_format,
         )
         total_samples_written += len(result.responses)
 

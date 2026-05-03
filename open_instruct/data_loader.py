@@ -492,6 +492,8 @@ class StreamingDataLoaderConfig:
     # Rollout saving
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
+    rollout_save_format: Literal["full", "scores_only"] = "full"
+    """Trace record shape to persist when save_traces is enabled."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -1330,6 +1332,7 @@ class DataPreparationActor:
                     advantages,
                     self.config.num_samples_per_prompt_rollout,
                     self.total_samples_written,
+                    record_format=self.config.rollout_save_format,
                 )
                 self.total_samples_written += len(batch.queries)
 

@@ -5,7 +5,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 import numpy as np
 import torch
@@ -17,6 +17,7 @@ logger = logger_utils.setup_logger(__name__)
 
 _rollout_executor = ThreadPoolExecutor(max_workers=2)
 ROLLOUT_SHARD_SIZE = 10000
+RolloutSaveFormat = Literal["full", "scores_only"]
 
 
 @dataclass
@@ -44,6 +45,14 @@ class RolloutRecord:
     source_dataset: str | None = None
     request_info: dict | None = None
     logprobs: list[float] | None = None
+
+
+@dataclass
+class RolloutScoreRecord:
+    dataset: str
+    reward: float
+    source_row_id: int | None = None
+    source_dataset: str | None = None
 
 
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
@@ -98,6 +107,7 @@ def _save_rollouts(
     advantages: np.ndarray,
     num_samples_per_prompt: int,
     shard_idx: int,
+    record_format: RolloutSaveFormat,
 ) -> None:
     shard_filename = f"{run_name}_rollouts_{shard_idx:06d}.jsonl"
     filepath = os.path.join(save_path, shard_filename)
@@ -107,6 +117,19 @@ def _save_rollouts(
 
     records = []
     for i in range(len(batch.queries)):
+        if record_format == "scores_only":
+            records.append(
+                asdict(
+                    RolloutScoreRecord(
+                        dataset=batch.datasets[i],
+                        reward=float(batch.scores[i]),
+                        source_row_id=batch.source_row_ids[i] if batch.source_row_ids is not None else None,
+                        source_dataset=batch.source_datasets[i] if batch.source_datasets is not None else None,
+                    )
+                )
+            )
+            continue
+
         records.append(
             asdict(
                 RolloutRecord(
@@ -143,6 +166,7 @@ def save_rollouts_to_disk(
     advantages: np.ndarray,
     num_samples_per_prompt: int,
     total_samples_written: int,
+    record_format: RolloutSaveFormat = "full",
 ) -> None:
     """Asynchronously save rollout records to disk.
 
@@ -158,10 +182,21 @@ def save_rollouts_to_disk(
         advantages: Calculated advantage values per sample.
         num_samples_per_prompt: Number of samples generated per prompt.
         total_samples_written: Total samples written so far, used for sharding.
+        record_format: Output schema to persist. Use "scores_only" for the
+            minimum fields needed by the difficulty-map builder.
     """
     shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
     _rollout_executor.submit(
-        _save_rollouts, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
+        _save_rollouts,
+        save_path,
+        run_name,
+        step,
+        batch,
+        result,
+        advantages,
+        num_samples_per_prompt,
+        shard_idx,
+        record_format,
     )
 
 
