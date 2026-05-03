@@ -382,7 +382,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "`use_cpu_adam=True` requires DeepSpeed to be installed. "
                     "Install it with: pip install deepspeed"
                 )
-            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate)
+            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate, weight_decay=args.weight_decay)
         else:
             self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches

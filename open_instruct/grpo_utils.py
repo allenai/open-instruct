@@ -146,7 +146,7 @@ class GRPOExperimentConfig(
     deepspeed_offload_optimizer: bool = False
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     use_cpu_adam: bool = False
-    """use DeepSpeedCPUAdam instead of torch.optim.AdamW; recommended when deepspeed_offload_optimizer=True"""
+    """whether to use DeepSpeedCPUAdam instead of torch.optim.AdamW; recommended when deepspeed_offload_optimizer=True"""
     deepspeed_checkpoint_load_universal: bool = False
     """DeepSpeed checkpoint.load_universal: load checkpoints across different parallel configs"""
     gather_whole_model: bool = True
@@ -290,6 +290,8 @@ class GRPOExperimentConfig(
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
         if self.deepspeed_offload_param and self.deepspeed_stage != 3:
             raise ValueError("`deepspeed_offload_param` requires `deepspeed_stage` to be 3!")
+        if self.use_cpu_adam and self.deepspeed_stage == 0:
+            raise ValueError("`use_cpu_adam` requires a DeepSpeed stage (`deepspeed_stage` > 0)!")
         if self.use_cpu_adam and not self.deepspeed_offload_optimizer:
             logger.warning(
                 "`use_cpu_adam` is enabled but `deepspeed_offload_optimizer` is False. "
