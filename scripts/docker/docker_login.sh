@@ -14,6 +14,9 @@ SWERL_PODMAN_SERVICE_DIR="${SWERL_PODMAN_SERVICE_DIR:-/tmp/podman-services}"
 SWERL_PODMAN_GRAPHROOT_BASE="${SWERL_PODMAN_GRAPHROOT_BASE:-/var/lib/containers/storage/swerl-podman-shards}"
 SWERL_PODMAN_RUNROOT_BASE="${SWERL_PODMAN_RUNROOT_BASE:-/run/containers/storage/swerl-podman-shards}"
 SWERL_PODMAN_TMPDIR_BASE="${SWERL_PODMAN_TMPDIR_BASE:-/var/tmp/swerl-podman-shards}"
+SWERL_PODMAN_IMAGE_JANITOR_ENABLED="${SWERL_PODMAN_IMAGE_JANITOR_ENABLED:-0}"
+SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S="${SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S:-300}"
+SWERL_PODMAN_IMAGE_JANITOR_UNTIL="${SWERL_PODMAN_IMAGE_JANITOR_UNTIL:-30m}"
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
 
@@ -167,6 +170,33 @@ if command -v podman >/dev/null 2>&1; then
             ) &
             export PODMAN_JANITOR_PID=$!
             echo "Podman janitor PID: $PODMAN_JANITOR_PID"
+        fi
+        if [ "$SWERL_PODMAN_IMAGE_JANITOR_ENABLED" = "1" ]; then
+            IMAGE_JANITOR_LOG="${PODMAN_LOG_DIR}/podman-image-janitor.log"
+            IMAGE_JANITOR_INTERVAL="$SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S"
+            IMAGE_JANITOR_UNTIL="$SWERL_PODMAN_IMAGE_JANITOR_UNTIL"
+            echo "Starting Podman image janitor (interval=${IMAGE_JANITOR_INTERVAL}s, until=${IMAGE_JANITOR_UNTIL})"
+            (
+                while true; do
+                    {
+                        echo "$(date -Is) filesystem usage before image prune"
+                        df -h /var/lib/containers /var/tmp /output 2>/dev/null || true
+                    } >>"$IMAGE_JANITOR_LOG"
+                    for ((image_janitor_shard = 0; image_janitor_shard < SWERL_PODMAN_SERVICE_COUNT; image_janitor_shard++)); do
+                        {
+                            echo "$(date -Is) shard=${image_janitor_shard} podman system df before image prune"
+                            podman_for_shard "$image_janitor_shard" system df || true
+                            echo "$(date -Is) shard=${image_janitor_shard} pruning unused images older than ${IMAGE_JANITOR_UNTIL}"
+                            podman_for_shard "$image_janitor_shard" image prune -a --force --filter "until=${IMAGE_JANITOR_UNTIL}" || true
+                            echo "$(date -Is) shard=${image_janitor_shard} podman system df after image prune"
+                            podman_for_shard "$image_janitor_shard" system df || true
+                        } >>"$IMAGE_JANITOR_LOG" 2>&1
+                    done
+                    sleep "$IMAGE_JANITOR_INTERVAL"
+                done
+            ) &
+            export PODMAN_IMAGE_JANITOR_PID=$!
+            echo "Podman image janitor PID: $PODMAN_IMAGE_JANITOR_PID; log: $IMAGE_JANITOR_LOG"
         fi
     else
         echo "WARNING: One or more Podman sockets were not created"

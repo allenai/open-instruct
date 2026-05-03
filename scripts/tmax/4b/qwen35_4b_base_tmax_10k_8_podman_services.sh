@@ -28,6 +28,9 @@ uv run python mason.py \
        --env SWERL_PODMAN_SERVICE_COUNT=8 \
        --env SWERL_DOCKER_START_CONCURRENCY=64 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=300 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=30m \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
