@@ -43,9 +43,9 @@ uv run open_instruct/grpo_fast.py \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
-    --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
+    --dataset_mixer_list mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples-quartiles 1.0 \
     --dataset_mixer_list_splits "train" \
-    --dataset_mixer_eval_list mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list mnoukhov/aime-2025-openinstruct-qwen3-4b-base-32samples-quartiles 1.0 mnoukhov/brumo-2025-openinstruct-qwen3-4b-base-32samples-quartiles 1.0 \
     --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \

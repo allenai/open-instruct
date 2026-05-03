@@ -59,6 +59,7 @@ import dataclasses
 import logging
 import math
 import random
+import re
 import shutil
 import threading
 import time
@@ -2025,6 +2026,30 @@ def _compute_manufactoria_test_pass_at_k_by_difficulty(
     return metrics
 
 
+def _quartile_metric_base(dataset_name: str) -> str | None:
+    match = re.fullmatch(r"(.+)_quartile\d+", dataset_name)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _compute_quartile_base_pass_at_metrics(
+    dataset_pass_at_by_k: dict[str, dict[int, float]],
+) -> dict[str, dict[int, float]]:
+    base_pass_at_values: dict[str, dict[int, list[float]]] = {}
+    for dataset_name, pass_rates in dataset_pass_at_by_k.items():
+        base_name = _quartile_metric_base(dataset_name)
+        if base_name is None:
+            continue
+        for k, pass_rate in pass_rates.items():
+            base_pass_at_values.setdefault(base_name, {}).setdefault(k, []).append(pass_rate)
+
+    return {
+        base_name: {k: float(np.mean(values)) for k, values in sorted(pass_at_values.items()) if values}
+        for base_name, pass_at_values in sorted(base_pass_at_values.items())
+    }
+
+
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -2325,6 +2350,7 @@ def maybe_evaluate(
         eval_k = eval_generation_config.n
         pass_at_by_k: dict[int, float] = {}
         dataset_pass_at_by_k: dict[str, dict[int, float]] = {}
+        quartile_base_pass_at_by_k: dict[str, dict[int, float]] = {}
         manufactoria_test_pass_at_by_difficulty: dict[str, float] = {}
         eval_pass_at_k_metrics: dict[str, float] = {}
 
@@ -2355,6 +2381,7 @@ def maybe_evaluate(
                     dataset_pass_at_by_k[dataset_name] = {
                         k: float(dataset_prompt_pass_at[:, col].mean()) for col, k in enumerate(pass_at_ks)
                     }
+                quartile_base_pass_at_by_k = _compute_quartile_base_pass_at_metrics(dataset_pass_at_by_k)
         else:
             logger.warning(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
@@ -2428,6 +2455,9 @@ def maybe_evaluate(
             eval_metrics[f"eval/pass_at_{k}"] = pass_rate
         eval_metrics.update(eval_pass_at_k_metrics)
         for metric_name, pass_rates in dataset_pass_at_by_k.items():
+            for k, pass_rate in pass_rates.items():
+                eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
+        for metric_name, pass_rates in quartile_base_pass_at_by_k.items():
             for k, pass_rate in pass_rates.items():
                 eval_metrics[f"eval/{metric_name}/pass_at_{k}"] = pass_rate
         eval_metrics.update(manufactoria_test_pass_at_by_difficulty)
