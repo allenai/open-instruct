@@ -51,6 +51,7 @@ uv run open_instruct/benchmark_generators.py \
   --apply_verifiable_reward true \
   --verification_reward 10.0 \
   --save_traces \
+  --rollout_save_format scores_only \
   --rollouts_save_path "${TRACE_DIR}" \
   --run_all_instances \
   --seed 1 "$@"
