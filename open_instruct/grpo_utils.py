@@ -146,8 +146,7 @@ class GRPOExperimentConfig(
     deepspeed_offload_optimizer: bool = False
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     use_cpu_adam: bool = False
-    """Use DeepSpeedCPUAdam optimizer instead of torch.optim.AdamW. Recommended when
-    deepspeed_offload_optimizer=True. Reduces GPU memory usage at the cost of training speed."""
+    """use DeepSpeedCPUAdam instead of torch.optim.AdamW; recommended when deepspeed_offload_optimizer=True"""
     deepspeed_checkpoint_load_universal: bool = False
     """DeepSpeed checkpoint.load_universal: load checkpoints across different parallel configs"""
     gather_whole_model: bool = True
