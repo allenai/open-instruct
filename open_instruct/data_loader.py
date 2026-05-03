@@ -485,6 +485,9 @@ class StreamingDataLoaderConfig:
     maintain_pending_ngu_completions: bool = True
     """Keep full ``GenerationResult`` objects across zero-std never-give-up retries so they can be merged into one
     training batch. Independent of :attr:`maintain_pending_ngu_counts`, which controls advantage baseline statistics."""
+    maintain_ngu_completions_downsample: bool = False
+    """After merging pending never-give-up completions, downsample each retained training group to an equal number of
+    correct and incorrect completions. Rollout target accounting is still based on the full accepted group."""
     maintain_pending_ngu_counts: bool = False
     """Include discarded never-give-up attempts in the grouped reward **baseline** (mean and std denominators). When True
     with :attr:`maintain_pending_ngu_completions` False, phantom response slots enter the baseline even though their
@@ -1335,6 +1338,51 @@ def merge_generation_results(
     return merged_result, combined_reward_metrics
 
 
+def downsample_result_to_balanced_correctness(
+    result: data_types.GenerationResult, max_possible_score: float
+) -> data_types.GenerationResult:
+    """Trim completion-level fields so correct and incorrect completions are balanced."""
+    if result.reward_scores is None:
+        return result
+
+    reward_scores = result.reward_scores
+    correct_indices = [
+        index for index, score in enumerate(reward_scores) if np.isclose(float(score), max_possible_score)
+    ]
+    incorrect_indices = [
+        index for index, score in enumerate(reward_scores) if not np.isclose(float(score), max_possible_score)
+    ]
+    balanced_count = min(len(correct_indices), len(incorrect_indices))
+    if balanced_count == 0 or len(correct_indices) == len(incorrect_indices):
+        return result
+
+    keep_indices = sorted(correct_indices[:balanced_count] + incorrect_indices[:balanced_count])
+
+    def slice_if_aligned(values: list[Any]) -> list[Any]:
+        if len(values) != len(reward_scores):
+            return values
+        return [values[index] for index in keep_indices]
+
+    request_info = data_types.RequestInfo(
+        num_calls=slice_if_aligned(result.request_info.num_calls),
+        timeouts=slice_if_aligned(result.request_info.timeouts),
+        tool_errors=slice_if_aligned(result.request_info.tool_errors),
+        tool_outputs=slice_if_aligned(result.request_info.tool_outputs),
+        tool_runtimes=slice_if_aligned(result.request_info.tool_runtimes),
+        tool_calleds=slice_if_aligned(result.request_info.tool_calleds),
+        tool_call_stats=slice_if_aligned(result.request_info.tool_call_stats),
+        rollout_states=slice_if_aligned(result.request_info.rollout_states),
+    )
+    result.responses = [result.responses[index] for index in keep_indices]
+    result.finish_reasons = [result.finish_reasons[index] for index in keep_indices]
+    result.masks = [result.masks[index] for index in keep_indices]
+    result.request_info = request_info
+    if result.logprobs is not None:
+        result.logprobs = [result.logprobs[index] for index in keep_indices]
+    result.reward_scores = [reward_scores[index] for index in keep_indices]
+    return result
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     generation_config: vllm.SamplingParams,
@@ -1373,6 +1421,7 @@ def accumulate_inference_batches(
     never_give_up_state_lock: Any = None,
     maintain_pending_ngu_age: int = 2,
     maintain_pending_ngu_completions: bool = True,
+    maintain_ngu_completions_downsample: bool = False,
     maintain_pending_ngu_counts: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
@@ -1796,14 +1845,15 @@ def accumulate_inference_batches(
             baseline_reward_sum = reward_scores_sum
 
         accepted_response_tokens = sum(len(response) for response in result.responses)
+        accepted_sample_count = sample_count
         if target_mode == "tokens":
             num_tokens_sampled += accepted_response_tokens
             progress_bar.update(accepted_response_tokens)
             if progress_callback is not None:
                 progress_callback(num_tokens_sampled, target_total)
         elif target_mode == "completions":
-            num_completions_sampled += sample_count
-            progress_bar.update(sample_count)
+            num_completions_sampled += accepted_sample_count
+            progress_bar.update(accepted_sample_count)
             if progress_callback is not None:
                 progress_callback(num_completions_sampled, target_total)
         else:
@@ -1811,6 +1861,20 @@ def accumulate_inference_batches(
             progress_bar.update(1)
             if progress_callback is not None:
                 progress_callback(num_prompts_sampled, target_total)
+
+        if maintain_ngu_completions_downsample and merged_prior_ngu_completions:
+            result = downsample_result_to_balanced_correctness(result, max_possible_score)
+            reward_scores = np.asarray(result.reward_scores, dtype=float)
+            sample_count = len(result.responses)
+            reward_scores_sum = float(reward_scores.sum())
+            k_queries = repeat_each([query], sample_count)
+            k_ground_truths = repeat_each([ground_truth], sample_count)
+            k_datasets = repeat_each([dataset_name], sample_count)
+            k_raw_queries = repeat_each([raw_query], sample_count)
+            k_active_tools = repeat_each([sample_active_tools], sample_count)
+            decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
+            baseline_sample_count = sample_count
+            baseline_reward_sum = reward_scores_sum
 
         completions_used_by_dataset[prompt_dataset_key] = (
             completions_used_by_dataset.get(prompt_dataset_key, 0) + sample_count
@@ -2319,6 +2383,7 @@ class DataPreparationActor:
                 never_give_up_state_lock=self.never_give_up_state_lock,
                 maintain_pending_ngu_age=self.config.maintain_pending_ngu_age,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
+                maintain_ngu_completions_downsample=self.config.maintain_ngu_completions_downsample,
                 maintain_pending_ngu_counts=self.config.maintain_pending_ngu_counts,
             )
             logger.info(

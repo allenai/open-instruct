@@ -23,6 +23,7 @@ uv run mason.py \
     --cluster ${CLUSTER} \
     --workspace ${WORKSPACE} \
     --priority ${PRIORITY} \
+    --timeout 10h \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --no_auto_dataset_cache \
