@@ -121,6 +121,7 @@ def save_benchmark_results_to_csv(
     """Save benchmark results to CSV file."""
     git_commit = utils.get_git_commit()
     agg_results = aggregate_results(results)
+    total_samples = len(agg_results["response_lengths"])
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
     row_data = {
@@ -134,7 +135,9 @@ def save_benchmark_results_to_csv(
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
         "total_weight_sync_time": agg_results["total_weight_sync_time"],
-        "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100,
+        "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100
+        if total_time > 0
+        else 0,
         "weight_sync_time_percentage": (agg_results["total_weight_sync_time"] / total_time) * 100
         if total_time > 0
         else 0,
@@ -144,12 +147,7 @@ def save_benchmark_results_to_csv(
         "avg_mbu": agg_results["avg_mbu"],
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_weight_sync_time_per_batch": agg_results["avg_weight_sync_time"],
-        "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
-        / (
-            len(results)
-            * streaming_config.num_unique_prompts_rollout
-            * streaming_config.num_samples_per_prompt_rollout
-        ),
+        "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"] / total_samples if total_samples > 0 else 0,
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -385,20 +383,16 @@ def submission_thread(
     dataset: datasets.Dataset,
     generation_config: vllm_utils.SamplingConfig,
     stop_event: threading.Event,
-    batch_size: int,
-    start_batch_idx: int,
-    num_batches: int,
+    batch_specs: list[tuple[int, int, int]],
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
+    for batch_idx, start_idx, end_idx in batch_specs:
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
 
         # Get batch data from dataset
-        start_idx = batch_idx * batch_size
-        end_idx = min(start_idx + batch_size, len(dataset))
         batch_data = dataset[start_idx:end_idx]
         prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
 
@@ -412,7 +406,21 @@ def submission_thread(
                     generation_config=generation_config,
                 )
             )
-    logger.info(f"[Submission Thread] All {num_batches} batches submitted")
+    logger.info(f"[Submission Thread] All {len(batch_specs)} batches submitted")
+
+
+def build_batch_specs(
+    *, dataset_len: int, batch_size: int, start_batch_idx: int, num_batches: int
+) -> list[tuple[int, int, int]]:
+    """Return (batch_idx, start_idx, end_idx) triples for non-empty batches only."""
+    batch_specs = []
+    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
+        start_idx = batch_idx * batch_size
+        if start_idx >= dataset_len:
+            break
+        end_idx = min(start_idx + batch_size, dataset_len)
+        batch_specs.append((batch_idx, start_idx, end_idx))
+    return batch_specs
 
 
 def run_benchmark(
@@ -430,6 +438,9 @@ def run_benchmark(
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
+    if len(dataset) == 0:
+        raise ValueError("Benchmark dataset is empty after loading and filtering.")
+
     logger.info(
         f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts_rollout}"
     )
@@ -508,25 +519,42 @@ def run_benchmark(
             step=0,
             total_samples_written=total_samples_written,
         )
-        logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
-        submission_future = executor.submit(
-            submission_thread,
-            param_prompt_Q,
-            dataset,
-            generation_config,
-            stop_event,
-            streaming_config.num_unique_prompts_rollout,
-            1,
-            num_batches - 1,
+        main_batch_specs = build_batch_specs(
+            dataset_len=len(dataset),
+            batch_size=streaming_config.num_unique_prompts_rollout,
+            start_batch_idx=1,
+            num_batches=num_batches - 1,
         )
+        if not main_batch_specs:
+            logger.warning(
+                "No main benchmark batches remain after warmup because the dataset only has %s prompt(s), "
+                "which fit entirely in the warmup batch size of %s.",
+                len(dataset),
+                streaming_config.num_unique_prompts_rollout,
+            )
+            submission_future = None
+        else:
+            if len(main_batch_specs) < num_batches - 1:
+                logger.info(
+                    "Submitting %s main benchmark batch(es) instead of %s because the dataset only has %s prompt(s).",
+                    len(main_batch_specs),
+                    num_batches - 1,
+                    len(dataset),
+                )
+            else:
+                logger.info(f"Submitting {len(main_batch_specs)} batches for main benchmark...")
+
+            submission_future = executor.submit(
+                submission_thread, param_prompt_Q, dataset, generation_config, stop_event, main_batch_specs
+            )
         # Process remaining batches with timing
-        for batch_idx in range(1, num_batches):
+        for batch_position, (batch_idx, batch_start_idx, batch_end_idx) in enumerate(main_batch_specs, start=1):
             # Quick health check!
-            if submission_future.done():
+            if submission_future is not None and submission_future.done():
                 submission_future.result()
 
             # Collect all results for this batch (one per prompt) using non-blocking polling
-            num_prompts = streaming_config.num_unique_prompts_rollout
+            num_prompts = batch_end_idx - batch_start_idx
             batch_results = []
             batch_deadline = time.time() + 1200
             while len(batch_results) < num_prompts:
@@ -535,7 +563,9 @@ def run_benchmark(
                     batch_results.append(result)
                 except Empty:
                     if time.time() > batch_deadline:
-                        raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
+                        raise TimeoutError(
+                            f"Batch {batch_idx} timed out, got {len(batch_results)}/{num_prompts}"
+                        ) from None
 
             total_samples_written = maybe_save_scored_rollout_traces(
                 batch_results,
@@ -609,7 +639,7 @@ def run_benchmark(
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
-                f"Batch {batch_idx}/{num_batches - 1}: "
+                f"Batch {batch_position}/{len(main_batch_specs)}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {result_dict['mfu']:.2f}%, "
                 f"MBU: {result_dict['mbu']:.2f}%, "
@@ -617,6 +647,9 @@ def run_benchmark(
                 f"weight sync time: {weight_sync_time:.2f}s, "
                 f"total new tokens: {total_new_tokens}"
             )
+
+        if submission_future is not None:
+            submission_future.result()
 
         # Calculate total time for main benchmark only
         main_benchmark_time = sum(r["generation_time"] for r in results)
@@ -657,6 +690,24 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         prompt_lengths.extend(result["prompt_lengths"])
 
     num_results = len(results)
+    if num_results == 0:
+        return {
+            "total_mfu": 0.0,
+            "total_mbu": 0.0,
+            "total_tokens_per_second": 0.0,
+            "total_generation_time": 0.0,
+            "total_weight_sync_time": 0.0,
+            "total_num_new_tokens": 0,
+            "finish_reasons": finish_reasons,
+            "response_lengths": response_lengths,
+            "prompt_lengths": prompt_lengths,
+            "avg_tokens_per_second": 0.0,
+            "avg_mfu": 0.0,
+            "avg_mbu": 0.0,
+            "avg_generation_time": 0.0,
+            "avg_weight_sync_time": 0.0,
+        }
+
     avg_tokens_per_second = total_num_new_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_mfu = total_mfu / num_results
     avg_mbu = total_mbu / num_results
@@ -691,10 +742,8 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     agg_results = aggregate_results(results)
-    total_samples = (
-        len(results) * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
-    )
-    avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
+    total_samples = len(agg_results["response_lengths"])
+    avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples if total_samples > 0 else 0
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -707,6 +756,12 @@ def print_summary(
     print(f"Unique prompts per batch: {streaming_config.num_unique_prompts_rollout}")
     print(f"Num rollouts: {streaming_config.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {streaming_config.response_length}")
+    if not results:
+        print("-" * 60)
+        print("No main benchmark batches were executed after warmup.")
+        print("=" * 60)
+        return
+
     print("-" * 60)
     print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
     print(f"Total weight sync time: {agg_results['total_weight_sync_time']:.2f}s")
