@@ -16,8 +16,8 @@ files, or rollout shard ``.jsonl`` files written by ``open_instruct.rl_utils``.
 For each traced prompt instance it:
 
 1. loads rollout shards written by ``save_rollouts_to_disk()``,
-2. groups attempts by a deterministic fingerprint over task name, prompt tokens,
-   and ground truth,
+2. groups attempts by source dataset row identity when available, otherwise by a
+   deterministic fingerprint over task name, prompt tokens, and ground truth,
 3. normalizes binary verifiable rewards from ``{0, C}`` back to ``{0, 1}``
    when possible,
 4. fits a Beta prior across binary outcomes and estimates per-item success
@@ -73,7 +73,9 @@ DIFFICULTY_GENERATION_METHOD = "beta_binomial_posterior_quantiles"
 DIFFICULTY_METHOD_FILENAME_ALIASES = {DIFFICULTY_GENERATION_METHOD: "bbq"}
 PRIOR_SOURCE_FILENAME_ALIASES = {"empirical_bayes": "eb", "jeffreys": "j", "jeffreys_fallback": "jf"}
 SOURCE_FORMAT_KIND = "open_instruct_rollout_traces"
-INSTANCE_ID_DEFINITION = "sha1(task_name,prompt_tokens,ground_truth)"
+INSTANCE_ID_DEFINITION = (
+    "sha1(source_dataset,source_row_id) when available; otherwise sha1(task_name,prompt_tokens,ground_truth)"
+)
 
 
 @dataclass(frozen=True)
@@ -425,8 +427,11 @@ def build_rollout_contribution(
     if task_name is None:
         raise ValueError("missing dataset/verifier source")
 
+    source_dataset = normalize_source_dataset(record.get("source_dataset"))
+    source_row_id = normalize_source_row_id(record.get("source_row_id"))
+
     prompt_tokens = normalize_token_list(record.get("prompt_tokens"))
-    if prompt_tokens is None:
+    if prompt_tokens is None and (source_dataset is None or source_row_id is None):
         raise ValueError("missing or invalid prompt_tokens")
 
     reward = extract_numeric_reward(record.get("reward"))
@@ -438,12 +443,18 @@ def build_rollout_contribution(
 
     return {
         "instance_id": make_rollout_instance_id(
-            task_name=task_name, prompt_tokens=prompt_tokens, ground_truth=ground_truth
+            task_name=task_name,
+            prompt_tokens=prompt_tokens,
+            ground_truth=ground_truth,
+            source_dataset=source_dataset,
+            source_row_id=source_row_id,
         ),
         "task_name": task_name,
         "base_task_name": get_base_task_name(task_name),
         "prompt_tokens": prompt_tokens,
         "ground_truth": ground_truth,
+        "source_dataset": source_dataset,
+        "source_row_id": source_row_id,
         "score_source": task_name,
         "attempt_scores": [reward],
         "finish_reasons": [finish_reason] if finish_reason else [],
@@ -462,8 +473,41 @@ def normalize_task_name(value: Any) -> str | None:
         return None
     if isinstance(value, str):
         return value
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return normalize_task_name(value[0])
     serialized = serialize_value(value)
     return serialized or None
+
+
+def normalize_source_dataset(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return normalize_source_dataset(value[0])
+    serialized = serialize_value(value)
+    return serialized or None
+
+
+def normalize_source_row_id(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            return None
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
 
 
 def normalize_token_list(value: Any) -> list[int] | None:
@@ -908,6 +952,8 @@ def build_dataset_metadata(
             "kind": SOURCE_FORMAT_KIND,
             "task_field": "dataset",
             "score_field": "reward",
+            "source_dataset_field": "source_dataset",
+            "source_row_id_field": "source_row_id",
             "instance_id_definition": INSTANCE_ID_DEFINITION,
         },
         "score_processing": dict(score_processing),
@@ -1014,7 +1060,23 @@ def extract_binary_counts(attempt_scores: list[float]) -> tuple[int, int] | None
     return success_count, len(attempt_scores)
 
 
-def make_rollout_instance_id(*, task_name: str, prompt_tokens: list[int], ground_truth: Any) -> str:
+def make_rollout_instance_id(
+    *,
+    task_name: str,
+    prompt_tokens: list[int] | None,
+    ground_truth: Any,
+    source_dataset: str | None = None,
+    source_row_id: int | None = None,
+) -> str:
+    if source_dataset is not None and source_row_id is not None:
+        fingerprint = {"source_dataset": source_dataset, "source_row_id": source_row_id}
+        digest = hashlib.sha1(canonical_json(fingerprint).encode("utf-8")).hexdigest()[:20]
+        task_prefix = sanitize_name(source_dataset) or "unknown"
+        return f"{task_prefix}::{digest}"
+
+    if prompt_tokens is None:
+        raise ValueError("prompt_tokens are required when source row identity is unavailable")
+
     fingerprint = {"task_name": task_name, "prompt_tokens": prompt_tokens, "ground_truth": make_jsonable(ground_truth)}
     digest = hashlib.sha1(canonical_json(fingerprint).encode("utf-8")).hexdigest()[:20]
     task_prefix = sanitize_name(task_name) or "unknown"
