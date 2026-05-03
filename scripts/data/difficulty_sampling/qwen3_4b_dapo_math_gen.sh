@@ -1,13 +1,19 @@
 #!/bin/bash
 
-EXP_NAME=qwen3_4b_base_dapo_rollout_probe
-RUN_NAME=${EXP_NAME}_$(date +%Y%m%d_%H%M%S)
-NUM_GPUS=1
-CLUSTER=ai2/jupiter
-WORKSPACE=ai2/olmo-instruct
-PRIORITY=urgent
-BEAKER_IMAGE=nathanl/open_instruct_auto
-TRACE_DIR=/weka/oe-adapt-default/tylerm/deletable_rollouts/${EXP_NAME}/${RUN_NAME}
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_rollout_probe}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+
+NUM_GPUS="${NUM_GPUS:-1}"
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+
+CLUSTER="${CLUSTER:-ai2/jupiter}"
+PRIORITY="${PRIORITY:-urgent}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+TRACE_DIR="${TRACE_DIR:-/weka/oe-adapt-default/tylerm/deletable_rollouts/${EXP_NAME}/${RUN_NAME}}"
+
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
 uv run python mason.py \
   --task_name "${EXP_NAME}" \
@@ -46,4 +52,4 @@ uv run open_instruct/benchmark_generators.py \
   --verification_reward 10.0 \
   --save_traces \
   --rollouts_save_path "${TRACE_DIR}" \
-  --seed 1
+  --seed 1 "$@"
