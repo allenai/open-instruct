@@ -18,6 +18,8 @@ DIND_STORAGE_DRIVER="${DIND_STORAGE_DRIVER:-vfs}"
 DIND_SMOKE_TEST="${DIND_SMOKE_TEST:-1}"
 DIND_SMOKE_IMAGE="${DIND_SMOKE_IMAGE:-python:3.12-slim}"
 
+export PATH="$PREFIX:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
+
 unset DOCKER_TLS_VERIFY
 unset DOCKER_CERT_PATH
 
@@ -29,7 +31,7 @@ export SWERL_PODMAN_DOCKER_HOSTS="${DOCKER_HOST}"
 
 dind_fail() {
     echo "ERROR: $*" >&2
-    return 1 2>/dev/null || exit 1
+    exit 1
 }
 
 dind_show_log() {
@@ -82,6 +84,30 @@ if ! need_pkgs; then
         slirp4netns jq iproute2 gcc libc6-dev curl ca-certificates >/dev/null \
         || dind_fail "failed to install DinD prerequisites"
 fi
+
+if [ -n "${DIND_SLIRP4NETNS_BIN:-}" ]; then
+    [ -x "$DIND_SLIRP4NETNS_BIN" ] || dind_fail "DIND_SLIRP4NETNS_BIN is not executable: $DIND_SLIRP4NETNS_BIN"
+elif command -v slirp4netns >/dev/null 2>&1; then
+    DIND_SLIRP4NETNS_BIN="$(command -v slirp4netns)"
+elif [ -x /usr/bin/slirp4netns ]; then
+    DIND_SLIRP4NETNS_BIN=/usr/bin/slirp4netns
+elif [ -x /bin/slirp4netns ]; then
+    DIND_SLIRP4NETNS_BIN=/bin/slirp4netns
+else
+    dind_fail "slirp4netns not found after installing DinD prerequisites"
+fi
+export DIND_SLIRP4NETNS_BIN
+
+if command -v nsenter >/dev/null 2>&1; then
+    DIND_NSENTER_BIN="$(command -v nsenter)"
+elif [ -x /usr/bin/nsenter ]; then
+    DIND_NSENTER_BIN=/usr/bin/nsenter
+elif [ -x /bin/nsenter ]; then
+    DIND_NSENTER_BIN=/bin/nsenter
+else
+    DIND_NSENTER_BIN=""
+fi
+export DIND_NSENTER_BIN
 
 if [ ! -x "$PREFIX/dockerd" ]; then
     curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" \
@@ -162,7 +188,7 @@ fi
 cat >"$PREFIX/inside_dockerd.sh" <<EOF
 #!/bin/bash
 set -e
-export PATH=$PREFIX:\$PATH
+export PATH=$PREFIX:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\$PATH
 mount --make-rprivate /
 mkdir -p /tmp/cg && mount -t cgroup2 none /tmp/cg && mount --bind /tmp/cg /sys/fs/cgroup
 ip link set lo up
@@ -217,13 +243,26 @@ else
     [ -f "$DIND_NS_PID_FILE" ] || { dind_show_log "$DIND_LOG"; dind_fail "timed out waiting for ${DIND_NS_PID_FILE}"; }
 
     NS_PID="$(sed -n '1p' "$DIND_NS_PID_FILE")"
-    slirp4netns --configure --mtu=65520 --disable-host-loopback "$NS_PID" tap0 >"$DIND_SLIRP_LOG" 2>&1 &
+    "$DIND_SLIRP4NETNS_BIN" --configure --mtu=65520 --disable-host-loopback "$NS_PID" tap0 >"$DIND_SLIRP_LOG" 2>&1 &
     export DIND_SLIRP_PID=$!
     echo "slirp4netns PID: ${DIND_SLIRP_PID}; log: ${DIND_SLIRP_LOG}"
     sleep 2
     if ! kill -0 "$DIND_SLIRP_PID" >/dev/null 2>&1; then
         dind_show_log "$DIND_SLIRP_LOG"
         dind_fail "slirp4netns exited before dockerd startup"
+    fi
+    if [ -n "$DIND_NSENTER_BIN" ]; then
+        for attempt in $(seq 1 50); do
+            if "$DIND_NSENTER_BIN" -t "$NS_PID" -n ip addr show tap0 >/dev/null 2>&1 \
+                && "$DIND_NSENTER_BIN" -t "$NS_PID" -n ip route get 10.0.2.3 >/dev/null 2>&1; then
+                break
+            fi
+            if [ "$attempt" = "50" ]; then
+                dind_show_log "$DIND_SLIRP_LOG"
+                dind_fail "slirp4netns did not configure tap0 networking"
+            fi
+            sleep 0.1
+        done
     fi
     touch "$DIND_SLIRP_READY_FILE"
 
