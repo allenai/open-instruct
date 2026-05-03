@@ -37,7 +37,7 @@ uv run open_instruct/benchmark_generators.py \
   --model_name_or_path "Qwen/Qwen3-4B-Base" \
   --tokenizer_name_or_path "Qwen/Qwen3-4B-Base" \
   --chat_template_name qwen_instruct_user_boxed_math \
-  --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 64 \
+  --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 8 \
   --dataset_mixer_list_splits train \
   --num_unique_prompts_rollout 8 \
   --num_samples_per_prompt_rollout 16 \

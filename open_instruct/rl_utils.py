@@ -39,6 +39,8 @@ class RolloutRecord:
     finish_reason: str
     dataset: str
     ground_truth: list[int] | None = None
+    source_row_id: int | None = None
+    source_dataset: str | None = None
     request_info: dict | None = None
     logprobs: list[float] | None = None
 
@@ -116,6 +118,8 @@ def _save_rollouts(
                     finish_reason=result.finish_reasons[i],
                     dataset=batch.datasets[i],
                     ground_truth=batch.ground_truths[i],
+                    source_row_id=batch.source_row_ids[i] if batch.source_row_ids is not None else None,
+                    source_dataset=batch.source_datasets[i] if batch.source_datasets is not None else None,
                     request_info=_get_request_info_for_sample(result.request_info, i),
                     logprobs=result.logprobs[i] if result.logprobs else None,
                 )
@@ -167,6 +171,8 @@ def build_rollout_batch_and_advantages(
     dataset_name: str,
     raw_query: str,
     advantage_normalization_type: str,
+    source_row_id: int | None = None,
+    source_dataset: str | None = None,
 ) -> tuple[model_utils.Batch, np.ndarray]:
     """Convert a scored inference result into the rollout format used by difficulty bucketing."""
     if result.reward_scores is None:
@@ -188,6 +194,8 @@ def build_rollout_batch_and_advantages(
         decoded_responses=None,
         indices=indices,
         scores=scores,
+        source_row_ids=[source_row_id] * num_samples,
+        source_datasets=[source_dataset] * num_samples,
         model_steps=[result.model_step] * num_samples,
     )
 

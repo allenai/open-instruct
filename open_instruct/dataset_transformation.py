@@ -869,6 +869,7 @@ DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 VERIFIER_SOURCE_KEY = "dataset"
 RAW_PROMPT_KEY = "prompt"
+SOURCE_ROW_ID_KEY = "source_row_id"
 
 
 @dataclass
@@ -944,7 +945,8 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
-DATASET_CACHE_VERSION = "v6"
+# v7: Preserve original source row ids in transformed datasets for rollout trace joins.
+DATASET_CACHE_VERSION = "v7"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1630,6 +1632,8 @@ class DatasetConfig:
                 num_proc=max_num_processes(),
             )
         assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
+        if SOURCE_ROW_ID_KEY not in dataset.column_names:
+            dataset = dataset.add_column(SOURCE_ROW_ID_KEY, range(len(dataset)))
         self.dataset = dataset
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
@@ -1731,6 +1735,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(SOURCE_ROW_ID_KEY, dataset, target_columns)
         target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
@@ -2162,6 +2167,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    drop_dataset_source: bool = True,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2175,7 +2181,7 @@ def get_cached_dataset_tulu(
         hf_entity=hf_entity,
         dataset_local_cache_dir=dataset_local_cache_dir,
         dataset_skip_cache=dataset_skip_cache,
-        drop_dataset_source=True,
+        drop_dataset_source=drop_dataset_source,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
     )[0]

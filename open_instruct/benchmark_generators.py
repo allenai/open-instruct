@@ -193,6 +193,8 @@ def maybe_save_scored_rollout_traces(
             dataset_name=example[dataset_transformation.VERIFIER_SOURCE_KEY],
             raw_query=example[dataset_transformation.RAW_PROMPT_KEY],
             advantage_normalization_type=streaming_config.advantage_normalization_type,
+            source_row_id=example.get(dataset_transformation.SOURCE_ROW_ID_KEY),
+            source_dataset=example.get(dataset_transformation.DATASET_ORIGIN_KEY),
         )
         save_rollouts_to_disk(
             streaming_config.rollouts_save_path,
@@ -272,6 +274,7 @@ def setup_dataset(
         dataset_cache_mode=streaming_config.dataset_cache_mode,
         dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
         dataset_skip_cache=streaming_config.dataset_skip_cache,
+        drop_dataset_source=not streaming_config.save_traces,
     )
 
     # Shuffle dataset

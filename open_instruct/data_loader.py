@@ -36,10 +36,12 @@ from transformers import PreTrainedTokenizer
 from open_instruct import data_types, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
+    DATASET_ORIGIN_KEY,
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
+    SOURCE_ROW_ID_KEY,
     TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
 )
@@ -780,6 +782,8 @@ def accumulate_inference_batches(
     all_active_tools = []
     all_scores = []
     all_indices = []
+    all_source_row_ids = []
+    all_source_datasets = []
     all_percent_solved = []
     all_model_steps = []
     total_filtered_prompts = 0
@@ -831,6 +835,8 @@ def accumulate_inference_batches(
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
+        source_row_id = example.get(SOURCE_ROW_ID_KEY)
+        source_dataset = example.get(DATASET_ORIGIN_KEY)
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
         if replenish_prompts:
@@ -861,6 +867,8 @@ def accumulate_inference_batches(
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         k_indices = repeat_each([result.index], generation_config.n)
+        k_source_row_ids = repeat_each([source_row_id], generation_config.n)
+        k_source_datasets = repeat_each([source_dataset], generation_config.n)
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -898,6 +906,8 @@ def accumulate_inference_batches(
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
         all_indices.extend(k_indices)
+        all_source_row_ids.extend(k_source_row_ids)
+        all_source_datasets.extend(k_source_datasets)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
@@ -1000,6 +1010,8 @@ def accumulate_inference_batches(
         indices=all_indices,
         scores=all_scores,
         active_tools=all_active_tools if all_active_tools else None,
+        source_row_ids=all_source_row_ids,
+        source_datasets=all_source_datasets,
         model_steps=all_model_steps,
     )
 

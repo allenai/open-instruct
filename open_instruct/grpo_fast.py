@@ -1180,6 +1180,7 @@ def setup_datasets(
         dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
         dataset_skip_cache=streaming_config.dataset_skip_cache,
         system_prompt_override=system_prompt_override,
+        drop_dataset_source=not streaming_config.save_traces,
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
@@ -1197,6 +1198,7 @@ def setup_datasets(
             dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
             dataset_skip_cache=streaming_config.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
+            drop_dataset_source=not streaming_config.save_traces,
         )
 
         _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
