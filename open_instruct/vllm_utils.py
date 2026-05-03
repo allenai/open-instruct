@@ -104,6 +104,8 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+VLLM_OPENAI_TIMEOUT_S = 3600.0
+VLLM_OPENAI_MAX_RETRIES = 5
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -750,10 +752,21 @@ class LLMRayActor:
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
-        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=3600)
+        self.client = openai.AsyncOpenAI(
+            base_url=base_url,
+            api_key="EMPTY",
+            timeout=VLLM_OPENAI_TIMEOUT_S,
+            max_retries=VLLM_OPENAI_MAX_RETRIES,
+        )
         self.model_name = self.llm_engine.vllm_config.model_config.model
 
-        logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
+        logger.info(
+            "Waiting for vLLM OpenAI API server to be ready at %s "
+            "(timeout=%.1fs, max_retries=%d)",
+            base_url,
+            VLLM_OPENAI_TIMEOUT_S,
+            VLLM_OPENAI_MAX_RETRIES,
+        )
 
         asyncio.run(_check_health(self.server_port))
         logger.info("vLLM OpenAI API server is ready")
@@ -1520,7 +1533,7 @@ def broadcast_weights_to_vllm(
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
-    use_packed = False
+    use_packed = True
 
     if is_rank_0:
         refs = [engine.update_weights.remote(names, dtype_names, shapes, packed=use_packed) for engine in vllm_engines]

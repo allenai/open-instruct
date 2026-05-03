@@ -1681,16 +1681,15 @@ def weight_sync_thread(
                     enable=args.verbose,
                 )
 
-                if not inflight_updates:
-                    # Ensure all vLLM engine update RPCs have completed before unpausing actors.
-                    # Without waiting here, should_stop may flip to False while updates are still queued.
-                    engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
-                    if engine_update_refs:
-                        ray_get_with_progress(
-                            engine_update_refs,
-                            desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
-                            enable=False,
-                        )
+                # Always wait for vLLM's update RPCs before resuming generation. In-flight
+                # updates only skip draining active requests before the pause/update.
+                engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
+                if engine_update_refs:
+                    ray_get_with_progress(
+                        engine_update_refs,
+                        desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
+                        enable=False,
+                    )
 
                 ray_get_with_progress(
                     [engine.wake_up.remote() for engine in vllm_engines],
