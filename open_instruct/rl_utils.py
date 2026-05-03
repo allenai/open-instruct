@@ -25,6 +25,7 @@ class RolloutMetadata:
     git_commit: str
     model_name: str
     timestamp: str
+    experiment_id: str | None = None
 
 
 @dataclass
@@ -49,7 +50,7 @@ def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None)
     """Save metadata about the rollout collection to disk.
 
     Creates a JSONL file containing run information including git commit,
-    model name, and timestamp for traceability.
+    model name, runtime experiment id, and timestamp for traceability.
 
     Args:
         save_path: Directory to save metadata file.
@@ -60,6 +61,7 @@ def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None)
         run_name=run_name,
         git_commit=utils.get_git_commit(),
         model_name=model_name or "unknown",
+        experiment_id=os.environ.get("BEAKER_WORKLOAD_ID") or None,
         timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
     )
     metadata_path = os.path.join(save_path, f"{run_name}_metadata.jsonl")

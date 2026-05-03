@@ -16,7 +16,7 @@ files, or rollout shard ``.jsonl`` files written by ``open_instruct.rl_utils``.
 For each traced prompt instance it:
 
 1. loads rollout shards written by ``save_rollouts_to_disk()``,
-2. groups attempts by source dataset row identity when available, otherwise by a
+2. groups attempts by source dataset identity when available, otherwise by a
    deterministic fingerprint over task name, prompt tokens, and ground truth,
 3. normalizes binary verifiable rewards from ``{0, C}`` back to ``{0, 1}``
    when possible,
@@ -74,7 +74,7 @@ DIFFICULTY_METHOD_FILENAME_ALIASES = {DIFFICULTY_GENERATION_METHOD: "bbq"}
 PRIOR_SOURCE_FILENAME_ALIASES = {"empirical_bayes": "eb", "jeffreys": "j", "jeffreys_fallback": "jf"}
 SOURCE_FORMAT_KIND = "open_instruct_rollout_traces"
 INSTANCE_ID_DEFINITION = (
-    "sha1(source_dataset,source_row_id) when available; otherwise sha1(task_name,prompt_tokens,ground_truth)"
+    "source_dataset::source_dataset_id when available; otherwise sha1(task_name,prompt_tokens,ground_truth)"
 )
 
 
@@ -239,9 +239,10 @@ def main(argv: list[str] | None = None) -> None:
             group_rows, prior=prior, lower_quantile=args.posterior_lower_quantile, num_buckets=args.difficulty_buckets
         )
         group_rows = sorted(group_rows, key=lambda row: row["instance_id"])
+        output_rows = strip_output_only_rollout_fields(group_rows)
 
         dataset_metadata = build_dataset_metadata(
-            rows=group_rows,
+            rows=output_rows,
             task_name=task_name,
             model_name=model_name,
             requested_prior_mode=args.beta_prior,
@@ -269,7 +270,7 @@ def main(argv: list[str] | None = None) -> None:
                 model_name,
             )
 
-        dataset = Dataset.from_list(group_rows)
+        dataset = Dataset.from_list(output_rows)
         annotate_dataset_metadata(dataset, dataset_metadata)
         output_jsonl, schema_json, metadata_json = build_output_paths(
             output_root, task_name=task_name, model_name=model_name, dataset_metadata=dataset_metadata
@@ -278,7 +279,7 @@ def main(argv: list[str] | None = None) -> None:
             output_jsonl=output_jsonl,
             schema_json=schema_json,
             metadata_json=metadata_json,
-            rows=group_rows,
+            rows=output_rows,
             dataset=dataset,
             dataset_metadata=dataset_metadata,
         )
@@ -286,10 +287,10 @@ def main(argv: list[str] | None = None) -> None:
         if args.push_to_hub is not None:
             dataset.push_to_hub(args.push_to_hub, split=args.split, private=True)
 
-        written_outputs.append((task_name, model_name, len(group_rows), output_jsonl, schema_json, metadata_json))
+        written_outputs.append((task_name, model_name, len(output_rows), output_jsonl, schema_json, metadata_json))
         logger.info(
             "Wrote %s rows for task=%s model=%s to %s, %s, and %s.",
-            len(group_rows),
+            len(output_rows),
             task_name,
             model_name,
             output_jsonl,
@@ -346,8 +347,8 @@ def build_rollout_source_from_metadata(metadata_path: Path, *, input_arg: str) -
         raise FileNotFoundError(f"Could not find rollout shards for run {run_name} next to {metadata_path}")
     return RolloutSource(
         input_arg=input_arg,
-        root_path=metadata_path.parent.resolve(),
-        metadata_path=metadata_path.resolve(),
+        root_path=metadata_path.parent.absolute(),
+        metadata_path=metadata_path.absolute(),
         rollout_paths=rollout_paths,
         run_name=run_name,
     )
@@ -415,6 +416,7 @@ def read_rollout_metadata(metadata_path: Path, *, fallback_run_name: str) -> dic
     return {
         "run_name": optional_string(metadata.get("run_name")) or fallback_run_name,
         "model_name": optional_string(metadata.get("model_name")),
+        "experiment_id": optional_string(metadata.get("experiment_id")),
         "git_commit": optional_string(metadata.get("git_commit")),
         "timestamp": optional_string(metadata.get("timestamp")),
     }
@@ -428,10 +430,10 @@ def build_rollout_contribution(
         raise ValueError("missing dataset/verifier source")
 
     source_dataset = normalize_source_dataset(record.get("source_dataset"))
-    source_row_id = normalize_source_row_id(record.get("source_row_id"))
+    source_dataset_id = extract_source_dataset_id(record)
 
     prompt_tokens = normalize_token_list(record.get("prompt_tokens"))
-    if prompt_tokens is None and (source_dataset is None or source_row_id is None):
+    if prompt_tokens is None and (source_dataset is None or source_dataset_id is None):
         raise ValueError("missing or invalid prompt_tokens")
 
     reward = extract_numeric_reward(record.get("reward"))
@@ -447,21 +449,21 @@ def build_rollout_contribution(
             prompt_tokens=prompt_tokens,
             ground_truth=ground_truth,
             source_dataset=source_dataset,
-            source_row_id=source_row_id,
+            source_dataset_id=source_dataset_id,
         ),
         "task_name": task_name,
         "base_task_name": get_base_task_name(task_name),
         "prompt_tokens": prompt_tokens,
         "ground_truth": ground_truth,
         "source_dataset": source_dataset,
-        "source_row_id": source_row_id,
+        "source_dataset_id": source_dataset_id,
         "score_source": task_name,
         "attempt_scores": [reward],
         "finish_reasons": [finish_reason] if finish_reason else [],
         "experiment_metadata": {
             "source_root": str(source_run.root_path),
             "model_name": run_metadata["model_name"],
-            "experiment_id": None,
+            "experiment_id": run_metadata["experiment_id"],
             "experiment_name": run_metadata["run_name"],
         },
         "warnings": extract_rollout_warnings(record.get("request_info")),
@@ -490,7 +492,15 @@ def normalize_source_dataset(value: Any) -> str | None:
     return serialized or None
 
 
-def normalize_source_row_id(value: Any) -> int | None:
+def extract_source_dataset_id(record: dict[str, Any]) -> int | None:
+    for field_name in ("source_dataset_id", "source_row_id"):
+        source_dataset_id = normalize_source_dataset_id(record.get(field_name))
+        if source_dataset_id is not None:
+            return source_dataset_id
+    return None
+
+
+def normalize_source_dataset_id(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -576,6 +586,13 @@ def aggregate_contributions(contributions: list[dict[str, Any]]) -> list[dict[st
         rows.append(row)
 
     return rows
+
+
+def strip_output_only_rollout_fields(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {key: value for key, value in row.items() if key not in {"prompt_tokens", "ground_truth"}}
+        for row in rows
+    ]
 
 
 def normalize_attempt_scores_for_group(
@@ -953,6 +970,7 @@ def build_dataset_metadata(
             "task_field": "dataset",
             "score_field": "reward",
             "source_dataset_field": "source_dataset",
+            "source_dataset_id_field": "source_dataset_id",
             "source_row_id_field": "source_row_id",
             "instance_id_definition": INSTANCE_ID_DEFINITION,
         },
@@ -1066,13 +1084,10 @@ def make_rollout_instance_id(
     prompt_tokens: list[int] | None,
     ground_truth: Any,
     source_dataset: str | None = None,
-    source_row_id: int | None = None,
+    source_dataset_id: int | None = None,
 ) -> str:
-    if source_dataset is not None and source_row_id is not None:
-        fingerprint = {"source_dataset": source_dataset, "source_row_id": source_row_id}
-        digest = hashlib.sha1(canonical_json(fingerprint).encode("utf-8")).hexdigest()[:20]
-        task_prefix = sanitize_name(source_dataset) or "unknown"
-        return f"{task_prefix}::{digest}"
+    if source_dataset is not None and source_dataset_id is not None:
+        return f"{source_dataset}::{source_dataset_id}"
 
     if prompt_tokens is None:
         raise ValueError("prompt_tokens are required when source row identity is unavailable")

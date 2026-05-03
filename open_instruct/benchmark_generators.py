@@ -103,6 +103,7 @@ def save_config(
         "model_config": dataclasses.asdict(model_config),
         "streaming_config": dataclasses.asdict(streaming_config),
         "timestamp": timestamp,
+        "experiment_id": os.environ.get("BEAKER_WORKLOAD_ID") or None,
     }
 
     with open(config_path, "w") as f:
