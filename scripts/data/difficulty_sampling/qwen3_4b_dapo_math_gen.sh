@@ -41,11 +41,10 @@ uv run open_instruct/benchmark_generators.py \
   --dataset_mixer_list_splits train \
   --num_unique_prompts_rollout 64 \
   --vllm_num_engines 8 \
+  --vllm_tensor_parallel_size 1 \
   --max_prompt_token_length 2048 \
   --response_length 8192 \
   --pack_length 10240 \
-  --vllm_num_engines 1 \
-  --vllm_tensor_parallel_size 1 \
   --vllm_top_p 1.0 \
   --temperature 1.0 \
   --apply_verifiable_reward true \
