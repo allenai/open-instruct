@@ -40,6 +40,7 @@ uv run open_instruct/benchmark_generators.py \
   --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
   --dataset_mixer_list_splits train \
   --num_unique_prompts_rollout 64 \
+  --num_samples_per_prompt_rollout 16 \
   --vllm_num_engines 8 \
   --vllm_tensor_parallel_size 1 \
   --max_prompt_token_length 2048 \
