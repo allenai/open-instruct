@@ -1563,7 +1563,11 @@ class DataPreparationActor:
                     sae_threshold=self.config.sae_threshold,
                     need_ground_truths=need_gt,
                     need_siblings=need_siblings,
-                    num_siblings_to_sample=self.config.rollout_context_num_siblings,
+                    num_siblings_to_sample=value_model_utils.resolve_num_siblings_to_sample(
+                        self.config.gt_conditioning_template,
+                        self.config.rollout_context_num_siblings,
+                        self.config.num_samples_per_prompt_rollout,
+                    ),
                     rng=np.random.default_rng(seed=(step * 97 + 1)),
                     batch_hints=batch.hints,
                 )

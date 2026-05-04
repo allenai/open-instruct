@@ -36,6 +36,7 @@ from open_instruct.value_model_utils import (
     build_generative_value_prompt,
     is_postfix_template,
     parse_generative_value_score,
+    resolve_num_siblings_to_sample,
     segment_rollout,
     value_clipped_mse_loss,
 )
@@ -168,6 +169,11 @@ class TestConditioningBuilders(unittest.TestCase):
     def test_is_postfix_template(self):
         self.assertFalse(is_postfix_template("answer_prefix"))
         self.assertTrue(is_postfix_template("expected_accuracy"))
+
+    def test_correct_demo_auto_samples_all_other_rollouts(self):
+        self.assertEqual(resolve_num_siblings_to_sample("correct_demo", -1, num_samples_per_prompt=8), 7)
+        self.assertEqual(resolve_num_siblings_to_sample("rollout_context", -1, num_samples_per_prompt=8), 4)
+        self.assertEqual(resolve_num_siblings_to_sample("correct_demo", 2, num_samples_per_prompt=8), 2)
 
 
 class TestScoreParsing(unittest.TestCase):

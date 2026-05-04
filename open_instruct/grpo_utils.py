@@ -176,8 +176,9 @@ class GRPOExperimentConfig(
     """If True, splice a conditioning string built from the ground truth into the value forward."""
     gt_conditioning_template: str = "answer_prefix"
     """Template name. One of: answer_prefix, expected_accuracy, rollout_context, correct_demo."""
-    rollout_context_num_siblings: int = 4
-    """Number of sibling rollouts to include when using the rollout_context / correct_demo templates."""
+    rollout_context_num_siblings: int = -1
+    """Number of sibling rollouts for rollout_context / correct_demo. -1 auto-selects 4 for rollout_context
+    and all other rollouts in the prompt group for correct_demo."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -367,8 +368,8 @@ class GRPOExperimentConfig(
             )
         if self.value_model_ground_truth_conditioning and not self.use_value_model:
             raise ValueError("--value_model_ground_truth_conditioning requires --use_value_model.")
-        if self.rollout_context_num_siblings < 0:
-            raise ValueError(f"--rollout_context_num_siblings must be >=0, got {self.rollout_context_num_siblings}.")
+        if self.rollout_context_num_siblings < -1:
+            raise ValueError(f"--rollout_context_num_siblings must be >=-1, got {self.rollout_context_num_siblings}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:

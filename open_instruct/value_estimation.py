@@ -84,7 +84,7 @@ class ScoreDatasetConfig:
     # Conditioning flags; must match what the value model was trained with.
     value_model_ground_truth_conditioning: bool = False
     gt_conditioning_template: str = "answer_prefix"
-    rollout_context_num_siblings: int = 4
+    rollout_context_num_siblings: int = -1
     gen_value_conditioning: str = "none"
     gen_value_score_min: float = 0.0
     gen_value_score_max: float = 10.0

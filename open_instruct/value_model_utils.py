@@ -24,6 +24,8 @@ from collections.abc import Sequence
 import torch
 
 _ROLLOUT_CONTEXT_MAX_TOKENS = 4096
+_DEFAULT_ROLLOUT_CONTEXT_NUM_SIBLINGS = 4
+_AUTO_ROLLOUT_CONTEXT_NUM_SIBLINGS = -1
 _POSTFIX_TEMPLATES = {"expected_accuracy", "rollout_context", "correct_demo"}
 _PREFIX_TEMPLATES = {"answer_prefix"}
 
@@ -99,6 +101,23 @@ def is_postfix_template(template: str) -> bool:
     Prefix templates are prepended to the entire packed sub-sequence.
     """
     return template in _POSTFIX_TEMPLATES
+
+
+def resolve_num_siblings_to_sample(
+    template: str, num_siblings_to_sample: int, num_samples_per_prompt: int
+) -> int:
+    """Resolve the auto sibling count used by rollout-context-style templates.
+
+    ``correct_demo`` needs access to every other rollout by default so it does not
+    drop a successful sibling before choosing the reference demo.
+    """
+    if num_siblings_to_sample >= 0:
+        return num_siblings_to_sample
+    if num_siblings_to_sample != _AUTO_ROLLOUT_CONTEXT_NUM_SIBLINGS:
+        raise ValueError(f"num_siblings_to_sample must be >= -1, got {num_siblings_to_sample}.")
+    if template == "correct_demo":
+        return max(0, num_samples_per_prompt - 1)
+    return _DEFAULT_ROLLOUT_CONTEXT_NUM_SIBLINGS
 
 
 def build_conditioning_text(
