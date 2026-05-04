@@ -1,0 +1,60 @@
+#!/bin/bash
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
+
+uv run python mason.py \
+    --budget ai2/oe-adapt \
+    --cluster ai2/jupiter \
+    --image nathanl/open_instruct_auto \
+    --pure_docker_mode \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --preemptible \
+    --num_nodes 4 \
+    --gpus 8 \
+    --max_retries 0 \
+    --no_auto_dataset_cache \
+    --env RAY_CGRAPH_get_timeout=300 \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --exp_name baseline_think_run_olmo_7b_sft_mixed \
+        --beta 0.0 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 64 \
+        --num_mini_batches 1 \
+        --learning_rate 1e-6 \
+        --per_device_train_batch_size 1 \
+        --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/ \
+        --kl_estimator 2 \
+        --dataset_mixer_list jacobmorrison/cse-579-mixed-rl 1.0 \
+        --dataset_mixer_list_splits train \
+        --max_prompt_token_length 2048 \
+        --response_length 32768 \
+        --pack_length 35840 \
+        --model_name_or_path allenai/Olmo-3-7B-Instruct-SFT \
+        --chat_template_name olmo_think \
+        --non_stop_penalty False \
+        --mask_truncated_completions False \
+        --temperature 1.0 \
+        --total_episodes 512000 \
+        --deepspeed_stage 3 \
+        --num_learners_per_node 8 8 \
+        --sequence_parallel_size 1 \
+        --vllm_num_engines 16 \
+        --vllm_tensor_parallel_size 1 \
+        --lr_scheduler_type constant \
+        --apply_verifiable_reward true \
+        --seed 1 \
+        --local_eval_every 100 \
+        --save_freq 100 \
+        --eval_priority urgent \
+        --eval_workspace ai2/olmo-instruct \
+        --try_launch_beaker_eval_jobs_on_weka True \
+        --gradient_checkpointing \
+        --with_tracking \
+        --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
+        --code_pass_rate_reward_threshold 0.99 \
+        --oe_eval_max_length 32768 \
+        --checkpoint_state_freq 100 \
+        --oe_eval_gpu_multiplier 4 \
+        --keep_last_n_checkpoints -1 \
+        --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
+        --oe_eval_tasks alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2025_deepseek
