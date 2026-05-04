@@ -2,8 +2,8 @@
 
 ## Status
 
-- **State**: running (queued, container not yet started as of 2026-05-04 21:09 UTC)
-- **Eval state**: not started — will auto-launch via `--try_launch_beaker_eval_jobs_on_weka` once training finishes
+- **State**: failed (exit 1 at config-parse time; relaunched as a separate run — see "Attempts" below)
+- **Eval state**: not started
 - **Last updated**: 2026-05-04
 
 ## Purpose
@@ -20,13 +20,15 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
 
 ## Beaker
 
-- **URL**: https://beaker.org/ex/01KQTD4DJ57C1SY8A1MFNS3GFC
+### Attempts
+
+| # | URL | Launched (UTC) | Terminated (UTC) | Exit | Notes |
+|---|-----|----------------|------------------|------|-------|
+| 1 | [01KQTD4D…](https://beaker.org/ex/01KQTD4DJ57C1SY8A1MFNS3GFC) | 2026-05-04 21:08 | 2026-05-04 22:36 | 1 | `checkpoint_state_dir` validation failure at parse time (see Known issues) |
+
 - **Workspace**: ai2/olmo-instruct
 - **Cluster**: ai2/jupiter
 - **Resources**: 1 node × 8 GPUs
-- **Launched**: 2026-05-04 21:08 UTC
-- **Started**: pending
-- **Terminated**: —
 
 ## Configuration
 
@@ -86,4 +88,23 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
 
 ## Known issues
 
-None identified yet. Update on termination.
+### Attempt 1 — checkpoint_state_dir validation crash (2026-05-04)
+
+`grpo_utils.ExperimentConfig.__post_init__` rejected the config:
+
+```
+ValueError: `checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!
+```
+
+Root cause: PR #1600 (April 2026) changed `checkpoint_state_freq` default from
+`-1` (off) to `200` (on). mason.py auto-injects `--checkpoint_state_dir` *only*
+inside the dataset-caching block (`if not skip_caching:` at mason.py:406). Our
+launch passes `--no_auto_dataset_cache` (required on macOS where `vllm` isn't
+installed), which skips that block entirely, so `checkpoint_state_dir` was
+never injected. Validation failed before any training started.
+
+**Fix** (committed): `cse-579-scripts/length_shaping_rl_qwen.sh` and
+`length_shaping_rl_7b.sh` now compute a unique `CHECKPOINT_STATE_DIR` and pass
+it as `--checkpoint_state_dir` explicitly. Same fix would be needed in
+Jacob's `baseline_rl.sh` / `baseline_rl_7b.sh` if launched with
+`--no_auto_dataset_cache`.

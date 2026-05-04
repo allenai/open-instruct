@@ -42,6 +42,13 @@ LAUNCH_BEAKER_TOKEN=$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_BEAKER_TOK
 
 EXP_NAME="lenshape_qwen_4b_base_mixed_${SHAPING_METHOD}_p${DECAY_PARAM}_w${WARMUP_TYPE}${EXP_SUFFIX}"
 
+# mason.py auto-injects --checkpoint_state_dir only when dataset caching runs,
+# but --no_auto_dataset_cache (required on macOS without vllm) skips that path.
+# Without this, grpo_utils.ExperimentConfig.__post_init__ rejects the default
+# checkpoint_state_freq=200. Override CHECKPOINT_STATE_DIR if you want a
+# specific path (e.g. for resuming a preempted run).
+CHECKPOINT_STATE_DIR=${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/ianm/${EXP_NAME}_$(date +%s)}
+
 uv run python mason.py \
     --budget ai2/oe-other \
     --cluster ai2/jupiter \
@@ -98,6 +105,7 @@ uv run python mason.py \
         --code_pass_rate_reward_threshold 0.99 \
         --oe_eval_max_length 32768 \
         --checkpoint_state_freq 100 \
+        --checkpoint_state_dir "$CHECKPOINT_STATE_DIR" \
         --oe_eval_gpu_multiplier 4 \
         --keep_last_n_checkpoints -1 \
         --length_reward_shaping_method "$SHAPING_METHOD" \
