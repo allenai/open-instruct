@@ -599,8 +599,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(len(combined_result.responses), num_prompts)
         self.assertEqual(prompt_Q.qsize(), 1)
         self.assertEqual(reward_metrics["stale_results_dropped"], 1.0)
-        self.assertEqual(reward_metrics["stale_result_lag_mean"], 9.0)
-        self.assertEqual(reward_metrics["stale_result_lag_max"], 9.0)
         self.assertEqual(reward_metrics["model_step_min"], 8.0)
         self.assertEqual(reward_metrics["model_step_max"], 10.0)
 

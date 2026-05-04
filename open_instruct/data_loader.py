@@ -1001,7 +1001,6 @@ def accumulate_inference_batches(
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
     stale_results_dropped = 0
-    stale_result_lags = []
     progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
@@ -1042,7 +1041,6 @@ def accumulate_inference_batches(
         ):
             lag = training_step - result.model_step
             stale_results_dropped += 1
-            stale_result_lags.append(lag)
             logger.warning(
                 "[accumulate_inference_batches] Dropping stale result for index=%s prompt_id=%s "
                 "at training_step=%s: model_step=%s lag=%s max_result_age_steps=%s",
@@ -1257,13 +1255,6 @@ def accumulate_inference_batches(
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
     combined_reward_metrics["stale_results_dropped"] = float(stale_results_dropped)
-    if stale_results_dropped:
-        stale_result_lags_array = np.array(stale_result_lags, dtype=float)
-        combined_reward_metrics["stale_result_lag_mean"] = float(stale_result_lags_array.mean())
-        combined_reward_metrics["stale_result_lag_max"] = float(stale_result_lags_array.max())
-    else:
-        combined_reward_metrics["stale_result_lag_mean"] = 0.0
-        combined_reward_metrics["stale_result_lag_max"] = 0.0
     if all_model_steps:
         model_steps_array = np.array(all_model_steps, dtype=float)
         combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
