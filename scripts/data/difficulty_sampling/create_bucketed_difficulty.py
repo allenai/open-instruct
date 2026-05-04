@@ -9,13 +9,16 @@
 # ///
 
 """
-Build a per-instance difficulty map from open-instruct rollout traces.
+Build a per-instance difficulty map from open-instruct rollout traces or
+Hugging Face datasets with pass-rate aggregates.
 
 The script accepts one or more local rollout directories, metadata ``.jsonl``
-files, or rollout shard ``.jsonl`` files written by ``open_instruct.rl_utils``.
-For each traced prompt instance it:
+files, rollout shard ``.jsonl`` files written by ``open_instruct.rl_utils``,
+or a Hugging Face dataset that already contains per-row pass counts. For each
+prompt instance it:
 
 1. loads rollout shards written by ``save_rollouts_to_disk()``, including compact score-only shards,
+   or loads per-row pass counts from a Hub dataset,
 2. groups attempts by source dataset identity when available, otherwise by a
    deterministic fingerprint over task name, prompt tokens, and ground truth,
 3. normalizes binary verifiable rewards from ``{0, C}`` back to ``{0, 1}``
@@ -33,6 +36,11 @@ Examples:
     uv run scripts/data/difficulty_sampling/create_bucketed_difficulty.py \
       --source /tmp/qwen_math_rollouts/qwen_math_metadata.jsonl \
       --output /tmp/difficulty_map
+
+    uv run scripts/data/difficulty_sampling/create_bucketed_difficulty.py \
+      --hf-dataset mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples \
+      --hf-split train \
+      --output /tmp/dapo_math_qwen3_difficulty
 """
 
 from __future__ import annotations
@@ -48,7 +56,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 from scipy.optimize import minimize
 from scipy.special import betaln
 from scipy.stats import beta as beta_distribution
@@ -72,10 +80,16 @@ POSTERIOR_QUANTILE_BATCH_SIZE = 256
 DIFFICULTY_GENERATION_METHOD = "beta_binomial_posterior_quantiles"
 DIFFICULTY_METHOD_FILENAME_ALIASES = {DIFFICULTY_GENERATION_METHOD: "bbq"}
 PRIOR_SOURCE_FILENAME_ALIASES = {"empirical_bayes": "eb", "jeffreys": "j", "jeffreys_fallback": "jf"}
-SOURCE_FORMAT_KIND = "open_instruct_rollout_traces"
-INSTANCE_ID_DEFINITION = (
+ROLLOUT_SOURCE_FORMAT_KIND = "open_instruct_rollout_traces"
+HF_SOURCE_FORMAT_KIND = "hugging_face_dataset_passrate_rows"
+ROLLOUT_INSTANCE_ID_DEFINITION = (
     "source_dataset::source_dataset_id when available; otherwise sha1(task_name,prompt_tokens,ground_truth)"
 )
+HF_INSTANCE_ID_DEFINITION = (
+    "dataset_repo_id::row_id_field when a stable row id is available; otherwise dataset_repo_id::row_index"
+)
+HF_SOURCE_ROW_INDEX_FIELD = "_source_row_index"
+HF_OUTPUT_COLUMNS = ("difficulty",)
 
 
 @dataclass(frozen=True)
@@ -101,16 +115,65 @@ class DifficultyPosteriorRow:
     difficulty_beta: float
 
 
+@dataclass(frozen=True)
+class InputRowsBundle:
+    rows: list[dict[str, Any]]
+    malformed_records: int
+    source_format: dict[str, Any]
+    source_dataset: Dataset | None = None
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build a per-instance difficulty map from open-instruct rollout traces.",
+        description="Build a per-instance difficulty map from open-instruct rollout traces or HF pass-rate datasets.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
         "--source",
         nargs="+",
-        required=True,
         help="One or more local rollout dirs, *_metadata.jsonl files, or *_rollouts_*.jsonl shards.",
+    )
+    source_group.add_argument(
+        "--hf-dataset",
+        type=str,
+        default=None,
+        help="Hugging Face dataset repo id containing per-row pass-rate aggregates.",
+    )
+    parser.add_argument("--hf-config", type=str, default=None, help="Optional dataset config for --hf-dataset.")
+    parser.add_argument("--hf-split", type=str, default="train", help="Input split to load from --hf-dataset.")
+    parser.add_argument(
+        "--hf-row-id-field",
+        type=str,
+        default="extra_info.index",
+        help="Dot-path to the stable per-row id field inside --hf-dataset.",
+    )
+    parser.add_argument(
+        "--hf-task-field", type=str, default="dataset", help="Dot-path to the task/verifier field in --hf-dataset."
+    )
+    parser.add_argument(
+        "--hf-model-field",
+        type=str,
+        default="generator_model",
+        help="Dot-path to the generator model field in --hf-dataset.",
+    )
+    parser.add_argument(
+        "--hf-pass-count-field",
+        type=str,
+        default="pass_count",
+        help="Dot-path to the integer pass-count field in --hf-dataset.",
+    )
+    parser.add_argument(
+        "--hf-attempt-count-field",
+        type=str,
+        default="num_samples",
+        help="Dot-path to the total-attempt-count field in --hf-dataset.",
+    )
+    parser.add_argument(
+        "--hf-pass-rate-field",
+        type=str,
+        default="pass_rate",
+        help="Optional dot-path to a pass-rate or fraction field used for validation/fallback in --hf-dataset.",
     )
     parser.add_argument(
         "--task",
@@ -175,33 +238,13 @@ def main(argv: list[str] | None = None) -> None:
     task_filters = set(args.task)
     output_root = resolve_output_root(args.output)
 
-    source_runs = discover_rollout_sources(args.source)
-    if not source_runs:
-        raise ValueError("No rollout trace sources were found.")
+    input_rows = load_input_rows(args, task_filters=task_filters)
 
-    contributions: list[dict[str, Any]] = []
-    malformed_records = 0
-
-    for source_run in source_runs:
-        logger.info(
-            "Loading %s (run=%s, metadata=%s, shards=%s)",
-            source_run.input_arg,
-            source_run.run_name,
-            source_run.metadata_path,
-            len(source_run.rollout_paths),
-        )
-        run_contributions, run_malformed = build_contributions_for_source(
-            source_run=source_run, task_filters=task_filters, strict=args.strict
-        )
-        contributions.extend(run_contributions)
-        malformed_records += run_malformed
-
-    if not contributions:
+    if not input_rows.rows:
         raise ValueError("No resolved per-instance rows were produced.")
 
-    rows = aggregate_contributions(contributions)
     rows = sorted(
-        rows,
+        input_rows.rows,
         key=lambda row: (
             stable_string(row.get("task_name")),
             stable_string((row.get("experiment_metadata") or {}).get("model_name")),
@@ -226,6 +269,16 @@ def main(argv: list[str] | None = None) -> None:
         group_rows, score_processing, group_skipped_nonunit = normalize_attempt_scores_for_group(
             group_rows, allow_nonunit_scores=args.allow_nonunit_scores
         )
+        if input_rows.source_format["kind"] == HF_SOURCE_FORMAT_KIND:
+            score_processing["source_field"] = ",".join(
+                field_name
+                for field_name in (
+                    input_rows.source_format.get("pass_count_field"),
+                    input_rows.source_format.get("attempt_count_field"),
+                    input_rows.source_format.get("pass_rate_field"),
+                )
+                if field_name
+            )
         skipped_nonunit += group_skipped_nonunit
 
         if not group_rows:
@@ -238,8 +291,14 @@ def main(argv: list[str] | None = None) -> None:
         group_rows = apply_beta_binomial_difficulty(
             group_rows, prior=prior, lower_quantile=args.posterior_lower_quantile, num_buckets=args.difficulty_buckets
         )
-        group_rows = sorted(group_rows, key=lambda row: row["instance_id"])
-        output_rows = strip_output_only_rollout_fields(group_rows)
+        if input_rows.source_dataset is None:
+            ordered_group_rows = sorted(group_rows, key=lambda row: row["instance_id"])
+            output_rows = strip_output_only_rollout_fields(ordered_group_rows)
+            dataset = Dataset.from_list(output_rows)
+        else:
+            ordered_group_rows = sort_hf_group_rows(group_rows)
+            output_rows = strip_internal_fields(ordered_group_rows)
+            dataset = build_hf_output_dataset(input_rows.source_dataset, ordered_group_rows)
 
         dataset_metadata = build_dataset_metadata(
             rows=output_rows,
@@ -251,6 +310,7 @@ def main(argv: list[str] | None = None) -> None:
             prior=prior,
             binary_row_count=binary_row_count,
             score_processing=score_processing,
+            source_format=input_rows.source_format,
         )
 
         if prior is not None:
@@ -270,7 +330,6 @@ def main(argv: list[str] | None = None) -> None:
                 model_name,
             )
 
-        dataset = Dataset.from_list(output_rows)
         annotate_dataset_metadata(dataset, dataset_metadata)
         output_jsonl, schema_json, metadata_json = build_output_paths(
             output_root, task_name=task_name, model_name=model_name, dataset_metadata=dataset_metadata
@@ -279,7 +338,6 @@ def main(argv: list[str] | None = None) -> None:
             output_jsonl=output_jsonl,
             schema_json=schema_json,
             metadata_json=metadata_json,
-            rows=output_rows,
             dataset=dataset,
             dataset_metadata=dataset_metadata,
         )
@@ -301,9 +359,362 @@ def main(argv: list[str] | None = None) -> None:
     logger.info(
         "Finished writing %s output file groups (%s malformed rollout records, %s skipped due to unsupported scores).",
         len(written_outputs),
-        malformed_records,
+        input_rows.malformed_records,
         skipped_nonunit,
     )
+
+
+def load_input_rows(args: argparse.Namespace, *, task_filters: set[str]) -> InputRowsBundle:
+    if args.hf_dataset is not None:
+        return load_hf_dataset_rows(
+            dataset_name=args.hf_dataset,
+            config_name=args.hf_config,
+            split=args.hf_split,
+            task_filters=task_filters,
+            strict=args.strict,
+            row_id_field=args.hf_row_id_field,
+            task_field=args.hf_task_field,
+            model_field=args.hf_model_field,
+            pass_count_field=args.hf_pass_count_field,
+            attempt_count_field=args.hf_attempt_count_field,
+            pass_rate_field=args.hf_pass_rate_field,
+        )
+
+    if not args.source:
+        raise ValueError("Expected --source when --hf-dataset is not provided.")
+
+    source_runs = discover_rollout_sources(args.source)
+    if not source_runs:
+        raise ValueError("No rollout trace sources were found.")
+
+    contributions: list[dict[str, Any]] = []
+    malformed_records = 0
+
+    for source_run in source_runs:
+        logger.info(
+            "Loading %s (run=%s, metadata=%s, shards=%s)",
+            source_run.input_arg,
+            source_run.run_name,
+            source_run.metadata_path,
+            len(source_run.rollout_paths),
+        )
+        run_contributions, run_malformed = build_contributions_for_source(
+            source_run=source_run, task_filters=task_filters, strict=args.strict
+        )
+        contributions.extend(run_contributions)
+        malformed_records += run_malformed
+
+    return InputRowsBundle(
+        rows=aggregate_contributions(contributions),
+        malformed_records=malformed_records,
+        source_format=build_rollout_source_format_metadata(),
+    )
+
+
+def load_hf_dataset_rows(
+    *,
+    dataset_name: str,
+    config_name: str | None,
+    split: str,
+    task_filters: set[str],
+    strict: bool,
+    row_id_field: str,
+    task_field: str,
+    model_field: str,
+    pass_count_field: str,
+    attempt_count_field: str,
+    pass_rate_field: str | None,
+) -> InputRowsBundle:
+    logger.info(
+        "Loading Hugging Face dataset %s (config=%s, split=%s).", dataset_name, config_name or "default", split
+    )
+
+    if config_name:
+        source_dataset = load_dataset(dataset_name, config_name, split=split)
+    else:
+        source_dataset = load_dataset(dataset_name, split=split)
+
+    rows: list[dict[str, Any]] = []
+    malformed_records = 0
+
+    for row_index, source_row in enumerate(source_dataset):
+        try:
+            row = build_hf_dataset_row(
+                source_row=source_row,
+                source_row_index=row_index,
+                dataset_name=dataset_name,
+                config_name=config_name,
+                split=split,
+                row_id_field=row_id_field,
+                task_field=task_field,
+                model_field=model_field,
+                pass_count_field=pass_count_field,
+                attempt_count_field=attempt_count_field,
+                pass_rate_field=pass_rate_field,
+            )
+        except Exception as exc:
+            malformed_records += 1
+            message = f"Malformed HF dataset row {dataset_name}[{split}][{row_index}]: {exc}"
+            if strict:
+                raise ValueError(message) from exc
+            logger.warning(message)
+            continue
+
+        task_name = stable_string(row.get("task_name"))
+        if task_filters and task_name not in task_filters and get_base_task_name(task_name) not in task_filters:
+            continue
+        rows.append(row)
+
+    return InputRowsBundle(
+        rows=rows,
+        malformed_records=malformed_records,
+        source_format=build_hf_source_format_metadata(
+            dataset_name=dataset_name,
+            config_name=config_name,
+            split=split,
+            row_id_field=row_id_field,
+            task_field=task_field,
+            model_field=model_field,
+            pass_count_field=pass_count_field,
+            attempt_count_field=attempt_count_field,
+            pass_rate_field=pass_rate_field,
+        ),
+        source_dataset=source_dataset,
+    )
+
+
+def build_hf_dataset_row(
+    *,
+    source_row: dict[str, Any],
+    source_row_index: int,
+    dataset_name: str,
+    config_name: str | None,
+    split: str,
+    row_id_field: str,
+    task_field: str,
+    model_field: str,
+    pass_count_field: str,
+    attempt_count_field: str,
+    pass_rate_field: str | None,
+) -> dict[str, Any]:
+    task_name = normalize_task_name(get_nested_field(source_row, task_field))
+    if task_name is None:
+        raise ValueError(f"missing task field {task_field!r}")
+
+    source_row_id = normalize_identifier(get_nested_field(source_row, row_id_field)) or str(source_row_index)
+    pass_count, attempt_count = extract_hf_attempt_summary(
+        row=source_row,
+        pass_count_field=pass_count_field,
+        attempt_count_field=attempt_count_field,
+        pass_rate_field=pass_rate_field,
+    )
+    model_name = optional_string(get_nested_field(source_row, model_field))
+
+    return {
+        HF_SOURCE_ROW_INDEX_FIELD: source_row_index,
+        "instance_id": make_hf_instance_id(dataset_name=dataset_name, source_row_id=source_row_id),
+        "task_name": task_name,
+        "base_task_name": get_base_task_name(task_name),
+        "source_dataset": dataset_name,
+        "source_row_id": source_row_id,
+        "attempt_scores": expand_binary_attempt_scores(pass_count=pass_count, attempt_count=attempt_count),
+        "finish_reasons": [],
+        "experiment_metadata": {
+            "source_root": format_hf_source_locator(dataset_name=dataset_name, config_name=config_name, split=split),
+            "model_name": model_name,
+            "experiment_id": None,
+            "experiment_name": dataset_name,
+        },
+        "score_sources": [task_name],
+        "warnings": [],
+    }
+
+
+def build_rollout_source_format_metadata() -> dict[str, Any]:
+    return {
+        "kind": ROLLOUT_SOURCE_FORMAT_KIND,
+        "task_field": "dataset",
+        "score_field": "reward",
+        "source_dataset_field": "source_dataset",
+        "source_dataset_id_field": "source_dataset_id",
+        "source_row_id_field": "source_row_id",
+        "instance_id_definition": ROLLOUT_INSTANCE_ID_DEFINITION,
+    }
+
+
+def build_hf_source_format_metadata(
+    *,
+    dataset_name: str,
+    config_name: str | None,
+    split: str,
+    row_id_field: str,
+    task_field: str,
+    model_field: str,
+    pass_count_field: str,
+    attempt_count_field: str,
+    pass_rate_field: str | None,
+) -> dict[str, Any]:
+    return {
+        "kind": HF_SOURCE_FORMAT_KIND,
+        "dataset_repo_id": dataset_name,
+        "config_name": config_name,
+        "split": split,
+        "row_id_field": row_id_field,
+        "task_field": task_field,
+        "model_field": model_field,
+        "pass_count_field": pass_count_field,
+        "attempt_count_field": attempt_count_field,
+        "pass_rate_field": pass_rate_field,
+        "instance_id_definition": HF_INSTANCE_ID_DEFINITION,
+    }
+
+
+def format_hf_source_locator(*, dataset_name: str, config_name: str | None, split: str) -> str:
+    config_token = config_name or "default"
+    return f"hf://{dataset_name}/{config_token}/{split}"
+
+
+def make_hf_instance_id(*, dataset_name: str, source_row_id: str) -> str:
+    return f"{dataset_name}::{source_row_id}"
+
+
+def sort_hf_group_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda row: row[HF_SOURCE_ROW_INDEX_FIELD])
+
+
+def build_hf_output_dataset(source_dataset: Dataset, rows: list[dict[str, Any]]) -> Dataset:
+    ordered_rows = sort_hf_group_rows(rows)
+    dataset = source_dataset.select([row[HF_SOURCE_ROW_INDEX_FIELD] for row in ordered_rows])
+
+    for column_name in HF_OUTPUT_COLUMNS:
+        values = [make_jsonable(row.get(column_name)) for row in ordered_rows]
+        if column_name in dataset.column_names:
+            dataset = dataset.remove_columns(column_name)
+        dataset = dataset.add_column(column_name, values)
+
+    return dataset
+
+
+def strip_internal_fields(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{key: value for key, value in row.items() if key != HF_SOURCE_ROW_INDEX_FIELD} for row in rows]
+
+
+def get_nested_field(value: Any, field_path: str) -> Any:
+    if not field_path:
+        return value
+
+    current = value
+    for field_name in field_path.split("."):
+        if not isinstance(current, dict) or field_name not in current:
+            return None
+        current = current[field_name]
+    return current
+
+
+def normalize_identifier(value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    text = stable_string(value).strip()
+    return text or None
+
+
+def normalize_nonnegative_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer() or value < 0:
+            return None
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = int(stripped)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def parse_pass_rate_value(value: Any) -> tuple[int | None, int | None, float | None]:
+    if value is None:
+        return None, None, None
+    if is_number(value):
+        rate = float(value)
+        if 0.0 <= rate <= 1.0:
+            return None, None, rate
+        raise ValueError(f"expected pass-rate value in [0, 1], received {value!r}")
+    if not isinstance(value, str):
+        raise ValueError(f"unsupported pass-rate value {value!r}")
+
+    stripped = value.strip()
+    if not stripped:
+        return None, None, None
+
+    if "/" in stripped:
+        numerator_text, denominator_text = stripped.split("/", 1)
+        numerator = normalize_nonnegative_int(numerator_text)
+        denominator = normalize_nonnegative_int(denominator_text)
+        if numerator is None or denominator is None or numerator > denominator:
+            raise ValueError(f"invalid pass-rate fraction {value!r}")
+        rate = 0.0 if denominator == 0 else numerator / denominator
+        return numerator, denominator, rate
+
+    try:
+        rate = float(stripped)
+    except ValueError as exc:
+        raise ValueError(f"invalid pass-rate value {value!r}") from exc
+    if not math.isfinite(rate) or rate < 0.0 or rate > 1.0:
+        raise ValueError(f"expected pass-rate value in [0, 1], received {value!r}")
+    return None, None, rate
+
+
+def extract_hf_attempt_summary(
+    *, row: dict[str, Any], pass_count_field: str, attempt_count_field: str, pass_rate_field: str | None
+) -> tuple[int, int]:
+    pass_count = normalize_nonnegative_int(get_nested_field(row, pass_count_field))
+    attempt_count = normalize_nonnegative_int(get_nested_field(row, attempt_count_field))
+
+    parsed_pass_count = None
+    parsed_attempt_count = None
+    parsed_pass_rate = None
+    if pass_rate_field:
+        parsed_pass_count, parsed_attempt_count, parsed_pass_rate = parse_pass_rate_value(
+            get_nested_field(row, pass_rate_field)
+        )
+
+    if pass_count is None and parsed_pass_count is not None:
+        pass_count = parsed_pass_count
+    if attempt_count is None and parsed_attempt_count is not None:
+        attempt_count = parsed_attempt_count
+
+    if pass_count is None or attempt_count is None:
+        raise ValueError(
+            f"missing pass-count summary fields {pass_count_field!r}/{attempt_count_field!r}"
+            f"{f' or parseable {pass_rate_field!r}' if pass_rate_field else ''}"
+        )
+    if attempt_count <= 0:
+        raise ValueError(f"attempt count must be positive, received {attempt_count}")
+    if pass_count > attempt_count:
+        raise ValueError(f"pass count {pass_count} exceeds attempt count {attempt_count}")
+
+    if parsed_pass_count is not None and parsed_pass_count != pass_count:
+        raise ValueError(f"pass-count field {pass_count_field!r} disagrees with {pass_rate_field!r}")
+    if parsed_attempt_count is not None and parsed_attempt_count != attempt_count:
+        raise ValueError(f"attempt-count field {attempt_count_field!r} disagrees with {pass_rate_field!r}")
+    if parsed_pass_rate is not None and not is_close(pass_count / attempt_count, parsed_pass_rate):
+        raise ValueError(
+            f"pass-count fields {pass_count_field!r}/{attempt_count_field!r} disagree with {pass_rate_field!r}"
+        )
+
+    return pass_count, attempt_count
+
+
+def expand_binary_attempt_scores(*, pass_count: int, attempt_count: int) -> list[float]:
+    return [1.0] * pass_count + [0.0] * (attempt_count - pass_count)
 
 
 def discover_rollout_sources(sources: list[str]) -> list[RolloutSource]:
@@ -501,23 +912,7 @@ def extract_source_dataset_id(record: dict[str, Any]) -> int | None:
 
 
 def normalize_source_dataset_id(value: Any) -> int | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value) or not value.is_integer():
-            return None
-        return int(value)
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            return int(stripped)
-        except ValueError:
-            return None
-    return None
+    return normalize_nonnegative_int(value)
 
 
 def normalize_token_list(value: Any) -> list[int] | None:
@@ -589,10 +984,7 @@ def aggregate_contributions(contributions: list[dict[str, Any]]) -> list[dict[st
 
 
 def strip_output_only_rollout_fields(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {key: value for key, value in row.items() if key not in {"prompt_tokens", "ground_truth"}}
-        for row in rows
-    ]
+    return [{key: value for key, value in row.items() if key not in {"prompt_tokens", "ground_truth"}} for row in rows]
 
 
 def normalize_attempt_scores_for_group(
@@ -902,18 +1294,12 @@ def build_output_paths(
 
 
 def write_output_files(
-    *,
-    output_jsonl: Path,
-    schema_json: Path,
-    metadata_json: Path,
-    rows: list[dict[str, Any]],
-    dataset: Dataset,
-    dataset_metadata: dict[str, Any],
+    *, output_jsonl: Path, schema_json: Path, metadata_json: Path, dataset: Dataset, dataset_metadata: dict[str, Any]
 ) -> None:
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
     with output_jsonl.open("w") as output_file:
-        for row in rows:
-            output_file.write(json.dumps(row, ensure_ascii=False) + "\n")
+        for row in dataset:
+            output_file.write(json.dumps(make_jsonable(row), ensure_ascii=False) + "\n")
 
     schema_json.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -939,6 +1325,7 @@ def build_dataset_metadata(
     prior: BetaPrior | None,
     binary_row_count: int,
     score_processing: dict[str, Any],
+    source_format: dict[str, Any],
 ) -> dict[str, Any]:
     effective_bucket_count = extract_effective_bucket_count(rows)
     difficulty_generation = {
@@ -965,15 +1352,7 @@ def build_dataset_metadata(
         "task_name": task_name,
         "model_name": model_name,
         "row_count": len(rows),
-        "source_format": {
-            "kind": SOURCE_FORMAT_KIND,
-            "task_field": "dataset",
-            "score_field": "reward",
-            "source_dataset_field": "source_dataset",
-            "source_dataset_id_field": "source_dataset_id",
-            "source_row_id_field": "source_row_id",
-            "instance_id_definition": INSTANCE_ID_DEFINITION,
-        },
+        "source_format": dict(source_format),
         "score_processing": dict(score_processing),
         "difficulty_generation": difficulty_generation,
     }
