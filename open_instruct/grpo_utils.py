@@ -559,7 +559,7 @@ def calculate_token_counts(
     Copied from grpo_fast.py to share logic with olmo_core_train_modules.py.
     """
     accumulation_counts: dict[int, float] = {}
-    local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
+    local_counts = [(mask[:, 1:] > 0).sum().float() for mask in data_BT.response_masks]
     if not local_counts:
         return accumulation_counts
 

@@ -151,3 +151,31 @@ Diff job `01KQTE27NWT6Y4G3VN3N2N87T2` (`scripts/train/qwen/diff_step1_dumps.py`)
 - Extend `snapshot_param_grads` to handle DeepSpeed Stage 2 (read partitioned grads from the engine; un-partition for comparison or save partitioned summaries with rank/partition metadata).
 - Re-launch grpo_fast step-1 capture; rerun diff for grad statistics.
 - Fix `response_masks` dtype mismatch at the capture site (cast to bool in oc, or to int64 in fast — pick whichever matches the trainer's actual usage downstream).
+
+## Bug 6 — `loss_denominator` 60× too big in grpo.py (FIXED)
+
+Step-1 dump diff (rank0) showed `loss_denominator` differs almost exactly by the observed grad-norm ratio:
+
+| | oc | fast | ratio |
+|---|---:|---:|---:|
+| `loss_denominator` (per accumulation group, all-reduced) | 3,979,577 | 66,718 | 59.6× |
+| `reported_grad_norm` (step 1) | 0.0348 | 2.0208 | 58.0× |
+
+Inspecting raw `inputs.response_masks[i]` from the captures:
+
+| | dtype | nunique | max | sum (single mask) |
+|---|---|---:|---:|---:|
+| oc `response_masks[0]` | int64 | 19 | 34 | 222,681 |
+| oc `response_masks[1]` | int64 | 17 | 16 |  74,570 |
+| fast `response_masks[0]` | bool | 2 | 1 |   7,182 |
+| fast `response_masks[1]` | bool | 2 | 1 |   8,682 |
+
+**oc's `response_masks` are document-ID valued, not binary 0/1.** Each token gets an integer doc-id (0 = pad/non-response, ≥1 = which document inside the pack the token belongs to). `grpo_utils.calculate_token_counts` did `mask[:, 1:].sum()`, which treats the mask as numeric and **sums the doc-id values** instead of counting response tokens. With ~17 docs per pack averaging ~17 tokens each, the sum-of-ids overcounts by roughly the average doc-id (~17×) per pack. After accumulation across two micro-batches and all-reduce across 4 ranks, the inflated denominator was ~60× the true response-token count.
+
+`grpo_fast.py:635` converts `data_BT.response_masks` to `mask.bool()` before the loss path, so fast's denominator is correct. `grpo.py` (oc path) keeps the int64 mask through `calculate_token_counts` and so the doc-id values leak into the denominator.
+
+**Fix (commit `…`)**: in both `grpo_utils.calculate_token_counts` and `grpo_fast.py.calculate_token_counts`, replace `mask[:, 1:].sum()` with `(mask[:, 1:] > 0).sum()` so the function is robust to either binary-bool or doc-id-int64 masks.
+
+Predicted effect: oc's per-step loss and grad_norm rise ~60× to match grpo_fast's; AIME parity should follow.
+
+Validation: relaunch the step-1 capture under both trainers; expect oc's `loss_denominator` to drop from ~4M to ~70k and `reported_grad_norm` to rise from ~0.035 to ~2.0, matching fast.

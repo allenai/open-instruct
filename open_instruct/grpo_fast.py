@@ -584,7 +584,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
     ) -> dict[int, float]:
         accumulation_counts: dict[int, float] = {}
-        local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
+        local_counts = [(mask[:, 1:] > 0).sum().float() for mask in data_BT.response_masks]
         if not local_counts:
             return accumulation_counts
 
