@@ -6,6 +6,9 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+if [[ $# -gt 0 ]]; then
+    shift
+fi
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
@@ -33,7 +36,7 @@ else
 fi
 DIFFICULTY_CURRICULUM_TOTAL_STEPS="${DIFFICULTY_CURRICULUM_TOTAL_STEPS:-${DEFAULT_DIFFICULTY_CURRICULUM_TOTAL_STEPS}}"
 
-uv run mason.py \
+uv run python mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
