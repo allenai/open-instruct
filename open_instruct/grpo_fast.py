@@ -2511,6 +2511,7 @@ def main(
         and is_beaker_job()
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
+        and not args.output_dir.startswith("/weka/")
         and os.path.isdir(args.output_dir)
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)

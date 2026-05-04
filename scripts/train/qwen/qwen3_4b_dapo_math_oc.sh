@@ -81,4 +81,5 @@ uv run open_instruct/grpo.py \
     --keep_last_n_checkpoints -1 \
     --output_dir "/tmp-3m/${RUN_NAME}" \
     --checkpoint_state_dir "/tmp-3m/${RUN_NAME}" \
-    --push_to_hub False "$@"
+    --push_to_hub False \
+    --try_auto_save_to_beaker False "$@"

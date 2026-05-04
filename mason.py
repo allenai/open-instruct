@@ -30,11 +30,36 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo.py",
     "open_instruct/dpo_tune_cache.py",
+    "open_instruct/grpo.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/reward_modeling.py",
 ]
 
-OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
+OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo.py", "open_instruct/grpo_fast.py"]
+
+
+def replace_or_append_flag(command: list[str], flag: str, value: str) -> list[str]:
+    """Replace the existing value for `flag` in `command`, or append `[flag, value]` if absent.
+
+    If `flag` appears multiple times, all occurrences are collapsed to a single occurrence with `value`.
+    """
+    indices = [i for i, tok in enumerate(command) if tok == flag]
+    if not indices:
+        command.append(flag)
+        command.append(value)
+        return command
+    first = indices[0]
+    if first + 1 < len(command):
+        command[first + 1] = value
+    else:
+        command.append(value)
+    for idx in reversed(indices[1:]):
+        if idx + 1 < len(command):
+            del command[idx : idx + 2]
+        else:
+            del command[idx]
+    return command
+
 
 CACHE_EXCLUDED_ARGS = {
     "--with_tracking": False,
@@ -500,8 +525,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     console.log(
                         f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir_path}/`"
                     )
-                    command.append("--output_dir")
-                    command.append(f"{new_output_dir_path}/")
+                    command = replace_or_append_flag(command, "--output_dir", f"{new_output_dir_path}/")
             else:
                 no_eval_commands = [
                     ["--try_launch_beaker_eval_jobs", "False"],
@@ -679,7 +703,7 @@ def maybe_override_checkpoint_dir(
     console.log(
         f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_path}`"
     )
-    command.extend(["--checkpoint_state_dir", str(new_checkpoint_state_path)])
+    command = replace_or_append_flag(command, "--checkpoint_state_dir", str(new_checkpoint_state_path))
 
     return command
 

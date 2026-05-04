@@ -177,6 +177,8 @@ class GRPOExperimentConfig(
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
+    keep_last_n_checkpoints: int = 1
+    """How many recent training-state checkpoints to retain. -1 keeps all."""
     gs_checkpoint_state_dir: str | None = None
     """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
