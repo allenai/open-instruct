@@ -106,6 +106,7 @@ def _handle_post_training(
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and output_path != beaker_output_path
+        and not args.output_dir.startswith("/weka/")
     ):
         shutil.copytree(hf_model_path, "/output", dirs_exist_ok=True)
 
@@ -186,6 +187,8 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = olmo_core_utils.setup_model(args)
+    if is_main_process:
+        olmo_core_utils.verify_can_save_as_hf(model_config, args.model_name_or_path)
 
     if args.packing:
         logger.info("Using packing/padding-free collation")

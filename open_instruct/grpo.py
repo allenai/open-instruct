@@ -31,7 +31,7 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, utils, vllm_utils
+from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -80,6 +80,7 @@ def save_and_cleanup(
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
+        and not args.output_dir.startswith("/weka/")
         and os.path.isdir(args.output_dir)
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
@@ -125,6 +126,9 @@ def main(
 
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
+
+    _, transformer_config = olmo_core_utils.setup_model(model_config, tc, init_device="meta")
+    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
