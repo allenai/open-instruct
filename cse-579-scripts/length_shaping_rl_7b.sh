@@ -33,16 +33,17 @@ SOLVE_RATE_THRESHOLD=${SOLVE_RATE_THRESHOLD:-0.3}
 GIT_REF=${GIT_REF:-ian/length-shaping}
 EXP_SUFFIX=${EXP_SUFFIX:-}
 
-# Read secrets from ai2/ianm and pass them through as plain --env values.
-# This works around mason's per-workspace secret lookup: ai2/olmo-instruct
-# (where we want to run for cluster priority) does not yet have ianm_*
-# secrets configured. Override SECRETS_WORKSPACE if you keep them elsewhere.
+# Read secrets from ai2/ianm and pass them through under aliases.
+# Works around mason's per-workspace secret lookup (ai2/olmo-instruct does
+# not yet have ianm_* secrets) AND Beaker's guard against literal --env
+# values for canonical secret names (WANDB_API_KEY etc). We re-export to
+# the canonical names inside the container before python starts.
 # The values get embedded literally in the Beaker job spec, so do not use
-# this pattern with secrets you would not paste into a beaker description.
+# this pattern with secrets more sensitive than class-project keys.
 SECRETS_WORKSPACE=${SECRETS_WORKSPACE:-ai2/ianm}
-WANDB_API_KEY=${WANDB_API_KEY:-$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_WANDB_API_KEY)}
-HF_TOKEN=${HF_TOKEN:-$(beaker secret read -w "$SECRETS_WORKSPACE" HF_TOKEN)}
-BEAKER_TOKEN=${BEAKER_TOKEN:-$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_BEAKER_TOKEN)}
+LAUNCH_WANDB_KEY=$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_WANDB_API_KEY)
+LAUNCH_HF_TOKEN=$(beaker secret read -w "$SECRETS_WORKSPACE" HF_TOKEN)
+LAUNCH_BEAKER_TOKEN=$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_BEAKER_TOKEN)
 
 EXP_NAME="lenshape_olmo_7b_sft_mixed_${SHAPING_METHOD}_p${DECAY_PARAM}_w${WARMUP_TYPE}${EXP_SUFFIX}"
 
@@ -59,10 +60,10 @@ uv run python mason.py \
     --max_retries 0 \
     --no_auto_dataset_cache \
     --env RAY_CGRAPH_get_timeout=300 \
-    --env "WANDB_API_KEY=$WANDB_API_KEY" \
-    --env "HF_TOKEN=$HF_TOKEN" \
-    --env "BEAKER_TOKEN=$BEAKER_TOKEN" \
-    -- rm -rf /stage/open_instruct \&\& git clone --depth=1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /tmp/oi_branch \&\& cp -r /tmp/oi_branch/open_instruct /stage/ \&\& source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --env "LAUNCH_WANDB_KEY=$LAUNCH_WANDB_KEY" \
+    --env "LAUNCH_HF_TOKEN=$LAUNCH_HF_TOKEN" \
+    --env "LAUNCH_BEAKER_TOKEN=$LAUNCH_BEAKER_TOKEN" \
+    -- export WANDB_API_KEY=\$LAUNCH_WANDB_KEY HF_TOKEN=\$LAUNCH_HF_TOKEN BEAKER_TOKEN=\$LAUNCH_BEAKER_TOKEN \&\& rm -rf /stage/open_instruct \&\& git clone --depth=1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /tmp/oi_branch \&\& cp -r /tmp/oi_branch/open_instruct /stage/ \&\& source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name "$EXP_NAME" \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \

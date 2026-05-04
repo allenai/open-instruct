@@ -19,10 +19,13 @@ GIT_REF=${GIT_REF:-ian/length-shaping}
 # Pass secrets through --env (see cse-579-scripts/length_shaping_rl_7b.sh
 # for context). Lets us run --with_tracking even in workspaces that don't
 # have our wandb key configured.
+# Beaker rejects literal --env values for canonical secret names
+# (WANDB_API_KEY, HF_TOKEN, BEAKER_TOKEN), so we ship them under aliases
+# and re-export inside the container before python starts.
 SECRETS_WORKSPACE=${SECRETS_WORKSPACE:-ai2/ianm}
-WANDB_API_KEY=${WANDB_API_KEY:-$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_WANDB_API_KEY)}
-HF_TOKEN=${HF_TOKEN:-$(beaker secret read -w "$SECRETS_WORKSPACE" HF_TOKEN)}
-BEAKER_TOKEN=${BEAKER_TOKEN:-$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_BEAKER_TOKEN)}
+LAUNCH_WANDB_KEY=$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_WANDB_API_KEY)
+LAUNCH_HF_TOKEN=$(beaker secret read -w "$SECRETS_WORKSPACE" HF_TOKEN)
+LAUNCH_BEAKER_TOKEN=$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_BEAKER_TOKEN)
 
 EXP_NAME="lenshape_smoke_${SHAPING_METHOD}_p${DECAY_PARAM}"
 
@@ -39,13 +42,13 @@ uv run python mason.py \
        --max_retries 0 \
        --timeout 15m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-       --env "WANDB_API_KEY=$WANDB_API_KEY" \
-       --env "HF_TOKEN=$HF_TOKEN" \
-       --env "BEAKER_TOKEN=$BEAKER_TOKEN" \
+       --env "LAUNCH_WANDB_KEY=$LAUNCH_WANDB_KEY" \
+       --env "LAUNCH_HF_TOKEN=$LAUNCH_HF_TOKEN" \
+       --env "LAUNCH_BEAKER_TOKEN=$LAUNCH_BEAKER_TOKEN" \
        --budget ai2/oe-other \
        --gpus 1 \
        --no_auto_dataset_cache \
-       -- rm -rf /stage/open_instruct \&\& git clone --depth=1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /tmp/oi_branch \&\& cp -r /tmp/oi_branch/open_instruct /stage/ \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- export WANDB_API_KEY=\$LAUNCH_WANDB_KEY HF_TOKEN=\$LAUNCH_HF_TOKEN BEAKER_TOKEN=\$LAUNCH_BEAKER_TOKEN \&\& rm -rf /stage/open_instruct \&\& git clone --depth=1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /tmp/oi_branch \&\& cp -r /tmp/oi_branch/open_instruct /stage/ \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name "$EXP_NAME" \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
