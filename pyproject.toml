@@ -25,6 +25,7 @@ dependencies = [
     "pyarrow>=20.0.0",
     "pyyaml>=6.0.2",
     "ray[default]>=2.49.2",
+    "seaborn>=0.13.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
