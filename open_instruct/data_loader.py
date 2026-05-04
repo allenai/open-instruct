@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, length_reward_shaping, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -486,6 +486,20 @@ class StreamingDataLoaderConfig:
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
+    # Length-aware reward shaping (see open_instruct/length_reward_shaping.py).
+    length_reward_shaping_method: str = "none"
+    """One of: none, linear, exponential, rank, binary_shortest, soft_threshold."""
+    length_reward_decay_param: float = 1.0
+    """alpha (linear), lambda (exponential), or threshold fraction (soft_threshold)."""
+    length_reward_warmup_type: str = "constant"
+    """One of: constant, linear, solve_rate."""
+    length_reward_warmup_fraction: float = 0.25
+    """Fraction of training over which to linearly ramp up the length penalty."""
+    length_reward_solve_rate_threshold: float = 0.3
+    """Group solve-rate threshold above which the penalty activates (solve_rate type)."""
+    length_reward_correctness_threshold: float = 0.0
+    """A response is treated as correct when its raw reward exceeds this value."""
+
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -533,6 +547,17 @@ class StreamingDataLoaderConfig:
 
         if self.save_traces and not self.rollouts_save_path:
             raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
+
+        if self.length_reward_shaping_method not in length_reward_shaping.SHAPING_METHODS:
+            raise ValueError(
+                f"length_reward_shaping_method must be one of "
+                f"{length_reward_shaping.SHAPING_METHODS}, got {self.length_reward_shaping_method!r}"
+            )
+        if self.length_reward_warmup_type not in length_reward_shaping.WARMUP_TYPES:
+            raise ValueError(
+                f"length_reward_warmup_type must be one of "
+                f"{length_reward_shaping.WARMUP_TYPES}, got {self.length_reward_warmup_type!r}"
+            )
 
     def build_dataloader(
         self,
@@ -1256,6 +1281,32 @@ class DataPreparationActor:
             assert batch_stats is not None
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
+
+            scores_pre_shaping_mean = float(scores_per_prompt.mean()) if scores_per_prompt.size else 0.0
+            length_reward_warmup_weight = 0.0
+            if self.config.length_reward_shaping_method != "none" and len(result.responses) > 0:
+                response_lengths_arr = np.array([len(r) for r in result.responses])
+                lengths_per_prompt = response_lengths_arr.reshape(-1, self.config.num_samples_per_prompt_rollout)
+                correct_mask = scores_per_prompt > self.config.length_reward_correctness_threshold
+                group_solve_rate = float(correct_mask.mean(axis=-1).mean()) if correct_mask.size else 0.0
+                length_reward_warmup_weight = length_reward_shaping.compute_warmup_weight(
+                    step=step,
+                    num_training_steps=self.num_training_steps,
+                    warmup_type=self.config.length_reward_warmup_type,
+                    warmup_fraction=self.config.length_reward_warmup_fraction,
+                    solve_rate_threshold=self.config.length_reward_solve_rate_threshold,
+                    group_solve_rate=group_solve_rate,
+                )
+                scores_per_prompt = length_reward_shaping.apply_length_reward_shaping(
+                    scores_per_prompt=scores_per_prompt,
+                    lengths_per_prompt=lengths_per_prompt,
+                    method=self.config.length_reward_shaping_method,
+                    decay_param=self.config.length_reward_decay_param,
+                    warmup_weight=length_reward_warmup_weight,
+                    correctness_threshold=self.config.length_reward_correctness_threshold,
+                )
+                scores = scores_per_prompt.reshape(-1)
+
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
@@ -1369,6 +1420,9 @@ class DataPreparationActor:
                     "val/advantages_min": advantages.min(),
                     "val/advantages_max": advantages.max(),
                     "val/advantages_hist": advantages,
+                    "val/length_reward_warmup_weight": length_reward_warmup_weight,
+                    "val/scores_pre_shaping": scores_pre_shaping_mean,
+                    "val/scores_post_shaping": float(scores.mean()) if scores.size else 0.0,
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
