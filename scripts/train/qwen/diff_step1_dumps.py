@@ -119,7 +119,23 @@ def main():
         s = payload.get("samples")
         if s is None:
             continue
-        if isinstance(s, dict):
+        if isinstance(s, list):
+            logger.info(f"{tag} samples: list len={len(s)}")
+            for i, item in enumerate(s):
+                if not isinstance(item, dict):
+                    logger.info(f"  {tag}[{i}]: {type(item).__name__}")
+                    continue
+                for sk, sv in sorted(item.items()):
+                    if isinstance(sv, torch.Tensor):
+                        f = sv.float()
+                        logger.info(
+                            f"  {tag}[{i}].{sk}: shape={tuple(sv.shape)} dtype={sv.dtype} "
+                            f"mean={f.mean().item():.6e} sum={f.sum().item():.6e} "
+                            f"min={f.min().item():.6e} max={f.max().item():.6e}"
+                        )
+                    else:
+                        logger.info(f"  {tag}[{i}].{sk}: {type(sv).__name__} value={sv!r}")
+        elif isinstance(s, dict):
             for sk, sv in sorted(s.items()):
                 if isinstance(sv, torch.Tensor):
                     logger.info(
