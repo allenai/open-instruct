@@ -4,7 +4,13 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
+
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+if [[ "${1:-}" == "$BEAKER_USER"* ]]; then
+    BEAKER_IMAGE="$1"
+    shift
+fi
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
@@ -22,7 +28,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env OPEN_INSTRUCT_DUMP_DIR=/tmp-3m/${RUN_NAME}/step1_capture \
+    --env OPEN_INSTRUCT_DUMP_DIR=/weka/oe-adapt-default/finbarrt/step1_capture/${RUN_NAME} \
     --env OPEN_INSTRUCT_DUMP_STEP=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \

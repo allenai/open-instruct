@@ -127,7 +127,10 @@ def main(
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
-    _, transformer_config = olmo_core_utils.setup_model(model_config, tc, init_device="meta")
+    oc_model_config = olmo_core_utils.ModelConfig(
+        model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
+    )
+    _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
     olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
 
     ray_init_kwargs = {
