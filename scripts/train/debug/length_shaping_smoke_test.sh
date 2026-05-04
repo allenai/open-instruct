@@ -16,6 +16,14 @@ WARMUP_FRACTION=${WARMUP_FRACTION:-0.25}
 SOLVE_RATE_THRESHOLD=${SOLVE_RATE_THRESHOLD:-0.3}
 GIT_REF=${GIT_REF:-ian/length-shaping}
 
+# Pass secrets through --env (see cse-579-scripts/length_shaping_rl_7b.sh
+# for context). Lets us run --with_tracking even in workspaces that don't
+# have our wandb key configured.
+SECRETS_WORKSPACE=${SECRETS_WORKSPACE:-ai2/ianm}
+WANDB_API_KEY=${WANDB_API_KEY:-$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_WANDB_API_KEY)}
+HF_TOKEN=${HF_TOKEN:-$(beaker secret read -w "$SECRETS_WORKSPACE" HF_TOKEN)}
+BEAKER_TOKEN=${BEAKER_TOKEN:-$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_BEAKER_TOKEN)}
+
 EXP_NAME="lenshape_smoke_${SHAPING_METHOD}_p${DECAY_PARAM}"
 
 uv run python mason.py \
@@ -31,6 +39,9 @@ uv run python mason.py \
        --max_retries 0 \
        --timeout 15m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+       --env "WANDB_API_KEY=$WANDB_API_KEY" \
+       --env "HF_TOKEN=$HF_TOKEN" \
+       --env "BEAKER_TOKEN=$BEAKER_TOKEN" \
        --budget ai2/oe-other \
        --gpus 1 \
        --no_auto_dataset_cache \
@@ -58,6 +69,7 @@ uv run python mason.py \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
+    --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
