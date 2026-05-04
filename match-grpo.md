@@ -124,3 +124,30 @@ In rough priority order (Bug 5 closed; doc_lens ablation no longer the lead):
 
 - `scripts/diagnostics/olmo_core_hf_parity.py` — single-rank HF↔OLMo-core forward + per-layer hidden-state diff probe.
 - `scripts/diagnostics/launch_olmo_core_hf_parity.sh` — Beaker single-GPU launch wrapper. Run via `./scripts/train/build_image_and_launch.sh scripts/diagnostics/launch_olmo_core_hf_parity.sh`.
+
+## Step-1 capture probe (new)
+
+`open_instruct/_step1_capture.py` writes per-rank dumps to `$OPEN_INSTRUCT_DUMP_DIR/{trainer}_step1_rank{R}.pt` when `OPEN_INSTRUCT_DUMP_STEP=1`. Captured for both trainers on Qwen3-4B-Base DAPO with seed=1, identical hyperparameters except `--fsdp_shard_degree 4` vs `--deepspeed_stage 2`.
+
+| run | exp | dump dir |
+|---|---|---|
+| grpo.py oc v3 | `01KQT919T937TN54MHAJPZ946X` | `/weka/oe-adapt-default/finbarrt/step1_capture/qwen3_4b_dapo_grpooc_step1cap_v3_20260504_145109/` |
+| grpo_fast v5 | `01KQTD7TVQBAMQXXFJ5ZEM3QMP` | `/weka/oe-adapt-default/finbarrt/step1_capture/qwen3_4b_dapo_grpofast_step1cap_v5_20260504_151018/` |
+
+Diff job `01KQTE27NWT6Y4G3VN3N2N87T2` (`scripts/train/qwen/diff_step1_dumps.py`) on rank0 dumps:
+
+### Findings
+
+1. **`response_masks` dtype mismatch**: oc=`torch.int64`, fast=`torch.bool`. Same shape contract; meaning identical, but if any downstream code does `mask.sum()` it's a type-coerce difference. Worth confirming masked_mean denominators are identical between trainers.
+
+2. **`param_grads` dict empty for grpo_fast (399 vs 0)**. `snapshot_param_grads` iterates `model.named_parameters()` and reads `p.grad`. In **DeepSpeed Stage 2** the gradients are partitioned and stored on the optimizer (`engine.optimizer.averaged_gradients` / `single_partition_of_fp32_groups`), not on `p.grad`, so our naive collector saw zero gradients. The OLMo-core/HSDP side correctly sees 399 DTensor `p.grad`s (`is_dtensor=True`).
+
+   - This means the rank0 dumps **cannot be diffed for gradients yet**. Need to extend `snapshot_param_grads` to pull from `engine.optimizer.averaged_gradients` for the deepspeed path before relaunching grpo_fast.
+
+3. **Inputs payloads otherwise structurally identical**: same set of fields (`advantages`, `attention_masks`, `position_ids`, `query_responses`, `response_masks`, `vllm_logprobs`), all `list[Tensor]` of length 2, same dtypes (modulo response_masks above). Sample shapes differ trivially because each run rolled out independently with seed=1 against different rollout schedules.
+
+### Next steps
+
+- Extend `snapshot_param_grads` to handle DeepSpeed Stage 2 (read partitioned grads from the engine; un-partition for comparison or save partitioned summaries with rank/partition metadata).
+- Re-launch grpo_fast step-1 capture; rerun diff for grad statistics.
+- Fix `response_masks` dtype mismatch at the capture site (cast to bool in oc, or to int64 in fast — pick whichever matches the trainer's actual usage downstream).
