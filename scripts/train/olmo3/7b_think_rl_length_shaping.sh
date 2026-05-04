@@ -41,7 +41,7 @@ EXP_NAME="7b_olmo3_thinker_sft_to_rl_lenshape_${SHAPING_METHOD}_p${DECAY_PARAM}_
 python mason.py \
     --budget ai2/oe-other \
     --cluster ai2/jupiter \
-    --image hamishivi/open_instruct_testing_1110 \
+    --image nathanl/open_instruct_auto \
     --pure_docker_mode \
     --workspace ai2/olmo-instruct \
     --priority urgent \
