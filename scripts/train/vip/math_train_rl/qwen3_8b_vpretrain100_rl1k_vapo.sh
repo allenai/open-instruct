@@ -3,6 +3,8 @@
 # length-adaptive GAE for 100 value-only steps, then 1000 regular
 # policy/value RL steps on Qwen3-8B-Base.
 #
+# GPU layout: 2 nodes x 8 GPUs = 8 learner GPUs + 8 vLLM inference GPUs.
+#
 # Step budget:
 #   total_episodes = (100 value warmup + 1000 RL) * 32 prompts * 8 samples
 #                  = 281600
@@ -18,7 +20,7 @@ uv run python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --gpus 8 \
     --max_retries 0 \
     --no_auto_dataset_cache \
@@ -50,9 +52,9 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 281600 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 4 \
+    --num_learners_per_node 8 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 4 \
+    --vllm_num_engines 8 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --lr_scheduler_type constant \
