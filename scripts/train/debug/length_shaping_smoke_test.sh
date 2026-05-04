@@ -21,7 +21,7 @@ EXP_NAME="lenshape_smoke_${SHAPING_METHOD}_p${DECAY_PARAM}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
-       --image hamishivi/open_instruct_testing_1110 \
+       --image nathanl/open_instruct_auto \
        --description "Length shaping smoke test (single GPU)." \
        --pure_docker_mode \
        --no-host-networking \
