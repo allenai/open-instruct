@@ -1,29 +1,12 @@
 #!/bin/bash
-# 1000-step version of scripts/train/debug/genac_smoke.sh, launched via mason.
-#
-# Same GenAC configuration as the smoke test, but using the VIP RL1K SAE + AP
-# math rollout settings on Qwen3-4B as much as possible: 32 prompts, 8 samples
-# per prompt, answer-prefix scalar value conditioning, SAE segmentation, and
-# 1000 joint actor/critic RL steps after value warmup.
-#
-# GPU layout (8 GPUs on 1 node):
-#   - 4x policy learners (DeepSpeed stage 3)
-#   - 1x policy vLLM engine (TP=1)
-#   - 2x generative-critic vLLM engines (TP=1)
-#   - 1x GenValueTrainerActor (PyTorch, REINFORCE updates)
-# (Rationale: the gen-value pool scores every sampled response each step, so
-# the gen-value vLLM pool remains the bottleneck. Give it more engines than
-# the policy pool.)
+# Value warmup + RL: scalar PPO critic + answer_prefix GT conditioning for
+# 100 value-only steps, then 1000 regular policy/value RL steps.
 #
 # Step budget:
-#   100 critic-only warmup steps (policy frozen via --value_warmup_steps)
-# + 1000 joint actor/critic steps
-# = 1100 total training steps
-#
-# total_episodes = 1100 * num_unique_prompts_rollout * num_samples_per_prompt_rollout
-#                = 1100 * 32 * 8 = 281600
+#   total_episodes = (100 value warmup + 1000 RL) * 32 prompts * 8 samples
+#                  = 281600
 DDMM=$(date +"%d%m")
-exp_name=genac_rl1k_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain100_rl1k_ppo_ap_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -41,18 +24,15 @@ uv run python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
-    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast_genvalue.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
     --beta 0.0 \
     --async_steps 8 \
     --inflight_updates \
-    --active_sampling \
     --no_resampling_pass_rate 0.875 \
-    --loss_fn dapo \
-    --clip_higher 0.272 \
-    --mask_truncated_completions False \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
+    --active_sampling \
     --num_samples_per_prompt_rollout 8 \
     --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
@@ -71,10 +51,9 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 1 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
-    --vllm_enable_prefix_caching \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
@@ -86,25 +65,11 @@ uv run python mason.py \
     --push_to_hub False \
     --use_value_model \
     --value_learning_rate 2e-6 \
-    --value_warmup_steps 100 \
-    --reset_optimizer_after_value_warmup \
     --gae_lambda 0.95 \
     --gamma 1.0 \
     --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
-    --use_sae \
-    --sae_threshold 0.2 \
     --value_model_ground_truth_conditioning \
     --gt_conditioning_template answer_prefix \
-    --use_generative_value_model \
-    --gen_value_model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --gen_value_vllm_num_engines 2 \
-    --gen_value_vllm_tensor_parallel_size 1 \
-    --gen_value_segmentation sae \
-    --gen_value_max_segments 16 \
-    --gen_value_score_min 0 \
-    --gen_value_score_max 10 \
-    --gen_value_max_new_tokens 1024 \
-    --gen_value_conditioning gt \
-    --gen_value_learning_rate 1e-6 \
-    --gen_value_sync_freq 1
+    --value_warmup_steps 100 \
+    --reset_optimizer_after_value_warmup
