@@ -104,11 +104,32 @@ def main():
     _summarize_inputs("oc", oc)
     _summarize_inputs("fast", fa)
 
-    if "param_grads" in oc and "param_grads" in fa:
+    if oc.get("param_grads") and fa.get("param_grads"):
         _diff_grad_summary(oc["param_grads"], fa["param_grads"])
         _diff_weights(oc["param_grads"], fa["param_grads"])
     else:
-        logger.info(f"missing param_grads — oc has: {sorted(oc.keys())}; fast has: {sorted(fa.keys())}")
+        logger.info(
+            f"param_grads non-empty? oc={bool(oc.get('param_grads'))} fast={bool(fa.get('param_grads'))}"
+        )
+
+    for k in ["dp_world_size", "global_step", "reported_grad_norm", "trainer"]:
+        logger.info(f"top-level {k}: oc={oc.get(k)} fast={fa.get(k)}")
+
+    for tag, payload in [("oc", oc), ("fast", fa)]:
+        s = payload.get("samples")
+        if s is None:
+            continue
+        if isinstance(s, dict):
+            for sk, sv in sorted(s.items()):
+                if isinstance(sv, torch.Tensor):
+                    logger.info(
+                        f"{tag} samples.{sk}: shape={tuple(sv.shape)} dtype={sv.dtype} "
+                        f"mean={sv.float().mean().item():.6e} norm={sv.float().norm(2).item():.6e}"
+                    )
+                else:
+                    logger.info(f"{tag} samples.{sk}: {type(sv).__name__} {sv!r}")
+        else:
+            logger.info(f"{tag} samples: {type(s).__name__}")
 
 
 if __name__ == "__main__":
