@@ -43,13 +43,20 @@ def build_install_script(ref: str) -> str:
         raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
     return (
         "set -euo pipefail && "
+        "export UV_PROJECT_ENVIRONMENT=/opt/venv && "
+        "export UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache && "
         "git clone "
         "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
         "/opt/olmo-eval-internal && "
         f"cd /opt/olmo-eval-internal && git checkout {shlex.quote(ref)} && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
-        "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
+        "uv pip freeze -q | grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt && "
+        "uv venv /opt/vllm-venv && "
+        "for pkg in /opt/venv/lib/python*/site-packages/torch* /opt/venv/lib/python*/site-packages/nvidia*; do "
+        "ln -sf \"$pkg\" /opt/vllm-venv/lib/python*/site-packages/; "
+        "done && "
+        "VIRTUAL_ENV=/opt/vllm-venv uv pip install --cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]' && "
+        "uv pip install -e '.[s3,clients,hf,beaker]' -c /tmp/cuda-constraints.txt && "
+        "uv pip install 'antlr4-python3-runtime' -c /tmp/cuda-constraints.txt && "
         "cd /workspace"
     )
 
@@ -182,6 +189,7 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
                     {"name": "OPENAI_API_KEY", "secret": "openai_api_key"},
                     {"name": "GITHUB_TOKEN", "secret": "GITHUB_TOKEN"},
                     {"name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN", "value": "1"},
+                    {"name": "VLLM_PYTHON", "value": "/opt/vllm-venv/bin/python"},
                 ],
                 "datasets": datasets,
                 "result": {"path": "/results"},
