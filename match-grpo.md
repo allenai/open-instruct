@@ -178,4 +178,13 @@ Inspecting raw `inputs.response_masks[i]` from the captures:
 
 Predicted effect: oc's per-step loss and grad_norm rise ~60× to match grpo_fast's; AIME parity should follow.
 
-Validation: relaunch the step-1 capture under both trainers; expect oc's `loss_denominator` to drop from ~4M to ~70k and `reported_grad_norm` to rise from ~0.035 to ~2.0, matching fast.
+Validation (beaker `01KQTGZ3DWZ8GNDMQPTH3HF287`, dump at `qwen3_4b_dapo_oc_bug6fix_step1cap_20260504_161526`, diffed against fast baseline `qwen3_4b_dapo_grpofast_step1cap_v5_20260504_151018` in beaker `01KQTHJYHQY23EFDY5YZ4199CV`):
+
+| | Before fix (oc) | After fix (oc) | Fast baseline |
+|---|---:|---:|---:|
+| `loss_denominator` | 3,979,577 | 66,966 | 66,718 |
+| `reported_grad_norm` (step 1) | 0.0348 | 2.2326 | 2.0208 |
+
+After-fix oc still has int64 doc-id-valued `response_masks` (max=18 / 32 in this run, 19 / 15 unique values per pack — confirming the data shape was the input cause), but the new `(mask[:, 1:] > 0).sum()` correctly counts response tokens. Per-rank loss_denominator within 0.4% of fast and grad_norm within 10% (residual variance attributable to independent rollouts on different prompt slices). The 58× grad-norm gap that motivated this whole investigation is fully explained by Bug 6.
+
+Next: rerun a 1000-step training and compare AIME pass@1 to the fast baseline (0.2156) — expect oc to no longer be under-trained at 0.1948.
