@@ -104,6 +104,22 @@ def main():
     _summarize_inputs("oc", oc)
     _summarize_inputs("fast", fa)
 
+    for tag, payload in [("oc", oc), ("fast", fa)]:
+        masks = payload.get("inputs", {}).get("response_masks", [])
+        for i, m in enumerate(masks):
+            f = m.float()
+            uniq = m.unique()
+            uniq_show = uniq[:20].tolist()
+            logger.info(
+                f"  {tag}.inputs.response_masks[{i}]: dtype={m.dtype} shape={tuple(m.shape)} "
+                f"sum={f.sum().item():.6e} max={f.max().item():.6e} min={f.min().item():.6e} "
+                f"nunique={uniq.numel()} uniq_first20={uniq_show}"
+            )
+            f_sliced = m[:, 1:].float()
+            logger.info(
+                f"    [:, 1:].sum()={f_sliced.sum().item():.6e}  bool[:, 1:].sum()={(m[:, 1:] > 0).float().sum().item():.6e}"
+            )
+
     if oc.get("param_grads") and fa.get("param_grads"):
         _diff_grad_summary(oc["param_grads"], fa["param_grads"])
         _diff_weights(oc["param_grads"], fa["param_grads"])
