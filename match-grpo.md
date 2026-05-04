@@ -20,11 +20,11 @@ Documented in earlier revisions of this doc; all landed in `8300ff103` and ances
 3. **Optimizer never stepping.** `optim_step` / `zero_grads` overrides made `train_batch`'s call to `self.optim_step()` a no-op. Fixed by calling `super().optim_step()` from inside `train_batch` (`008dc95`).
 4. `--lr_scheduler_type constant` silently routed to `LinearWithWarmup(alpha_f=0)`. Fixed by explicit routing + raising on unknown values (`008dc95`).
 
-## Bug 5 (status: single-doc FIXED, packed/doc_lens path BROKEN)
+## Bug 5 (status: FULLY FIXED — single-doc and packed/doc_lens both correct)
 
 Original finding (commit `05a966756`): single-doc forward through OLMo-core's Qwen3 port diverged from HF starting at `block_6` (max ≈288), causing the trainer↔vLLM TIS gap.
 
-Re-ran the parity probe (`scripts/diagnostics/olmo_core_hf_parity.py`, restored from `939a1f631`) against the current pin `61091dba` on Beaker `01KQSYMVPRBNTG22WQXY4Y6TVM` (single GPU, ~1 min wallclock).
+Re-ran the parity probe (`scripts/diagnostics/olmo_core_hf_parity.py`, restored from `939a1f631`) against the current pin `61091dba` on Beaker `01KQSYMVPRBNTG22WQXY4Y6TVM` then again on `01KQT1HM575JQREGW41Q55CKTB` (single GPU, ~1 min wallclock).
 
 ### Single-doc (no packing) — FIXED
 
@@ -41,37 +41,29 @@ Re-ran the parity probe (`scripts/diagnostics/olmo_core_hf_parity.py`, restored 
 
 The original `block_6` jump is gone. Per-block diffs grow gradually from bf16 noise (~1e-2) at block_0 to ~4 at block_35 — consistent with 36 stacked bf16 matmuls and acceptable for our purposes. **Bug 5 single-doc is fixed.**
 
-### Packed-2-doc — BROKEN, and the FIXED path is the worse one
+### Packed-2-doc — FIXED (after probe was corrected)
 
-The probe runs OLMo-core two ways on the same packed-2-doc input:
-- **BROKEN**: `model(input_ids, attention_mask=None, position_ids=position_ids)`. OLMo-core silently drops both kwargs, so attention is plain causal across the whole packed sequence (cross-doc bleed).
-- **FIXED**: `model(input_ids, doc_lens=doc_lens, max_doc_lens=max_doc_lens)`. Should give intra-document attention.
+Initial probe v1 (`01KQSYMVPRBNTG22WQXY4Y6TVM`) reported `packed FIXED block_6 max|Δ| = 5405`. That number was an artifact of an apples-to-oranges comparison: the HF baseline ran with `attention_mask=None`, so HF allowed cross-doc attention while OLMo-core (with `doc_lens`) blocked it. The whole 5400 was just "what one extra row of cross-doc attention contributes per layer, compounded 6 times."
 
-Result on current pin:
+Probe v2 (`01KQT1HM575JQREGW41Q55CKTB`, commit `bdccbdb7a`) builds a 4D additive `attention_mask` for HF that blocks cross-doc attention too. Now both sides have the same masking semantics:
 
-| | BROKEN (no doc_lens) | FIXED (with doc_lens) |
+| | BROKEN (HF intra-doc, OLMo no doc_lens) | FIXED (both intra-doc) |
 |---|---:|---:|
-| `block_0` max\|Δ\| | 1.05 | 5.69 |
-| `block_5` max\|Δ\| | 4.13 | 50.8 |
-| **`block_6` max\|Δ\|** | 7.44 | **5405** |
-| `block_35` max\|Δ\| | 303 | 798 |
-| logprob max\|Δ\| | 9.06 | 7.22 |
-| argmax-agree | 72.7% | 72.7% |
+| `block_0` max\|Δ\| | 5.48 | 7.8e-3 |
+| `block_5` max\|Δ\| | 46.6 | 0.125 |
+| **`block_6` max\|Δ\|** | 5405 | **0.160** |
+| `block_35` max\|Δ\| | 806 | 8.0 |
+| `final_norm` max\|Δ\| | 48.3 | 2.0 |
+| logprob max\|Δ\| | 7.19 | **0.219** |
+| logprob mean\|Δ\| | 0.97 | **0.029** |
+| argmax-agree | 68.2% | **100%** |
 
-**Passing `doc_lens` makes things ~700× worse at block_6**, and the divergence stays in the thousands all the way to block_33. Either the doc_lens code path in olmo-core is buggy, or `forward(..., doc_lens=...)` no longer exists on the current pin and the kwarg is being routed somewhere harmful (silently mutating activations rather than just being dropped).
+**Packed FIXED tracks single-doc almost exactly** (block_6: 0.156 vs 0.160; block_35: 4.0 vs 8.0). The `doc_lens` path in OLMo-core works. The 700× regression we thought we saw was the probe's HF baseline being wrong, not olmo-core.
 
-The training-time forward in `olmo_core_train_modules.py` passes `doc_lens` (commit `8ca1313a6 Pass doc_lens to OLMo-core forward in GRPO logprob recompute`). **So the trainer is currently running the broken-FIXED path on every step.** This is consistent with grpo.py training reward looking superficially OK (the gradient still has signal) while transferring poorly to AIME — gradients computed against logits that are 5000× off from "true" Qwen3 are still a learning signal, just a wrong one.
-
-### Caveats on the packed test
-
-- Argmax-agree being 72.7% in **both** BROKEN and FIXED suggests the cross-doc-bleed BROKEN path has been the de-facto "good enough" path — vLLM/HF also have cross-doc effects for this input shape (per the earlier note: HF's `attention_mask=None + position_ids` does NOT build an intra-doc mask; `position_ids` only affects RoPE).
-- The probe input is `"The quick brown fox jumps over the lazy dog." + "In a hole in the ground there lived a hobbit."` (10 + 12 tokens). Real training packs are much longer with more docs; the failure mode there will be different but the doc_lens path is shared.
-
-### Next moves on this
-
-1. **Read olmo-core upstream commit `61091dba` Transformer.forward signature.** If `doc_lens` was renamed/removed, our `forward_for_logprobs` wrapper is passing a kwarg the model now silently mishandles. If still present, reproduce minimum failure inside olmo-core's tests and file upstream.
-2. **Try BROKEN-path training**, i.e. drop `doc_lens` from `olmo_core_train_modules.py` forward calls. If grad_norm jumps from 0.02 → ~1.0 and AIME catches up, the doc_lens regression is the dominant cause of all the symptoms.
-3. **Trainer-vLLM logprob diff is small (~6e-3) in BOTH runs** despite the parity probe showing 5400-magnitude divergence with doc_lens. That means either (a) actual training packs trigger this less than the toy 2-doc test does, or (b) the way we recompute logprobs in the trainer cancels much of the error. Worth understanding which before committing to (2) — see investigation note below.
+What this means:
+- `Transformer.forward(..., doc_lens=..., max_doc_lens=...)` at pin `61091dba` is correctly plumbed through `_prepare_inputs` → `cu_doc_lens` → block kwargs → `Attention.forward` → `RotaryEmbedding.forward` (intra-doc RoPE, `rope.py:533-544`) → flash-attn-2 varlen (`backend.py:226-231`). All verified by reading source.
+- The trainer passing `doc_lens` on every step is fine. **`doc_lens` is not the cause of the AIME regression or the 50× grad_norm gap.**
+- The `BROKEN` column (no doc_lens) shows what dropping the kwarg costs: cross-doc attention bleed compounds to ~5400 by block_6. That confirms doc_lens is doing real work; we just shouldn't read its diff against an unmasked HF baseline.
 
 ## New observation: 50× grad_norm gap (current branch tip `8181927c4`)
 
@@ -102,10 +94,14 @@ Conclusion: loss path math is structurally equivalent to grpo_fast.py. The 50× 
 
 ### Open hypotheses for the grad_norm gap
 
-1. **doc_lens path in OLMo-core is broken (most likely cause).** Parity probe (Bug 5 section above) shows `model(..., doc_lens=...)` produces hidden-state differences of ~5400 at block_6 vs HF, while the kwarg-dropping path gives ~7. The trainer uses the doc_lens path. Even if the trainer↔vLLM logprob diff stays small (because vLLM is also wrong in a similar way, or because most packs are dominated by single docs), the gradients are computed against ~thousands-magnitude-wrong intermediate activations — the resulting grad shape and norm are not the gradient we'd get from a "true" Qwen3 forward.
-2. **DTensor norm aggregation under HSDP.** `get_total_norm` on `_NormPartial` DTensors with subsequent `.full_tensor()` should sum `p^norm` across shards before taking the root. A bug here would systematically under-report by ~√shard_degree (i.e. ~2×), not ~50× — but worth ruling out by computing the norm manually after `loss.backward()`.
-3. **Activation checkpointing (`activation_memory_budget=0.5`).** Selective AC shouldn't change gradients, but this is the only training-config delta beyond trainer choice.
+(Bug 5 / `doc_lens` ruled out by probe v2 above. Loss-scaling ruled out earlier.)
+
+1. **DTensor norm aggregation under HSDP.** `get_total_norm` on `_NormPartial` DTensors with subsequent `.full_tensor()` should sum `p^norm` across shards before taking the root. A bug here would systematically under-report by ~√shard_degree (i.e. ~2×) — that's ~10× too small to explain a 50× gap on its own, but could combine with another factor. Easy to rule in/out by computing the norm manually after `loss.backward()`.
+2. **`masked_mean` denominator differs from grpo_fast.** grpo.py uses `masked_mean(pg_loss + beta*kl, mask, None, loss_denominator)` where `loss_denominator` is the all-reduced token count over the dp_process_group. grpo_fast uses the same call but the denominator is reduced over the default global group. Need to verify these denominators are numerically equal in a real step (e.g. add `dist.barrier(); print(loss_denominator)` and compare).
+3. **Activation checkpointing (`activation_memory_budget=0.5`).** Selective AC shouldn't change gradients, but it's a config delta. Try `activation_memory_budget=1.0` for a few steps and check grad_norm.
 4. **Optimizer-state lifecycle.** `super().optim_step()` was wired in `008dc95` as the fix for Bug 3. Worth re-confirming the optimizer actually advances every accumulation boundary in a current run (e.g. by logging param hash before/after on rank 0 for a few steps).
+5. **Gradient accumulation / micro-batching boundary.** grpo.py's accumulation loop in `train_batch` may divide gradients differently from grpo_fast's. If grpo.py is averaging across accumulation steps where grpo_fast is summing (or vice versa), grad_norm could differ by `num_accum_steps` (often ~16-64×).
+6. **Reduce-scatter vs all-reduce averaging.** FSDP reduce-scatter divides by world_size in the gradient reduction; DeepSpeed Stage 2 all-reduce sums then divides by world_size. The math is equivalent IF the local pre-reduce gradient is the same — but if grpo.py's loss is *already* divided by world_size before backward (and grpo_fast's isn't, or vice versa), grad_norm differs by world_size (8× or 16×).
 
 ## What we know is fine
 
@@ -116,13 +112,13 @@ Conclusion: loss path math is structurally equivalent to grpo_fast.py. The 50× 
 
 ## Recommended next moves
 
-In rough priority order:
+In rough priority order (Bug 5 closed; doc_lens ablation no longer the lead):
 
-1. **Investigate the doc_lens path.** Read `Transformer.forward` at olmo-core pin `61091dba` and confirm whether `doc_lens` / `max_doc_lens` are still accepted kwargs and whether they're routed to the attention kernel correctly. The parity probe shows passing them produces ~5400 hidden-state divergence — either the API changed and our wrapper is wrong, or there's an upstream regression.
-2. **Try training with doc_lens disabled.** Drop the `doc_lens=...` kwarg from `olmo_core_train_modules.py:forward_for_logprobs` calls and rerun a short grpo.py. If grad_norm jumps to ~1.0 and AIME catches up to the grpo_fast baseline, this is the dominant cause.
-3. **Bisect the grad_norm gap independently.** If (2) doesn't close it, run grpo.py with `fsdp_shard_degree=1, fsdp_num_replicas=4` (DDP-equivalent). If grad_norm jumps back to ~1.0 there, the residual is FSDP-specific (DTensor norm aggregation, reduce-scatter semantics). If it stays at ~0.02, the issue is in the loss path.
-4. **Manual grad-norm check.** Single-rank instrumented variant that, after `loss.backward()` and before clip, computes `sqrt(sum(p.grad.detach().to_local().pow(2).sum() for p in params))` (DTensor-aware) and prints alongside the clip-reported value. Disagreement localizes the bug to the clip path.
-5. **Confirm optimizer is stepping.** Log a fixed parameter's `abs().mean()` before and after a known step in both trainers. Rules out a subtler regression of Bug 3.
+1. **Manual grad-norm check.** Single-rank instrumented variant that, after `loss.backward()` and before clip, computes `sqrt(sum(p.grad.detach().to_local().pow(2).sum() for p in params))` (DTensor-aware) and prints alongside the clip-reported value. If they disagree, the bug is in the DTensor `_NormPartial` aggregation; if they agree, the gradients themselves really are 50× smaller and we look upstream of clip.
+2. **Bisect FSDP vs DDP under HSDP.** Run grpo.py with `fsdp_shard_degree=1, fsdp_num_replicas=8` (pure replica / DDP-like). If grad_norm jumps to ~1.0, the gap is FSDP-shard-specific (DTensor aggregation, reduce-scatter semantics). If it stays at ~0.02, the issue is in the loss path or accumulation, not sharding.
+3. **Print `loss_denominator` and `loss` value at step 1.** Compare side-by-side to grpo_fast.py's `total_loss_token_count` and final `loss` at step 1 (same data, same starting weights). If `loss_denominator` differs, the masked_mean call is the culprit; if `loss` matches but grad_norm doesn't, it's downstream of `.backward()`.
+4. **Confirm optimizer is stepping.** Log a fixed parameter's `abs().mean()` before and after a known step in both trainers. Rules out a subtler regression of Bug 3.
+5. **Disable activation checkpointing** (`activation_memory_budget=1.0`) for a few steps; check if grad_norm changes. Should be a no-op for gradients; if it isn't, we have a recompute determinism problem.
 
 ## Probe + scripts
 
