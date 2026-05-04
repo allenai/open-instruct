@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, padding_free_collator, rlvr_curriculum, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     DATASET_ORIGIN_KEY,
@@ -424,6 +424,30 @@ class StreamingDataLoaderConfig:
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
+    # Difficulty-aware prompt curriculum
+    difficulty_curriculum_enabled: bool = False
+    difficulty_curriculum_field: str = "difficulty"
+    difficulty_curriculum_posterior_mean_field: str = "posterior_mean"
+    difficulty_curriculum_bucket_index_field: str = "bucket_index"
+    difficulty_curriculum_bucket_count_field: str = "bucket_count"
+    difficulty_curriculum_easy_focus_steps: int = 100
+    difficulty_curriculum_bootstrap_target_bucket_ratio: float = 0.125
+    difficulty_curriculum_warmup_target_bucket_ratio: float = 0.5
+    difficulty_curriculum_final_target_bucket_ratio: float = 1.0
+    difficulty_curriculum_warmup_steps: int = 500
+    difficulty_curriculum_total_steps: int = 10000
+    difficulty_curriculum_min_hard_frac: float = 0.05
+    difficulty_curriculum_max_hard_frac: float = 0.50
+    difficulty_curriculum_bucket_sigma: float = 0.0
+    difficulty_curriculum_easy_focus_sigma: float = 0.0
+    difficulty_curriculum_uncertainty_weight: float = 0.5
+    difficulty_curriculum_adaptive_enabled: bool = False
+    difficulty_curriculum_adaptive_update_every: int = 50
+    difficulty_curriculum_adaptive_learning_signal_weight: float = 0.7
+    difficulty_curriculum_adaptive_exploration_weight: float = 0.3
+    difficulty_curriculum_adaptive_blend_weight: float = 0.5
+    difficulty_curriculum_strict_metadata: bool = True
+
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     dataset_mixer_eval_list: list[str] = field(default_factory=list)
@@ -566,6 +590,33 @@ class StreamingDataLoaderConfig:
             fs_local_rank=fs_local_rank,
         )
 
+    def build_difficulty_curriculum_config(self, seed: int) -> rlvr_curriculum.DifficultyCurriculumConfig:
+        return rlvr_curriculum.DifficultyCurriculumConfig(
+            enabled=self.difficulty_curriculum_enabled,
+            difficulty_field=self.difficulty_curriculum_field,
+            posterior_mean_field=self.difficulty_curriculum_posterior_mean_field,
+            bucket_index_field=self.difficulty_curriculum_bucket_index_field,
+            bucket_count_field=self.difficulty_curriculum_bucket_count_field,
+            easy_focus_steps=self.difficulty_curriculum_easy_focus_steps,
+            bootstrap_target_bucket_ratio=self.difficulty_curriculum_bootstrap_target_bucket_ratio,
+            warmup_target_bucket_ratio=self.difficulty_curriculum_warmup_target_bucket_ratio,
+            final_target_bucket_ratio=self.difficulty_curriculum_final_target_bucket_ratio,
+            warmup_steps=self.difficulty_curriculum_warmup_steps,
+            total_curriculum_steps=self.difficulty_curriculum_total_steps,
+            min_hard_frac=self.difficulty_curriculum_min_hard_frac,
+            max_hard_frac=self.difficulty_curriculum_max_hard_frac,
+            bucket_sigma=self.difficulty_curriculum_bucket_sigma,
+            easy_focus_sigma=self.difficulty_curriculum_easy_focus_sigma,
+            uncertainty_weight=self.difficulty_curriculum_uncertainty_weight,
+            adaptive_enabled=self.difficulty_curriculum_adaptive_enabled,
+            adaptive_update_every=self.difficulty_curriculum_adaptive_update_every,
+            adaptive_learning_signal_weight=self.difficulty_curriculum_adaptive_learning_signal_weight,
+            adaptive_exploration_weight=self.difficulty_curriculum_adaptive_exploration_weight,
+            adaptive_blend_weight=self.difficulty_curriculum_adaptive_blend_weight,
+            seed=seed,
+            strict_metadata=self.difficulty_curriculum_strict_metadata,
+        )
+
 
 class StreamingDataLoader(data_loader.DataLoaderBase):
     """Thin wrapper dataloader that pulls pre-prepared data from the DataPreparationActor singleton."""
@@ -665,6 +716,143 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
+class DifficultyCurriculumHFDataLoader(HFDataLoader):
+    """Prompt loader that samples with a difficulty-aware curriculum."""
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int,
+        seed: int,
+        dp_rank: int,
+        dp_world_size: int,
+        work_dir: str,
+        curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig,
+        automatic_reshuffle: bool = True,
+        collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+        device: torch.device | None = None,
+        drop_last: bool = True,
+        fs_local_rank: int | None = None,
+        max_seq_length: int = 1,
+    ) -> None:
+        if batch_size != 1:
+            raise ValueError("DifficultyCurriculumHFDataLoader currently supports batch_size=1 only")
+        if dp_world_size != 1 or dp_rank != 0:
+            raise ValueError("DifficultyCurriculumHFDataLoader currently supports dp_world_size=1 only")
+
+        self._sampling_step = 0
+        self._curriculum_sampler = rlvr_curriculum.BetaBinomialDifficultySampler(
+            dataset=dataset,
+            num_samples=max(len(dataset), 1),
+            config=curriculum_config,
+            global_step_getter=lambda: self._sampling_step,
+        )
+        self._curriculum_iter = None
+
+        super().__init__(
+            dataset=dataset,
+            batch_size=batch_size,
+            seed=seed,
+            dp_rank=dp_rank,
+            dp_world_size=dp_world_size,
+            work_dir=work_dir,
+            automatic_reshuffle=automatic_reshuffle,
+            collator=collator,
+            device=device,
+            drop_last=drop_last,
+            fs_local_rank=fs_local_rank,
+            max_seq_length=max_seq_length,
+        )
+
+    @property
+    def curriculum_sampler(self) -> rlvr_curriculum.BetaBinomialDifficultySampler:
+        return self._curriculum_sampler
+
+    def set_sampling_step(self, step: int) -> None:
+        self._sampling_step = int(step)
+
+    def record_curriculum_observations(
+        self,
+        dataset_indices: list[int] | np.ndarray,
+        rewards: list[float] | np.ndarray,
+        advantages: list[float] | np.ndarray | None = None,
+    ) -> None:
+        self._curriculum_sampler.record_observations(dataset_indices, rewards, advantages)
+
+    def build_curriculum_metrics(self, prompt_dataset_indices: list[int], step: int) -> dict[str, float]:
+        return self._curriculum_sampler.build_metrics(prompt_dataset_indices, step)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "epoch": self._epoch,
+            "batches_processed": self.batches_processed,
+            "sampling_step": self._sampling_step,
+            "curriculum_sampler_state": self._curriculum_sampler.state_dict(),
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self._epoch = state_dict["epoch"]
+        self.batches_processed = state_dict["batches_processed"]
+        self._sampling_step = state_dict.get("sampling_step", 0)
+        self._curriculum_sampler.load_state_dict(state_dict["curriculum_sampler_state"])
+        self.effective_size = max(len(self._full_dataset), 1)
+        self.dataset = self._full_dataset
+        self._curriculum_iter = iter(self._curriculum_sampler)
+        self._current_iter = None
+
+    def exclude_index(self, index: int) -> None:
+        self._curriculum_sampler.exclude_index(index)
+
+    def _reshard(self, epoch: int) -> None:
+        del epoch
+        self._precomputed_batch_sizes = None
+        self._num_padding_batches = 0
+        self._overflow = []
+        self.effective_size = max(len(self._full_dataset), 1)
+        self.dataset = self._full_dataset
+        self._curriculum_iter = iter(self._curriculum_sampler)
+
+    def _iter_batches(self) -> Iterable[dict[str, Any]]:
+        start_example = self.batches_processed
+        if self._curriculum_iter is None:
+            self._curriculum_iter = iter(self._curriculum_sampler)
+
+        for batch_offset in range(start_example, self.effective_size):
+            dataset_index = next(self._curriculum_iter)
+            example = self._full_dataset[dataset_index]
+            prompt_id = f"{self._epoch}_{batch_offset}_{dataset_index}"
+            batch = to_device(self._collator([example | {"prompt_id": prompt_id}]), self._device)
+            yield batch
+
+
+def build_data_preparation_prompt_dataloader(
+    dataset: Dataset, seed: int, work_dir: str, config: StreamingDataLoaderConfig
+) -> HFDataLoader:
+    if config.difficulty_curriculum_enabled:
+        return DifficultyCurriculumHFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=seed,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=work_dir,
+            automatic_reshuffle=True,
+            collator=single_example_collator,
+            curriculum_config=config.build_difficulty_curriculum_config(seed=seed),
+        )
+
+    return HFDataLoader(
+        dataset=dataset,
+        batch_size=1,
+        seed=seed,
+        dp_rank=0,
+        dp_world_size=1,
+        work_dir=work_dir,
+        automatic_reshuffle=True,
+        collator=single_example_collator,
+    )
+
+
 def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, Any] | None) -> EnvConfig:
     """Merge base and sample env config into canonical payload.
     Sample env_config overrides any base env_configs with the same name.
@@ -721,6 +909,7 @@ def add_prompt_to_generator(
     ground_truth_overrides: dict[int, Any] | None = None,
 ) -> None:
     index = int(example["index"])
+    prompt_id = example.get("prompt_id", f"{epoch_number}_{index}")
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
@@ -732,7 +921,7 @@ def add_prompt_to_generator(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             index=index,
-            prompt_id=f"{epoch_number}_{index}",
+            prompt_id=prompt_id,
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
@@ -1179,15 +1368,8 @@ class DataPreparationActor:
         self.model_name = model_name
         self.base_env_config = base_env_config
 
-        self.iter_dataloader = HFDataLoader(
-            dataset=dataset,
-            batch_size=1,
-            seed=seed,
-            dp_rank=0,
-            dp_world_size=1,
-            work_dir=work_dir,
-            automatic_reshuffle=True,
-            collator=single_example_collator,
+        self.iter_dataloader = build_data_preparation_prompt_dataloader(
+            dataset=dataset, seed=seed, work_dir=work_dir, config=config
         )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
@@ -1227,6 +1409,8 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
+        if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
+            self.iter_dataloader.set_sampling_step(self.training_step)
         for _ in range(num_initial_prompts):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -1246,6 +1430,8 @@ class DataPreparationActor:
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
+            if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
+                self.iter_dataloader.set_sampling_step(step)
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1289,14 +1475,23 @@ class DataPreparationActor:
                     )
                     for _ in range(self.dp_world_size)
                 ]
+                empty_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
+                    empty_metrics.update(self.iter_dataloader.build_curriculum_metrics([], step))
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                    self.metrics[step] = empty_metrics
                     self.current_prepared_step = step
+                self.training_step = step + 1
                 continue
 
             assert batch is not None
             assert batch_stats is not None
+            prompt_dataset_indices = (
+                [int(index) for index in batch.indices[:: self.config.num_samples_per_prompt_rollout]]
+                if batch.indices is not None
+                else []
+            )
 
             if self.rubric_manager and batch.decoded_responses:
                 rubric_metrics, new_overrides = self.rubric_manager.run_step(
@@ -1354,6 +1549,10 @@ class DataPreparationActor:
                 result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
                 assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
+
+            if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader) and batch.indices is not None:
+                normalized_scores = np.clip(scores / max(self.config.max_possible_score, 1e-8), 0.0, 1.0)
+                self.iter_dataloader.record_curriculum_observations(batch.indices, normalized_scores, advantages)
 
             assert result.logprobs is not None
             packed_sequences = pack_sequences(
@@ -1440,10 +1639,14 @@ class DataPreparationActor:
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
+            if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
+                step_metrics.update(self.iter_dataloader.build_curriculum_metrics(prompt_dataset_indices, step))
+
             with self.lock:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
+            self.training_step = step + 1
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

@@ -77,6 +77,74 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | | `--save_freq` | Save every N train steps | `200` |
 | | `--with_tracking` | Track experiment with Weights and Biases | `False` |
 
+### Difficulty-Aware RLVR Curriculum
+
+Open-Instruct can optionally replace uniform prompt reshuffling with a bucket-aware RLVR curriculum driven by per-instance beta-binomial metadata:
+
+```json
+{
+  "difficulty": {
+    "value": 0.9999999997624719,
+    "posterior_mean": 0.003437858035078528,
+    "posterior_lower_bound": 2.3752813430506325e-10,
+    "expected_quantile": 0.10139684528348392,
+    "bucket_index": 4,
+    "bucket_count": 5
+  }
+}
+```
+
+- `posterior_mean` is the estimated solve probability for that prompt. Lower means harder.
+- `bucket_index = 0` is the easiest bucket and `bucket_index = bucket_count - 1` is the hardest.
+- The sampler uses a smooth distribution with a configurable easy-heavy bootstrap phase, then gradually shifts mass toward harder buckets instead of hard-switching between discrete phases.
+- Within each bucket, examples are weighted by a blend of uncertainty (`4 * p * (1 - p)`) and hardness (`1 - p`), so borderline prompts stay attractive while already-solved prompts are naturally down-weighted.
+- If `--difficulty_curriculum_adaptive_enabled true` is set, bucket probabilities are additionally blended with live reward / advantage statistics so buckets with useful learning signal can get more mass during training.
+
+Recommended starting settings for `bucket_count=5`:
+
+- Bootstrap (first ~100 steps by default): buckets 0 and 1 dominate so the model sees easier prompts while it settles into the chat template and task format.
+- Early after bootstrap: bucket 2 highest, buckets 1 and 3 nonzero, bucket 4 low.
+- Mid: buckets 2 and 3 dominate, with bucket 4 increasing.
+- Late: buckets 3 and 4 dominate, while buckets 0-2 remain nonzero.
+
+Useful flags:
+
+```bash
+--difficulty_curriculum_enabled true \
+--difficulty_curriculum_field difficulty \
+--difficulty_curriculum_easy_focus_steps 100 \
+--difficulty_curriculum_bootstrap_target_bucket_ratio 0.125 \
+--difficulty_curriculum_warmup_target_bucket_ratio 0.5 \
+--difficulty_curriculum_final_target_bucket_ratio 1.0 \
+--difficulty_curriculum_warmup_steps 500 \
+--difficulty_curriculum_total_steps 10000 \
+--difficulty_curriculum_min_hard_frac 0.05 \
+--difficulty_curriculum_max_hard_frac 0.50 \
+--difficulty_curriculum_bucket_sigma 0.0 \
+--difficulty_curriculum_easy_focus_sigma 0.0 \
+--difficulty_curriculum_uncertainty_weight 0.5 \
+--difficulty_curriculum_adaptive_enabled true
+```
+
+Tuning tips:
+
+- Increase `difficulty_curriculum_easy_focus_steps` to keep the easy bootstrap around longer.
+- Lower `difficulty_curriculum_bootstrap_target_bucket_ratio` to bias more strongly toward the easiest buckets early.
+- Lower `difficulty_curriculum_bucket_sigma` or `difficulty_curriculum_easy_focus_sigma` to concentrate probability on fewer neighboring buckets.
+- Lower `difficulty_curriculum_warmup_target_bucket_ratio` if you want the post-bootstrap warmup to stay easier for longer.
+
+Metrics are logged through the standard GRPO tracking path. The most useful ones are:
+
+- `curriculum/progress`
+- `curriculum/static_bucket_prob_*`
+- `curriculum/adaptive_bucket_prob_*`
+- `curriculum/bucket_prob_*`
+- `curriculum/sampled_bucket_count_*`
+- `curriculum/bucket_reward_mean_*`
+- `curriculum/bucket_abs_advantage_mean_*`
+
+See `scripts/train/qwen/qwen3_4b_dapo_math_difficulty_curriculum.sh` for a concrete launch example. The dataset metadata can be produced with `scripts/data/difficulty_sampling/create_bucketed_difficulty.py`.
+
 For details on how GRPO's HSDP sharding works, see [OLMo-core Sharding and Parallelism](olmo_core_sharding.md).
 
 ---
