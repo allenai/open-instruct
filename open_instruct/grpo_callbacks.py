@@ -8,6 +8,7 @@ These callbacks handle:
 
 import contextlib
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -22,7 +23,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -62,6 +63,68 @@ def olmo_core_to_hf_name(name: str) -> str:
 
 
 @dataclass
+class StepTimingCallback(Callback):
+    """Records outer-loop timing and utilization metrics per step."""
+
+    model_dims: utils.ModelDims
+    vllm_num_engines: int = 1
+    vllm_tensor_parallel_size: int = 1
+    samples_per_prompt: int = 1
+    num_training_gpus: int = 1
+
+    _step_start: float = field(default=0.0, init=False, repr=False)
+    _train_duration: float = field(default=0.0, init=False, repr=False)
+    _training_start: float = field(default=0.0, init=False, repr=False)
+    _num_total_tokens: int = field(default=0, init=False, repr=False)
+    _prompt_lengths: list[int] = field(default_factory=list, init=False, repr=False)
+    _response_lengths: list[int] = field(default_factory=list, init=False, repr=False)
+    _total_generation_time: float = field(default=0.0, init=False, repr=False)
+
+    def pre_train(self) -> None:
+        self._training_start = time.perf_counter()
+
+    def pre_step(self, batch: dict[str, Any]) -> None:
+        self._step_start = time.perf_counter()
+        metrics = batch["metrics"]
+        self._prompt_lengths = list(metrics["batch/prompt_lengths"])
+        self._response_lengths = list(metrics["batch/response_lengths"])
+        self._total_generation_time = float(metrics["time/getting_response"])
+
+    def post_train_batch(self) -> None:
+        self._train_duration = time.perf_counter() - self._step_start
+
+    def post_step(self) -> None:
+        now = time.perf_counter()
+        step_time = now - self._step_start
+        total_training_time = now - self._training_start
+
+        train_module = cast(Any, self.trainer.train_module)
+        num_step_tokens = int(train_module._last_num_step_tokens)
+        self._num_total_tokens += num_step_tokens
+
+        self.trainer.record_metric("time/total", step_time, reduce_type=None)
+        self.trainer.record_metric("time/training", self._train_duration, reduce_type=None)
+        self.trainer.record_metric("learner_tokens_per_second_step", num_step_tokens / step_time, reduce_type=None)
+        self.trainer.record_metric(
+            "learner_tokens_per_second_overall", self._num_total_tokens / total_training_time, reduce_type=None
+        )
+
+        utilization = utils.calculate_utilization_metrics(
+            model_dims=self.model_dims,
+            prompt_lengths=self._prompt_lengths,
+            response_lengths=self._response_lengths,
+            total_generation_time=self._total_generation_time,
+            samples_per_prompt=self.samples_per_prompt,
+            num_engines=self.vllm_num_engines,
+            num_gpus_per_engine=self.vllm_tensor_parallel_size,
+            training_time=self._train_duration,
+            num_training_gpus=self.num_training_gpus,
+        )
+        for key, value in utilization.items():
+            self.trainer.record_metric(key, float(value), reduce_type=None)
+
+
+@dataclass
 class VLLMWeightSyncCallback(Callback):
     """Callback to synchronize weights from training model to vLLM inference engines.
 
@@ -73,8 +136,8 @@ class VLLMWeightSyncCallback(Callback):
     """
 
     vllm_engines: list[ray.actor.ActorHandle]
+    actor_manager: ray.actor.ActorHandle
     model_update_group: Any | None = None
-    actor_manager: ray.actor.ActorHandle | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
 
@@ -88,25 +151,18 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        ray.get(self.actor_manager.set_should_stop.remote(True))
-
-        model = self.train_module.model
-
-        utils.ray_get_with_progress(
-            vllm_utils.broadcast_weights_to_vllm(
-                model=model,
-                vllm_engines=self.vllm_engines,
-                model_update_group=self.model_update_group,
-                model_step=self.trainer.global_step,
-                name_mapper=self.name_mapper,
-            ),
-            desc="Broadcasting weights to vLLM engines",
-            enable=False,
+        broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
+            model=self.train_module.model,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            model_step=self.trainer.global_step,
+            name_mapper=self.name_mapper,
         )
-        utils.ray_get_with_progress(
-            [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
+        sync_time_stats, _ = grpo_utils.perform_weight_sync(
+            broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
         )
-        ray.get(self.actor_manager.set_should_stop.remote(False))
+        for name, value in sync_time_stats.items():
+            self.trainer.record_metric(name, value, reduce_type=None)
 
 
 @dataclass

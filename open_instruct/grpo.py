@@ -282,11 +282,8 @@ def main(
     )
     logger.info("======== vLLM engines initialized =========")
 
-    if vllm_engines:
-        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-    else:
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+    kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+    ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
 
     utils.ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -312,6 +309,11 @@ def main(
         ],
         desc="Setting up callbacks",
     )
+
+    utils.ray_get_with_progress(
+        [m.run_initial_weight_sync.remote() for m in policy_group.models], desc="Initial vLLM weight sync"
+    )
+    logger.info("======== Initial vLLM weight sync complete =========")
 
     logger.info("Starting OLMo-core GRPO training with Ray actors...")
     utils.ray_get_with_progress([m.fit.remote() for m in policy_group.models], desc="Running OLMo-core GRPO training")

@@ -47,7 +47,7 @@ from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.rubrics import RubricManager
-from open_instruct.utils import combine_reward_metrics, repeat_each
+from open_instruct.utils import combine_reward_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -737,6 +737,249 @@ def add_prompt_to_generator(
     )
 
 
+@dataclass
+class Group:
+    """All samples for one GRPO group: a single prompt with n generations."""
+
+    result: data_types.GenerationResult
+    query: list[int]
+    ground_truth: list[int]
+    dataset: str
+    raw_query: str
+    active_tools: list[str] | None
+    index: int
+    decoded_responses: list[str]
+    reward_scores: list[float]
+    reward_metrics: dict[str, Any]
+    percent_solved: float
+
+
+def process_group(
+    result: data_types.GenerationResult,
+    generation_config: vllm.SamplingParams,
+    tokenizer: PreTrainedTokenizer,
+    dataset: Dataset,
+    max_possible_score: float,
+    no_resampling_pass_rate: float | None,
+    iter_dataloader: HFDataLoader | None,
+    filter_zero_std_samples: bool,
+    replenish_prompts: bool,
+    param_prompt_Q: ray_queue.Queue | None,
+    base_env_config: EnvConfig,
+    ground_truth_overrides: dict[int, Any] | None = None,
+) -> Group | None:
+    assert result.index is not None
+    assert result.reward_scores is not None
+    assert result.token_statistics is not None
+    assert len(result.responses) == generation_config.n, (
+        f"Mismatch: individual prompt result has {len(result.responses)} responses "
+        f"but expected {generation_config.n} samples per prompt. "
+        f"Index: {result.index}, Prompt ID: {result.prompt_id}"
+    )
+
+    example = dataset[result.index]
+    query = example[INPUT_IDS_PROMPT_KEY]
+    ground_truth = example[GROUND_TRUTHS_KEY]
+    dataset_name = example[VERIFIER_SOURCE_KEY]
+    raw_query = example[RAW_PROMPT_KEY]
+    sample_active_tools = example.get(TOOLS_COLUMN_KEY)
+
+    if replenish_prompts:
+        assert iter_dataloader is not None and param_prompt_Q is not None
+        example = next(iter_dataloader)
+        add_prompt_to_generator(
+            example,
+            iter_dataloader._epoch,
+            param_prompt_Q,
+            generation_config,
+            is_eval=False,
+            base_env_config=base_env_config,
+            ground_truth_overrides=ground_truth_overrides,
+        )
+
+    for i in range(len(result.finish_reasons)):
+        if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
+            result.responses[i].append(tokenizer.eos_token_id)
+            result.masks[i].append(1)
+            result.logprobs[i].append(float("nan"))
+
+    decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
+
+    percent_solved = np.mean(result.reward_scores).item() / max_possible_score
+    if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+        assert iter_dataloader is not None
+        iter_dataloader.exclude_index(result.index)
+
+    if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+        return None
+
+    return Group(
+        result=result,
+        query=query,
+        ground_truth=ground_truth,
+        dataset=dataset_name,
+        raw_query=raw_query,
+        active_tools=sample_active_tools,
+        index=result.index,
+        decoded_responses=decoded_responses,
+        reward_scores=result.reward_scores,
+        reward_metrics=result.reward_metrics or {},
+        percent_solved=percent_solved,
+    )
+
+
+def make_batch_from_groups(
+    groups: list[Group],
+    generation_config: vllm.SamplingParams,
+    training_step: int,
+    actor_manager=None,
+    filtered_prompts: int = 0,
+    filtered_prompts_zero: int = 0,
+    filtered_prompts_solved: int = 0,
+    filtered_prompts_nonzero: int = 0,
+    no_resampled_prompts: int = 0,
+) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]:
+    assert len(groups) > 0, "make_batch_from_groups requires at least one group"
+
+    all_queries = []
+    all_ground_truths = []
+    all_datasets = []
+    all_raw_queries = []
+    all_decoded_responses = []
+    all_reward_metrics = []
+    all_active_tools = []
+    all_scores = []
+    all_indices = []
+    all_percent_solved = []
+    all_model_steps = []
+
+    combined_responses = []
+    combined_finish_reasons = []
+    combined_masks = []
+    combined_num_calls = []
+    combined_timeouts = []
+    combined_tool_errors = []
+    combined_tool_outputs = []
+    combined_tool_runtimes = []
+    combined_tool_calleds = []
+    combined_tool_call_stats = []
+    combined_rollout_states = []
+    combined_logprobs = []
+
+    earliest_start_time = float("inf")
+    prompt_lengths = []
+    response_lengths = []
+
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+    max_generation_time = 0
+
+    for group in groups:
+        result = group.result
+        all_queries.extend([group.query] * generation_config.n)
+        all_ground_truths.extend([group.ground_truth] * generation_config.n)
+        all_datasets.extend([group.dataset] * generation_config.n)
+        all_raw_queries.extend([group.raw_query] * generation_config.n)
+        all_active_tools.extend([group.active_tools] * generation_config.n)
+        all_indices.extend([group.index] * generation_config.n)
+        all_decoded_responses.extend(group.decoded_responses)
+        all_scores.extend(group.reward_scores)
+        all_reward_metrics.append(group.reward_metrics)
+        all_percent_solved.append(group.percent_solved)
+        all_model_steps.extend([result.model_step] * len(result.responses))
+
+        combined_responses.extend(result.responses)
+        combined_finish_reasons.extend(result.finish_reasons)
+        combined_masks.extend(result.masks)
+        combined_num_calls.extend(result.request_info.num_calls)
+        combined_timeouts.extend(result.request_info.timeouts)
+        combined_tool_errors.extend(result.request_info.tool_errors)
+        combined_tool_outputs.extend(result.request_info.tool_outputs)
+        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
+        combined_tool_calleds.extend(result.request_info.tool_calleds)
+        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_rollout_states.extend(result.request_info.rollout_states)
+
+        combined_logprobs.extend(result.logprobs)
+
+        earliest_start_time = min(earliest_start_time, result.start_time)
+
+        prompt_lengths.append(len(group.query))
+
+        for response in result.responses:
+            response_lengths.append(len(response))
+
+        total_prompt_tokens += result.token_statistics.num_prompt_tokens
+        total_response_tokens += result.token_statistics.num_response_tokens
+        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+
+    accumulated_stats = data_types.TokenStatistics(
+        num_prompt_tokens=total_prompt_tokens,
+        num_response_tokens=total_response_tokens,
+        generation_time=max_generation_time,
+        earliest_start_time=earliest_start_time,
+    )
+
+    combined_request_info = data_types.RequestInfo(
+        num_calls=combined_num_calls,
+        timeouts=combined_timeouts,
+        tool_errors=combined_tool_errors,
+        tool_outputs=combined_tool_outputs,
+        tool_runtimes=combined_tool_runtimes,
+        tool_calleds=combined_tool_calleds,
+        tool_call_stats=combined_tool_call_stats,
+        rollout_states=combined_rollout_states,
+    )
+
+    combined_result = data_types.GenerationResult(
+        responses=combined_responses,
+        finish_reasons=combined_finish_reasons,
+        masks=combined_masks,
+        request_info=combined_request_info,
+        index=None,
+        prompt_id=groups[0].result.prompt_id,
+        token_statistics=accumulated_stats,
+        logprobs=combined_logprobs,
+    )
+
+    if actor_manager is not None:
+        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
+
+    batch = Batch(
+        queries=all_queries,
+        ground_truths=all_ground_truths,
+        datasets=all_datasets,
+        raw_queries=all_raw_queries,
+        decoded_responses=all_decoded_responses,
+        indices=all_indices,
+        scores=all_scores,
+        active_tools=all_active_tools if any(all_active_tools) else None,
+        model_steps=all_model_steps,
+    )
+
+    combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    model_steps_array = np.array(all_model_steps, dtype=float)
+    combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
+    combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
+    combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
+    combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
+    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
+
+    batch_stats = BatchStatistics(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        filtered_prompts=filtered_prompts,
+        filtered_prompts_zero=filtered_prompts_zero,
+        filtered_prompts_solved=filtered_prompts_solved,
+        filtered_prompts_nonzero=filtered_prompts_nonzero,
+        percent_solved_mean=percent_solved_mean,
+        percent_solved_hist=np.array(all_percent_solved),
+        no_resampled_prompts=no_resampled_prompts,
+        total_prompts=len(groups),
+    )
+    return combined_result, batch, combined_reward_metrics, batch_stats
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     generation_config: vllm.SamplingParams,
@@ -770,18 +1013,7 @@ def accumulate_inference_batches(
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
-    results = []
-    all_queries = []
-    all_ground_truths = []
-    all_datasets = []
-    all_raw_queries = []
-    all_decoded_responses = []
-    all_reward_metrics = []
-    all_active_tools = []
-    all_scores = []
-    all_indices = []
-    all_percent_solved = []
-    all_model_steps = []
+    groups: list[Group] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
@@ -797,7 +1029,7 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
-    collected_results = []  # Track results for potential requeue on timeout
+    collected_results = []
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
@@ -820,62 +1052,25 @@ def accumulate_inference_batches(
         if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
 
-        assert len(result.responses) == generation_config.n, (
-            f"Mismatch: individual prompt result has {len(result.responses)} responses "
-            f"but expected {generation_config.n} samples per prompt. "
-            f"Index: {result.index}, Prompt ID: {result.prompt_id}"
+        group = process_group(
+            result=result,
+            generation_config=generation_config,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            max_possible_score=max_possible_score,
+            no_resampling_pass_rate=no_resampling_pass_rate,
+            iter_dataloader=iter_dataloader,
+            filter_zero_std_samples=filter_zero_std_samples,
+            replenish_prompts=replenish_prompts,
+            param_prompt_Q=param_prompt_Q,
+            base_env_config=base_env_config,
+            ground_truth_overrides=ground_truth_overrides,
         )
 
-        example = dataset[result.index]
-        query = example[INPUT_IDS_PROMPT_KEY]
-        ground_truth = example[GROUND_TRUTHS_KEY]
-        dataset_name = example[VERIFIER_SOURCE_KEY]
-        raw_query = example[RAW_PROMPT_KEY]
-        sample_active_tools = example.get(TOOLS_COLUMN_KEY)
-
-        if replenish_prompts:
-            assert iter_dataloader is not None
-            assert param_prompt_Q is not None
-            example = next(iter_dataloader)
-            add_prompt_to_generator(
-                example,
-                iter_dataloader._epoch,
-                param_prompt_Q,
-                generation_config,
-                is_eval=False,
-                base_env_config=base_env_config,
-                ground_truth_overrides=ground_truth_overrides,
-            )
-
-        for i in range(len(result.finish_reasons)):
-            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
-
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
-
-        k_queries = repeat_each([query], generation_config.n)
-        k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset_name], generation_config.n)
-        k_raw_queries = repeat_each([raw_query], generation_config.n)
-        k_active_tools = repeat_each([sample_active_tools], generation_config.n)
-        k_indices = repeat_each([result.index], generation_config.n)
-
-        percent_solved = np.mean(result.reward_scores).item() / max_possible_score
-        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-            assert iter_dataloader is not None
-            iter_dataloader.exclude_index(result.index)
-            total_no_resampled += 1
-            logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
-            )
-
-        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+        if group is None:
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
-
             total_filtered_prompts += 1
             if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
@@ -887,24 +1082,19 @@ def accumulate_inference_batches(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
             continue
-        else:
-            num_prompts_sampled += 1
-            progress_bar.update(1)
 
-        results.append(result)
-        all_queries.extend(k_queries)
-        all_ground_truths.extend(k_ground_truths)
-        all_datasets.extend(k_datasets)
-        all_raw_queries.extend(k_raw_queries)
-        all_active_tools.extend(k_active_tools)
-        all_indices.extend(k_indices)
-        all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(result.reward_scores)
-        all_reward_metrics.append(result.reward_metrics)
-        all_percent_solved.append(percent_solved)
-        all_model_steps.extend([result.model_step] * len(result.responses))
+        if no_resampling_pass_rate is not None and group.percent_solved >= no_resampling_pass_rate:
+            total_no_resampled += 1
+            logging.debug(
+                f"[Data Preparation Thread] Prompt solved at {group.percent_solved}, "
+                f"will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
 
-    if len(results) == 0:
+        num_prompts_sampled += 1
+        progress_bar.update(1)
+        groups.append(group)
+
+    if len(groups) == 0:
         logging.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
@@ -912,118 +1102,17 @@ def accumulate_inference_batches(
         )
         return None, None, None, None
 
-    combined_responses = []
-    combined_finish_reasons = []
-    combined_masks = []
-    combined_num_calls = []
-    combined_timeouts = []
-    combined_tool_errors = []
-    combined_tool_outputs = []
-    combined_tool_runtimes = []
-    combined_tool_calleds = []
-    combined_tool_call_stats = []
-    combined_rollout_states = []
-    combined_logprobs = []
-
-    earliest_start_time = float("inf")
-    prompt_lengths = []
-    response_lengths = []
-
-    total_prompt_tokens = 0
-    total_response_tokens = 0
-    max_generation_time = 0
-
-    for i, result in enumerate(results):
-        combined_responses.extend(result.responses)
-        combined_finish_reasons.extend(result.finish_reasons)
-        combined_masks.extend(result.masks)
-        combined_num_calls.extend(result.request_info.num_calls)
-        combined_timeouts.extend(result.request_info.timeouts)
-        combined_tool_errors.extend(result.request_info.tool_errors)
-        combined_tool_outputs.extend(result.request_info.tool_outputs)
-        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
-        combined_tool_calleds.extend(result.request_info.tool_calleds)
-        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
-        combined_rollout_states.extend(result.request_info.rollout_states)
-
-        combined_logprobs.extend(result.logprobs)
-
-        earliest_start_time = min(earliest_start_time, result.start_time)
-
-        prompt_lengths.append(len(all_queries[i * generation_config.n]))
-
-        for response in result.responses:
-            response_lengths.append(len(response))
-
-        total_prompt_tokens += result.token_statistics.num_prompt_tokens
-        total_response_tokens += result.token_statistics.num_response_tokens
-        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
-
-    accumulated_stats = data_types.TokenStatistics(
-        num_prompt_tokens=total_prompt_tokens,
-        num_response_tokens=total_response_tokens,
-        generation_time=max_generation_time,
-        earliest_start_time=earliest_start_time,
-    )
-
-    combined_request_info = data_types.RequestInfo(
-        num_calls=combined_num_calls,
-        timeouts=combined_timeouts,
-        tool_errors=combined_tool_errors,
-        tool_outputs=combined_tool_outputs,
-        tool_runtimes=combined_tool_runtimes,
-        tool_calleds=combined_tool_calleds,
-        tool_call_stats=combined_tool_call_stats,
-        rollout_states=combined_rollout_states,
-    )
-
-    combined_result = data_types.GenerationResult(
-        responses=combined_responses,
-        finish_reasons=combined_finish_reasons,
-        masks=combined_masks,
-        request_info=combined_request_info,
-        index=None,
-        prompt_id=results[0].prompt_id,
-        token_statistics=accumulated_stats,
-        logprobs=combined_logprobs,
-    )
-
-    if actor_manager is not None:
-        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
-
-    batch = Batch(
-        queries=all_queries,
-        ground_truths=all_ground_truths,
-        datasets=all_datasets,
-        raw_queries=all_raw_queries,
-        decoded_responses=all_decoded_responses,
-        indices=all_indices,
-        scores=all_scores,
-        active_tools=all_active_tools if all_active_tools else None,
-        model_steps=all_model_steps,
-    )
-
-    combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
-    model_steps_array = np.array(all_model_steps, dtype=float)
-    combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
-    combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
-    combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
-    combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
-    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
-
-    batch_stats = BatchStatistics(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
+    return make_batch_from_groups(
+        groups,
+        generation_config,
+        training_step,
+        actor_manager,
         filtered_prompts=total_filtered_prompts,
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
-        percent_solved_mean=percent_solved_mean,
-        percent_solved_hist=np.array(all_percent_solved),
         no_resampled_prompts=total_no_resampled,
-        total_prompts=len(results),
     )
-    return combined_result, batch, combined_reward_metrics, batch_stats
 
 
 def prepare_collated_data_for_workers(
@@ -1337,10 +1426,8 @@ class DataPreparationActor:
                 result.responses = [result.responses[i] for i in stop_idxes]
                 result.masks = [result.masks[i] for i in stop_idxes]
                 result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
-                assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
-            assert result.logprobs is not None
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
