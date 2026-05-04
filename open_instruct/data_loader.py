@@ -497,8 +497,14 @@ class StreamingDataLoaderConfig:
     """Fraction of training over which to linearly ramp up the length penalty."""
     length_reward_solve_rate_threshold: float = 0.3
     """Group solve-rate threshold above which the penalty activates (solve_rate type)."""
-    length_reward_correctness_threshold: float = 0.0
-    """A response is treated as correct when its raw reward exceeds this value."""
+    length_reward_correctness_threshold: float = -1.0
+    """A response is treated as correct when its raw reward exceeds this value.
+
+    Negative values mean 'auto-derive in __post_init__': we use r1_style_format_reward
+    when format reward is on AND additive (so the well-formatted-but-wrong floor is
+    excluded from the shaping pool) and 0.0 otherwise. Pass an explicit non-negative
+    value to override.
+    """
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -558,6 +564,15 @@ class StreamingDataLoaderConfig:
                 f"length_reward_warmup_type must be one of "
                 f"{length_reward_shaping.WARMUP_TYPES}, got {self.length_reward_warmup_type!r}"
             )
+        if self.length_reward_correctness_threshold < 0.0:
+            # Sentinel "auto": pick a threshold that excludes the well-formatted-but-wrong
+            # floor when it exists. In additive format-reward mode, that floor is
+            # r1_style_format_reward; in every other config a response with score > 0 has
+            # at least some verifier credit, so 0 is the right boundary.
+            if self.apply_r1_style_format_reward and self.additive_format_reward:
+                self.length_reward_correctness_threshold = self.r1_style_format_reward
+            else:
+                self.length_reward_correctness_threshold = 0.0
 
     def build_dataloader(
         self,

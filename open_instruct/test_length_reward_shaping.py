@@ -120,6 +120,20 @@ class TestApplyLengthRewardShaping(unittest.TestCase):
         with self.assertRaises(ValueError):
             lrs.apply_length_reward_shaping(scores, lengths, "linear", 1.0)
 
+    def test_correctness_threshold_excludes_format_only(self):
+        # Additive format reward gives a well-formatted-but-wrong response score
+        # equal to format_reward (1.0 by default). With threshold = 1.0, that
+        # response should not set L_min.
+        scores = np.array([[1.0, 11.0, 11.0]])  # format-only, fully-correct, fully-correct
+        lengths = np.array([[10, 200, 250]])
+        out = lrs.apply_length_reward_shaping(scores, lengths, "linear", 1.0, correctness_threshold=1.0)
+        # The format-only response (score 1.0) is below threshold so it stays unchanged
+        # AND does not contribute to L_min. L_min = 200 (the shortest fully-correct).
+        # The response at length 250 gets factor 1 - 50/200 = 0.75 -> 11 * 0.75 = 8.25.
+        self.assertAlmostEqual(out[0, 0], 1.0)
+        self.assertAlmostEqual(out[0, 1], 11.0)
+        self.assertAlmostEqual(out[0, 2], 8.25)
+
 
 class TestComputeWarmupWeight(unittest.TestCase):
     def test_constant(self):
