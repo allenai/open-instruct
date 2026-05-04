@@ -26,20 +26,33 @@ from open_instruct import logger_utils, model_utils, olmo_core_utils
 logger = logger_utils.setup_logger(__name__)
 
 
-def make_inputs(tokenizer, device, packed: bool):
+def build_intra_doc_mask(doc_lens_list, device, dtype):
+    """4D additive mask (1, 1, S, S): 0 where same-doc + causal, -inf otherwise."""
+    seg_ids = torch.cat([torch.full((n,), i, dtype=torch.long) for i, n in enumerate(doc_lens_list)]).to(device)
+    s = seg_ids.shape[0]
+    same_doc = seg_ids[:, None] == seg_ids[None, :]
+    causal = torch.arange(s, device=device)[:, None] >= torch.arange(s, device=device)[None, :]
+    allow = same_doc & causal
+    mask = torch.zeros((1, 1, s, s), dtype=dtype, device=device)
+    mask.masked_fill_(~allow, torch.finfo(dtype).min)
+    return mask
+
+
+def make_inputs(tokenizer, device, packed: bool, dtype):
     """Single-doc or packed 2-doc inputs."""
     doc_a = tokenizer("The quick brown fox jumps over the lazy dog.", return_tensors="pt").input_ids[0]
     if not packed:
         input_ids = doc_a.unsqueeze(0).to(device)
         position_ids = torch.arange(len(doc_a)).unsqueeze(0).to(device)
-        return input_ids, position_ids, None, None
+        return input_ids, position_ids, None, None, None
 
     doc_b = tokenizer("In a hole in the ground there lived a hobbit.", return_tensors="pt").input_ids[0]
     input_ids = torch.cat([doc_a, doc_b], dim=0).unsqueeze(0).to(device)
     position_ids = torch.cat([torch.arange(len(doc_a)), torch.arange(len(doc_b))]).unsqueeze(0).to(device)
     doc_lens = torch.tensor([[len(doc_a), len(doc_b)]], dtype=torch.int32, device=device)
     max_doc_lens = [int(max(len(doc_a), len(doc_b)))]
-    return input_ids, position_ids, doc_lens, max_doc_lens
+    hf_mask = build_intra_doc_mask([len(doc_a), len(doc_b)], device, dtype)
+    return input_ids, position_ids, doc_lens, max_doc_lens, hf_mask
 
 
 class HFCapture:
@@ -96,8 +109,8 @@ class OLMoCapture:
         return hook
 
 
-def hf_logprobs(model, input_ids, position_ids):
-    out = model(input_ids=input_ids, attention_mask=None, position_ids=position_ids)
+def hf_logprobs(model, input_ids, position_ids, attention_mask=None):
+    out = model(input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids)
     logits = out.logits if hasattr(out, "logits") else out
     return logits, model_utils.log_softmax_and_gather(logits[:, :-1], input_ids[:, 1:])
 
@@ -183,12 +196,12 @@ def main() -> None:
     for packed in (False, True):
         label = "packed-2-doc" if packed else "single-doc"
         logger.info(f"\n========== {label} ==========")
-        input_ids, position_ids, doc_lens, max_doc_lens = make_inputs(tokenizer, device, packed)
+        input_ids, position_ids, doc_lens, max_doc_lens, hf_mask = make_inputs(tokenizer, device, packed, dtype)
         logger.info(f"input_ids shape={tuple(input_ids.shape)}")
 
         with torch.no_grad():
             with HFCapture(hf_model) as hfc:
-                hf_logits, hf_lp = hf_logprobs(hf_model, input_ids, position_ids)
+                hf_logits, hf_lp = hf_logprobs(hf_model, input_ids, position_ids, attention_mask=hf_mask)
 
             kwargs = {"attention_mask": None, "position_ids": position_ids}
             with OLMoCapture(olmo_model) as oc:
