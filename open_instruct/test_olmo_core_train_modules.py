@@ -178,7 +178,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.randn(batch_size, seq_len)
 
         pg_losses, pg_losses2, pg_loss_max, kl = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            rho_weights=torch.ones_like(ratio),
         )
 
         self.assertEqual(pg_losses.shape, (batch_size, seq_len))
@@ -193,7 +198,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.ones(1, 3)
 
         pg_losses, pg_losses2, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            rho_weights=torch.ones_like(ratio),
         )
 
         expected_clamped = torch.clamp(ratio, 0.8, 1.2)
@@ -206,7 +216,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.ones(1, 3)
 
         pg_losses, pg_losses2, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            rho_weights=torch.ones_like(ratio),
         )
 
         pg_loss_max.sum().backward()
@@ -222,7 +237,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         ref_logprobs = torch.randn(batch_size, seq_len)
 
         _, _, _, kl = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=ref_logprobs, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            config=config,
+            rho_weights=torch.ones_like(ratio),
         )
 
         self.assertFalse(torch.all(kl == 0))
@@ -234,7 +254,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
         advantages = torch.randn(2, 4)
 
         _, _, _, kl = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            rho_weights=torch.ones_like(ratio),
         )
 
         torch.testing.assert_close(kl, torch.zeros_like(kl))
@@ -252,7 +277,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=advantages,
             ref_logprobs=None,
             config=config,
-            rho_weights=None,
+            rho_weights=torch.ones_like(new_logprobs),
         )
 
         pg_rho, pg2_rho, _, _ = grpo_utils.compute_grpo_loss(
@@ -318,6 +343,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 advantages=torch.randn(2, 4),
                 ref_logprobs=None,
                 config=config,
+                rho_weights=torch.ones(2, 4),
             )
 
 

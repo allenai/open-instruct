@@ -349,7 +349,7 @@ def _icepop_mask_from_rho(
 class RhoCorrection:
     """Per-token stop-gradient correction for the train/infer engine mismatch.
 
-    ``weights`` is multiplied into the policy loss (None disables the correction).
+    ``weights`` is multiplied into the policy loss (all-ones disables the correction).
     ``metrics`` maps wandb keys to per-token tensors that get reduced by
     ``masked_mean(., response_mask)`` at logging time.
     ``histogram_metrics`` maps wandb keys to flat 1D tensors of values
@@ -357,7 +357,7 @@ class RhoCorrection:
     concatenated across micro-batches and logged as wandb histograms.
     """
 
-    weights: torch.Tensor | None
+    weights: torch.Tensor
     metrics: dict[str, torch.Tensor]
     histogram_metrics: dict[str, torch.Tensor] = field(default_factory=dict)
 
@@ -384,10 +384,9 @@ def compute_rho_correction(
             },
             histogram_metrics=rho_hist,
         )
-    cap = config.truncated_importance_sampling_ratio_cap
-    if cap <= 0:
-        return RhoCorrection(weights=None, metrics={}, histogram_metrics=rho_hist)
-    clamped = torch.clamp(rho, max=cap)
+    if config.truncated_importance_sampling_ratio_cap <= 0:
+        return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
+    clamped = torch.clamp(rho, max=config.truncated_importance_sampling_ratio_cap)
     return RhoCorrection(
         weights=clamped,
         metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < rho).float()},
@@ -439,7 +438,7 @@ def compute_grpo_loss(
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    rho_weights: torch.Tensor | None = None,
+    rho_weights: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -452,9 +451,8 @@ def compute_grpo_loss(
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    if rho_weights is not None:
-        pg_losses = pg_losses * rho_weights
-        pg_losses2 = pg_losses2 * rho_weights
+    pg_losses = pg_losses * rho_weights
+    pg_losses2 = pg_losses2 * rho_weights
 
     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
