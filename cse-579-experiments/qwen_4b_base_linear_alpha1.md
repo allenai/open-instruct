@@ -2,7 +2,7 @@
 
 ## Status
 
-- **State**: failed (exit 1 at config-parse time; relaunched as a separate run — see "Attempts" below)
+- **State**: running (attempt 2 — see "Attempts" below)
 - **Eval state**: not started
 - **Last updated**: 2026-05-04
 
@@ -25,6 +25,7 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
 | # | URL | Launched (UTC) | Terminated (UTC) | Exit | Notes |
 |---|-----|----------------|------------------|------|-------|
 | 1 | [01KQTD4D…](https://beaker.org/ex/01KQTD4DJ57C1SY8A1MFNS3GFC) | 2026-05-04 21:08 | 2026-05-04 22:36 | 1 | `checkpoint_state_dir` validation failure at parse time (see Known issues) |
+| 2 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | 2026-05-04 22:40 | — | — | After fix: explicit `--checkpoint_state_dir` |
 
 - **Workspace**: ai2/olmo-instruct
 - **Cluster**: ai2/jupiter
