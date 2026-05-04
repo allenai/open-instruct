@@ -968,6 +968,7 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    max_result_age_steps: int | None = None,
     ground_truth_overrides: dict[int, Any] | None = None,
     image_prewarm_actors: list[ray.actor.ActorHandle] | None = None,
 ) -> (
@@ -999,6 +1000,8 @@ def accumulate_inference_batches(
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
+    stale_results_dropped = 0
+    stale_result_lags = []
     progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
@@ -1024,13 +1027,49 @@ def accumulate_inference_batches(
                 for r in collected_results:
                     inference_results_Q.put(r)
             raise
-        collected_results.append(result)
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )
 
         if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
+
+        if (
+            max_result_age_steps is not None
+            and training_step is not None
+            and result.model_step is not None
+            and training_step - result.model_step > max_result_age_steps
+        ):
+            lag = training_step - result.model_step
+            stale_results_dropped += 1
+            stale_result_lags.append(lag)
+            logger.warning(
+                "[accumulate_inference_batches] Dropping stale result for index=%s prompt_id=%s "
+                "at training_step=%s: model_step=%s lag=%s max_result_age_steps=%s",
+                result.index,
+                result.prompt_id,
+                training_step,
+                result.model_step,
+                lag,
+                max_result_age_steps,
+            )
+            if replenish_prompts:
+                assert iter_dataloader is not None
+                assert param_prompt_Q is not None
+                example = next(iter_dataloader)
+                add_prompt_to_generator(
+                    example,
+                    iter_dataloader._epoch,
+                    param_prompt_Q,
+                    generation_config,
+                    is_eval=False,
+                    base_env_config=base_env_config,
+                    ground_truth_overrides=ground_truth_overrides,
+                    image_prewarm_actors=image_prewarm_actors,
+                )
+            continue
+
+        collected_results.append(result)
 
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
@@ -1217,6 +1256,14 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    combined_reward_metrics["stale_results_dropped"] = float(stale_results_dropped)
+    if stale_results_dropped:
+        stale_result_lags_array = np.array(stale_result_lags, dtype=float)
+        combined_reward_metrics["stale_result_lag_mean"] = float(stale_result_lags_array.mean())
+        combined_reward_metrics["stale_result_lag_max"] = float(stale_result_lags_array.max())
+    else:
+        combined_reward_metrics["stale_result_lag_mean"] = 0.0
+        combined_reward_metrics["stale_result_lag_max"] = 0.0
     if all_model_steps:
         model_steps_array = np.array(all_model_steps, dtype=float)
         combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
@@ -1492,6 +1539,7 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+                max_result_age_steps=self.config.async_steps,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
                 image_prewarm_actors=self.image_prewarm_actors,

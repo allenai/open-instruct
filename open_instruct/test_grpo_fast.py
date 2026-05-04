@@ -550,6 +550,60 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(reward_metrics["model_step_max"], 12.0)
         self.assertEqual(reward_metrics["model_step_mean"], 11.0)
 
+    def test_accumulate_inference_batches_drops_stale_model_steps(self):
+        num_prompts = 2
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=4)
+        prompt_Q = ray_queue.Queue(maxsize=4)
+        self._ray_queues.extend([inference_results_Q, prompt_Q])
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(3)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        class FakeDataLoader:
+            _epoch = 0
+
+            def __init__(self, dataset):
+                self.dataset = dataset
+                self.index = 0
+
+            def __next__(self):
+                example = self.dataset[self.index % len(self.dataset)]
+                self.index += 1
+                return example
+
+        inference_results_Q.put(self.create_mock_result(0, "0_0", model_step=1))
+        inference_results_Q.put(self.create_mock_result(1, "0_1", model_step=8))
+        inference_results_Q.put(self.create_mock_result(2, "0_2", model_step=10))
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+
+        mock_model_dims = self.create_llama7b_model_dims()
+        combined_result, batch, reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            replenish_prompts=True,
+            iter_dataloader=FakeDataLoader(mock_dataset),
+            param_prompt_Q=prompt_Q,
+            training_step=10,
+            max_result_age_steps=2,
+        )
+
+        self.assertEqual(batch.indices, [1, 2])
+        self.assertEqual(len(combined_result.responses), num_prompts)
+        self.assertEqual(prompt_Q.qsize(), 1)
+        self.assertEqual(reward_metrics["stale_results_dropped"], 1.0)
+        self.assertEqual(reward_metrics["stale_result_lag_mean"], 9.0)
+        self.assertEqual(reward_metrics["stale_result_lag_max"], 9.0)
+        self.assertEqual(reward_metrics["model_step_min"], 8.0)
+        self.assertEqual(reward_metrics["model_step_max"], 10.0)
+
     @unittest.skip("Timing-sensitive test that is flaky in CI environments")
     def test_accumulate_waits_for_all_engines(self):
         """Test that accumulate_inference_batches waits for all engines."""
