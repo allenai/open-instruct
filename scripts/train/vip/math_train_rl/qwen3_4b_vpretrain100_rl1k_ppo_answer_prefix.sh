@@ -1,12 +1,13 @@
 #!/bin/bash
-# Value warmup + RL: scalar PPO critic + answer_prefix GT conditioning for
-# 100 value-only steps, then 1000 regular policy/value RL steps.
+# Value warmup + RL: scalar PPO critic with decoupled, length-adaptive GAE
+# and answer_prefix GT conditioning for 100 value-only steps, then 1000
+# regular policy/value RL steps.
 #
 # Step budget:
 #   total_episodes = (100 value warmup + 1000 RL) * 32 prompts * 8 samples
 #                  = 281600
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain100_rl1k_ppo_ap_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain100_rl1k_ppo_decoupled_lagae_ap_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -66,6 +67,8 @@ uv run python mason.py \
     --use_value_model \
     --value_learning_rate 2e-6 \
     --gae_lambda 0.95 \
+    --decoupled_gae \
+    --length_adaptive_gae \
     --gamma 1.0 \
     --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
