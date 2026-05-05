@@ -29,20 +29,28 @@ else
     ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0
 
     cleanup() {
-        echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting 0"
+        exit_code="${1:-1}"
+        if [ "$exit_code" -eq 0 ]; then
+            echo "[ray_node_setup] Worker cleanup requested exit 0; forcing exit 1."
+            exit_code=1
+        fi
+        echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting ${exit_code}"
         ray stop --force >/dev/null 2>&1 || true
         trap - TERM INT HUP EXIT
-        exit 0
+        exit "$exit_code"
     }
 
-    trap cleanup TERM INT HUP EXIT
+    trap 'cleanup 143' TERM
+    trap 'cleanup 130' INT
+    trap 'cleanup 129' HUP
+    trap 'cleanup 1' EXIT
 
     echo "[ray_node_setup] Monitoring Ray head at ${RAY_ADDRESS}"
-    # Poll head availability. Exit 0 when head is gone.
+    # Poll head availability. Workers should never report success on shutdown.
     while true; do
         if ! ray status --address="${RAY_ADDRESS}" >/dev/null 2>&1; then
-            echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 0."
-            cleanup
+            echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 1."
+            cleanup 1
         fi
         sleep 5
     done
