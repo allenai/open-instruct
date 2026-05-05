@@ -630,11 +630,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             trainer_idle_wait_time = time.perf_counter() - wait_start_time
             batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
-            if len(batch_data["batch"]) == 0:
-                logger.warning(
-                    f"[Dataloader] Empty batch at step={step} (all groups filtered); skipping training step"
-                )
-                continue
             yield batch_data
 
 
@@ -1323,7 +1318,8 @@ class DataPreparationActor:
                 ground_truth_overrides=self.ground_truth_overrides,
             )
 
-        for step in range(self.training_step, self.num_training_steps):
+        step = self.training_step
+        while step < self.num_training_steps:
             generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
                 logger.info(
@@ -1363,21 +1359,9 @@ class DataPreparationActor:
                 return
 
             if result is None:
-                empty_data = [
-                    data_types.CollatedBatchData(
-                        query_responses=[],
-                        attention_masks=[],
-                        position_ids=[],
-                        advantages=[],
-                        response_masks=[],
-                        vllm_logprobs=[],
-                    )
-                    for _ in range(self.dp_world_size)
-                ]
-                with self.lock:
-                    self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
-                    self.current_prepared_step = step
+                logger.warning(
+                    f"[DataPreparationActor] Step {step}: all groups filtered (zero-std rewards); resampling without advancing step counter"
+                )
                 continue
 
             assert batch is not None
@@ -1527,6 +1511,8 @@ class DataPreparationActor:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
+
+            step += 1
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
