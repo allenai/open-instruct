@@ -630,6 +630,11 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             trainer_idle_wait_time = time.perf_counter() - wait_start_time
             batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
             self.training_step = step + 1
+            if len(batch_data["batch"]) == 0:
+                logger.warning(
+                    f"[Dataloader] Empty batch at step={step} (all groups filtered); skipping training step"
+                )
+                continue
             yield batch_data
 
 
