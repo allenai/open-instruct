@@ -51,11 +51,11 @@ from __future__ import annotations
 
 import logging
 import os
+import queue as queue_lib
 import random
 import threading
 from concurrent import futures
 from dataclasses import dataclass
-import queue as queue_lib
 from queue import Full, Queue
 from typing import Any
 
@@ -234,14 +234,8 @@ class GenValueTrainerActor:
         master_address = ray._private.services.get_node_ip_address().strip("[]")
         master_port = utils.find_free_port()
         world_size = len(vllm_engines) * self._tp_size + 1
-        master_info = {
-            "master_address": master_address,
-            "master_port": master_port,
-            "world_size": world_size,
-        }
-        init_infos = [
-            master_info | {"rank_offset": i * self._tp_size + 1} for i, _ in enumerate(vllm_engines)
-        ]
+        master_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
+        init_infos = [master_info | {"rank_offset": i * self._tp_size + 1} for i, _ in enumerate(vllm_engines)]
 
         # Submit the vLLM-side init RPCs first (async) so the NCCL handshake can
         # proceed on both sides in parallel, then wait.
@@ -251,9 +245,7 @@ class GenValueTrainerActor:
         ]
         torch.cuda.set_device(0)
         self._model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
-        utils.ray_get_with_progress(
-            refs, desc="Initializing gen-value vLLM weight transfer engines", timeout=600
-        )
+        utils.ray_get_with_progress(refs, desc="Initializing gen-value vLLM weight transfer engines", timeout=600)
 
     def broadcast_to_vllm(self, model_step: int) -> list:
         """Push current PyTorch weights to the gen-value vLLM pool over NCCL.
@@ -430,6 +422,14 @@ def _build_sample_scoring_prompts(
     return prompts
 
 
+def _put_gen_value_metrics(metrics_Q: Queue, metrics: dict[str, Any], source: str) -> None:
+    """Send background-thread metrics through the main training step for aligned W&B logging."""
+    try:
+        metrics_Q.put_nowait(metrics)
+    except Full:
+        logger.warning("[GenValue] metrics queue full, dropping %s metrics", source)
+
+
 def _gen_value_scoring_loop(
     args: GenValueExperimentConfig,
     tokenizer: Any,
@@ -475,16 +475,7 @@ def _gen_value_scoring_loop(
                 "gen_value/score_mean": sum(valid) / len(valid) if valid else float("nan"),
                 "gen_value/score_parse_rate": len(valid) / len(scores) if scores else 0.0,
             }
-            # Ship metrics to the main thread via a queue so they land in
-            # data_thread_metrics and therefore both the pretty-printed
-            # single-line output and wandb.log(step=training_step). We
-            # intentionally don't call wandb.log here: letting the main
-            # thread own step alignment avoids dropped logs from wandb's
-            # monotonic-step rule.
-            try:
-                metrics_Q.put_nowait(score_metrics)
-            except Full:
-                logger.warning("[GenValue] metrics queue full, dropping scoring metrics")
+            _put_gen_value_metrics(metrics_Q, score_metrics, "scoring")
             logger.debug(
                 "[GenValue] scored %d prompts: mean=%.3f parse_rate=%.2f",
                 len(scores),
@@ -518,35 +509,17 @@ def _gen_value_reinforce_loop(
             pairs = training_queue.get(timeout=1.0)
         except queue_lib.Empty:
             continue
-        except Exception:
-            logger.exception("[GenValue] unexpected error reading training-pair queue")
-            continue
         if pairs is None or len(pairs) == 0:
             continue
-        try:
-            metrics = ray.get(trainer_actor.reinforce_step.remote(pairs))
-            if metrics:
-                # Route metrics through the main thread so they land in
-                # data_thread_metrics -> both the pretty-printed single-line
-                # output AND wandb.log(step=training_step). Avoids wandb's
-                # monotonic-step rule silently dropping background-thread logs.
-                try:
-                    metrics_Q.put_nowait(metrics)
-                except Full:
-                    logger.warning(
-                        "[GenValue] metrics queue full, dropping REINFORCE metrics"
-                    )
-            logger.info("[GenValue] REINFORCE step: %s", metrics)
-        except Exception:
-            logger.exception("[GenValue] REINFORCE step failed, continuing")
+        metrics = ray.get(trainer_actor.reinforce_step.remote(pairs))
+        if metrics:
+            _put_gen_value_metrics(metrics_Q, metrics, "REINFORCE")
+        logger.debug("[GenValue] REINFORCE step: %s", metrics)
     logger.info("[GenValue] REINFORCE thread stopped.")
 
 
 def _sync_gen_value_weights(
-    gen_value_trainer: Any,
-    gen_value_vllm_engines: list,
-    model_step: int,
-    engines_lock: threading.Lock,
+    gen_value_trainer: Any, gen_value_vllm_engines: list, model_step: int, engines_lock: threading.Lock
 ) -> None:
     """Push updated gen-value weights to the gen-value vLLM pool over NCCL.
 
@@ -809,7 +782,6 @@ def main():
     # GenValueTrainerActor.reinforce_step().
     gen_value_trainer: Any = None
     gen_value_training_queue: Any = None
-    gen_value_reinforce_thread: threading.Thread | None = None
 
     if gen_value_vllm_engines:
         gv_lr = args.gen_value_learning_rate or 1e-6
@@ -854,6 +826,13 @@ def main():
     # data_thread_metrics so they land in the main pretty-print + wandb log.
     gen_value_metrics_Q: Queue = Queue(maxsize=64)
     gen_value_thread: threading.Thread | None = None
+    gen_value_reinforce_future: futures.Future | None = None
+
+    # Shared executor for training support threads; the REINFORCE future must be
+    # observable from the main loop so trainer failures abort the whole run.
+    weight_sync_metrics_Q: Queue = Queue(maxsize=streaming_config.async_steps)
+    stop_event = threading.Event()
+    executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo_genvalue")
 
     if gen_value_vllm_engines:
         gen_value_thread = threading.Thread(
@@ -874,25 +853,26 @@ def main():
         )
         gen_value_thread.start()
 
-        if gen_value_trainer is not None:
-            gen_value_reinforce_thread = threading.Thread(
-                target=_gen_value_reinforce_loop,
-                args=(
-                    gen_value_trainer,
-                    gen_value_training_queue,
-                    gen_value_stop_event,
-                    gen_value_metrics_Q,
-                ),
-                daemon=True,
-                name="genvalue-reinforce",
-            )
-            gen_value_reinforce_thread.start()
+        assert gen_value_trainer is not None
+        gen_value_reinforce_future = executor.submit(
+            _gen_value_reinforce_loop,
+            gen_value_trainer,
+            gen_value_training_queue,
+            gen_value_stop_event,
+            gen_value_metrics_Q,
+        )
 
     # Wrap one_training_step to fire the scoring trigger and (periodically) sync gen-value weights.
     _original_one_training_step = _grpo_fast.one_training_step
     _gv_policy_step_count = [0]  # mutable counter shared with closure
 
+    def _raise_if_gen_value_reinforce_failed() -> None:
+        if gen_value_reinforce_future is not None and gen_value_reinforce_future.done():
+            gen_value_reinforce_future.result()
+
     def _one_training_step_with_genvalue(*step_args, **step_kwargs):
+        _raise_if_gen_value_reinforce_failed()
+
         # Drain any gen-value metrics emitted by the background threads since
         # the previous step and merge them into data_thread_metrics (positional
         # arg 4 of grpo_fast.one_training_step, a mutable dict). Main thread
@@ -914,22 +894,17 @@ def main():
         sync_freq = args.gen_value_sync_freq
         if sync_freq > 0 and gen_value_trainer is not None and _gv_policy_step_count[0] % sync_freq == 0:
             _sync_gen_value_weights(
-                gen_value_trainer,
-                gen_value_vllm_engines,
-                _gv_policy_step_count[0],
-                gen_value_engines_lock,
+                gen_value_trainer, gen_value_vllm_engines, _gv_policy_step_count[0], gen_value_engines_lock
             )
         if gen_value_vllm_engines:
             gen_value_step_trigger.set()
+        _raise_if_gen_value_reinforce_failed()
         return result
 
     _grpo_fast.one_training_step = _one_training_step_with_genvalue
 
     # ── Step 6: run policy training loop ─────────────────────────────────────
-    weight_sync_metrics_Q: Queue = Queue(maxsize=streaming_config.async_steps)
-    stop_event = threading.Event()
-    executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo_genvalue")
-
+    primary_exception: BaseException | None = None
     try:
         _grpo_fast.run_training(
             args,
@@ -959,6 +934,7 @@ def main():
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
             _grpo_fast.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     except Exception as e:
+        primary_exception = e
         if args.send_slack_alerts:
             utils.send_slack_message(f"<!here> A gen-value RL job has died. Error message: {e}.")
         raise
@@ -968,11 +944,11 @@ def main():
         if gen_value_thread is not None:
             gen_value_step_trigger.set()
             gen_value_thread.join(timeout=30)
-        if gen_value_reinforce_thread is not None:
-            gen_value_reinforce_thread.join(timeout=30)
         _grpo_fast.cleanup_training_resources(
             stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
         )
+        if primary_exception is None:
+            _raise_if_gen_value_reinforce_failed()
 
     logger.info("finished gen-value training")
     utils.check_runtime_leaks()

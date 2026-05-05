@@ -6,14 +6,14 @@
 # per prompt, answer-prefix scalar value conditioning, SAE segmentation, and
 # 1000 joint actor/critic RL steps after value warmup.
 #
-# GPU layout (8 GPUs on 1 node):
+# GPU layout (16 GPUs on 2 nodes):
 #   - 4x policy learners (DeepSpeed stage 3)
-#   - 1x policy vLLM engine (TP=1)
-#   - 2x generative-critic vLLM engines (TP=1)
+#   - 6x policy vLLM engines (TP=1)
+#   - 5x generative-critic vLLM engines (TP=1)
 #   - 1x GenValueTrainerActor (PyTorch, REINFORCE updates)
-# (Rationale: the gen-value pool scores every sampled response each step, so
-# the gen-value vLLM pool remains the bottleneck. Give it more engines than
-# the policy pool.)
+# (Rationale: keep learner world size fixed while spending the extra node on
+# rollout and critic inference. Six policy engines can serve the 32x8 rollout
+# batch without the sequential KV-cache waves seen with a single engine.)
 #
 # Step budget:
 #   100 critic-only warmup steps (policy frozen via --value_warmup_steps)
@@ -34,7 +34,7 @@ uv run python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --gpus 8 \
     --max_retries 0 \
     --no_auto_dataset_cache \
@@ -71,7 +71,7 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 1 \
+    --vllm_num_engines 6 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --vllm_enable_prefix_caching \
@@ -98,7 +98,7 @@ uv run python mason.py \
     --gt_conditioning_template answer_prefix \
     --use_generative_value_model \
     --gen_value_model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --gen_value_vllm_num_engines 2 \
+    --gen_value_vllm_num_engines 5 \
     --gen_value_vllm_tensor_parallel_size 1 \
     --gen_value_segmentation sae \
     --gen_value_max_segments 16 \
