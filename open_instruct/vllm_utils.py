@@ -953,42 +953,46 @@ async def _acquire_and_reset_pools(
     active_env_names: list[str] = []
     text_env_names: list[str] = []
 
-    for pool_name in sorted(configured_tools):
-        pool = pools.get(pool_name)
-        if pool is None:
-            raise ValueError(f"No pool for target '{pool_name}'. Available: {list(pools.keys())}")
+    try:
+        for pool_name in sorted(configured_tools):
+            pool = pools.get(pool_name)
+            if pool is None:
+                raise ValueError(f"No pool for target '{pool_name}'. Available: {list(pools.keys())}")
 
-        target_actor = await pool.acquire.remote()
-        acquired[pool_name] = (pool, target_actor)
-        actor_map[pool_name] = target_actor
-        active_env_names.append(pool_name)
+            entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
+            reset_kwargs = {"max_steps": env_config.max_steps, **entry.kwargs}
+            target_actor, target_tools = await pool.acquire_reset.remote(reset_kwargs)
+            acquired[pool_name] = (pool, target_actor)
+            actor_map[pool_name] = target_actor
+            active_env_names.append(pool_name)
 
-        entry = env_config.env_configs.get(pool_name, EnvConfigEntry(env_name=pool_name, is_text_env=False))
-        reset_kwargs = {"max_steps": env_config.max_steps, **entry.kwargs}
-        _, target_tools = await target_actor.reset.remote(**reset_kwargs)
-        target_response_role = await target_actor.get_response_role.remote()
-        tool_response_roles[pool_name] = target_response_role
+            target_response_role = await target_actor.get_response_role.remote()
+            tool_response_roles[pool_name] = target_response_role
 
-        new_actors, new_tools, new_roles = _register_tool_dispatch(
-            pool_name, target_actor, target_tools, target_response_role, actor_map
-        )
-        actor_map.update(new_actors)
-        allowed_tools.update(new_tools)
-        tool_response_roles.update(new_roles)
+            new_actors, new_tools, new_roles = _register_tool_dispatch(
+                pool_name, target_actor, target_tools, target_response_role, actor_map
+            )
+            actor_map.update(new_actors)
+            allowed_tools.update(new_tools)
+            tool_response_roles.update(new_roles)
 
-        if entry.is_text_env:
-            text_env_names.append(pool_name)
-            allowed_tools.add(pool_name)
+            if entry.is_text_env:
+                text_env_names.append(pool_name)
+                allowed_tools.add(pool_name)
 
-    if len(text_env_names) > 1:
-        raise ValueError(f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}")
+        if len(text_env_names) > 1:
+            raise ValueError(f"Only one text environment may be active per rollout, got: {sorted(text_env_names)}")
 
-    unresolved = allowed_tools - set(actor_map.keys())
-    if unresolved:
-        raise ValueError(
-            f"Some allowed tools have no active dispatch target: {sorted(unresolved)}. "
-            f"Active targets: {sorted(actor_map.keys())}"
-        )
+        unresolved = allowed_tools - set(actor_map.keys())
+        if unresolved:
+            raise ValueError(
+                f"Some allowed tools have no active dispatch target: {sorted(unresolved)}. "
+                f"Active targets: {sorted(actor_map.keys())}"
+            )
+    except Exception:
+        for pool, acquired_actor in acquired.values():
+            pool.release.remote(acquired_actor)
+        raise
 
     return PoolSetup(
         acquired=acquired,

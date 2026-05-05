@@ -22,6 +22,16 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
+DOCKER_HOST_CONNECTIVITY_ERROR_MARKERS = (
+    "error while fetching server api version",
+    "unixhttpconnectionpool",
+    "read timed out",
+    "connection refused",
+    "connection aborted",
+    "broken pipe",
+    "connection reset",
+)
+
 
 def _env_flag(name: str, default: bool) -> bool:
     value = os.getenv(name)
@@ -52,6 +62,11 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def is_docker_host_connectivity_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    return any(marker in message for marker in DOCKER_HOST_CONNECTIVITY_ERROR_MARKERS)
+
+
 class _FileSlotSemaphore:
     """Small cross-process semaphore using advisory locks on per-node files."""
 
@@ -73,7 +88,7 @@ class _FileSlotSemaphore:
         while handle is None:
             for slot in range(self.slots):
                 path = os.path.join(self.lock_dir, f"{self.name}.{slot}.lock")
-                candidate = open(path, "a+")
+                candidate = open(path, "a+")  # noqa: SIM115 - lock handle lives through the context manager
                 try:
                     fcntl.flock(candidate.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as e:
@@ -608,7 +623,7 @@ class ApptainerBackend(SandboxBackend):
         """
         self._image = _normalize_apptainer_image(image)
         self._timeout = timeout
-        self._mem_limit = mem_limit  # noqa: documented limitation
+        self._mem_limit = mem_limit  # Kept for API symmetry; ignored by Apptainer.
         self._pwd = pwd
         self._cache_dir = cache_dir
         self._tmp_dir = tmp_dir

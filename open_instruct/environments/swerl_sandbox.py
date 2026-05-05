@@ -234,7 +234,18 @@ class SWERLSandboxEnv(RLEnvironment):
                 "Set env_config.image or provide image.txt in task data."
             )
         self._backend_kwargs["image"] = resolved_image
+        if self._backend_type == "docker" and kwargs.get("docker_host"):
+            self._backend_kwargs["docker_host"] = kwargs["docker_host"]
         record_phase("resolve_image")
+
+        if (
+            self._backend is not None
+            and self._backend_type == "docker"
+            and getattr(self._backend, "_docker_host", None) != self._backend_kwargs.get("docker_host")
+        ):
+            self._backend.close()
+            record_phase("close")
+            self._backend = None
 
         if self._backend is not None:
             self._backend.close()

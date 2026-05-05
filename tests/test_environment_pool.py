@@ -1,24 +1,18 @@
-from open_instruct.environments.pool import _actor_kwargs_for_slot
+from open_instruct.environments.pool import _is_podman_host_failure
 
 
-def test_actor_kwargs_for_slot_assigns_docker_host_round_robin():
-    base_kwargs = {"backend": "docker", "image": "test-image"}
+def test_is_podman_host_failure_detects_unresponsive_socket():
+    error = RuntimeError(
+        "Reset failed after 5 attempts: Error while fetching server API version: "
+        "UnixHTTPConnectionPool(host='localhost', port=None): Read timed out. (read timeout=300)"
+    )
 
-    kwargs = _actor_kwargs_for_slot(base_kwargs, 5, ["unix:///tmp/podman-0.sock", "unix:///tmp/podman-1.sock"])
-
-    assert kwargs["docker_host"] == "unix:///tmp/podman-1.sock"
-    assert "docker_host" not in base_kwargs
-
-
-def test_actor_kwargs_for_slot_preserves_explicit_docker_host():
-    base_kwargs = {"backend": "docker", "docker_host": "unix:///tmp/custom.sock"}
-
-    kwargs = _actor_kwargs_for_slot(base_kwargs, 1, ["unix:///tmp/podman-0.sock", "unix:///tmp/podman-1.sock"])
-
-    assert kwargs["docker_host"] == "unix:///tmp/custom.sock"
+    assert _is_podman_host_failure(error)
 
 
-def test_actor_kwargs_for_slot_skips_non_docker_backends():
-    kwargs = _actor_kwargs_for_slot({"backend": "apptainer"}, 0, ["unix:///tmp/podman-0.sock"])
+def test_is_podman_host_failure_detects_connection_errors():
+    assert _is_podman_host_failure(ConnectionError("Connection refused while connecting to podman.sock"))
 
-    assert "docker_host" not in kwargs
+
+def test_is_podman_host_failure_ignores_task_failures():
+    assert not _is_podman_host_failure(RuntimeError("Command timed out after 120s."))
