@@ -5,6 +5,7 @@ from .base import BaseEnvConfig, EnvCall, RLEnvironment, RolloutState, StepResul
 from .generic_sandbox import GenericSandboxEnv, GenericSandboxEnvConfig
 from .pool import EnvironmentPool
 from .swerl_sandbox import SWERLSandboxEnv, SWERLSandboxEnvConfig
+from .swerl_vanillux_sandbox import SWERLVanilluxSandboxEnv, SWERLVanilluxSandboxEnvConfig
 
 __all__ = [
     "BaseEnvConfig",
@@ -23,4 +24,6 @@ __all__ = [
     "GenericSandboxEnvConfig",
     "SWERLSandboxEnv",
     "SWERLSandboxEnvConfig",
+    "SWERLVanilluxSandboxEnv",
+    "SWERLVanilluxSandboxEnvConfig",
 ]
