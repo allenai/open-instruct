@@ -1024,6 +1024,124 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         return self._score_gen_value_requests([request])[0]
 
+    @staticmethod
+    def _balanced_pack_conditioned_value_entries(
+        entries: list[dict[str, Any]], target_len: int, num_packs: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Pack expanded conditioned value subsequences into length-balanced rows."""
+        if not entries:
+            return []
+
+        target_len = max(int(target_len), 1)
+        order = sorted(range(len(entries)), key=lambda idx: int(entries[idx]["input_ids"].shape[0]), reverse=True)
+        if num_packs is None:
+            packs: list[dict[str, Any]] = []
+        else:
+            packs = [{"entries": [], "tokens": 0} for _ in range(max(int(num_packs), 0))]
+
+        for entry_idx in order:
+            entry = entries[entry_idx]
+            entry_len = int(entry["input_ids"].shape[0])
+
+            if not packs:
+                packs.append({"entries": [], "tokens": 0})
+
+            fitting_pack_idxs = [
+                pack_idx
+                for pack_idx, pack in enumerate(packs)
+                if pack["tokens"] == 0 or pack["tokens"] + entry_len <= target_len
+            ]
+            if fitting_pack_idxs:
+                pack_idx = min(fitting_pack_idxs, key=lambda idx: packs[idx]["tokens"])
+            elif num_packs is None:
+                packs.append({"entries": [], "tokens": 0})
+                pack_idx = len(packs) - 1
+            else:
+                # Fixed pack count: keep every rank at the same number of forwards even if a
+                # local heavy rank has to exceed target_len. Pick the lightest row.
+                pack_idx = min(range(len(packs)), key=lambda idx: packs[idx]["tokens"])
+
+            packs[pack_idx]["entries"].append(entry)
+            packs[pack_idx]["tokens"] += entry_len
+
+        return packs
+
+    @staticmethod
+    def _sync_max_conditioned_value_packs(local_num_packs: int, device: torch.device) -> int:
+        num_packs_t = torch.tensor(max(int(local_num_packs), 0), dtype=torch.long, device=device)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(num_packs_t, op=dist.ReduceOp.MAX)
+        return int(num_packs_t.item())
+
+    def _dummy_value_forward(
+        self,
+        dtype: torch.dtype,
+        device: torch.device,
+        dummy_grad_outputs: list | None = None,
+    ) -> None:
+        dummy = torch.zeros(1, 1, dtype=dtype, device=device)
+        dummy_out = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
+        if dummy_grad_outputs is not None:
+            logits = getattr(dummy_out, "logits", dummy_out)
+            dummy_grad_outputs.append(logits.reshape(-1)[0])
+
+    def _forward_repacked_conditioned_value_entries(
+        self,
+        entries: list[dict[str, Any]],
+        full_len: int,
+        position_dtype: torch.dtype,
+        token_dtype: torch.dtype,
+        device: torch.device,
+        dummy_grad_outputs: list | None = None,
+    ) -> torch.Tensor:
+        out_values = torch.zeros(1, full_len - 1, dtype=torch.float32, device=device)
+        target_len = getattr(self.args, "value_model_repack_max_length", None)
+        if target_len is None or target_len <= 0:
+            target_len = getattr(self.streaming_config, "pack_length", full_len)
+
+        local_packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len))
+        max_num_packs = self._sync_max_conditioned_value_packs(len(local_packs), device)
+        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len), num_packs=max_num_packs)
+
+        for pack in packs:
+            pack_entries = pack["entries"]
+            if not pack_entries:
+                self._dummy_value_forward(token_dtype, device, dummy_grad_outputs=dummy_grad_outputs)
+                continue
+
+            packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0).unsqueeze(0)
+            packed_pos = torch.cat(
+                [
+                    torch.arange(entry["input_ids"].shape[0], dtype=position_dtype, device=device)
+                    for entry in pack_entries
+                ],
+                dim=0,
+            ).unsqueeze(0)
+
+            output = self.value_model(input_ids=packed_ids, attention_mask=None, position_ids=packed_pos)
+            logits = getattr(output, "logits", output)
+            pack_values = logits[0, :-1].squeeze(-1).float()
+
+            row_offset = 0
+            for entry in pack_entries:
+                entry_len = int(entry["input_ids"].shape[0])
+                if entry_len <= 1:
+                    row_offset += entry_len
+                    continue
+
+                sub_values = pack_values[row_offset : row_offset + entry_len - 1]
+                new_resp_values = sub_values[entry["orig_mask"][1:]]
+                sub = entry["subseq"]
+                base = sub["offset_in_pack"]
+                resp_mask = sub["response_is_resp"]
+                resp_positions = resp_mask[1:].nonzero(as_tuple=True)[0] + base
+                n = min(resp_positions.numel(), new_resp_values.numel())
+                out_values[0, resp_positions[:n]] = new_resp_values[:n]
+                row_offset += entry_len
+
+        return out_values
+
+
     def _forward_value_with_conditioning(
         self,
         query_responses: torch.Tensor,
@@ -1060,6 +1178,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # No model calls here — we batch everything below into a single forward.
         expanded_ids_list: list[torch.Tensor] = []
         orig_masks_list: list[torch.Tensor] = []
+        value_entries: list[dict[str, Any]] = []
 
         for i, sub in enumerate(subseqs):
             ids = sub["input_ids"]
@@ -1086,8 +1205,19 @@ class PolicyTrainerRayProcess(RayProcess):
 
             expanded_ids_list.append(new_ids)
             orig_masks_list.append(orig_mask)
+            value_entries.append({"input_ids": new_ids, "orig_mask": orig_mask, "subseq": sub})
 
         if sequential:
+            if getattr(args, "value_model_repack_conditioned_inputs", True) and args.sequence_parallel_size == 1:
+                return self._forward_repacked_conditioned_value_entries(
+                    value_entries,
+                    full_len,
+                    position_ids.dtype,
+                    query_responses.dtype,
+                    device,
+                    dummy_grad_outputs=dummy_grad_outputs,
+                )
+
             # ZeRO-3 requires all DP ranks to call the value model the same number of times
             # (each call triggers an ALLGATHER). Different packs may have different n_subs, so
             # we sync the max and run dummy forwards on ranks that finish early.
@@ -1118,11 +1248,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # During the loss pass, the caller collects dummy_grad_outputs and folds
                     # them into v_loss with a 0 weight so that backward also traverses the
                     # same number of layers on all ranks (ZeRO-3 backward allgather parity).
-                    dummy = torch.zeros(1, 1, dtype=query_responses.dtype, device=device)
-                    dummy_out = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
-                    if dummy_grad_outputs is not None:
-                        logits = getattr(dummy_out, "logits", dummy_out)
-                        dummy_grad_outputs.append(logits.reshape(-1)[0])
+                    self._dummy_value_forward(query_responses.dtype, device, dummy_grad_outputs=dummy_grad_outputs)
             return out_values
 
         # Pad all expanded sequences to the same length for a single batched forward.

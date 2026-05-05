@@ -174,6 +174,10 @@ class GRPOExperimentConfig(
     # Value-model conditioning (applied only during the value forward, between prompt and response)
     value_model_ground_truth_conditioning: bool = False
     """If True, splice a conditioning string built from the ground truth into the value forward."""
+    value_model_repack_conditioned_inputs: bool = True
+    """If True, repack GT-conditioned scalar value inputs before forwarding to reduce ZeRO-3 allgathers."""
+    value_model_repack_max_length: int | None = None
+    """Optional max token budget per repacked conditioned value row. Defaults to the rollout pack length."""
     gt_conditioning_template: str = "answer_prefix"
     """Template name. One of: answer_prefix, expected_accuracy, rollout_context, correct_demo."""
     rollout_context_num_siblings: int = -1
