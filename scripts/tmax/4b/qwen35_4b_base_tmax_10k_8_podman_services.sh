@@ -14,7 +14,7 @@ uv run python mason.py \
        --priority urgent \
        --preemptible \
        --num_nodes 3 \
-       --max_retries 0 \
+       --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
        --env BEAKER_SKIP_DOCKER_SOCKET=1 \
@@ -37,7 +37,6 @@ uv run python mason.py \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --budget ai2/oe-adapt \
-       --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \

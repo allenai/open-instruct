@@ -16,7 +16,7 @@ uv run python mason.py \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \
-       --max_retries 0 \
+       --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
        --env BEAKER_SKIP_DOCKER_SOCKET=1 \

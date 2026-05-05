@@ -28,7 +28,7 @@ uv run python mason.py \
        --num_nodes 1 \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
        --env BEAKER_SKIP_DOCKER_SOCKET=1 \
-       --max_retries 0 \
+       --max_retries 5 \
        --timeout 30m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
