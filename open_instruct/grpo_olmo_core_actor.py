@@ -29,6 +29,7 @@ from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngin
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import (
+    EvalCallback,
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
@@ -85,6 +86,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.run_name = None
         self.json_config = None
         self.ref_policy_update_freq = None
+        self.eval_dataset = None
+        self.eval_data_loader = None
+        self.eval_generation_config = None
+        self.base_env_config = None
+        self.prompt_Q = None
+        self.evaluation_inference_results_Q = None
+        self.max_possible_score = 1.0
 
     def setup_model(self) -> int:
         """Initialize the OLMo-core model and training infrastructure.
@@ -276,6 +284,38 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.json_config = json_config
         self.ref_policy_update_freq = ref_policy_update_freq
 
+    def setup_eval(
+        self,
+        prompt_Q: Any,
+        evaluation_inference_results_Q: Any,
+        eval_dataset: Any,
+        eval_generation_config: Any,
+        base_env_config: Any,
+        max_possible_score: float,
+    ) -> None:
+        """Store eval configuration for use in fit().
+
+        Only rank 0 builds the eval data loader; other ranks store None and
+        won't have an EvalCallback registered.
+        """
+        self.prompt_Q = prompt_Q
+        self.evaluation_inference_results_Q = evaluation_inference_results_Q
+        self.eval_dataset = eval_dataset
+        self.eval_generation_config = eval_generation_config
+        self.base_env_config = base_env_config
+        self.max_possible_score = max_possible_score
+        if self.rank == 0 and eval_dataset is not None:
+            self.eval_data_loader = data_loader_lib.HFDataLoader(
+                dataset=eval_dataset,
+                batch_size=1,
+                seed=self.grpo_config.seed,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=self.grpo_config.output_dir,
+                automatic_reshuffle=False,
+                collator=data_loader_lib.single_example_collator,
+            )
+
     def fit(self) -> dict:
         """Run training using OLMo-core Trainer with callbacks.
 
@@ -312,6 +352,21 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(
                 name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
+            )
+
+        if self.rank == 0 and self.eval_dataset is not None and self.grpo_config.local_eval_every > 0:
+            trainer_callbacks["eval"] = EvalCallback(
+                args=self.grpo_config,
+                prompt_Q=self.prompt_Q,
+                evaluation_inference_results_Q=self.evaluation_inference_results_Q,
+                eval_dataset=self.eval_dataset,
+                eval_data_loader=self.eval_data_loader,
+                eval_generation_config=self.eval_generation_config,
+                model_dims=model_dims,
+                base_env_config=self.base_env_config,
+                tokenizer=self.tokenizer,
+                max_possible_score=self.max_possible_score,
+                actor_manager=self.actor_manager,
             )
 
         if self.grpo_config.save_freq != self.grpo_config.checkpoint_state_freq:

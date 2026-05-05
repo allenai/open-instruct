@@ -15,8 +15,10 @@ from typing import Any, ClassVar, cast
 
 import ray
 import ray.exceptions
+import ray.util.queue as ray_queue
 import torch
 import torch.nn as nn
+from datasets import Dataset
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
 from torch.distributed._composable.fsdp import FSDPModule
@@ -248,3 +250,64 @@ class DataPreparationActorCheckpointCallback(Callback):
             logger.info("Restored DataPreparationActor state from checkpoint")
         except (ray.exceptions.RayError, ValueError) as e:
             logger.warning(f"Failed to restore DataPreparationActor state: {e}")
+
+
+@dataclass
+class EvalCallback(Callback):
+    """Pushes eval prompts onto prompt_Q on cadence and drains eval results.
+
+    Mirrors grpo_fast.py's main-loop eval coordination as an OLMo-core Callback,
+    since grpo.py delegates the train loop to OLMo-core's Trainer. Only register
+    on rank 0 when eval is enabled (eval_dataset is not None and local_eval_every > 0).
+    """
+
+    args: grpo_utils.GRPOExperimentConfig
+    prompt_Q: ray_queue.Queue
+    evaluation_inference_results_Q: ray_queue.Queue
+    eval_dataset: Dataset
+    eval_data_loader: data_loader_lib.HFDataLoader
+    eval_generation_config: Any
+    model_dims: utils.ModelDims
+    base_env_config: Any
+    tokenizer: Any
+    max_possible_score: float
+    actor_manager: ray.actor.ActorHandle | None = None
+
+    _last_eval_collected: bool = field(default=True, init=False, repr=False)
+
+    def pre_step(self, batch: dict[str, Any]) -> None:
+        if not (
+            (self.args.eval_on_step_0 and self.trainer.global_step == 1)
+            or (self.trainer.global_step % self.args.local_eval_every == 0 and self.trainer.global_step > 1)
+        ):
+            return
+        if not self._last_eval_collected:
+            logger.warning(
+                "[EvalCallback] previous eval round not fully collected; results may interleave. "
+                "Consider increasing local_eval_every."
+            )
+        for eval_example in iter(self.eval_data_loader):
+            data_loader_lib.add_prompt_to_generator(
+                eval_example,
+                self.trainer.global_step,
+                self.prompt_Q,
+                self.eval_generation_config,
+                is_eval=True,
+                base_env_config=self.base_env_config,
+            )
+        self.eval_data_loader.reset()
+
+    def post_step(self) -> None:
+        self._last_eval_collected = grpo_utils.maybe_evaluate(
+            self.args,
+            self.trainer.global_step,
+            self.evaluation_inference_results_Q,
+            self.tokenizer,
+            0,
+            self.eval_dataset,
+            self.eval_generation_config,
+            self.model_dims,
+            self.base_env_config,
+            self.max_possible_score,
+            self.actor_manager,
+        )

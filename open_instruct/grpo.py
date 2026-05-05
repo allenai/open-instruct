@@ -192,7 +192,8 @@ def main(
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
-    generation_config = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)["train"]
+    generation_configs = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)
+    generation_config = generation_configs["train"]
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -315,6 +316,21 @@ def main(
             for m in policy_group.models
         ],
         desc="Setting up callbacks",
+    )
+
+    utils.ray_get_with_progress(
+        [
+            m.setup_eval.remote(
+                prompt_Q=prompt_Q,
+                evaluation_inference_results_Q=evaluation_inference_results_Q,
+                eval_dataset=eval_dataset,
+                eval_generation_config=generation_configs["eval"],
+                base_env_config=base_env_config,
+                max_possible_score=streaming_config.max_possible_score,
+            )
+            for m in policy_group.models
+        ],
+        desc="Setting up eval",
     )
 
     utils.ray_get_with_progress(
