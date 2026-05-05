@@ -649,6 +649,7 @@ class BatchStatistics:
     filtered_prompts_zero: int
     filtered_prompts_solved: int
     filtered_prompts_nonzero: int
+    filtered_prompts_pct: float
     percent_solved_mean: float
     percent_solved_hist: np.ndarray
     no_resampled_prompts: int
@@ -965,6 +966,9 @@ def make_batch_from_groups(
     combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
+    total_prompts = len(groups)
+    total_seen = filtered_prompts + total_prompts
+    filtered_prompts_pct = filtered_prompts / total_seen if total_seen > 0 else 0.0
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
@@ -972,10 +976,11 @@ def make_batch_from_groups(
         filtered_prompts_zero=filtered_prompts_zero,
         filtered_prompts_solved=filtered_prompts_solved,
         filtered_prompts_nonzero=filtered_prompts_nonzero,
+        filtered_prompts_pct=filtered_prompts_pct,
         percent_solved_mean=percent_solved_mean,
         percent_solved_hist=np.array(all_percent_solved),
         no_resampled_prompts=no_resampled_prompts,
-        total_prompts=len(groups),
+        total_prompts=total_prompts,
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
 
@@ -1078,8 +1083,11 @@ def accumulate_inference_batches(
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
-            logging.debug(
-                f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
+            logger.info(
+                f"[accumulate_inference_batches] training_step={training_step} "
+                f"sampled={num_prompts_sampled}/{num_prompts} "
+                f"filtered={total_filtered_prompts} "
+                f"(all_zero={filtered_prompt_zero}, all_solved={filtered_prompt_solved}, nonzero_std0={filtered_prompt_nonzero})"
             )
             continue
 
