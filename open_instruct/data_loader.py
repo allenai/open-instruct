@@ -873,7 +873,7 @@ def make_batch_from_groups(
     total_prompt_tokens = 0
     total_response_tokens = 0
     max_generation_time = 0
-    per_group_generation_times: list[float] = []
+    total_generation_time = 0.0
 
     for group in groups:
         result = group.result
@@ -913,11 +913,9 @@ def make_batch_from_groups(
         total_prompt_tokens += result.token_statistics.num_prompt_tokens
         total_response_tokens += result.token_statistics.num_response_tokens
         max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
-        per_group_generation_times.append(result.token_statistics.generation_time)
+        total_generation_time += result.token_statistics.generation_time
 
-    mean_per_group_wall_time = (
-        sum(per_group_generation_times) / len(per_group_generation_times) if per_group_generation_times else 0.0
-    )
+    mean_per_group_wall_time = total_generation_time / len(groups)
 
     accumulated_stats = data_types.TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
