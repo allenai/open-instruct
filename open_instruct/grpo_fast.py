@@ -140,6 +140,16 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
+def _uses_generative_value_model(args: Any) -> bool:
+    return bool(
+        getattr(args, "use_generative_value_model", False) and getattr(args, "gen_value_vllm_num_engines", 1) > 0
+    )
+
+
+def _uses_scalar_value_model(args: Any) -> bool:
+    return bool(getattr(args, "use_value_model", False) and not _uses_generative_value_model(args))
+
+
 def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
     if checkpoint_state is None:
         return None
@@ -458,7 +468,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Save value model path to load later (after value_model is initialized)
                 self.value_model_checkpoint_path = None
-                if args.use_value_model and states.get("value_model_saved", False):
+                if _uses_scalar_value_model(args) and states.get("value_model_saved", False):
                     value_model_dir = os.path.join(args.checkpoint_state_dir, "value_model")
                     if os.path.exists(os.path.join(value_model_dir, "value_model.bin")):
                         self.value_model_checkpoint_path = value_model_dir
@@ -498,8 +508,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Value model (optional)
         self.value_model = None
-        if args.use_value_model:
+        if _uses_scalar_value_model(args):
             self._init_value_model(args, model_config)
+        elif args.use_value_model:
+            logger.info(f"{self.rank=}: Skipping scalar value model; generative value model is active")
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -775,15 +787,15 @@ class PolicyTrainerRayProcess(RayProcess):
             result.append({"offset_in_pack": s, "length": e - s, "input_ids": ids, "response_is_resp": mask})
         return result
 
-    def _score_rollout_with_gen_value(
+    def _build_gen_value_scoring_request(
         self,
         query_responses: torch.Tensor,
         position_ids: torch.Tensor,
         response_mask: torch.Tensor,
         ground_truths_pack: list[str],
         response_logprobs_full: "torch.Tensor | None" = None,
-    ) -> tuple[torch.Tensor, list[dict]]:
-        """Score every sub-sequence in a packed rollout with the gen-value vLLM pool.
+    ) -> dict[str, Any]:
+        """Build all gen-value prompts and scatter metadata for one packed rollout.
 
         The pack is first split into its constituent sub-sequences via position-id
         resets (see ``_unpack_subseqs``). Each sub-sequence is scored independently
@@ -793,31 +805,15 @@ class PolicyTrainerRayProcess(RayProcess):
         which meant per-segment scores and training pairs on multi-subseq packs
         were meaningless.
 
-        All per-sub-sequence scoring prompts are batched into a single vLLM call
-        so we don't pay an RPC round-trip per sub-sequence.
-
         ``response_logprobs_full`` is the full per-token log-prob tensor for the
         pack (shape ``(1, seq_len)``). When ``gen_value_segmentation='sae'`` we
         slice it per sub-sequence to get the right SAE boundaries.
-
-        Returns ``(values_BT, training_pairs)`` where:
-          - ``values_BT`` has shape ``(1, seq_len-1)`` (shifted layout), with each
-            response token carrying its sub-sequence's piecewise-constant score.
-          - ``training_pairs`` is a flat list of ``{prompt, generated, outcome,
-            subseq_idx}`` dicts. ``outcome`` is left as ``None`` so the caller can
-            stamp per-sub-sequence outcomes derived from the rewards/dones tensors.
         """
         args = self.args
         device = query_responses.device
         seq_len = query_responses.shape[1]
-        empty_values = torch.zeros(1, seq_len - 1, device=device)
-
-        if not self._gen_value_engines:
-            return empty_values, []
 
         subseqs = self._unpack_subseqs(query_responses, position_ids, response_mask)
-        if not subseqs:
-            return empty_values, []
 
         segmentation: str = getattr(args, "gen_value_segmentation", "fixed")
         chunk_size: int = getattr(args, "gen_value_chunk_size", 512)
@@ -826,10 +822,7 @@ class PolicyTrainerRayProcess(RayProcess):
         score_min: float = getattr(args, "gen_value_score_min", 0.0)
         score_max: float = getattr(args, "gen_value_score_max", 10.0)
         conditioning: str = getattr(args, "gen_value_conditioning", "none")
-        max_new_tokens: int = getattr(args, "gen_value_max_new_tokens", 8)
-        temperature: float = getattr(args, "gen_value_temperature", 1.0)
 
-        # Per-subseq precomputation; scoring prompts from all subseqs are batched.
         prompts: list[str] = []
         prompt_subseq_idx: list[int] = []
         per_subseq_info: list[dict] = []
@@ -904,41 +897,40 @@ class PolicyTrainerRayProcess(RayProcess):
                 }
             )
 
-        if not prompts:
-            return empty_values, []
+        return {
+            "seq_len": seq_len,
+            "device": device,
+            "prompts": prompts,
+            "prompt_subseq_idx": prompt_subseq_idx,
+            "per_subseq_info": per_subseq_info,
+        }
 
-        n_eng = len(self._gen_value_engines)
-        buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_eng)]
-        for k, prompt in enumerate(prompts):
-            buckets[k % n_eng].append((k, prompt))
-        non_empty = [(e, b) for e, b in enumerate(buckets) if b]
-        refs = [
-            self._gen_value_engines[e].generate_completions.remote(
-                [p for _, p in bucket],
-                temperature=temperature,
-                max_tokens=max_new_tokens,
-                top_p=1.0,
-                stop=["</answer>"],
-                include_stop_str_in_output=True,
-            )
-            for e, bucket in non_empty
-        ]
-        results = ray.get(refs)
-        generated_texts: list[str] = [""] * len(prompts)
-        for (_, bucket), bucket_texts in zip(non_empty, results):
-            for (k, _), text in zip(bucket, bucket_texts):
-                generated_texts[k] = text
+    def _finish_gen_value_scoring_request(
+        self, request: dict[str, Any], generated_texts: list[str]
+    ) -> tuple[torch.Tensor, list[dict]]:
+        """Scatter generated gen-value scores for one request back to token positions."""
+        args = self.args
+        seq_len = request["seq_len"]
+        device = request["device"]
+        prompts: list[str] = request["prompts"]
+        prompt_subseq_idx: list[int] = request["prompt_subseq_idx"]
+        per_subseq_info: list[dict] = request["per_subseq_info"]
+        score_min: float = getattr(args, "gen_value_score_min", 0.0)
+        score_max: float = getattr(args, "gen_value_score_max", 10.0)
+
+        values_BT = torch.zeros(1, seq_len - 1, device=device)
+        if not prompts:
+            return values_BT, []
 
         all_scores: list[float] = []
         for text in generated_texts:
             raw = value_model_utils.parse_generative_value_score(text, score_min, score_max)
-            # Parse failure → v_hat = 0 (piecewise-constant value of 0 for that segment),
+            # Parse failure -> v_hat = 0 (piecewise-constant value of 0 for that segment),
             # matching the REINFORCE reward semantics in grpo_fast_genvalue.GenValueTrainerActor.
             all_scores.append(
                 value_model_utils.rescale_gen_value_score(raw, score_min, score_max) if raw is not None else 0.0
             )
 
-        values_BT = torch.zeros(1, seq_len - 1, device=device)
         for info in per_subseq_info:
             boundaries = info["boundaries"]
             n_resp_sub = info["n_resp_sub"]
@@ -960,14 +952,77 @@ class PolicyTrainerRayProcess(RayProcess):
         training_pairs: list[dict] = []
         for k, (prompt, generated) in enumerate(zip(prompts, generated_texts)):
             training_pairs.append(
-                {
-                    "prompt": prompt,
-                    "generated": generated,
-                    "outcome": None,
-                    "subseq_idx": prompt_subseq_idx[k],
-                }
+                {"prompt": prompt, "generated": generated, "outcome": None, "subseq_idx": prompt_subseq_idx[k]}
             )
         return values_BT, training_pairs
+
+    def _score_gen_value_requests(self, requests: list[dict[str, Any]]) -> list[tuple[torch.Tensor, list[dict]]]:
+        """Batch all gen-value prompts for this rank across the gen-value vLLM engines."""
+        if not requests:
+            return []
+        if not self._gen_value_engines:
+            return [(torch.zeros(1, request["seq_len"] - 1, device=request["device"]), []) for request in requests]
+
+        flat_entries: list[tuple[int, int, str]] = []
+        generated_by_request: list[list[str]] = []
+        for request_idx, request in enumerate(requests):
+            prompts: list[str] = request["prompts"]
+            generated_by_request.append([""] * len(prompts))
+            for prompt_idx, prompt in enumerate(prompts):
+                flat_entries.append((request_idx, prompt_idx, prompt))
+
+        if flat_entries:
+            args = self.args
+            max_new_tokens: int = getattr(args, "gen_value_max_new_tokens", 8)
+            temperature: float = getattr(args, "gen_value_temperature", 1.0)
+            n_eng = len(self._gen_value_engines)
+            buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_eng)]
+            for flat_idx, (_, _, prompt) in enumerate(flat_entries):
+                buckets[flat_idx % n_eng].append((flat_idx, prompt))
+            non_empty = [(e, b) for e, b in enumerate(buckets) if b]
+            refs = [
+                self._gen_value_engines[e].generate_completions.remote(
+                    [p for _, p in bucket],
+                    temperature=temperature,
+                    max_tokens=max_new_tokens,
+                    top_p=1.0,
+                    stop=["</answer>"],
+                    include_stop_str_in_output=True,
+                )
+                for e, bucket in non_empty
+            ]
+            results = ray.get(refs)
+            for (_, bucket), bucket_texts in zip(non_empty, results):
+                for (flat_idx, _), text in zip(bucket, bucket_texts):
+                    request_idx, prompt_idx, _ = flat_entries[flat_idx]
+                    generated_by_request[request_idx][prompt_idx] = text
+
+        return [
+            self._finish_gen_value_scoring_request(request, generated_texts)
+            for request, generated_texts in zip(requests, generated_by_request)
+        ]
+
+    def _score_rollout_with_gen_value(
+        self,
+        query_responses: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        ground_truths_pack: list[str],
+        response_logprobs_full: "torch.Tensor | None" = None,
+    ) -> tuple[torch.Tensor, list[dict]]:
+        """Score one packed rollout with the gen-value vLLM pool.
+
+        This wrapper is kept for callers/tests that score a single pack. The training
+        path batches requests across all packs via ``_score_gen_value_requests``.
+        """
+        request = self._build_gen_value_scoring_request(
+            query_responses,
+            position_ids,
+            response_mask,
+            ground_truths_pack,
+            response_logprobs_full=response_logprobs_full,
+        )
+        return self._score_gen_value_requests([request])[0]
 
     def _forward_value_with_conditioning(
         self,
@@ -1230,6 +1285,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if (
             self.args.reset_optimizer_after_value_warmup
             and self.args.value_warmup_steps > 0
+            and not _uses_generative_value_model(self.args)
             and training_step == self.args.value_warmup_steps + 1
         ):
             try:
@@ -1319,7 +1375,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 "use_value_model=True but rewards/dones are missing from CollatedBatchData; "
                 "did DataPreparationActor populate them?"
             )
-            value_loss_inputs = []
+            if not _use_gen_value:
+                value_loss_inputs = []
             per_sample_bf: list[float] = []
             per_sample_lam: list[float] = []
             # Per-token value diagnostics accumulators (correct vs incorrect rollouts, percentile bins).
@@ -1333,10 +1390,10 @@ class PolicyTrainerRayProcess(RayProcess):
             _gen_value_terminal_vhat_correct: list[float] = []
             _gen_value_terminal_vhat_incorrect: list[float] = []
             with Timer("Value forward (no-grad)", noop=self.rank != 0), torch.no_grad():
-                for i in range(num_samples):
-                    resp_mask = data_BT.response_masks[i][:, 1:].bool()
-                    gv_pairs: list[dict] = []
-                    if _use_gen_value:
+                gen_value_results: list[tuple[torch.Tensor, list[dict]]] = []
+                if _use_gen_value:
+                    gen_value_requests: list[dict[str, Any]] = []
+                    for i in range(num_samples):
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
                         gv_logprobs_full = None
                         if (
@@ -1345,13 +1402,25 @@ class PolicyTrainerRayProcess(RayProcess):
                             and data_BT.vllm_logprobs is not None
                         ):
                             gv_logprobs_full = data_BT.vllm_logprobs[i]
-                        values_BT, gv_pairs = self._score_rollout_with_gen_value(
-                            data_BT.query_responses[i],
-                            data_BT.position_ids[i],
-                            data_BT.response_masks[i],
-                            list(gts_pack),
-                            response_logprobs_full=gv_logprobs_full,
+                        gen_value_requests.append(
+                            self._build_gen_value_scoring_request(
+                                data_BT.query_responses[i],
+                                data_BT.position_ids[i],
+                                data_BT.response_masks[i],
+                                list(gts_pack),
+                                response_logprobs_full=gv_logprobs_full,
+                            )
                         )
+                    sae_step_metrics["gen_value/num_segment_prompts"] = float(
+                        sum(len(request["prompts"]) for request in gen_value_requests)
+                    )
+                    gen_value_results = self._score_gen_value_requests(gen_value_requests)
+
+                for i in range(num_samples):
+                    resp_mask = data_BT.response_masks[i][:, 1:].bool()
+                    gv_pairs: list[dict] = []
+                    if _use_gen_value:
+                        values_BT, gv_pairs = gen_value_results[i]
                     elif self.args.value_model_ground_truth_conditioning:
                         gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
                         sibs_pack = data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
@@ -1391,16 +1460,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             sub_rewards = rewards_full[s_off : s_off + s_len]
                             if sub_dones.any():
                                 n_d = int(sub_dones.sum())
-                                subseq_outcomes.append(
-                                    float(sub_rewards[sub_dones].sum()) / (n_d * max_score)
-                                )
+                                subseq_outcomes.append(float(sub_rewards[sub_dones].sum()) / (n_d * max_score))
                             else:
                                 subseq_outcomes.append(0.0)
                         for pair in gv_pairs:
                             s_idx = int(pair.get("subseq_idx", 0))
-                            pair["outcome"] = (
-                                subseq_outcomes[s_idx] if 0 <= s_idx < len(subseq_outcomes) else 0.0
-                            )
+                            pair["outcome"] = subseq_outcomes[s_idx] if 0 <= s_idx < len(subseq_outcomes) else 0.0
                         _gen_value_training_pairs.extend(gv_pairs)
                     resp_masks_np = resp_mask.long().cpu().numpy()
                     logprobs_np = None
@@ -1467,17 +1532,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     # value_mask uses [:, :-1] so V(s_t) is supervised at the correct response
                     # positions (not shifted left like response_masks[:, 1:] would do).
                     value_mask = data_BT.response_masks[i][:, :-1].bool()
-                    value_loss_inputs.append(
-                        {
-                            "returns": torch.from_numpy(returns_np.astype("float32")).to(device),
-                            "old_values": values_BT.detach(),
-                            "response_mask": resp_mask,
-                            "value_mask": value_mask,
-                        }
-                    )
+                    if value_loss_inputs is not None:
+                        value_loss_inputs.append(
+                            {
+                                "returns": torch.from_numpy(returns_np.astype("float32")).to(device),
+                                "old_values": values_BT.detach(),
+                                "response_mask": resp_mask,
+                                "value_mask": value_mask,
+                            }
+                        )
                     # Accumulate per-token value diagnostics split by correct/incorrect.
                     # A pack is "correct" if any terminal reward is positive.
-                    term_rewards = (rewards * dones.astype("float32"))
+                    term_rewards = rewards * dones.astype("float32")
                     is_correct = bool(term_rewards.sum() > 0)
                     vm_np = value_mask.cpu().numpy()  # shape (B, T-1), True at value positions
                     vals_np = values_BT.float().cpu().numpy()  # (B, T-1)
@@ -1492,9 +1558,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         _vdiag_returns_all.extend(r_tokens.tolist())
                         _vdiag_preds_all.extend(v_tokens.tolist())
                         # Bucket by percentile position within this response.
-                        bins = np.minimum(
-                            (np.arange(n) * _NUM_PCT_BINS / n).astype(int), _NUM_PCT_BINS - 1
-                        )
+                        bins = np.minimum((np.arange(n) * _NUM_PCT_BINS / n).astype(int), _NUM_PCT_BINS - 1)
                         target = _vdiag_correct if is_correct else _vdiag_incorrect
                         for pos_idx, bin_idx in enumerate(bins):
                             target[bin_idx].append(float(v_tokens[pos_idx]))
@@ -1520,8 +1584,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
             if _gen_value_terminal_vhat_correct and _gen_value_terminal_vhat_incorrect:
                 sae_step_metrics["gen_value/terminal_vhat_gap"] = float(
-                    np.mean(_gen_value_terminal_vhat_correct)
-                    - np.mean(_gen_value_terminal_vhat_incorrect)
+                    np.mean(_gen_value_terminal_vhat_correct) - np.mean(_gen_value_terminal_vhat_incorrect)
                 )
             # Push gen-value training pairs to the REINFORCE queue. ray.util.queue.Queue
             # methods are regular sync methods (they proxy to an actor internally);
@@ -1543,7 +1606,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         len(_gen_value_training_pairs),
                     )
             # Global advantage whitening across all samples and ranks (replaces per-sample whitening).
-            if self.args.whiten_advantages and value_loss_inputs is not None:
+            if self.args.whiten_advantages:
                 adv_parts = [data_BT.advantages[i][:, 1:].float() for i in range(num_samples)]
                 mask_parts = [data_BT.response_masks[i][:, 1:].bool() for i in range(num_samples)]
                 adv_flat = torch.cat([a[m] for a, m in zip(adv_parts, mask_parts)])
@@ -1567,13 +1630,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 for bin_idx in range(_NUM_PCT_BINS):
                     tag = f"{bin_idx:03d}"
                     if _vdiag_correct[bin_idx]:
-                        sae_step_metrics[f"value/correct_pct_{tag}"] = float(
-                            np.mean(_vdiag_correct[bin_idx])
-                        )
+                        sae_step_metrics[f"value/correct_pct_{tag}"] = float(np.mean(_vdiag_correct[bin_idx]))
                     if _vdiag_incorrect[bin_idx]:
-                        sae_step_metrics[f"value/incorrect_pct_{tag}"] = float(
-                            np.mean(_vdiag_incorrect[bin_idx])
-                        )
+                        sae_step_metrics[f"value/incorrect_pct_{tag}"] = float(np.mean(_vdiag_incorrect[bin_idx]))
                 if _vdiag_returns_all and _vdiag_preds_all:
                     rets = np.array(_vdiag_returns_all, dtype="float32")
                     preds = np.array(_vdiag_preds_all, dtype="float32")
@@ -1583,9 +1642,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     sae_step_metrics["value/returns_std"] = float(np.std(rets))
                     sae_step_metrics["value/predictions_mean"] = float(np.mean(preds))
                     sae_step_metrics["value/predictions_std"] = float(np.std(preds))
-                    sae_step_metrics["value/explained_variance"] = (
-                        1.0 - float(np.var(residuals)) / (ret_var + 1e-8)
-                    )
+                    sae_step_metrics["value/explained_variance"] = 1.0 - float(np.var(residuals)) / (ret_var + 1e-8)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -1778,8 +1835,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         gn = float(self.value_model.get_global_grad_norm())
                         if math.isfinite(gn):
                             self.local_metrics["value/grad_norm"] = gn
-                for k, v in sae_step_metrics.items():
-                    self.local_metrics[k] = v
+            for k, v in sae_step_metrics.items():
+                self.local_metrics[k] = v
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
@@ -3052,12 +3109,20 @@ def cleanup_training_resources(
 
 def _is_in_warmup_window(args, training_step: int) -> bool:
     """Return True if training_step falls inside any value/policy warmup window."""
-    if args.value_warmup_steps > 0 and training_step <= args.value_warmup_steps:
+    if (
+        args.value_warmup_steps > 0
+        and not _uses_generative_value_model(args)
+        and training_step <= args.value_warmup_steps
+    ):
         return True
     if args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps:
         return True
     rewarmup_end = args.value_rewarmup_start + args.value_rewarmup_steps
-    return bool(args.value_rewarmup_steps > 0 and args.value_rewarmup_start <= training_step <= rewarmup_end)
+    return bool(
+        args.value_rewarmup_steps > 0
+        and not _uses_generative_value_model(args)
+        and args.value_rewarmup_start <= training_step <= rewarmup_end
+    )
 
 
 def run_training(
