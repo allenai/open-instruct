@@ -1,6 +1,25 @@
 # "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo-sft/qwen3-4b-sft-full/step44438-hf"
 MODEL_PATHS=(
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_100"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_100"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_200"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_300"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_400"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_500"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_600"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_700"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_800"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_900"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_1000"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_100"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_200"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_300"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_400"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_500"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_600"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_700"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_800"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_900"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_1000"
 )
 current_evals="alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
@@ -10,9 +29,9 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
     if [[ "$BASENAME" =~ ^step_[0-9]+$ ]]; then
         # RL checkpoint case: extract experiment name and step
         STEP_NUM="$BASENAME"
-        CHECKPOINTS_DIR=$(dirname "$MODEL_PATH")
-        EXPERIMENT_DIR=$(dirname "$CHECKPOINTS_DIR")
-        EXPERIMENT_NAME=$(basename "$EXPERIMENT_DIR")
+        EXPERIMENT_DIR=$(dirname "$MODEL_PATH")
+        # EXPERIMENT_NAME=$(basename "$EXPERIMENT_DIR")
+        EXPERIMENT_NAME=$(basename "$EXPERIMENT_DIR" _checkpoints)
         MODEL_NAME="${EXPERIMENT_NAME}_${STEP_NUM}"
     elif [[ "$BASENAME" =~ ^step[0-9]+-hf$ ]]; then
         # SFT checkpoint with step number
