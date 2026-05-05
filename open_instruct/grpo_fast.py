@@ -673,7 +673,11 @@ class PolicyTrainerRayProcess(RayProcess):
         # Ulysses SP all-to-alls), so every rank must participate. Every rank
         # writes its local trace to a rank-scoped file; under SP those files can
         # be stitched together offline by (dp_rank, sample_idx, sp_rank).
-        if self.streaming_config.save_traces and self.streaming_config.rollouts_save_path:
+        if (
+            self.streaming_config.save_traces
+            and self.streaming_config.save_trainer_logprobs
+            and self.streaming_config.rollouts_save_path
+        ):
             with Timer("Trainer logprobs trace save", noop=self.rank != 0), torch.no_grad():
                 if all(x is None for x in old_logprobs_BT):
                     trace_logprobs_BT = grpo_utils.compute_logprobs(

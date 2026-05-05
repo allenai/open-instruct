@@ -671,6 +671,7 @@ class StreamingDataLoaderConfig:
 
     # Rollout saving
     save_traces: bool = False
+    save_trainer_logprobs: bool = True
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
     # Computed at post_init
