@@ -17,6 +17,7 @@ class TokenStatistics:
     num_response_tokens: int
     generation_time: float
     earliest_start_time: float | None = None
+    mean_per_group_wall_time: float | None = None
 
 
 @dataclass
