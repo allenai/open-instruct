@@ -133,6 +133,7 @@ class Batch:
     scores: list[float] | None
     active_tools: list[list[str] | None] | None = None
     model_steps: list[int] = field(default_factory=list)
+    temperatures: list[float] = field(default_factory=list)
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
@@ -148,6 +149,7 @@ class Batch:
                 scores=self.scores[key] if self.scores is not None else None,
                 active_tools=self.active_tools[key] if self.active_tools is not None else None,
                 model_steps=self.model_steps[key],
+                temperatures=self.temperatures[key] if self.temperatures else [],
             )
         elif isinstance(key, int):
             # Handle single index: batch[5]
@@ -161,6 +163,7 @@ class Batch:
                 scores=[self.scores[key]] if self.scores is not None else None,
                 active_tools=[self.active_tools[key]] if self.active_tools is not None else None,
                 model_steps=[self.model_steps[key]],
+                temperatures=[self.temperatures[key]] if self.temperatures else [],
             )
         else:
             # Handle list of indices: batch[[1,3,5]]
@@ -176,6 +179,7 @@ class Batch:
                 scores=[self.scores[i] for i in key] if self.scores is not None else None,
                 active_tools=[self.active_tools[i] for i in key] if self.active_tools is not None else None,
                 model_steps=[self.model_steps[i] for i in key],
+                temperatures=[self.temperatures[i] for i in key] if self.temperatures else [],
             )
 
 

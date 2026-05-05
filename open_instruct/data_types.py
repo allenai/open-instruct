@@ -56,6 +56,7 @@ class GenerationResult:
     token_statistics: TokenStatistics | None = None
     start_time: float = 0.0
     logprobs: list[list[float]] = field(default_factory=list)
+    generation_temperatures: list[float] = field(default_factory=list)
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
     model_step: int = 0
@@ -111,9 +112,14 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    temperatures: list[torch.Tensor] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+        kwargs: dict[str, Any] = {}
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            kwargs[f.name] = None if value is None else value[idx]
+        return CollatedBatchData(**kwargs)
 
     def __len__(self) -> int:
         return len(self.query_responses)
@@ -122,7 +128,9 @@ class CollatedBatchData:
         return dataclasses.replace(
             self,
             **{
-                f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
+                f.name: None
+                if getattr(self, f.name) is None
+                else [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
                 for f in dataclasses.fields(self)
             },
         )

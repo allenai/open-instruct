@@ -386,6 +386,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         start_time=metadata["start_time"],
         logprobs=logprobs,
         model_step=metadata.get("model_step"),
+        generation_temperatures=[metadata["original_sampling_params"].temperature] * len(response_ids),
     )
     is_eval = metadata["is_eval"]
 

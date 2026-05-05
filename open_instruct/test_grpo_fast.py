@@ -151,6 +151,7 @@ class TestGrpoFastBase(unittest.TestCase):
             advantages=[torch.randn(length) for length in lengths],
             position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
             vllm_logprobs=[torch.randn(length) for length in lengths],
+            temperatures=[torch.ones(length, dtype=torch.float) for length in lengths],
         )
 
     def create_mock_result_from_request(self, request: PromptRequest, num_samples_per_prompt=1):
@@ -179,6 +180,7 @@ class TestGrpoFastBase(unittest.TestCase):
             ),
             index=index,
             prompt_id=prompt_id,
+            generation_temperatures=[1.0] * total_responses,
             start_time=time.perf_counter(),
             token_statistics=TokenStatistics(
                 num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
@@ -250,6 +252,68 @@ class TestGrpoFastBase(unittest.TestCase):
         return prompt_Q, inference_results_Q, mock_dataset
 
 
+class TestTemperatureScheduler(unittest.TestCase):
+    def test_constant_defaults_to_temperature(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(temperature=1.3)
+        scheduler = config.build_temperature_scheduler(total_steps=10)
+
+        self.assertEqual(scheduler.temperature_at(0), 1.3)
+        self.assertEqual(scheduler.temperature_at(9), 1.3)
+        self.assertEqual(config.constant_temperature(), 1.3)
+
+    def test_constant_temperature_uses_temperature_start_override(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(temperature=1.3, temperature_start=0.8)
+        scheduler = config.build_temperature_scheduler(total_steps=10)
+
+        self.assertEqual(scheduler.temperature_at(0), 0.8)
+        self.assertEqual(config.constant_temperature(), 0.8)
+
+    def test_linear_decay_hits_endpoints(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(
+            temperature_schedule="linear", temperature_start=1.0, temperature_end=0.7
+        )
+        scheduler = config.build_temperature_scheduler(total_steps=4)
+
+        values = [scheduler.temperature_at(step) for step in range(4)]
+        self.assertEqual(values[0], 1.0)
+        self.assertEqual(values[-1], 0.7)
+        self.assertTrue(all(left >= right for left, right in zip(values, values[1:])))
+
+    def test_linear_ramp_hits_endpoints(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(
+            temperature_schedule="linear", temperature_start=0.7, temperature_end=1.0
+        )
+        scheduler = config.build_temperature_scheduler(total_steps=4)
+
+        values = [scheduler.temperature_at(step) for step in range(4)]
+        self.assertEqual(values[0], 0.7)
+        self.assertEqual(values[-1], 1.0)
+        self.assertTrue(all(left <= right for left, right in zip(values, values[1:])))
+
+    def test_cosine_stays_within_bounds(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(
+            temperature_schedule="cosine", temperature_start=1.0, temperature_end=0.7
+        )
+        scheduler = config.build_temperature_scheduler(total_steps=8)
+
+        values = [scheduler.temperature_at(step) for step in range(8)]
+        self.assertTrue(all(0.7 <= value <= 1.0 for value in values))
+        self.assertEqual(values[0], 1.0)
+        self.assertEqual(values[-1], 0.7)
+
+    def test_non_constant_requires_end_temperature(self):
+        with self.assertRaisesRegex(ValueError, "temperature_end"):
+            data_loader_lib.StreamingDataLoaderConfig(temperature_schedule="linear")
+
+    def test_non_constant_temperature_has_no_scalar_fallback(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(
+            temperature_schedule="linear", temperature_start=1.0, temperature_end=0.7
+        )
+
+        with self.assertRaisesRegex(ValueError, "constant schedule"):
+            config.constant_temperature()
+
+
 class TestGrpoFastVLLM(TestGrpoFastBase):
     @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
     def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
@@ -317,6 +381,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             ),
             index=0,
             prompt_id="combined",
+            generation_temperatures=[1.0] * len(combined_responses),
         )
 
         # Verify that the combined results contain the same items (order may differ due to shuffling)
@@ -442,6 +507,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             ),
             index=0,
             prompt_id="combined",
+            generation_temperatures=[1.0] * len(combined_responses),
         )
 
         # Verify results - streaming accumulation should NOT replicate (order may differ due to shuffling)
@@ -527,6 +593,62 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(reward_metrics["model_step_min"], 10.0)
         self.assertEqual(reward_metrics["model_step_max"], 12.0)
         self.assertEqual(reward_metrics["model_step_mean"], 11.0)
+
+    def test_accumulate_inference_batches_requires_generation_temperatures_by_default(self):
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+        self._ray_queues.append(inference_results_Q)
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(1)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        result = self.create_mock_result(0, "0_0")
+        result.generation_temperatures = []
+        inference_results_Q.put(result)
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+        mock_generation_config.temperature = 0.7
+
+        with self.assertRaisesRegex(ValueError, "generation_temperatures is missing"):
+            data_loader_lib.accumulate_inference_batches(
+                inference_results_Q,
+                mock_generation_config,
+                num_prompts=1,
+                model_dims=self.create_llama7b_model_dims(),
+                tokenizer=tokenizer,
+                dataset=mock_dataset,
+                base_env_config=EnvConfig(),
+                training_step=0,
+            )
+
+    def test_accumulate_inference_batches_allows_constant_temperature_fallback(self):
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+        self._ray_queues.append(inference_results_Q)
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(1)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        result = self.create_mock_result(0, "0_0")
+        result.generation_temperatures = []
+        inference_results_Q.put(result)
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+        mock_generation_config.temperature = 0.7
+
+        _, batch, _, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=1,
+            model_dims=self.create_llama7b_model_dims(),
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            training_step=0,
+            allow_missing_generation_temperatures=True,
+        )
+
+        self.assertEqual(batch.temperatures, [0.7])
 
     @unittest.skip("Timing-sensitive test that is flaky in CI environments")
     def test_accumulate_waits_for_all_engines(self):
@@ -814,6 +936,7 @@ class TestDataPreparation(TestGrpoFastBase):
             "advantages",
             "response_masks",
             "vllm_logprobs",
+            "temperatures",
         }
 
         expected_samples_per_worker = batch_size // world_size
@@ -851,6 +974,28 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
+
+    def test_prepare_collated_data_preserves_temperatures(self):
+        packed_sequences = self.create_mock_packed_sequences(batch_size=4, seq_length=6)
+        packed_sequences.temperatures = [torch.full((6,), temp) for temp in [0.7, 0.8, 0.9, 1.0]]
+
+        result = data_loader_lib.prepare_collated_data_for_workers(
+            packed_sequences, dp_world_size=1, per_device_train_batch_size=4, pad_token_id=0, pin_memory=False
+        )
+
+        self.assertEqual(len(result), 1)
+        microbatch_temperatures = result[0].temperatures[0]
+        row_temperatures = sorted(round(float(row[0].item()), 1) for row in microbatch_temperatures)
+        self.assertEqual(row_temperatures, [0.7, 0.8, 0.9, 1.0])
+
+    def test_prepare_collated_data_requires_temperatures(self):
+        packed_sequences = self.create_mock_packed_sequences(batch_size=4, seq_length=6)
+        packed_sequences.temperatures = None
+
+        with self.assertRaisesRegex(ValueError, "temperatures"):
+            data_loader_lib.prepare_collated_data_for_workers(
+                packed_sequences, dp_world_size=1, per_device_train_batch_size=4, pad_token_id=0, pin_memory=False
+            )
 
 
 if __name__ == "__main__":

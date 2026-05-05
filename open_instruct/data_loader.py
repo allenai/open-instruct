@@ -13,12 +13,13 @@
 # limitations under the License.
 
 import logging
+import math
 import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from queue import Empty
 from typing import Any, Literal
@@ -52,6 +53,28 @@ from open_instruct.utils import combine_reward_metrics
 logger = logging.getLogger(__name__)
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
+
+
+@dataclass(frozen=True)
+class TemperatureScheduler:
+    schedule: Literal["constant", "linear", "cosine"]
+    start: float
+    end: float
+    total_steps: int
+
+    def temperature_at(self, step: int) -> float:
+        if self.schedule == "constant" or self.total_steps <= 1:
+            return self.start
+
+        clipped_step = min(max(step, 0), self.total_steps - 1)
+        progress = clipped_step / (self.total_steps - 1)
+        if self.schedule == "linear":
+            weight = progress
+        elif self.schedule == "cosine":
+            weight = 0.5 * (1.0 - math.cos(math.pi * progress))
+        else:
+            raise ValueError(f"Unknown temperature schedule: {self.schedule}")
+        return self.start + (self.end - self.start) * weight
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -437,6 +460,9 @@ class StreamingDataLoaderConfig:
 
     # Generation
     temperature: float = 0.7
+    temperature_schedule: Literal["constant", "linear", "cosine"] = "constant"
+    temperature_start: float | None = None
+    temperature_end: float | None = None
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
     eval_response_length: int | None = None
@@ -495,6 +521,11 @@ class StreamingDataLoaderConfig:
     max_possible_score: float = 1.0
 
     def __post_init__(self):
+        if self.temperature_start is None:
+            self.temperature_start = self.temperature
+        if self.temperature_schedule != "constant" and self.temperature_end is None:
+            raise ValueError("`temperature_end` must be set when `temperature_schedule` is not 'constant'.")
+
         if self.eval_response_length is None:
             self.eval_response_length = self.response_length
 
@@ -541,6 +572,21 @@ class StreamingDataLoaderConfig:
 
         if self.save_traces and not self.rollouts_save_path:
             raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
+
+    def build_temperature_scheduler(self, total_steps: int) -> TemperatureScheduler:
+        if self.temperature_start is None:
+            raise ValueError("`temperature_start` must be set before building a temperature scheduler.")
+        end = self.temperature_start if self.temperature_end is None else self.temperature_end
+        return TemperatureScheduler(
+            schedule=self.temperature_schedule, start=self.temperature_start, end=end, total_steps=total_steps
+        )
+
+    def constant_temperature(self) -> float:
+        if self.temperature_schedule != "constant":
+            raise ValueError("Missing batch temperatures can only fall back to a scalar constant schedule.")
+        if self.temperature_start is None:
+            raise ValueError("`temperature_start` must be set before using a constant temperature fallback.")
+        return self.temperature_start
 
     def build_dataloader(
         self,
@@ -620,6 +666,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             advantages=[dummy_advantage],
             response_masks=[dummy_response_mask],
             vllm_logprobs=[torch.zeros_like(dummy_qr, dtype=torch.float)],
+            temperatures=[torch.ones_like(dummy_qr, dtype=torch.float)],
         )
         return {"batch": batch, "metrics": {}}
 
@@ -633,7 +680,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             yield batch_data
 
 
-def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
+def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int | float, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
     padded_tensor = torch.atleast_2d(padded_tensor)
     if pin_memory and torch.cuda.is_available():
@@ -767,6 +814,7 @@ def process_group(
     param_prompt_Q: ray_queue.Queue | None,
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
+    replenish_generation_config: vllm.SamplingParams | None = None,
 ) -> Group | None:
     assert result.index is not None
     assert result.reward_scores is not None
@@ -791,7 +839,7 @@ def process_group(
             example,
             iter_dataloader._epoch,
             param_prompt_Q,
-            generation_config,
+            replenish_generation_config or generation_config,
             is_eval=False,
             base_env_config=base_env_config,
             ground_truth_overrides=ground_truth_overrides,
@@ -838,6 +886,7 @@ def make_batch_from_groups(
     filtered_prompts_solved: int = 0,
     filtered_prompts_nonzero: int = 0,
     no_resampled_prompts: int = 0,
+    allow_missing_generation_temperatures: bool = False,
 ) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]:
     assert len(groups) > 0, "make_batch_from_groups requires at least one group"
 
@@ -852,6 +901,7 @@ def make_batch_from_groups(
     all_indices = []
     all_percent_solved = []
     all_model_steps = []
+    all_temperatures = []
 
     combined_responses = []
     combined_finish_reasons = []
@@ -887,6 +937,20 @@ def make_batch_from_groups(
         all_reward_metrics.append(group.reward_metrics)
         all_percent_solved.append(group.percent_solved)
         all_model_steps.extend([result.model_step] * len(result.responses))
+        result_temperatures = result.generation_temperatures
+        if not result_temperatures:
+            if not allow_missing_generation_temperatures:
+                raise ValueError(
+                    "GenerationResult.generation_temperatures is missing. This is required for scheduled "
+                    "temperature GRPO because learner logprobs must use the rollout sampling temperature."
+                )
+            result_temperatures = [generation_config.temperature] * len(result.responses)
+        if len(result_temperatures) != len(result.responses):
+            raise ValueError(
+                f"generation_temperatures length ({len(result_temperatures)}) must match responses length "
+                f"({len(result.responses)})"
+            )
+        all_temperatures.extend(result_temperatures)
 
         combined_responses.extend(result.responses)
         combined_finish_reasons.extend(result.finish_reasons)
@@ -940,6 +1004,7 @@ def make_batch_from_groups(
         prompt_id=groups[0].result.prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
+        generation_temperatures=all_temperatures,
     )
 
     if actor_manager is not None:
@@ -955,6 +1020,7 @@ def make_batch_from_groups(
         scores=all_scores,
         active_tools=all_active_tools if any(all_active_tools) else None,
         model_steps=all_model_steps,
+        temperatures=all_temperatures,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
@@ -963,6 +1029,10 @@ def make_batch_from_groups(
     combined_reward_metrics["model_step_max"] = float(model_steps_array.max())
     combined_reward_metrics["model_step_mean"] = float(model_steps_array.mean())
     combined_reward_metrics["num_steps_off_policy"] = float(training_step - model_steps_array.mean())
+    temperature_array = np.array(all_temperatures, dtype=float)
+    combined_reward_metrics["temperature/batch"] = float(temperature_array.mean())
+    combined_reward_metrics["temperature/batch_min"] = float(temperature_array.min())
+    combined_reward_metrics["temperature/batch_max"] = float(temperature_array.max())
     percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
@@ -1001,6 +1071,8 @@ def accumulate_inference_batches(
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
     ground_truth_overrides: dict[int, Any] | None = None,
+    replenish_generation_config: vllm.SamplingParams | None = None,
+    allow_missing_generation_temperatures: bool = False,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1065,6 +1137,7 @@ def accumulate_inference_batches(
             param_prompt_Q=param_prompt_Q,
             base_env_config=base_env_config,
             ground_truth_overrides=ground_truth_overrides,
+            replenish_generation_config=replenish_generation_config,
         )
 
         if group is None:
@@ -1112,6 +1185,7 @@ def accumulate_inference_batches(
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         no_resampled_prompts=total_no_resampled,
+        allow_missing_generation_temperatures=allow_missing_generation_temperatures,
     )
 
 
@@ -1153,6 +1227,9 @@ def prepare_collated_data_for_workers(
     assert packed_sequences.position_ids is not None
     assert packed_sequences.advantages is not None
     assert packed_sequences.vllm_logprobs is not None
+    packed_temperatures = packed_sequences.temperatures
+    if packed_temperatures is None:
+        raise ValueError("PackedSequences.temperatures must be set before preparing collated GRPO data.")
     for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
@@ -1160,6 +1237,7 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_packed_temperatures = packed_temperatures[B * i : B * (i + 1)]
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1169,6 +1247,7 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_temperatures = []
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1189,6 +1268,9 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            collated_temperatures.append(
+                collate_fn([per_device_packed_temperatures[idx] for idx in micro_range], 1.0, pin_memory)
+            )
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1197,6 +1279,7 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                temperatures=collated_temperatures,
             )
         )
     return collated_data
@@ -1241,6 +1324,7 @@ class DataPreparationActor:
         self.config = config
         self.config.max_possible_score = max_possible_score
         self.generation_config = generation_config
+        self.temperature_scheduler = self.config.build_temperature_scheduler(num_training_steps)
         self.num_training_steps = num_training_steps
         self.per_device_train_batch_size = per_device_train_batch_size
         self.global_batch_size = global_batch_size
@@ -1286,6 +1370,9 @@ class DataPreparationActor:
             self.set_state(initial_state)
             self.start()
 
+    def _generation_config_for_step(self, step: int) -> vllm.SamplingParams:
+        return replace(self.generation_config, temperature=self.temperature_scheduler.temperature_at(step))
+
     def start(self):
         if self._prep_future is not None:
             return
@@ -1302,16 +1389,18 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        for _ in range(num_initial_prompts):
-            add_prompt_to_generator(
-                next(self.iter_dataloader),
-                self.iter_dataloader._epoch,
-                self.param_prompt_Q,
-                self.generation_config,
-                is_eval=False,
-                base_env_config=self.base_env_config,
-                ground_truth_overrides=self.ground_truth_overrides,
-            )
+        for target_step in range(self.training_step, self.training_step + self.config.async_steps):
+            generation_config = self._generation_config_for_step(target_step)
+            for _ in range(self.global_batch_size):
+                add_prompt_to_generator(
+                    next(self.iter_dataloader),
+                    self.iter_dataloader._epoch,
+                    self.param_prompt_Q,
+                    generation_config,
+                    is_eval=False,
+                    base_env_config=self.base_env_config,
+                    ground_truth_overrides=self.ground_truth_overrides,
+                )
 
         for step in range(self.training_step, self.num_training_steps):
             generation_idle_wait_start_time = time.perf_counter()
@@ -1325,9 +1414,11 @@ class DataPreparationActor:
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
             )
+            current_generation_config = self._generation_config_for_step(step)
+            replenish_generation_config = self._generation_config_for_step(step + self.config.async_steps)
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
-                self.generation_config,
+                current_generation_config,
                 num_prompts=self.global_batch_size,
                 model_dims=self.model_dims,
                 tokenizer=self.tokenizer,
@@ -1344,6 +1435,8 @@ class DataPreparationActor:
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
+                replenish_generation_config=replenish_generation_config,
+                allow_missing_generation_temperatures=self.config.temperature_schedule == "constant",
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1361,12 +1454,16 @@ class DataPreparationActor:
                         advantages=[],
                         response_masks=[],
                         vllm_logprobs=[],
+                        temperatures=[],
                     )
                     for _ in range(self.dp_world_size)
                 ]
                 with self.lock:
                     self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                    self.metrics[step] = {
+                        "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                        "temperature/current": current_generation_config.temperature,
+                    }
                     self.current_prepared_step = step
                 continue
 
@@ -1427,6 +1524,7 @@ class DataPreparationActor:
                 result.masks = [result.masks[i] for i in stop_idxes]
                 result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
+                result.generation_temperatures = [result.generation_temperatures[i] for i in stop_idxes]
 
             packed_sequences = pack_sequences(
                 queries=batch.queries,
@@ -1435,6 +1533,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                temperatures=batch.temperatures,
                 mask_tool_use=self.config.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )
@@ -1451,7 +1550,10 @@ class DataPreparationActor:
             )
 
             if len(result.responses) == 0:
-                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
+                step_metrics = {
+                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "temperature/current": current_generation_config.temperature,
+                }
             else:
                 real_num_responses = len(result.responses)
                 expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
@@ -1474,6 +1576,7 @@ class DataPreparationActor:
 
                 step_metrics = {
                     "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                    "temperature/current": current_generation_config.temperature,
                     "scores": scores.mean(),
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,

@@ -381,6 +381,9 @@ class GRPOTrainModule(TransformerTrainModule):
         """
         self.model.train()
         data_BT = batch["batch"].to(self.device)
+        logprob_temperature = (
+            data_BT.temperatures if data_BT.temperatures is not None else self.streaming_config.constant_temperature()
+        )
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
@@ -388,7 +391,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.ref_policy,
                     data_BT,
                     self.pad_token_id,
-                    self.temperature,
+                    logprob_temperature,
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
                 )
@@ -408,7 +411,7 @@ class GRPOTrainModule(TransformerTrainModule):
                         self.model,
                         data_BT,
                         self.pad_token_id,
-                        self.temperature,
+                        logprob_temperature,
                         use_grad=False,
                         batch_size=3 * self.rank_microbatch_size,
                     )
@@ -449,13 +452,16 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
+                sample_temperature = (
+                    logprob_temperature[sample_idx] if isinstance(logprob_temperature, list) else logprob_temperature
+                )
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
                     data_BT.query_responses[sample_idx],
                     data_BT.attention_masks[sample_idx],
                     data_BT.position_ids[sample_idx],
                     self.pad_token_id,
-                    self.temperature,
+                    sample_temperature,
                     return_entropy=self.grpo_config.record_entropy,
                 )
 

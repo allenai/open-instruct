@@ -631,11 +631,20 @@ class PolicyTrainerRayProcess(RayProcess):
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
+        if data_BT.temperatures is None:
+            if self.streaming_config.temperature_schedule != "constant":
+                raise ValueError(
+                    "CollatedBatchData.temperatures is missing for a non-constant temperature schedule. "
+                    "Learner logprobs must use the rollout sampling temperature."
+                )
+            logprob_temperature = self.streaming_config.constant_temperature()
+        else:
+            logprob_temperature = data_BT.temperatures
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    self.ref_policy, data_BT, self.pad_token_id, logprob_temperature, use_grad=False
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -647,7 +656,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                        self.model, data_BT, self.pad_token_id, logprob_temperature, use_grad=False
                     )
 
                 with torch.no_grad():
@@ -689,13 +698,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss_denominator = accumulation_token_counts[batch_start]
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
+                    sample_temperature = (
+                        logprob_temperature[i] if isinstance(logprob_temperature, list) else logprob_temperature
+                    )
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
                         None,
                         data_BT.position_ids[i],
                         self.pad_token_id,
-                        self.streaming_config.temperature,
+                        sample_temperature,
                         return_entropy=self.args.record_entropy,
                     )
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
@@ -1723,6 +1735,7 @@ def maybe_evaluate(
     base_env_config: EnvConfig,
     max_possible_score: float,
     actor_manager=None,
+    allow_missing_generation_temperatures: bool = False,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -1766,6 +1779,7 @@ def maybe_evaluate(
             replenish_prompts=False,
             max_possible_score=max_possible_score,
             training_step=training_step,
+            allow_missing_generation_temperatures=allow_missing_generation_temperatures,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -1962,6 +1976,8 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
+    temperature_scheduler = streaming_config.build_temperature_scheduler(args.num_training_steps)
+
     # Restore dataloader state if available in checkpoint
     if checkpoint_state and "dataloader_state" in checkpoint_state:
         ray_get_with_progress(
@@ -2087,12 +2103,15 @@ def run_training(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
                     "Consider increasing local_eval_every."
                 )
+            eval_generation_config = dataclasses.replace(
+                generation_configs["eval"], temperature=temperature_scheduler.temperature_at(training_step - 1)
+            )
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
                     eval_example,
                     training_step,
                     prompt_Q,
-                    generation_configs["eval"],
+                    eval_generation_config,
                     is_eval=True,
                     base_env_config=base_env_config,
                 )
@@ -2170,11 +2189,14 @@ def run_training(
             tokenizer,
             episode,
             eval_dataset,
-            generation_configs["eval"],
+            dataclasses.replace(
+                generation_configs["eval"], temperature=temperature_scheduler.temperature_at(training_step - 1)
+            ),
             model_dims,
             base_env_config,
             streaming_config.max_possible_score,
             actor_manager,
+            allow_missing_generation_temperatures=streaming_config.temperature_schedule == "constant",
         )
 
         maybe_update_beaker_description(

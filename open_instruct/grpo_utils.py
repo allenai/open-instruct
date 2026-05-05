@@ -410,15 +410,28 @@ def forward_for_logprobs(
     attention_mask: torch.Tensor | None,
     position_ids: torch.Tensor,
     pad_token_id: int,
-    temperature: float,
+    temperature: float | torch.Tensor,
     return_entropy: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """Forward pass to compute log probabilities."""
+    """Forward pass to compute log probabilities.
+
+    Temperature may be the historical scalar value, or a per-token tensor with
+    the same shape as query_responses.
+    """
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
     logits = getattr(output, "logits", output)
-    logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
     logits = logits[:, :-1]
+    if isinstance(temperature, torch.Tensor):
+        if temperature.shape != query_responses.shape:
+            raise ValueError(
+                f"temperature tensor shape {tuple(temperature.shape)} must match query_responses shape "
+                f"{tuple(query_responses.shape)}"
+            )
+        temperature = temperature.to(device=logits.device, dtype=logits.dtype)
+        logits = logits / temperature[:, :-1].unsqueeze(-1)
+    else:
+        logits = logits / temperature
     labels = query_responses[:, 1:].clone().to(logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
@@ -437,7 +450,7 @@ def compute_logprobs(
     model: torch.nn.Module,
     data_BT: data_types.CollatedBatchData,
     pad_token_id: int,
-    temperature: float,
+    temperature: float | list[torch.Tensor],
     use_grad: bool = False,
     batch_size: int | None = None,
 ) -> list[torch.Tensor]:
@@ -460,13 +473,14 @@ def compute_logprobs(
 
             if len(set(shapes)) != 1:
                 for i in batch_indices:
+                    single_temperature = temperature[i] if isinstance(temperature, list) else temperature
                     single_logprobs, _ = forward_for_logprobs(
                         model,
                         data_BT.query_responses[i],
                         None,
                         data_BT.position_ids[i],
                         pad_token_id,
-                        temperature,
+                        single_temperature,
                         False,
                     )
 
@@ -477,9 +491,13 @@ def compute_logprobs(
 
             batch_query_responses = torch.cat(query_responses, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
+            if isinstance(temperature, list):
+                batch_temperatures: float | torch.Tensor = torch.cat([temperature[i] for i in batch_indices], dim=0)
+            else:
+                batch_temperatures = temperature
 
             batch_logprobs, _ = forward_for_logprobs(
-                model, batch_query_responses, None, batch_position_ids, pad_token_id, temperature, False
+                model, batch_query_responses, None, batch_position_ids, pad_token_id, batch_temperatures, False
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]

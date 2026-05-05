@@ -766,6 +766,7 @@ class TestUlyssesSPSplitter(unittest.TestCase):
             advantages=advantages,
             response_masks=response_masks,
             vllm_logprobs=vllm_logprobs,
+            temperatures=[torch.ones_like(t, dtype=torch.float) for t in query_responses],
         )
 
     @mock.patch("open_instruct.utils.dist.all_gather")
@@ -833,6 +834,7 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         pad_token_id = 99
         splitter = self._create_mock_splitter(sp_rank=1, sp_world_size=sp_world_size, pad_token_id=pad_token_id)
         batch = self._create_test_batch([3])  # Will pad to 4
+        batch.temperatures = [torch.full((1, 3), 0.7)]
 
         def fill_seqlens(seqlens, local_seqlen, group):
             for s in seqlens:
@@ -847,6 +849,10 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.query_responses[0][0, -1].item(), pad_token_id)
         # vllm_logprobs should pad with INVALID_LOGPROB (1.0)
         self.assertEqual(result.vllm_logprobs[0][0, -1].item(), utils.INVALID_LOGPROB)
+        # temperatures should pad with neutral logit scaling (1.0)
+        self.assertIsNotNone(result.temperatures)
+        self.assertAlmostEqual(result.temperatures[0][0, 0].item(), 0.7)
+        self.assertEqual(result.temperatures[0][0, -1].item(), 1.0)
         # attention_masks should pad with 0
         self.assertEqual(result.attention_masks[0][0, -1].item(), 0)
         # response_masks should pad with 0
@@ -898,6 +904,8 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.advantages[0].shape[-1], chunk_len)
         self.assertEqual(result.response_masks[0].shape[-1], chunk_len)
         self.assertEqual(result.vllm_logprobs[0].shape[-1], chunk_len)
+        self.assertIsNotNone(result.temperatures)
+        self.assertEqual(result.temperatures[0].shape[-1], chunk_len)
 
     @mock.patch("open_instruct.utils.dist.all_gather")
     def test_global_max_seqlen_respected(self, mock_all_gather):

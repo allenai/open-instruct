@@ -1,3 +1,4 @@
+import json
 import shutil
 import tempfile
 import time
@@ -8,7 +9,7 @@ import torch
 import transformers
 from parameterized import parameterized
 
-from open_instruct import rl_utils
+from open_instruct import data_types, model_utils, rl_utils
 
 PACK_LENGTH = 40
 PROMPT_MAX_LEN = 20
@@ -100,6 +101,7 @@ class TestRLUtils(unittest.TestCase):
         queries, responses, pad_token_id = get_test_data()
         masks = [[1] * len(response) for response in responses]
         vllm_logprobs = [[0.0] * len(response) for response in responses]
+        temperatures = [1.0] * len(queries)
         with rl_utils.Timer("pack_sequences"):
             packed_sequences = rl_utils.pack_sequences(
                 queries=queries,
@@ -108,6 +110,7 @@ class TestRLUtils(unittest.TestCase):
                 pack_length=PACK_LENGTH,
                 pad_token_id=pad_token_id,
                 vllm_logprobs=vllm_logprobs,
+                temperatures=temperatures,
             )
 
         self._assert_sequence_packed_correctly(packed_sequences, queries, responses, 0, 0, 0)
@@ -139,6 +142,7 @@ class TestRLUtils(unittest.TestCase):
         responses = [[10, 11, 12], [20, 21]]
         masks = [[1, 0, 1], [0, 1]]
         vllm_logprobs = [[0.0, 0.0, 0.0], [0.0, 0.0]]
+        temperatures = [1.0] * len(queries)
         pad_token_id = 0
 
         packed = rl_utils.pack_sequences(
@@ -148,6 +152,7 @@ class TestRLUtils(unittest.TestCase):
             pack_length=8,
             pad_token_id=pad_token_id,
             vllm_logprobs=vllm_logprobs,
+            temperatures=temperatures,
             mask_tool_use=mask_tool_use,
         )
 
@@ -156,6 +161,172 @@ class TestRLUtils(unittest.TestCase):
         self.assertEqual(packed.response_masks[1].dtype, torch.long)
         torch.testing.assert_close(packed.response_masks[0].bool(), torch.tensor(expected_mask_0, dtype=torch.bool))
         torch.testing.assert_close(packed.response_masks[1].bool(), torch.tensor(expected_mask_1, dtype=torch.bool))
+
+    def test_save_rollouts_includes_sample_temperature(self):
+        batch = model_utils.Batch(
+            queries=[[1, 2], [3, 4]],
+            ground_truths=[[10], [20]],
+            datasets=["test", "test"],
+            raw_queries=["first", "second"],
+            decoded_responses=["a", "b"],
+            indices=[0, 1],
+            scores=[1.0, 0.0],
+            temperatures=[0.7, 0.9],
+        )
+        result = data_types.GenerationResult(
+            responses=[[5], [6]],
+            finish_reasons=["stop", "length"],
+            masks=[[1], [1]],
+            request_info=data_types.RequestInfo(
+                num_calls=[0, 0],
+                timeouts=[0, 0],
+                tool_errors=["", ""],
+                tool_outputs=["", ""],
+                tool_runtimes=[0.0, 0.0],
+                tool_calleds=[False, False],
+            ),
+            index=None,
+            prompt_id="prompt",
+            generation_temperatures=[0.7, 0.9],
+            logprobs=[[0.0], [0.0]],
+        )
+
+        rl_utils._save_rollouts(
+            save_path=self.temp_dir,
+            run_name="run",
+            step=3,
+            batch=batch,
+            result=result,
+            advantages=np.array([0.5, -0.5]),
+            num_samples_per_prompt=1,
+            shard_idx=0,
+        )
+
+        with open(f"{self.temp_dir}/run_rollouts_000000.jsonl") as f:
+            records = [json.loads(line) for line in f]
+
+        self.assertEqual([record["temperature"] for record in records], [0.7, 0.9])
+
+    def test_save_rollouts_requires_sample_temperatures(self):
+        batch = model_utils.Batch(
+            queries=[[1, 2], [3, 4]],
+            ground_truths=[[10], [20]],
+            datasets=["test", "test"],
+            raw_queries=["first", "second"],
+            decoded_responses=["a", "b"],
+            indices=[0, 1],
+            scores=[1.0, 0.0],
+            temperatures=[0.7],
+        )
+        result = data_types.GenerationResult(
+            responses=[[5], [6]],
+            finish_reasons=["stop", "length"],
+            masks=[[1], [1]],
+            request_info=data_types.RequestInfo(
+                num_calls=[0, 0],
+                timeouts=[0, 0],
+                tool_errors=["", ""],
+                tool_outputs=["", ""],
+                tool_runtimes=[0.0, 0.0],
+                tool_calleds=[False, False],
+            ),
+            index=None,
+            prompt_id="prompt",
+            generation_temperatures=[0.7, 0.9],
+            logprobs=[[0.0], [0.0]],
+        )
+
+        with self.assertRaisesRegex(ValueError, "rollout_temperatures length"):
+            rl_utils._save_rollouts(
+                save_path=self.temp_dir,
+                run_name="run",
+                step=3,
+                batch=batch,
+                result=result,
+                advantages=np.array([0.5, -0.5]),
+                num_samples_per_prompt=1,
+                shard_idx=0,
+            )
+
+    def test_save_rollouts_allows_missing_sample_temperatures(self):
+        batch = model_utils.Batch(
+            queries=[[1, 2], [3, 4]],
+            ground_truths=[[10], [20]],
+            datasets=["test", "test"],
+            raw_queries=["first", "second"],
+            decoded_responses=["a", "b"],
+            indices=[0, 1],
+            scores=[1.0, 0.0],
+        )
+        result = data_types.GenerationResult(
+            responses=[[5], [6]],
+            finish_reasons=["stop", "length"],
+            masks=[[1], [1]],
+            request_info=data_types.RequestInfo(
+                num_calls=[0, 0],
+                timeouts=[0, 0],
+                tool_errors=["", ""],
+                tool_outputs=["", ""],
+                tool_runtimes=[0.0, 0.0],
+                tool_calleds=[False, False],
+            ),
+            index=None,
+            prompt_id="prompt",
+            logprobs=[[0.0], [0.0]],
+        )
+
+        rl_utils._save_rollouts(
+            save_path=self.temp_dir,
+            run_name="run",
+            step=3,
+            batch=batch,
+            result=result,
+            advantages=np.array([0.5, -0.5]),
+            num_samples_per_prompt=1,
+            shard_idx=0,
+        )
+
+        with open(f"{self.temp_dir}/run_rollouts_000000.jsonl") as f:
+            records = [json.loads(line) for line in f]
+
+        self.assertEqual([record["temperature"] for record in records], [None, None])
+
+    def test_pack_sequences_preserves_sample_temperatures(self):
+        packed = rl_utils.pack_sequences(
+            queries=[[1, 2], [3]],
+            responses=[[10], [20, 21]],
+            masks=[[1], [1, 1]],
+            pack_length=10,
+            pad_token_id=0,
+            vllm_logprobs=[[0.0], [0.0, 0.0]],
+            temperatures=[0.7, 0.9],
+        )
+
+        assert packed.temperatures is not None
+        torch.testing.assert_close(packed.temperatures[0], torch.tensor([0.7, 0.7, 0.7, 0.9, 0.9, 0.9]))
+
+    def test_pack_sequences_requires_sample_temperatures_to_be_provided(self):
+        with self.assertRaisesRegex(ValueError, "temperatures must be provided"):
+            rl_utils.pack_sequences(
+                queries=[[1, 2], [3]],
+                responses=[[10], [20, 21]],
+                masks=[[1], [1, 1]],
+                pack_length=10,
+                pad_token_id=0,
+                vllm_logprobs=[[0.0], [0.0, 0.0]],
+            )
+
+    def test_pack_sequences_requires_sample_temperatures(self):
+        with self.assertRaisesRegex(ValueError, "temperatures length"):
+            rl_utils.pack_sequences(
+                queries=[[1, 2], [3]],
+                responses=[[10], [20, 21]],
+                masks=[[1], [1, 1]],
+                pack_length=10,
+                pad_token_id=0,
+                vllm_logprobs=[[0.0], [0.0, 0.0]],
+                temperatures=[0.7],
+            )
 
     def test_calculate_advantages_packed(self):
         """Test that calculate_advantages_packed produces same results as unpacked version."""
@@ -264,6 +435,7 @@ class TestRLUtils(unittest.TestCase):
 
         masks = [[1] * len(response) for response in responses]
         vllm_logprobs = [[0.0] * len(response) for response in responses]
+        temperatures = [1.0] * len(queries)
         with rl_utils.Timer("pack_sequences"):
             packed_sequences = rl_utils.pack_sequences(
                 queries=queries,
@@ -272,6 +444,7 @@ class TestRLUtils(unittest.TestCase):
                 pack_length=PACK_LENGTH,
                 pad_token_id=pad_token_id,
                 vllm_logprobs=vllm_logprobs,
+                temperatures=temperatures,
             )
 
         lm_backbone = getattr(value_model, value_model.base_model_prefix)
@@ -301,6 +474,7 @@ class TestRLUtils(unittest.TestCase):
         queries, responses, pad_token_id = get_test_data()
         masks = [[1] * len(response) for response in responses]
         vllm_logprobs = [[0.0] * len(response) for response in responses]
+        temperatures = [1.0] * len(queries)
 
         # With default packing (large pack_length), we get 2 sequences
         packed_default = rl_utils.pack_sequences(
@@ -310,6 +484,7 @@ class TestRLUtils(unittest.TestCase):
             pack_length=PACK_LENGTH,
             pad_token_id=pad_token_id,
             vllm_logprobs=vllm_logprobs,
+            temperatures=temperatures,
         )
         default_num_sequences = len(packed_default.query_responses)
         self.assertEqual(default_num_sequences, 2)  # Sanity check
@@ -323,6 +498,7 @@ class TestRLUtils(unittest.TestCase):
             pack_length=PACK_LENGTH,
             pad_token_id=pad_token_id,
             vllm_logprobs=vllm_logprobs,
+            temperatures=temperatures,
             min_num_batches=3,
         )
         self.assertEqual(len(packed_with_min.query_responses), 3)

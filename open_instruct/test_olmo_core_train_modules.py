@@ -43,6 +43,7 @@ def _make_batch_data(
         advantages=advantages,
         response_masks=response_masks,
         vllm_logprobs=vllm_logprobs,
+        temperatures=[torch.ones_like(t, dtype=torch.float) for t in query_responses],
     )
 
 
@@ -80,6 +81,20 @@ class TestComputeLogprobs(unittest.TestCase):
         result = grpo_utils.compute_logprobs(model, data_BT, pad_token_id=0, temperature=1.0, use_grad=True)
 
         self.assertTrue(result[0].requires_grad)
+
+    def test_list_temperatures(self):
+        batch_size, seq_len, vocab_size = 2, 5, 10
+        model = _make_mock_model(vocab_size, seq_len, batch_size)
+        data_BT = _make_batch_data(batch_size, seq_len, vocab_size, num_samples=2)
+        data_BT.temperatures[1] = torch.full_like(data_BT.temperatures[1], 2.0)
+
+        mixed_result = grpo_utils.compute_logprobs(
+            model, data_BT, pad_token_id=0, temperature=data_BT.temperatures, use_grad=False
+        )
+        scalar_result = grpo_utils.compute_logprobs(model, data_BT, pad_token_id=0, temperature=1.0, use_grad=False)
+
+        self.assertTrue(torch.allclose(mixed_result[0], scalar_result[0]))
+        self.assertFalse(torch.allclose(mixed_result[1], scalar_result[1]))
 
 
 class TestForwardForLogprobs(unittest.TestCase):
@@ -129,6 +144,31 @@ class TestForwardForLogprobs(unittest.TestCase):
         )
 
         self.assertFalse(torch.allclose(logprob_t1, logprob_t2))
+
+    def test_token_temperature_scaling(self):
+        batch_size, seq_len, vocab_size = 2, 5, 10
+        model = _make_mock_model(vocab_size, seq_len, batch_size)
+        query_responses = torch.randint(0, vocab_size, (batch_size, seq_len))
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+        temperatures = torch.ones(batch_size, seq_len)
+        temperatures[1] = 2.0
+
+        logprob_mixed, _ = grpo_utils.forward_for_logprobs(
+            model,
+            query_responses,
+            attention_mask,
+            position_ids,
+            pad_token_id=0,
+            temperature=temperatures,
+            return_entropy=False,
+        )
+        logprob_t1, _ = grpo_utils.forward_for_logprobs(
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
+        )
+
+        self.assertTrue(torch.allclose(logprob_mixed[0], logprob_t1[0]))
+        self.assertFalse(torch.allclose(logprob_mixed[1], logprob_t1[1]))
 
 
 class TestDAPOLoss(unittest.TestCase):

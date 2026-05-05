@@ -193,6 +193,8 @@ class TestGeneration(TestGrpoFastBase):
             max_tokens=max_tokens,
         )
 
+        self.assertEqual(result.generation_temperatures, [0.0])
+
         if use_tools:
             self.assertTrue(
                 result.request_info.tool_calleds[0],
@@ -266,6 +268,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         result = inference_results_Q.get()
 
         self.assertIsInstance(result, GenerationResult)
+        self.assertEqual(result.generation_temperatures, [0.0])
 
         self.assertGreater(len(result.responses), 0)
         response_ids = result.responses[0]

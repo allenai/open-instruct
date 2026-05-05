@@ -2644,14 +2644,21 @@ class UlyssesSPSplitter:
         # slice and pad tensors for this sp rank
         kwargs = {}
         for field in dataclasses.fields(data):
+            field_data = getattr(data, field.name)
+            if field_data is None:
+                kwargs[field.name] = None
+                continue
             if field.name == "query_responses":
                 pad_value = self.pad_token_id
             elif field.name == "vllm_logprobs":
                 pad_value = INVALID_LOGPROB
+            elif field.name == "temperatures":
+                # Neutral logit-scaling value for masked padding, not a sampled rollout temperature.
+                pad_value = 1.0
             else:
                 pad_value = 0
             sharded = []
-            for t in getattr(data, field.name):
+            for t in field_data:
                 # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
                 padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
                 sharded.append(padded_sliced)

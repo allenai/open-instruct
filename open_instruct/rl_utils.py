@@ -41,6 +41,7 @@ class RolloutRecord:
     ground_truth: list[int] | None = None
     request_info: dict | None = None
     logprobs: list[float] | None = None
+    temperature: float | None = None
 
 
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
@@ -99,7 +100,21 @@ def _save_rollouts(
     filepath = os.path.join(save_path, shard_filename)
     os.makedirs(save_path, exist_ok=True)
 
-    assert batch.scores is not None, "batch.scores must not be None when saving rollouts"
+    if batch.scores is None:
+        raise ValueError("batch.scores must not be None when saving rollouts.")
+    rollout_temperatures: list[float | None]
+    if batch.temperatures:
+        rollout_temperatures = [float(temperature) for temperature in batch.temperatures]
+    elif result.generation_temperatures:
+        rollout_temperatures = [float(temperature) for temperature in result.generation_temperatures]
+    else:
+        rollout_temperatures = [None] * len(batch.queries)
+
+    if len(rollout_temperatures) != len(batch.queries):
+        raise ValueError(
+            f"rollout_temperatures length ({len(rollout_temperatures)}) must match batch.queries length "
+            f"({len(batch.queries)}) when saving rollouts."
+        )
 
     records = []
     for i in range(len(batch.queries)):
@@ -118,6 +133,7 @@ def _save_rollouts(
                     ground_truth=batch.ground_truths[i],
                     request_info=_get_request_info_for_sample(result.request_info, i),
                     logprobs=result.logprobs[i] if result.logprobs else None,
+                    temperature=rollout_temperatures[i],
                 )
             )
         )
@@ -210,6 +226,8 @@ class PackedSequences(Generic[T]):
     """
     rewards: list[torch.Tensor] | None = None
     """packed rewards (batch_size, pack_length)"""
+    temperatures: list[torch.Tensor] | None = None
+    """packed sampling temperatures (batch_size, pack_length)"""
 
 
 def reset_position_ids(attention_mask):
@@ -231,6 +249,7 @@ def pack_sequences(
     pack_length: int,
     pad_token_id: int,
     vllm_logprobs: list[list[float]],
+    temperatures: list[float] | None = None,
     min_num_batches: int = 1,
     mask_tool_use: bool = False,
 ) -> PackedSequences:
@@ -243,6 +262,7 @@ def pack_sequences(
         pack_length: Maximum length of each packed sequence
         pad_token_id: Token ID used for padding
         vllm_logprobs: Log probabilities from vLLM for each response
+        temperatures: Sampling temperature used for each query/response sample
         min_num_batches: Minimum number of packed batches to produce.
             Used to ensure we have a batch for each rank in distributed training.
 
@@ -250,6 +270,10 @@ def pack_sequences(
         PackedSequences containing the packed training data.
     """
     assert not any(pad_token_id in query for query in queries)
+    if temperatures is None:
+        raise ValueError("temperatures must be provided when packing GRPO rollout sequences.")
+    if len(temperatures) != len(queries):
+        raise ValueError(f"temperatures length ({len(temperatures)}) must match queries length ({len(queries)})")
 
     # Calculate total tokens to determine effective pack_length
     total_tokens = 0
@@ -278,6 +302,7 @@ def pack_sequences(
     num_actions = []
     packed_seq_lens = []
     packed_vllm_logprobs = []
+    packed_temperatures = []
     cur_data = []
     cur_response_mask = []
     cur_num_actions = []
@@ -285,11 +310,13 @@ def pack_sequences(
     cur_attention_mask = []
     cur_dones = []
     cur_vllm_logprobs = []
+    cur_temperatures = []
     offset = 0
     for i in range(len(queries)):
         query = queries[i]
         response = responses[i]
         mask = masks[i]
+        temperature = temperatures[i]
         # remove padding (but using vllm so this should not be needed, but just in case)
         query = [t for t in query if t != pad_token_id]
 
@@ -333,6 +360,7 @@ def pack_sequences(
             packed_seq_lens.append(cur_packed_seq_lens)
             dones.append(cur_dones)
             packed_vllm_logprobs.append(cur_vllm_logprobs)
+            packed_temperatures.append(cur_temperatures)
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
@@ -340,9 +368,11 @@ def pack_sequences(
             cur_packed_seq_lens = []
             cur_dones = []
             cur_vllm_logprobs = []
+            cur_temperatures = []
             offset = i
         cur_data.extend(query_response)
         cur_vllm_logprobs.extend(combined_logprobs)
+        cur_temperatures.extend([temperature] * len(query_response))
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
@@ -361,6 +391,7 @@ def pack_sequences(
         packed_seq_lens.append(cur_packed_seq_lens)
         dones.append(cur_dones)
         packed_vllm_logprobs.append(cur_vllm_logprobs)
+        packed_temperatures.append(cur_temperatures)
     attention_masks_list = [torch.tensor(t) for t in attention_masks]
     return PackedSequences(
         query_responses=[torch.tensor(t) for t in query_responses],
@@ -372,6 +403,7 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],
         vllm_logprobs=[torch.tensor(t, dtype=torch.float) for t in packed_vllm_logprobs],
+        temperatures=[torch.tensor(t, dtype=torch.float) for t in packed_temperatures],
     )
 
 
