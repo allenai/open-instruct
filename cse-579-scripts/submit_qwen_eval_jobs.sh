@@ -1,5 +1,6 @@
+# "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo-sft/qwen3-4b-sft-full/step44438-hf"
 MODEL_PATHS=(
-"/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmo-sft/qwen3-4b-sft-full/step44438-hf"
+    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed__1__1776210341_checkpoints/step_100"
 )
 current_evals="alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
@@ -41,4 +42,5 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
         --skip_oi_evals \
         --tokenizer_path /weka/oe-adapt-default/jacobm/repos/cse-579/tokenizers/qwen3-olmo-thinker-eos-old-transformers \
         --oe_eval_tasks $current_evals
+        # --tokenizer_path $MODEL_PATH \
 done
