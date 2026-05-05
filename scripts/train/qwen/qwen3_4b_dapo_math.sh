@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_icepop}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_icepop_very_narrow}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
