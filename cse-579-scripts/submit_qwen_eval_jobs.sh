@@ -49,7 +49,7 @@ for MODEL_PATH in "${MODEL_PATHS[@]}"; do
         --location "$MODEL_PATH" \
         --cluster ai2/saturn ai2/ceres \
         --is_tuned \
-        --workspace ai2/flex2 \
+        --workspace ai2/olmo-instruct \
         --priority urgent \
         --preemptible \
         --use_hf_tokenizer_template \
