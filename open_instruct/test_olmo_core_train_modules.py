@@ -160,6 +160,7 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "kl_estimator": 2,
         "loss_fn": grpo_utils.GRPOLossType.dapo,
         "load_ref_policy": False,
+        "icepop_sequence_level": False,
     }
     defaults.update(kwargs)
     config = MagicMock(spec=grpo_utils.GRPOExperimentConfig)
@@ -314,6 +315,29 @@ class TestComputeGRPOLoss(unittest.TestCase):
         torch.testing.assert_close(correction_pad.weights, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
         torch.testing.assert_close(correction_pad.metrics["val/icepop_drop_low_frac"], torch.zeros((1, 5)))
         torch.testing.assert_close(correction_pad.metrics["val/icepop_drop_high_frac"], torch.zeros((1, 5)))
+
+    def test_icepop_sequence_level_mask(self):
+        config = _make_grpo_config(
+            use_icepop=True, icepop_lower_bound=0.5, icepop_upper_bound=2.0, icepop_sequence_level=True
+        )
+        # Row 0: per-token ρ = [0.25, 1.0, 4.0]; mean log ρ = 0 → ρ_seq = 1 (kept).
+        # Row 1: per-token ρ = [4.0, 4.0, 4.0]; mean log ρ = log 4 → ρ_seq = 4 (drop high).
+        # Row 2: per-token ρ = [0.25, 0.25, 0.25]; ρ_seq = 0.25 (drop low).
+        old_logprob = torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0], [0.25, 0.25, 0.25]]))
+        vllm_logprobs = torch.zeros_like(old_logprob)
+        response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
+        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, config)
+        torch.testing.assert_close(
+            correction.weights, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        )
+        torch.testing.assert_close(
+            correction.metrics["val/icepop_drop_low_frac"],
+            torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]),
+        )
+        torch.testing.assert_close(
+            correction.metrics["val/icepop_drop_high_frac"],
+            torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]),
+        )
 
     def test_icepop_zeroes_loss(self):
         config = _make_grpo_config()

@@ -113,6 +113,11 @@ class GRPOExperimentConfig(
     """IcePop lower bound on the train/infer ratio ρ; tokens with ρ below this are dropped."""
     icepop_upper_bound: float = 2.0
     """IcePop upper bound on the train/infer ratio ρ; tokens with ρ above this are dropped."""
+    icepop_sequence_level: bool = False
+    """If True, apply the IcePop mask at the sequence level (DeepSeek-V3.2 style):
+    compute the mean log-ratio (1/|o_i|) Σ_t log(π_old / π_θ) per response sequence,
+    exponentiate to get a per-sequence ρ, and broadcast the keep/drop decision to every
+    token in that sequence. If False (default), the mask is applied per token."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -345,6 +350,19 @@ def _icepop_mask_from_rho(
     return mask, dropped_low, dropped_high
 
 
+def _icepop_sequence_rho(logprob_diff: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    """Per-sequence ρ = exp((1/|o_i|) Σ_t (log π_old - log π_θ)), broadcast to every token.
+
+    Sequences are identified with rows of ``logprob_diff`` (shape [B, T]); padding tokens
+    contribute 0 to the sum and are excluded from the count. Empty rows return ρ = 1.
+    """
+    valid = response_mask.float()
+    seq_sum = (logprob_diff * valid).sum(dim=-1, keepdim=True)
+    seq_count = valid.sum(dim=-1, keepdim=True).clamp_min(1.0)
+    seq_mean = seq_sum / seq_count
+    return torch.exp(seq_mean).expand_as(logprob_diff)
+
+
 @dataclass
 class RhoCorrection:
     """Per-token stop-gradient correction for the train/infer engine mismatch.
@@ -372,8 +390,9 @@ def compute_rho_correction(
     rho = torch.exp(logprob_diff)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
     if config.use_icepop:
+        rho_for_mask = _icepop_sequence_rho(logprob_diff, response_mask) if config.icepop_sequence_level else rho
         mask, dropped_low, dropped_high = _icepop_mask_from_rho(
-            rho, response_mask, config.icepop_lower_bound, config.icepop_upper_bound
+            rho_for_mask, response_mask, config.icepop_lower_bound, config.icepop_upper_bound
         )
         return RhoCorrection(
             weights=mask,
