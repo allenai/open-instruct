@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts/data/difficulty_sampling/create_difficulty_map.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts/data/difficulty_sampling/create_difficulty_map.py"
 
 
 def _load_create_difficulty_map_module():
@@ -84,7 +84,7 @@ def _load_create_difficulty_map_module():
         "scipy.stats": fake_scipy_stats,
     }
     module_name = "test_create_difficulty_map_module"
-    spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
+    spec = importlib.util.spec_from_file_location(module_name, SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
 

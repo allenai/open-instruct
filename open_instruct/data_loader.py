@@ -248,21 +248,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         self._excluded_indices.add(index)
 
-    def set_sampling_step(self, step: int) -> None:
-        del step
-
-    def record_curriculum_observations(
-        self,
-        dataset_indices: list[int] | np.ndarray,
-        rewards: list[float] | np.ndarray,
-        advantages: list[float] | np.ndarray | None = None,
-    ) -> None:
-        del dataset_indices, rewards, advantages
-
-    def build_curriculum_metrics(self, prompt_dataset_indices: list[int], step: int) -> dict[str, float]:
-        del prompt_dataset_indices, step
-        return {}
-
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle and reshard the dataset for a new epoch.
 
@@ -730,17 +715,6 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
 
     def set_sampling_step(self, step: int) -> None:
         self._sampling_step = int(step)
-
-    def record_curriculum_observations(
-        self,
-        dataset_indices: list[int] | np.ndarray,
-        rewards: list[float] | np.ndarray,
-        advantages: list[float] | np.ndarray | None = None,
-    ) -> None:
-        self._curriculum_sampler.record_observations(dataset_indices, rewards, advantages)
-
-    def build_curriculum_metrics(self, prompt_dataset_indices: list[int], step: int) -> dict[str, float]:
-        return self._curriculum_sampler.build_metrics(prompt_dataset_indices, step)
 
     def state_dict(self) -> dict[str, Any]:
         return {
@@ -1324,6 +1298,9 @@ class DataPreparationActor:
         self.iter_dataloader = create_prompt_dataloader(
             dataset=dataset, seed=seed, work_dir=work_dir, curriculum_config=curriculum_config
         )
+        self.curriculum_dataloader = (
+            self.iter_dataloader if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader) else None
+        )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
         self.metrics: dict[int, dict] = {}
@@ -1362,7 +1339,8 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        self.iter_dataloader.set_sampling_step(self.training_step)
+        if self.curriculum_dataloader is not None:
+            self.curriculum_dataloader.set_sampling_step(self.training_step)
         for _ in range(num_initial_prompts):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -1382,7 +1360,8 @@ class DataPreparationActor:
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
-            self.iter_dataloader.set_sampling_step(step)
+            if self.curriculum_dataloader is not None:
+                self.curriculum_dataloader.set_sampling_step(step)
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1427,7 +1406,8 @@ class DataPreparationActor:
                     for _ in range(self.dp_world_size)
                 ]
                 empty_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
-                empty_metrics.update(self.iter_dataloader.build_curriculum_metrics([], step))
+                if self.curriculum_dataloader is not None:
+                    empty_metrics.update(self.curriculum_dataloader.curriculum_sampler.build_metrics([], step))
                 with self.lock:
                     self.prepared_data[step] = empty_data
                     self.metrics[step] = empty_metrics
@@ -1436,11 +1416,11 @@ class DataPreparationActor:
 
             assert batch is not None
             assert batch_stats is not None
-            prompt_dataset_indices = (
-                [int(index) for index in batch.indices[:: self.config.num_samples_per_prompt_rollout]]
-                if batch.indices is not None
-                else []
-            )
+            prompt_dataset_indices: list[int] = []
+            if self.curriculum_dataloader is not None and batch.indices is not None:
+                prompt_dataset_indices = [
+                    int(index) for index in batch.indices[:: self.config.num_samples_per_prompt_rollout]
+                ]
 
             if self.rubric_manager and batch.decoded_responses:
                 rubric_metrics, new_overrides = self.rubric_manager.run_step(
@@ -1498,9 +1478,11 @@ class DataPreparationActor:
                 assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
-            if batch.indices is not None:
+            if self.curriculum_dataloader is not None and batch.indices is not None:
                 normalized_scores = np.clip(scores / max(self.config.max_possible_score, 1e-8), 0.0, 1.0)
-                self.iter_dataloader.record_curriculum_observations(batch.indices, normalized_scores, advantages)
+                self.curriculum_dataloader.curriculum_sampler.record_observations(
+                    batch.indices, normalized_scores, advantages
+                )
 
             assert result.logprobs is not None
             packed_sequences = pack_sequences(
@@ -1587,7 +1569,10 @@ class DataPreparationActor:
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
-            step_metrics.update(self.iter_dataloader.build_curriculum_metrics(prompt_dataset_indices, step))
+            if self.curriculum_dataloader is not None:
+                step_metrics.update(
+                    self.curriculum_dataloader.curriculum_sampler.build_metrics(prompt_dataset_indices, step)
+                )
 
             with self.lock:
                 self.prepared_data[step] = collated_data
