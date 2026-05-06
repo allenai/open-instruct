@@ -113,7 +113,7 @@ def get_args():
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
-    parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
+    parser.add_argument("--budget", type=str, help="Budget to use. If unset, Beaker uses the default budget.", default=None)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
         "--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb"
@@ -700,15 +700,17 @@ def main():
         console.print(Text(full_command))
     if is_external_user:
         return
-    experiment_spec = beaker.BeakerExperimentSpec(
-        description=args.description,
-        tasks=[
+    experiment_spec_kwargs = {
+        "description": args.description,
+        "tasks": [
             make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
             for i, full_command in enumerate(full_commands)
         ],
-        budget=args.budget,
-        retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
-    )
+        "retry": beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
+    }
+    if args.budget is not None:
+        experiment_spec_kwargs["budget"] = args.budget
+    experiment_spec = beaker.BeakerExperimentSpec(**experiment_spec_kwargs)
 
     @backoff.on_exception(
         backoff.expo,
