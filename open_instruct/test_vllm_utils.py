@@ -33,6 +33,39 @@ class TestTruncateEnvOutputTokens(unittest.TestCase):
         self.assertEqual(excess, expected_excess)
 
 
+class FakeCompletionTokenizer:
+    def encode(self, prompt, add_special_tokens=False):
+        return list(range(int(prompt)))
+
+
+class TestBoundCompletionRequestToContext(unittest.TestCase):
+    def test_reduces_max_tokens_when_prompt_fits(self):
+        prompt_ids, request_max_tokens, prompt_truncated = vllm_utils.bound_completion_request_to_context(
+            FakeCompletionTokenizer(),
+            "20481",
+            max_model_len=21504,
+            max_tokens=1024,
+        )
+
+        self.assertEqual(len(prompt_ids), 20481)
+        self.assertEqual(request_max_tokens, 1023)
+        self.assertFalse(prompt_truncated)
+        self.assertLessEqual(len(prompt_ids) + request_max_tokens, 21504)
+
+    def test_truncates_prompt_when_prompt_exceeds_context(self):
+        prompt_ids, request_max_tokens, prompt_truncated = vllm_utils.bound_completion_request_to_context(
+            FakeCompletionTokenizer(),
+            "12",
+            max_model_len=10,
+            max_tokens=4,
+        )
+
+        self.assertEqual(prompt_ids, [3, 4, 5, 6, 7, 8, 9, 10, 11])
+        self.assertEqual(request_max_tokens, 1)
+        self.assertTrue(prompt_truncated)
+        self.assertLessEqual(len(prompt_ids) + request_max_tokens, 10)
+
+
 class TestVllmUtils3(unittest.TestCase):
     def setUp(self):
         logging.disable(logging.CRITICAL)

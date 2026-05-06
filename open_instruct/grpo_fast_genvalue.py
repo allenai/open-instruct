@@ -190,11 +190,15 @@ class GenValueTrainerActor:
             # Only materialize logits needed to score the generated answer tokens.
             # Full-sequence logits for 8k-token prompts can allocate several extra GiB.
             outputs = self._model(
-                input_ids=input_ids, attention_mask=attention_mask, logits_to_keep=len(generated_ids) + 1
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                logits_to_keep=len(generated_ids) + 1,
             )
             logits = outputs.logits[:, :-1, :]
             lm_loss = torch.nn.functional.cross_entropy(
-                logits.reshape(-1, logits.shape[-1]).float(), target_ids.reshape(-1), reduction="mean"
+                logits.reshape(-1, logits.shape[-1]).float(),
+                target_ids.reshape(-1),
+                reduction="mean",
             )
             log_prob = -lm_loss  # mean log-prob of generated tokens
 
@@ -243,8 +247,14 @@ class GenValueTrainerActor:
         master_address = ray._private.services.get_node_ip_address().strip("[]")
         master_port = utils.find_free_port()
         world_size = len(vllm_engines) * self._tp_size + 1
-        master_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
-        init_infos = [master_info | {"rank_offset": i * self._tp_size + 1} for i, _ in enumerate(vllm_engines)]
+        master_info = {
+            "master_address": master_address,
+            "master_port": master_port,
+            "world_size": world_size,
+        }
+        init_infos = [
+            master_info | {"rank_offset": i * self._tp_size + 1} for i, _ in enumerate(vllm_engines)
+        ]
 
         # Submit the vLLM-side init RPCs first (async) so the NCCL handshake can
         # proceed on both sides in parallel, then wait.
@@ -254,7 +264,9 @@ class GenValueTrainerActor:
         ]
         torch.cuda.set_device(0)
         self._model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
-        utils.ray_get_with_progress(refs, desc="Initializing gen-value vLLM weight transfer engines", timeout=600)
+        utils.ray_get_with_progress(
+            refs, desc="Initializing gen-value vLLM weight transfer engines", timeout=600
+        )
 
     def broadcast_to_vllm(self, model_step: int) -> list:
         """Push current PyTorch weights to the gen-value vLLM pool over NCCL.
@@ -401,7 +413,7 @@ def score_partial_rollout_batch(
 
 def _get_gen_value_max_model_len(streaming_config: Any, args: Any) -> int:
     """Reserve context for gen-value scoring prompts plus the critic's answer."""
-    return streaming_config.pack_length * 2 + args.gen_value_max_new_tokens
+    return streaming_config.pack_length * 4 + args.gen_value_max_new_tokens
 
 
 def _build_sample_scoring_prompts(
@@ -528,7 +540,10 @@ def _gen_value_reinforce_loop(
 
 
 def _sync_gen_value_weights(
-    gen_value_trainer: Any, gen_value_vllm_engines: list, model_step: int, engines_lock: threading.Lock
+    gen_value_trainer: Any,
+    gen_value_vllm_engines: list,
+    model_step: int,
+    engines_lock: threading.Lock,
 ) -> None:
     """Push updated gen-value weights to the gen-value vLLM pool over NCCL.
 
@@ -903,7 +918,10 @@ def main():
         sync_freq = args.gen_value_sync_freq
         if sync_freq > 0 and gen_value_trainer is not None and _gv_policy_step_count[0] % sync_freq == 0:
             _sync_gen_value_weights(
-                gen_value_trainer, gen_value_vllm_engines, _gv_policy_step_count[0], gen_value_engines_lock
+                gen_value_trainer,
+                gen_value_vllm_engines,
+                _gv_policy_step_count[0],
+                gen_value_engines_lock,
             )
         if gen_value_vllm_engines:
             gen_value_step_trigger.set()

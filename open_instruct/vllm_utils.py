@@ -257,6 +257,33 @@ def truncate_tool_output_tokens(
     return tool_output_token_ids[:remaining], excess
 
 
+def bound_completion_request_to_context(
+    tokenizer,
+    prompt: str,
+    max_model_len: int,
+    max_tokens: int,
+) -> tuple[list[int], int, bool]:
+    """Return prompt token IDs and max_tokens that fit within the model context."""
+    if max_model_len <= 1:
+        raise ValueError(f"max_model_len must be > 1 for completions, got {max_model_len}.")
+
+    prompt_token_ids = tokenizer.encode(prompt, add_special_tokens=False)
+    request_max_tokens = max(1, min(max_tokens, max_model_len - 1))
+    prompt_budget = max_model_len - request_max_tokens
+    prompt_truncated = False
+
+    if len(prompt_token_ids) > prompt_budget:
+        if len(prompt_token_ids) < max_model_len:
+            request_max_tokens = max_model_len - len(prompt_token_ids)
+        else:
+            prompt_budget = max_model_len - 1
+            prompt_token_ids = prompt_token_ids[-prompt_budget:]
+            request_max_tokens = 1
+            prompt_truncated = True
+
+    return prompt_token_ids, request_max_tokens, prompt_truncated
+
+
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -841,13 +868,24 @@ class LLMRayActor:
 
         async def _run():
             extra_body = {"include_stop_str_in_output": True} if include_stop_str_in_output else None
+            max_model_len = self.llm_engine.model_config.max_model_len
+            adjusted_requests = 0
 
             async def _one(prompt: str) -> str:
+                nonlocal adjusted_requests
+                prompt_token_ids, request_max_tokens, prompt_truncated = bound_completion_request_to_context(
+                    self.llm_engine.tokenizer,
+                    prompt,
+                    max_model_len,
+                    max_tokens,
+                )
+                if request_max_tokens != max_tokens or prompt_truncated:
+                    adjusted_requests += 1
                 kwargs: dict[str, Any] = {
                     "model": self.model_name,
-                    "prompt": prompt,
+                    "prompt": prompt_token_ids,
                     "temperature": temperature,
-                    "max_tokens": max_tokens,
+                    "max_tokens": request_max_tokens,
                     "top_p": top_p,
                     "n": 1,
                 }
@@ -858,7 +896,15 @@ class LLMRayActor:
                 resp = await self.client.completions.create(**kwargs)
                 return resp.choices[0].text
 
-            return list(await asyncio.gather(*[_one(p) for p in prompts]))
+            results = list(await asyncio.gather(*[_one(p) for p in prompts]))
+            if adjusted_requests:
+                logger.warning(
+                    "Adjusted %d/%d completion request(s) to fit max_model_len=%d.",
+                    adjusted_requests,
+                    len(prompts),
+                    max_model_len,
+                )
+            return results
 
         return self._run_async(_run())
 
