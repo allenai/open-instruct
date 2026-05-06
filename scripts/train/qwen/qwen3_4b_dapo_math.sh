@@ -10,6 +10,7 @@ shift || true
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+BUDGET="${BUDGET:-ai2/oe-omai}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -24,7 +25,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
-    --budget ai2/oe-adapt \
+    --budget ${BUDGET} \
     -- \
 uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
