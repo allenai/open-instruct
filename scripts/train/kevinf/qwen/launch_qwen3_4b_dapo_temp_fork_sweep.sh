@@ -46,12 +46,12 @@ PY
 }
 
 if [[ -n "${BASE_EXPERIMENT_ID:-}" ]]; then
-    mapfile -t parsed < <(parse_base_spec)
-    BASE_TEMPERATURE="${BASE_TEMPERATURE:-${parsed[0]}}"
-    BASE_CHECKPOINT_STATE_DIR="${BASE_CHECKPOINT_STATE_DIR:-${parsed[1]}}"
+    parsed="$(parse_base_spec)"
+    BASE_TEMPERATURE="${BASE_TEMPERATURE:-$(printf "%s\n" "$parsed" | sed -n '1p')}"
+    BASE_CHECKPOINT_STATE_DIR="${BASE_CHECKPOINT_STATE_DIR:-$(printf "%s\n" "$parsed" | sed -n '2p')}"
 fi
 
-mapfile -t TEMPERATURES < <(
+TEMPERATURES="$(
     python - "$BASE_TEMPERATURE" "$TEMP_DELTA" "$NUM_TEMPS_EACH_SIDE" "$INCLUDE_BASE_TEMPERATURE" <<'PY'
 import sys
 
@@ -68,15 +68,15 @@ for temp in temps:
         raise SystemExit(f"Temperature must be positive, got {temp}")
     print(f"{temp:.2f}")
 PY
-)
+)"
 
 echo "Base temperature: ${BASE_TEMPERATURE}"
 echo "Base checkpoint state dir: ${BASE_CHECKPOINT_STATE_DIR}"
 echo "Base checkpoint tag: global_step${BASE_STEP}"
 echo "Branch checkpoint parent: ${SWEEP_CHECKPOINT_PARENT}"
-echo "Temperatures: ${TEMPERATURES[*]}"
+echo "Temperatures: $(printf "%s" "$TEMPERATURES" | tr '\n' ' ')"
 
-for temperature in "${TEMPERATURES[@]}"; do
+for temperature in $TEMPERATURES; do
     label="$(python - "$temperature" <<'PY'
 import sys
 print(sys.argv[1].replace(".", "p"))
@@ -90,5 +90,5 @@ PY
     export EXP_NAME="qwen3_4b_base_dapo_temp_fork_t${label}"
     export RUN_NAME="${EXP_NAME}_from_step${BASE_STEP}_${timestamp}"
     echo "Launching ${RUN_NAME} with checkpoint ${BRANCH_CHECKPOINT_STATE_DIR}"
-    ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_dapo_math_resume_temp_branch.sh
+    ./scripts/train/build_image_and_launch.sh scripts/train/kevinf/qwen/qwen3_4b_dapo_math_resume_temp_branch.sh
 done
