@@ -873,7 +873,6 @@ def make_batch_from_groups(
     total_prompt_tokens = 0
     total_response_tokens = 0
     max_generation_time = 0
-    total_generation_time = 0.0
 
     for group in groups:
         result = group.result
@@ -913,16 +912,12 @@ def make_batch_from_groups(
         total_prompt_tokens += result.token_statistics.num_prompt_tokens
         total_response_tokens += result.token_statistics.num_response_tokens
         max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
-        total_generation_time += result.token_statistics.generation_time
-
-    mean_per_group_wall_time = total_generation_time / len(groups)
 
     accumulated_stats = data_types.TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
         generation_time=max_generation_time,
         earliest_start_time=earliest_start_time,
-        mean_per_group_wall_time=mean_per_group_wall_time,
     )
 
     combined_request_info = data_types.RequestInfo(
@@ -1506,7 +1501,6 @@ class DataPreparationActor:
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time
-                step_metrics["time/per_group_wall_time"] = result.token_statistics.mean_per_group_wall_time
 
             with self.lock:
                 self.prepared_data[step] = collated_data
