@@ -611,9 +611,6 @@ class PolicyTrainerRayProcess(RayProcess):
         """
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
-        if len(data_BT) == 0:
-            logger.warning("[Training] Empty batch received, skipping training step")
-            return [], {}
 
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
@@ -1569,9 +1566,6 @@ def one_training_step(
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
-        if all(len(m) == 0 for m in metrics):
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return 0
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
