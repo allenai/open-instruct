@@ -1,10 +1,9 @@
-"""Unit tests for posterior-aware bucketing in open_instruct.rlvr_difficulty."""
+"""Unit tests for posterior-aware bucketing in create_bucketed_difficulty.py."""
 
-import importlib
+import importlib.util
 import json
 import math
 import sys
-import tempfile
 import types
 import unittest
 from collections import Counter
@@ -13,6 +12,8 @@ from statistics import NormalDist
 from unittest.mock import patch
 
 import numpy as np
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts/data/difficulty_sampling/create_bucketed_difficulty.py"
 
 
 def _load_create_bucketed_difficulty_module():
@@ -82,10 +83,16 @@ def _load_create_bucketed_difficulty_module():
         "scipy.special": fake_scipy_special,
         "scipy.stats": fake_scipy_stats,
     }
+    module_name = "test_create_bucketed_difficulty_module"
+    spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
 
     with patch.dict(sys.modules, modules):
-        sys.modules.pop("open_instruct.rlvr_difficulty", None)
-        return importlib.import_module("open_instruct.rlvr_difficulty")
+        sys.modules.pop(module_name, None)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
 
 
 MODULE = _load_create_bucketed_difficulty_module()
@@ -123,133 +130,57 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
                 [{**row, name: value} for row, value in zip(self._rows, values, strict=True)]
             )
 
-    def test_discover_rollout_sources_resolves_directory_runs(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "demo_run_metadata.jsonl").write_text(
-                json.dumps({"run_name": "demo_run", "model_name": "demo-model"}) + "\n"
-            )
-            (root / "demo_run_rollouts_000000.jsonl").write_text(
-                json.dumps(
-                    {
-                        "prompt_tokens": [1, 2, 3],
-                        "reward": 1.0,
-                        "finish_reason": "stop",
-                        "dataset": "math",
-                        "ground_truth": "4",
-                    }
-                )
-                + "\n"
-            )
-
-            sources = MODULE.discover_rollout_sources([str(root)])
-
-        self.assertEqual(len(sources), 1)
-        self.assertEqual(sources[0].run_name, "demo_run")
-        self.assertEqual(sources[0].metadata_path.name, "demo_run_metadata.jsonl")
-        self.assertEqual([path.name for path in sources[0].rollout_paths], ["demo_run_rollouts_000000.jsonl"])
-
-    def test_rollout_contributions_aggregate_and_normalize_constant_rewards(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "demo_run_metadata.jsonl").write_text(
-                json.dumps({"run_name": "demo_run", "model_name": "Qwen/Qwen3-4B-Base"}) + "\n"
-            )
-            shard = root / "demo_run_rollouts_000000.jsonl"
-            shard.write_text(
-                "\n".join(
-                    [
-                        json.dumps(
-                            {
-                                "prompt_tokens": [11, 12, 13],
-                                "reward": 10.0,
-                                "finish_reason": "stop",
-                                "dataset": "math",
-                                "ground_truth": {"answer": "4"},
-                                "request_info": {"timeouts": 0, "tool_errors": ""},
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "prompt_tokens": [11, 12, 13],
-                                "reward": 0.0,
-                                "finish_reason": "length",
-                                "dataset": "math",
-                                "ground_truth": {"answer": "4"},
-                                "request_info": {"timeouts": 1, "tool_errors": ""},
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "prompt_tokens": [21, 22, 23],
-                                "reward": 10.0,
-                                "finish_reason": "stop",
-                                "dataset": "math",
-                                "ground_truth": {"answer": "9"},
-                                "request_info": {"timeouts": 0, "tool_errors": ""},
-                            }
-                        ),
-                    ]
-                )
-                + "\n"
-            )
-
-            source = MODULE.discover_rollout_sources([str(root)])[0]
-            contributions, malformed_records = MODULE.build_contributions_for_source(
-                source_run=source, task_filters=set(), strict=True
-            )
-
-        self.assertEqual(malformed_records, 0)
-
-        rows = MODULE.aggregate_contributions(contributions)
-        self.assertEqual(len(rows), 2)
-
-        rows_by_group = MODULE.group_rows_by_task_and_model(rows)
-        group_rows, score_processing, skipped_nonunit = MODULE.normalize_attempt_scores_for_group(
-            rows_by_group[("math", "Qwen/Qwen3-4B-Base")], allow_nonunit_scores=False
+    def make_row(
+        self,
+        *,
+        source_row_index=0,
+        instance_id="row-0",
+        task_name="math",
+        source_dataset="mnoukhov/demo",
+        source_row_id="row-0",
+        attempt_scores=None,
+        model_name="demo-model",
+        warnings=None,
+        difficulty=None,
+    ):
+        return MODULE.DifficultyRow(
+            source_row_index=source_row_index,
+            instance_id=instance_id,
+            task_name=task_name,
+            base_task_name=MODULE.get_base_task_name(task_name),
+            source_dataset=source_dataset,
+            source_row_id=source_row_id,
+            attempt_scores=list(attempt_scores or []),
+            finish_reasons=[],
+            experiment_metadata=MODULE.ExperimentMetadata(
+                source_root=f"hf://{source_dataset}/default/train",
+                model_name=model_name,
+                experiment_id=None,
+                experiment_name=source_dataset,
+            ),
+            score_sources=[task_name],
+            warnings=list(warnings or []),
+            difficulty=difficulty or MODULE.DifficultyPayload(),
         )
 
-        self.assertEqual(skipped_nonunit, 0)
-        self.assertEqual(score_processing["normalization"], "binary_zero_or_constant")
-        self.assertEqual(score_processing["positive_reward_value"], 10.0)
+    def test_parser_requires_hf_dataset_and_rejects_source(self):
+        with self.assertRaises(SystemExit):
+            MODULE.make_parser().parse_args(["--output", "/tmp/difficulty"])
 
-        easy_row = next(row for row in group_rows if row["ground_truth"] == {"answer": "4"})
-        self.assertEqual(easy_row["attempt_scores"], [1.0, 0.0])
-        self.assertEqual(easy_row["prompt_tokens"], [11, 12, 13])
-        self.assertEqual(easy_row["finish_reasons"], ["stop", "length"])
-        self.assertEqual(easy_row["score_sources"], ["math"])
-        self.assertEqual(easy_row["experiment_metadata"]["model_name"], "Qwen/Qwen3-4B-Base")
-        self.assertIn("timeout", easy_row["warnings"])
+        with self.assertRaises(SystemExit):
+            MODULE.make_parser().parse_args(["--source", "/tmp/rollouts", "--output", "/tmp/difficulty"])
 
     def test_normalize_attempt_scores_for_group_marks_unsupported_rewards(self):
-        rows = [
-            {
-                "instance_id": "example",
-                "task_name": "math",
-                "base_task_name": "math",
-                "prompt_tokens": [1, 2, 3],
-                "ground_truth": "4",
-                "attempt_scores": [10.0, 5.0],
-                "finish_reasons": ["stop", "stop"],
-                "experiment_metadata": {
-                    "source_root": "/tmp/example-rollouts",
-                    "model_name": "demo-model",
-                    "experiment_id": None,
-                    "experiment_name": "demo-run",
-                },
-                "score_sources": ["math"],
-                "warnings": [],
-            }
-        ]
+        rows = [self.make_row(instance_id="example", source_row_id="example", attempt_scores=[10.0, 5.0])]
 
         kept_rows, score_processing, skipped_nonunit = MODULE.normalize_attempt_scores_for_group(
             rows, allow_nonunit_scores=True
         )
 
         self.assertEqual(skipped_nonunit, 0)
-        self.assertFalse(score_processing["supports_binary_difficulty"])
-        self.assertEqual(kept_rows[0]["attempt_scores"], [10.0, 5.0])
-        self.assertIn("nonbinary_reward_scores", kept_rows[0]["warnings"])
+        self.assertFalse(score_processing.supports_binary_difficulty)
+        self.assertEqual(kept_rows[0].attempt_scores, [10.0, 5.0])
+        self.assertIn("nonbinary_reward_scores", kept_rows[0].warnings)
 
         dropped_rows, _, dropped_count = MODULE.normalize_attempt_scores_for_group(rows, allow_nonunit_scores=False)
 
@@ -258,29 +189,32 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
 
     def test_build_dataset_metadata_captures_difficulty_generation_details(self):
         rows = [
-            {
-                "instance_id": "easy",
-                "difficulty": {
-                    "value": 0.1,
-                    "posterior_mean": 0.2,
-                    "posterior_lower_bound": 0.9,
-                    "expected_quantile": 0.2,
-                    "bucket_index": 0,
-                    "bucket_count": 3,
-                },
-            },
-            {
-                "instance_id": "hard",
-                "difficulty": {
-                    "value": 0.8,
-                    "posterior_mean": 0.7,
-                    "posterior_lower_bound": 0.2,
-                    "expected_quantile": 0.9,
-                    "bucket_index": 2,
-                    "bucket_count": 3,
-                },
-            },
-            {"instance_id": "nonbinary", "difficulty": MODULE.make_empty_difficulty_payload()},
+            self.make_row(
+                instance_id="easy",
+                source_row_id="easy",
+                difficulty=MODULE.DifficultyPayload(
+                    value=0.1,
+                    posterior_mean=0.2,
+                    posterior_lower_bound=0.9,
+                    expected_quantile=0.2,
+                    bucket_index=0,
+                    bucket_count=3,
+                ),
+            ),
+            self.make_row(
+                source_row_index=1,
+                instance_id="hard",
+                source_row_id="hard",
+                difficulty=MODULE.DifficultyPayload(
+                    value=0.8,
+                    posterior_mean=0.7,
+                    posterior_lower_bound=0.2,
+                    expected_quantile=0.9,
+                    bucket_index=2,
+                    bucket_count=3,
+                ),
+            ),
+            self.make_row(source_row_index=2, instance_id="nonbinary", source_row_id="nonbinary"),
         ]
 
         metadata = MODULE.build_dataset_metadata(
@@ -292,31 +226,41 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
             lower_quantile=0.1,
             prior=MODULE.BetaPrior(alpha=0.75, beta=1.25, source="empirical_bayes"),
             binary_row_count=2,
-            score_processing={
-                "source_field": "reward",
-                "output_field": "attempt_scores",
-                "normalization": "binary_zero_or_constant",
-                "positive_reward_value": 10.0,
-                "supports_binary_difficulty": True,
-            },
-            source_format=MODULE.build_rollout_source_format_metadata(),
+            score_processing=MODULE.ScoreProcessingMetadata(
+                source_field="reward",
+                output_field="attempt_scores",
+                normalization="binary_zero_or_constant",
+                positive_reward_value=10.0,
+                supports_binary_difficulty=True,
+            ),
+            source_format=MODULE.build_hf_source_format_metadata(
+                dataset_name="mnoukhov/demo",
+                config_name=None,
+                split="train",
+                row_id_field="extra_info.index",
+                task_field="dataset",
+                model_field="generator_model",
+                pass_count_field="pass_count",
+                attempt_count_field="num_samples",
+                pass_rate_field="pass_rate",
+            ),
         )
 
-        self.assertEqual(metadata["task_name"], "math")
-        self.assertEqual(metadata["model_name"], "demo-model")
-        self.assertEqual(metadata["row_count"], 3)
-        self.assertEqual(metadata["source_format"]["kind"], "open_instruct_rollout_traces")
-        self.assertEqual(metadata["score_processing"]["normalization"], "binary_zero_or_constant")
-        self.assertEqual(metadata["score_processing"]["positive_reward_value"], 10.0)
-        self.assertEqual(metadata["difficulty_generation"]["method"], "beta_binomial_posterior_quantiles")
-        self.assertEqual(metadata["difficulty_generation"]["posterior_lower_quantile"], 0.1)
-        self.assertEqual(metadata["difficulty_generation"]["bucket_count_requested"], 5)
-        self.assertEqual(metadata["difficulty_generation"]["bucket_count_effective"], 3)
-        self.assertEqual(metadata["difficulty_generation"]["beta_prior_used"]["source"], "empirical_bayes")
-        self.assertEqual(metadata["difficulty_generation"]["beta_prior_used"]["alpha"], 0.75)
-        self.assertEqual(metadata["difficulty_generation"]["beta_prior_used"]["beta"], 1.25)
-        self.assertEqual(metadata["difficulty_generation"]["binary_instance_count"], 2)
-        self.assertEqual(metadata["difficulty_generation"]["nonbinary_instance_count"], 1)
+        self.assertEqual(metadata.task_name, "math")
+        self.assertEqual(metadata.model_name, "demo-model")
+        self.assertEqual(metadata.row_count, 3)
+        self.assertEqual(metadata.source_format.kind, MODULE.HF_SOURCE_FORMAT_KIND)
+        self.assertEqual(metadata.score_processing.normalization, "binary_zero_or_constant")
+        self.assertEqual(metadata.score_processing.positive_reward_value, 10.0)
+        self.assertEqual(metadata.difficulty_generation.method, "beta_binomial_posterior_quantiles")
+        self.assertEqual(metadata.difficulty_generation.posterior_lower_quantile, 0.1)
+        self.assertEqual(metadata.difficulty_generation.bucket_count_requested, 5)
+        self.assertEqual(metadata.difficulty_generation.bucket_count_effective, 3)
+        self.assertEqual(metadata.difficulty_generation.beta_prior_used.source, "empirical_bayes")
+        self.assertEqual(metadata.difficulty_generation.beta_prior_used.alpha, 0.75)
+        self.assertEqual(metadata.difficulty_generation.beta_prior_used.beta, 1.25)
+        self.assertEqual(metadata.difficulty_generation.binary_instance_count, 2)
+        self.assertEqual(metadata.difficulty_generation.nonbinary_instance_count, 1)
 
     def test_build_hf_dataset_row_parses_pass_rate_counts(self):
         row = MODULE.build_hf_dataset_row(
@@ -340,11 +284,11 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
             pass_rate_field="pass_rate",
         )
 
-        self.assertEqual(row["instance_id"], "mnoukhov/demo::row-7")
-        self.assertEqual(row["source_row_id"], "row-7")
-        self.assertEqual(row["attempt_scores"], [1.0, 1.0, 1.0, 0.0, 0.0])
-        self.assertEqual(row["experiment_metadata"]["model_name"], "Qwen/Qwen3-4B-Base")
-        self.assertEqual(row["experiment_metadata"]["source_root"], "hf://mnoukhov/demo/default/train")
+        self.assertEqual(row.instance_id, "mnoukhov/demo::row-7")
+        self.assertEqual(row.source_row_id, "row-7")
+        self.assertEqual(row.attempt_scores, [1.0, 1.0, 1.0, 0.0, 0.0])
+        self.assertEqual(row.experiment_metadata.model_name, "Qwen/Qwen3-4B-Base")
+        self.assertEqual(row.experiment_metadata.source_root, "hf://mnoukhov/demo/default/train")
 
     def test_load_hf_dataset_rows_builds_bundle_and_filters_tasks(self):
         fake_dataset = self.FakeHFDataset(
@@ -384,11 +328,11 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
             )
 
         self.assertEqual(bundle.malformed_records, 0)
-        self.assertEqual(bundle.source_format["kind"], MODULE.HF_SOURCE_FORMAT_KIND)
-        self.assertEqual(bundle.source_format["dataset_repo_id"], "mnoukhov/demo")
+        self.assertEqual(bundle.source_format.kind, MODULE.HF_SOURCE_FORMAT_KIND)
+        self.assertEqual(bundle.source_format.dataset_repo_id, "mnoukhov/demo")
         self.assertEqual(len(bundle.rows), 1)
-        self.assertEqual(bundle.rows[0]["instance_id"], "mnoukhov/demo::math-1")
-        self.assertEqual(bundle.rows[0]["attempt_scores"], [1.0, 1.0, 0.0, 0.0])
+        self.assertEqual(bundle.rows[0].instance_id, "mnoukhov/demo::math-1")
+        self.assertEqual(bundle.rows[0].attempt_scores, [1.0, 1.0, 0.0, 0.0])
 
     def test_build_hf_output_dataset_preserves_source_rows_and_order(self):
         source_dataset = self.FakeHFDataset(
@@ -398,64 +342,44 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
             ]
         )
         rows = [
-            {
-                MODULE.HF_SOURCE_ROW_INDEX_FIELD: 1,
-                "instance_id": "mnoukhov/demo::row-1",
-                "task_name": "math",
-                "base_task_name": "math",
-                "source_dataset": "mnoukhov/demo",
-                "source_row_id": "row-1",
-                "attempt_scores": [0.0, 0.0],
-                "finish_reasons": [],
-                "experiment_metadata": {
-                    "source_root": "hf://mnoukhov/demo/default/train",
-                    "model_name": "Qwen/Qwen3-4B-Base",
-                    "experiment_id": None,
-                    "experiment_name": "mnoukhov/demo",
-                },
-                "score_sources": ["math"],
-                "warnings": [],
-                "difficulty": {
-                    "value": 0.9,
-                    "posterior_mean": 0.1,
-                    "posterior_lower_bound": 0.1,
-                    "expected_quantile": 0.9,
-                    "bucket_index": 1,
-                    "bucket_count": 2,
-                },
-            },
-            {
-                MODULE.HF_SOURCE_ROW_INDEX_FIELD: 0,
-                "instance_id": "mnoukhov/demo::row-0",
-                "task_name": "math",
-                "base_task_name": "math",
-                "source_dataset": "mnoukhov/demo",
-                "source_row_id": "row-0",
-                "attempt_scores": [1.0, 1.0],
-                "finish_reasons": [],
-                "experiment_metadata": {
-                    "source_root": "hf://mnoukhov/demo/default/train",
-                    "model_name": "Qwen/Qwen3-4B-Base",
-                    "experiment_id": None,
-                    "experiment_name": "mnoukhov/demo",
-                },
-                "score_sources": ["math"],
-                "warnings": [],
-                "difficulty": {
-                    "value": 0.1,
-                    "posterior_mean": 0.9,
-                    "posterior_lower_bound": 0.9,
-                    "expected_quantile": 0.1,
-                    "bucket_index": 0,
-                    "bucket_count": 2,
-                },
-            },
+            self.make_row(
+                source_row_index=1,
+                instance_id="mnoukhov/demo::row-1",
+                source_row_id="row-1",
+                attempt_scores=[0.0, 0.0],
+                model_name="Qwen/Qwen3-4B-Base",
+                difficulty=MODULE.DifficultyPayload(
+                    value=0.9,
+                    posterior_mean=0.1,
+                    posterior_lower_bound=0.1,
+                    expected_quantile=0.9,
+                    bucket_index=1,
+                    bucket_count=2,
+                ),
+            ),
+            self.make_row(
+                source_row_index=0,
+                instance_id="mnoukhov/demo::row-0",
+                source_row_id="row-0",
+                attempt_scores=[1.0, 1.0],
+                model_name="Qwen/Qwen3-4B-Base",
+                difficulty=MODULE.DifficultyPayload(
+                    value=0.1,
+                    posterior_mean=0.9,
+                    posterior_lower_bound=0.9,
+                    expected_quantile=0.1,
+                    bucket_index=0,
+                    bucket_count=2,
+                ),
+            ),
         ]
 
-        dataset = MODULE.build_hf_output_dataset(source_dataset, rows)
+        output_rows, dataset = MODULE.build_hf_output_dataset(source_dataset, rows)
 
         self.assertEqual(len(dataset), 2)
         self.assertEqual(dataset.column_names, ["prompt", "extra_info", "difficulty"])
+        self.assertEqual(output_rows[0]["source_row_id"], "row-0")
+        self.assertEqual(output_rows[1]["source_row_id"], "row-1")
         self.assertEqual(dataset[0]["prompt"], "first")
         self.assertEqual(dataset[0]["difficulty"]["bucket_index"], 0)
         self.assertEqual(dataset[1]["prompt"], "second")
@@ -470,85 +394,105 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
                 self.info = FakeInfo()
 
         dataset = FakeDataset()
-        dataset_metadata = {"task_name": "math", "difficulty_generation": {"bucket_count_requested": 5}}
+        dataset_metadata = MODULE.build_dataset_metadata(
+            rows=[self.make_row(difficulty=MODULE.DifficultyPayload(bucket_index=0, bucket_count=5))],
+            task_name="math",
+            model_name="demo-model",
+            requested_prior_mode="empirical-bayes",
+            requested_bucket_count=5,
+            lower_quantile=0.1,
+            prior=MODULE.BetaPrior(alpha=0.5, beta=0.5, source="empirical_bayes"),
+            binary_row_count=1,
+            score_processing=MODULE.ScoreProcessingMetadata(
+                source_field="pass_count,num_samples,pass_rate",
+                output_field="attempt_scores",
+                normalization="identity_binary",
+                positive_reward_value=1.0,
+                supports_binary_difficulty=True,
+            ),
+            source_format=MODULE.build_hf_source_format_metadata(
+                dataset_name="mnoukhov/demo",
+                config_name=None,
+                split="train",
+                row_id_field="extra_info.index",
+                task_field="dataset",
+                model_field="generator_model",
+                pass_count_field="pass_count",
+                attempt_count_field="num_samples",
+                pass_rate_field="pass_rate",
+            ),
+        )
 
         MODULE.annotate_dataset_metadata(dataset, dataset_metadata)
 
-        self.assertEqual(json.loads(dataset.info.description), dataset_metadata)
-
-    def test_normalize_experiment_metadata_uses_canonical_source_root_only(self):
-        normalized = MODULE.normalize_experiment_metadata(
-            {
-                "source_root": "/tmp/example-rollouts",
-                "source_input": "/tmp/example-rollouts/demo_run_metadata.jsonl",
-                "model_name": "demo-model",
-                "experiment_id": "exp-123",
-                "experiment_name": "demo-run",
-            }
-        )
-
-        self.assertEqual(
-            normalized,
-            {
-                "source_root": "/tmp/example-rollouts",
-                "model_name": "demo-model",
-                "experiment_id": "exp-123",
-                "experiment_name": "demo-run",
-            },
-        )
+        self.assertEqual(json.loads(dataset.info.description), MODULE.make_jsonable(dataset_metadata))
 
     def test_apply_beta_binomial_difficulty_orders_rows_by_expected_quantile(self):
         rows = [
-            {"instance_id": "easy", "attempt_scores": [1.0, 1.0, 1.0, 1.0]},
-            {"instance_id": "medium", "attempt_scores": [1.0, 1.0, 0.0, 0.0]},
-            {"instance_id": "hard", "attempt_scores": [0.0, 0.0, 0.0, 0.0]},
+            self.make_row(instance_id="easy", source_row_id="easy", attempt_scores=[1.0, 1.0, 1.0, 1.0]),
+            self.make_row(
+                source_row_index=1, instance_id="medium", source_row_id="medium", attempt_scores=[1.0, 1.0, 0.0, 0.0]
+            ),
+            self.make_row(
+                source_row_index=2, instance_id="hard", source_row_id="hard", attempt_scores=[0.0, 0.0, 0.0, 0.0]
+            ),
         ]
 
         result = MODULE.apply_beta_binomial_difficulty(
             rows, prior=MODULE.BetaPrior(alpha=0.5, beta=0.5, source="test"), lower_quantile=0.1, num_buckets=3
         )
-        difficulties = {row["instance_id"]: row["difficulty"] for row in result}
+        difficulties = {row.instance_id: row.difficulty for row in result}
 
-        self.assertLess(difficulties["easy"]["expected_quantile"], difficulties["medium"]["expected_quantile"])
-        self.assertLess(difficulties["medium"]["expected_quantile"], difficulties["hard"]["expected_quantile"])
-        self.assertEqual(difficulties["easy"]["bucket_index"], 0)
-        self.assertEqual(difficulties["medium"]["bucket_index"], 1)
-        self.assertEqual(difficulties["hard"]["bucket_index"], 2)
-        self.assertTrue(all(difficulty["bucket_count"] == 3 for difficulty in difficulties.values()))
+        self.assertLess(difficulties["easy"].expected_quantile, difficulties["medium"].expected_quantile)
+        self.assertLess(difficulties["medium"].expected_quantile, difficulties["hard"].expected_quantile)
+        self.assertEqual(difficulties["easy"].bucket_index, 0)
+        self.assertEqual(difficulties["medium"].bucket_index, 1)
+        self.assertEqual(difficulties["hard"].bucket_index, 2)
+        self.assertTrue(all(difficulty.bucket_count == 3 for difficulty in difficulties.values()))
 
     def test_apply_beta_binomial_difficulty_balances_bucket_sizes(self):
         rows = [
-            {"instance_id": "easiest", "attempt_scores": [1.0, 1.0, 1.0, 1.0]},
-            {"instance_id": "easy", "attempt_scores": [1.0, 1.0, 1.0, 0.0]},
-            {"instance_id": "mid", "attempt_scores": [1.0, 1.0, 0.0, 0.0]},
-            {"instance_id": "hard", "attempt_scores": [1.0, 0.0, 0.0, 0.0]},
-            {"instance_id": "hardest", "attempt_scores": [0.0, 0.0, 0.0, 0.0]},
+            self.make_row(instance_id="easiest", source_row_id="easiest", attempt_scores=[1.0, 1.0, 1.0, 1.0]),
+            self.make_row(
+                source_row_index=1, instance_id="easy", source_row_id="easy", attempt_scores=[1.0, 1.0, 1.0, 0.0]
+            ),
+            self.make_row(
+                source_row_index=2, instance_id="mid", source_row_id="mid", attempt_scores=[1.0, 1.0, 0.0, 0.0]
+            ),
+            self.make_row(
+                source_row_index=3, instance_id="hard", source_row_id="hard", attempt_scores=[1.0, 0.0, 0.0, 0.0]
+            ),
+            self.make_row(
+                source_row_index=4, instance_id="hardest", source_row_id="hardest", attempt_scores=[0.0, 0.0, 0.0, 0.0]
+            ),
         ]
 
         result = MODULE.apply_beta_binomial_difficulty(
             rows, prior=MODULE.BetaPrior(alpha=0.5, beta=0.5, source="test"), lower_quantile=0.1, num_buckets=2
         )
-        bucket_counts = Counter(row["difficulty"]["bucket_index"] for row in result)
+        bucket_counts = Counter(row.difficulty.bucket_index for row in result)
 
         self.assertEqual(bucket_counts[0], 3)
         self.assertEqual(bucket_counts[1], 2)
 
     def test_apply_beta_binomial_difficulty_leaves_nonbinary_rows_unbucketed(self):
         rows = [
-            {"instance_id": "easy", "attempt_scores": [1.0, 1.0]},
-            {"instance_id": "nonbinary", "attempt_scores": [0.5, 1.0]},
-            {"instance_id": "hard", "attempt_scores": [0.0, 0.0]},
+            self.make_row(instance_id="easy", source_row_id="easy", attempt_scores=[1.0, 1.0]),
+            self.make_row(
+                source_row_index=1, instance_id="nonbinary", source_row_id="nonbinary", attempt_scores=[0.5, 1.0]
+            ),
+            self.make_row(source_row_index=2, instance_id="hard", source_row_id="hard", attempt_scores=[0.0, 0.0]),
         ]
 
         result = MODULE.apply_beta_binomial_difficulty(
             rows, prior=MODULE.BetaPrior(alpha=0.5, beta=0.5, source="test"), lower_quantile=0.1, num_buckets=2
         )
-        difficulties = {row["instance_id"]: row["difficulty"] for row in result}
+        difficulties = {row.instance_id: row.difficulty for row in result}
 
-        self.assertIsNone(difficulties["nonbinary"]["value"])
-        self.assertIsNone(difficulties["nonbinary"]["expected_quantile"])
-        self.assertIsNone(difficulties["nonbinary"]["bucket_index"])
-        self.assertIsNone(difficulties["nonbinary"]["bucket_count"])
+        self.assertIsNone(difficulties["nonbinary"].value)
+        self.assertIsNone(difficulties["nonbinary"].expected_quantile)
+        self.assertIsNone(difficulties["nonbinary"].bucket_index)
+        self.assertIsNone(difficulties["nonbinary"].bucket_count)
 
 
 if __name__ == "__main__":
