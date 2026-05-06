@@ -40,7 +40,7 @@ with contextlib.suppress(Exception):
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
-from open_instruct import data_loader as data_loader_lib
+from open_instruct import data_loader as data_loader_lib, rlvr_curriculum
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
@@ -1300,6 +1300,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     base_env_config: EnvConfig,
+    curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig | None,
     tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
@@ -1361,6 +1362,7 @@ def create_model_and_optimizer(
         model_name=model_config.model_name_or_path,
         initial_state=None,
         base_env_config=base_env_config,
+        curriculum_config=curriculum_config,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -2395,10 +2397,12 @@ def main(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
+    curriculum_args: rlvr_curriculum.DifficultyCurriculumArgs,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+    curriculum_config = curriculum_args.build_curriculum_config(seed=args.seed)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -2455,7 +2459,7 @@ def main(
     if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
         utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
 
-    pprint([args, model_config, streaming_config, vllm_config, tools_config])
+    pprint([args, model_config, streaming_config, vllm_config, tools_config, curriculum_args])
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2511,6 +2515,7 @@ def main(
         reward_config,
         generation_configs["train"],
         base_env_config,
+        curriculum_config,
         tool_definitions,
         tools_config,
         pools,
@@ -2593,10 +2598,11 @@ if __name__ == "__main__":
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
             EnvsConfig,
+            rlvr_curriculum.DifficultyCurriculumArgs,
         )
     )
     parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
-    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config, curriculum_args = (
         parser.parse_args_into_dataclasses()
     )
     assert isinstance(args, grpo_utils.GRPOExperimentConfig)
@@ -2605,5 +2611,6 @@ if __name__ == "__main__":
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
     assert isinstance(tools_config, EnvsConfig)
+    assert isinstance(curriculum_args, rlvr_curriculum.DifficultyCurriculumArgs)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config, curriculum_args)

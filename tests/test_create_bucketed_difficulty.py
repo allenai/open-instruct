@@ -1,6 +1,6 @@
-"""Unit tests for posterior-aware bucketing in create_bucketed_difficulty.py."""
+"""Unit tests for posterior-aware bucketing in open_instruct.rlvr_difficulty."""
 
-import importlib.util
+import importlib
 import json
 import math
 import sys
@@ -14,14 +14,8 @@ from unittest.mock import patch
 
 import numpy as np
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts/data/difficulty_sampling/create_bucketed_difficulty.py"
-
 
 def _load_create_bucketed_difficulty_module():
-    module_name = "test_create_bucketed_difficulty_script"
-    spec = importlib.util.spec_from_file_location(module_name, SCRIPT_PATH)
-    module = importlib.util.module_from_spec(spec)
-
     fake_datasets = types.ModuleType("datasets")
     fake_datasets.Dataset = type("Dataset", (), {})
     fake_datasets.load_dataset = lambda *_args, **_kwargs: None
@@ -90,12 +84,8 @@ def _load_create_bucketed_difficulty_module():
     }
 
     with patch.dict(sys.modules, modules):
-        assert spec.loader is not None
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        sys.modules.pop(module_name, None)
-
-    return module
+        sys.modules.pop("open_instruct.rlvr_difficulty", None)
+        return importlib.import_module("open_instruct.rlvr_difficulty")
 
 
 MODULE = _load_create_bucketed_difficulty_module()

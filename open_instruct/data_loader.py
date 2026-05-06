@@ -250,6 +250,21 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         self._excluded_indices.add(index)
 
+    def set_sampling_step(self, step: int) -> None:
+        del step
+
+    def record_curriculum_observations(
+        self,
+        dataset_indices: list[int] | np.ndarray,
+        rewards: list[float] | np.ndarray,
+        advantages: list[float] | np.ndarray | None = None,
+    ) -> None:
+        del dataset_indices, rewards, advantages
+
+    def build_curriculum_metrics(self, prompt_dataset_indices: list[int], step: int) -> dict[str, float]:
+        del prompt_dataset_indices, step
+        return {}
+
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle and reshard the dataset for a new epoch.
 
@@ -424,30 +439,6 @@ class StreamingDataLoaderConfig:
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
-    # Difficulty-aware prompt curriculum
-    difficulty_curriculum_enabled: bool = False
-    difficulty_curriculum_field: str = "difficulty"
-    difficulty_curriculum_posterior_mean_field: str = "posterior_mean"
-    difficulty_curriculum_bucket_index_field: str = "bucket_index"
-    difficulty_curriculum_bucket_count_field: str = "bucket_count"
-    difficulty_curriculum_easy_focus_steps: int = 100
-    difficulty_curriculum_bootstrap_target_bucket_ratio: float = 0.125
-    difficulty_curriculum_warmup_target_bucket_ratio: float = 0.5
-    difficulty_curriculum_final_target_bucket_ratio: float = 1.0
-    difficulty_curriculum_warmup_steps: int = 500
-    difficulty_curriculum_total_steps: int = 10000
-    difficulty_curriculum_min_hard_frac: float = 0.05
-    difficulty_curriculum_max_hard_frac: float = 0.50
-    difficulty_curriculum_bucket_sigma: float = 0.0
-    difficulty_curriculum_easy_focus_sigma: float = 0.0
-    difficulty_curriculum_uncertainty_weight: float = 0.5
-    difficulty_curriculum_adaptive_enabled: bool = False
-    difficulty_curriculum_adaptive_update_every: int = 50
-    difficulty_curriculum_adaptive_learning_signal_weight: float = 0.7
-    difficulty_curriculum_adaptive_exploration_weight: float = 0.3
-    difficulty_curriculum_adaptive_blend_weight: float = 0.5
-    difficulty_curriculum_strict_metadata: bool = True
-
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     dataset_mixer_eval_list: list[str] = field(default_factory=list)
@@ -590,33 +581,6 @@ class StreamingDataLoaderConfig:
             fs_local_rank=fs_local_rank,
         )
 
-    def build_difficulty_curriculum_config(self, seed: int) -> rlvr_curriculum.DifficultyCurriculumConfig:
-        return rlvr_curriculum.DifficultyCurriculumConfig(
-            enabled=self.difficulty_curriculum_enabled,
-            difficulty_field=self.difficulty_curriculum_field,
-            posterior_mean_field=self.difficulty_curriculum_posterior_mean_field,
-            bucket_index_field=self.difficulty_curriculum_bucket_index_field,
-            bucket_count_field=self.difficulty_curriculum_bucket_count_field,
-            easy_focus_steps=self.difficulty_curriculum_easy_focus_steps,
-            bootstrap_target_bucket_ratio=self.difficulty_curriculum_bootstrap_target_bucket_ratio,
-            warmup_target_bucket_ratio=self.difficulty_curriculum_warmup_target_bucket_ratio,
-            final_target_bucket_ratio=self.difficulty_curriculum_final_target_bucket_ratio,
-            warmup_steps=self.difficulty_curriculum_warmup_steps,
-            total_curriculum_steps=self.difficulty_curriculum_total_steps,
-            min_hard_frac=self.difficulty_curriculum_min_hard_frac,
-            max_hard_frac=self.difficulty_curriculum_max_hard_frac,
-            bucket_sigma=self.difficulty_curriculum_bucket_sigma,
-            easy_focus_sigma=self.difficulty_curriculum_easy_focus_sigma,
-            uncertainty_weight=self.difficulty_curriculum_uncertainty_weight,
-            adaptive_enabled=self.difficulty_curriculum_adaptive_enabled,
-            adaptive_update_every=self.difficulty_curriculum_adaptive_update_every,
-            adaptive_learning_signal_weight=self.difficulty_curriculum_adaptive_learning_signal_weight,
-            adaptive_exploration_weight=self.difficulty_curriculum_adaptive_exploration_weight,
-            adaptive_blend_weight=self.difficulty_curriculum_adaptive_blend_weight,
-            seed=seed,
-            strict_metadata=self.difficulty_curriculum_strict_metadata,
-        )
-
 
 class StreamingDataLoader(data_loader.DataLoaderBase):
     """Thin wrapper dataloader that pulls pre-prepared data from the DataPreparationActor singleton."""
@@ -741,7 +705,7 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
             raise ValueError("DifficultyCurriculumHFDataLoader currently supports dp_world_size=1 only")
 
         self._sampling_step = 0
-        self._curriculum_sampler = rlvr_curriculum.BetaBinomialDifficultySampler(
+        self._curriculum_sampler = rlvr_curriculum.DifficultyCurriculumSampler(
             dataset=dataset,
             num_samples=max(len(dataset), 1),
             config=curriculum_config,
@@ -765,7 +729,7 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
         )
 
     @property
-    def curriculum_sampler(self) -> rlvr_curriculum.BetaBinomialDifficultySampler:
+    def curriculum_sampler(self) -> rlvr_curriculum.DifficultyCurriculumSampler:
         return self._curriculum_sampler
 
     def set_sampling_step(self, step: int) -> None:
@@ -826,9 +790,12 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
 
 
 def build_data_preparation_prompt_dataloader(
-    dataset: Dataset, seed: int, work_dir: str, config: StreamingDataLoaderConfig
+    dataset: Dataset,
+    seed: int,
+    work_dir: str,
+    curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig | None = None,
 ) -> HFDataLoader:
-    if config.difficulty_curriculum_enabled:
+    if curriculum_config is not None:
         return DifficultyCurriculumHFDataLoader(
             dataset=dataset,
             batch_size=1,
@@ -838,7 +805,7 @@ def build_data_preparation_prompt_dataloader(
             work_dir=work_dir,
             automatic_reshuffle=True,
             collator=single_example_collator,
-            curriculum_config=config.build_difficulty_curriculum_config(seed=seed),
+            curriculum_config=curriculum_config,
         )
 
     return HFDataLoader(
@@ -1348,6 +1315,7 @@ class DataPreparationActor:
         model_name: str | None,
         base_env_config: EnvConfig,
         initial_state: dict | None = None,
+        curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1369,7 +1337,7 @@ class DataPreparationActor:
         self.base_env_config = base_env_config
 
         self.iter_dataloader = build_data_preparation_prompt_dataloader(
-            dataset=dataset, seed=seed, work_dir=work_dir, config=config
+            dataset=dataset, seed=seed, work_dir=work_dir, curriculum_config=curriculum_config
         )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
@@ -1409,8 +1377,7 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
-            self.iter_dataloader.set_sampling_step(self.training_step)
+        self.iter_dataloader.set_sampling_step(self.training_step)
         for _ in range(num_initial_prompts):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -1430,8 +1397,7 @@ class DataPreparationActor:
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
-            if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
-                self.iter_dataloader.set_sampling_step(step)
+            self.iter_dataloader.set_sampling_step(step)
 
             logger.info(
                 f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1476,8 +1442,7 @@ class DataPreparationActor:
                     for _ in range(self.dp_world_size)
                 ]
                 empty_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
-                if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
-                    empty_metrics.update(self.iter_dataloader.build_curriculum_metrics([], step))
+                empty_metrics.update(self.iter_dataloader.build_curriculum_metrics([], step))
                 with self.lock:
                     self.prepared_data[step] = empty_data
                     self.metrics[step] = empty_metrics
@@ -1550,7 +1515,7 @@ class DataPreparationActor:
                 assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
-            if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader) and batch.indices is not None:
+            if batch.indices is not None:
                 normalized_scores = np.clip(scores / max(self.config.max_possible_score, 1e-8), 0.0, 1.0)
                 self.iter_dataloader.record_curriculum_observations(batch.indices, normalized_scores, advantages)
 
@@ -1639,8 +1604,7 @@ class DataPreparationActor:
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
-            if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader):
-                step_metrics.update(self.iter_dataloader.build_curriculum_metrics(prompt_dataset_indices, step))
+            step_metrics.update(self.iter_dataloader.build_curriculum_metrics(prompt_dataset_indices, step))
 
             with self.lock:
                 self.prepared_data[step] = collated_data

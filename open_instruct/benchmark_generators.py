@@ -29,55 +29,19 @@ from ray.util import queue as ray_queue
 
 from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_types import GenerationResult, PromptRequest
+from open_instruct.data_types import PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
-from open_instruct.rl_utils import build_rollout_batch_and_advantages, save_rollout_metadata, save_rollouts_to_disk
 
 logger = logger_utils.setup_logger(__name__)
 
 
-def get_default_data_dir() -> pathlib.Path:
-    """Return the legacy default directory for benchmark artifacts."""
-    if pathlib.Path("/weka").exists():
-        return pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
-    if pathlib.Path("/root").exists():
-        return pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
-    return pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
-
-
-DATA_DIR = get_default_data_dir()
-
-
-@dataclasses.dataclass
-class BenchmarkConfig:
-    """Benchmark-only controls for benchmark_generators.py."""
-
-    num_batches: int = 5
-    """Total number of benchmark batches to run, including the initial warmup batch."""
-    run_all_instances: bool = False
-    """If True, ignore num_batches and run enough batches to cover the entire dataset."""
-
-    def __post_init__(self) -> None:
-        if self.num_batches < 1:
-            raise ValueError(f"num_batches must be >= 1, got {self.num_batches}")
-
-
-def resolve_num_batches(*, dataset_len: int, prompts_per_batch: int, benchmark_config: BenchmarkConfig) -> int:
-    """Resolve the total number of benchmark batches to run, including warmup."""
-    if benchmark_config.run_all_instances:
-        return max(1, -(-dataset_len // prompts_per_batch))
-    return benchmark_config.num_batches
-
-
-def resolve_data_dir(
-    args: grpo_utils.GRPOExperimentConfig, streaming_config: data_loader.StreamingDataLoaderConfig
-) -> pathlib.Path:
-    """Resolve where benchmark artifacts should be written for this run."""
-    if args.output_dir.rstrip("/") != "output":
-        return pathlib.Path(args.output_dir)
-    if streaming_config.save_traces and streaming_config.rollouts_save_path:
-        return pathlib.Path(streaming_config.rollouts_save_path)
-    return get_default_data_dir()
+# Determine data directory
+if pathlib.Path("/weka").exists():
+    DATA_DIR = pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
+elif pathlib.Path("/root").exists():
+    DATA_DIR = pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
+else:
+    DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
 
 def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int):
@@ -103,13 +67,7 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
 
 
 def save_config(
-    args,
-    tokenizer_config,
-    model_config,
-    streaming_config: data_loader.StreamingDataLoaderConfig,
-    benchmark_config: BenchmarkConfig,
-    resolved_num_batches: int,
-    timestamp: int,
+    args, tokenizer_config, model_config, streaming_config: data_loader.StreamingDataLoaderConfig, timestamp: int
 ):
     """
     Save configuration to JSON file.
@@ -119,8 +77,6 @@ def save_config(
         tokenizer_config: TokenizerConfig dataclass
         model_config: ModelConfig dataclass
         streaming_config: StreamingDataLoaderConfig dataclass
-        benchmark_config: Benchmark-specific config dataclass
-        resolved_num_batches: Effective total number of benchmark batches that will run
         timestamp: Unix timestamp
     """
     config_path = DATA_DIR / f"config_{timestamp}.json"
@@ -131,10 +87,7 @@ def save_config(
         "tokenizer_config": dataclasses.asdict(tokenizer_config),
         "model_config": dataclasses.asdict(model_config),
         "streaming_config": dataclasses.asdict(streaming_config),
-        "benchmark_config": dataclasses.asdict(benchmark_config),
-        "resolved_num_batches": resolved_num_batches,
         "timestamp": timestamp,
-        "experiment_id": os.environ.get("BEAKER_WORKLOAD_ID") or None,
     }
 
     with open(config_path, "w") as f:
@@ -152,7 +105,6 @@ def save_benchmark_results_to_csv(
     """Save benchmark results to CSV file."""
     git_commit = utils.get_git_commit()
     agg_results = aggregate_results(results)
-    total_samples = len(agg_results["response_lengths"])
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
     row_data = {
@@ -166,9 +118,7 @@ def save_benchmark_results_to_csv(
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
         "total_weight_sync_time": agg_results["total_weight_sync_time"],
-        "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100
-        if total_time > 0
-        else 0,
+        "generation_time_percentage": (agg_results["total_generation_time"] / total_time) * 100,
         "weight_sync_time_percentage": (agg_results["total_weight_sync_time"] / total_time) * 100
         if total_time > 0
         else 0,
@@ -178,7 +128,12 @@ def save_benchmark_results_to_csv(
         "avg_mbu": agg_results["avg_mbu"],
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_weight_sync_time_per_batch": agg_results["avg_weight_sync_time"],
-        "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"] / total_samples if total_samples > 0 else 0,
+        "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
+        / (
+            len(results)
+            * streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
+        ),
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -191,65 +146,6 @@ def save_benchmark_results_to_csv(
             writer.writeheader()
         writer.writerow(row_data)
     logger.info(f"Saved benchmark results to {csv_path}")
-
-
-def resolve_run_name(args: grpo_utils.GRPOExperimentConfig, timestamp: int) -> str:
-    """Resolve a stable run name for optional rollout trace persistence."""
-    return args.run_name or f"{args.exp_name}__{timestamp}"
-
-
-def maybe_save_scored_rollout_traces(
-    batch_results: list[GenerationResult],
-    dataset: datasets.Dataset,
-    streaming_config: data_loader.StreamingDataLoaderConfig,
-    *,
-    run_name: str,
-    step: int,
-    total_samples_written: int,
-) -> int:
-    """Persist raw per-sample reward traces when explicitly requested."""
-    if not streaming_config.save_traces:
-        return total_samples_written
-
-    for result in batch_results:
-        if result.index is None:
-            raise ValueError("Cannot save scored rollout traces because the result is missing its dataset index.")
-
-        example = dataset[result.index]
-        prompt_tokens = (
-            list(example[dataset_transformation.INPUT_IDS_PROMPT_KEY])
-            if streaming_config.rollout_save_format == "full"
-            else []
-        )
-        ground_truth = (
-            example[dataset_transformation.GROUND_TRUTHS_KEY]
-            if streaming_config.rollout_save_format == "full"
-            else None
-        )
-        batch, advantages = build_rollout_batch_and_advantages(
-            result,
-            prompt_tokens=prompt_tokens,
-            ground_truth=ground_truth,
-            dataset_name=example[dataset_transformation.VERIFIER_SOURCE_KEY],
-            raw_query=example[dataset_transformation.RAW_PROMPT_KEY],
-            advantage_normalization_type=streaming_config.advantage_normalization_type,
-            source_row_id=example.get(dataset_transformation.SOURCE_ROW_ID_KEY),
-            source_dataset=example.get(dataset_transformation.DATASET_ORIGIN_KEY),
-        )
-        save_rollouts_to_disk(
-            streaming_config.rollouts_save_path,
-            run_name,
-            step,
-            batch,
-            result,
-            advantages,
-            len(result.responses),
-            total_samples_written,
-            record_format=streaming_config.rollout_save_format,
-        )
-        total_samples_written += len(result.responses)
-
-    return total_samples_written
 
 
 def free_all_gpu_memory(device: int | str = 0) -> None:
@@ -315,7 +211,6 @@ def setup_dataset(
         dataset_cache_mode=streaming_config.dataset_cache_mode,
         dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
         dataset_skip_cache=streaming_config.dataset_skip_cache,
-        drop_dataset_source=not streaming_config.save_traces,
     )
 
     # Shuffle dataset
@@ -425,16 +320,20 @@ def submission_thread(
     dataset: datasets.Dataset,
     generation_config: vllm_utils.SamplingConfig,
     stop_event: threading.Event,
-    batch_specs: list[tuple[int, int, int]],
+    batch_size: int,
+    start_batch_idx: int,
+    num_batches: int,
 ) -> None:
     """Thread that submits prompts to the queue."""
     logger.info("[Submission Thread] Starting prompt submission")
-    for batch_idx, start_idx, end_idx in batch_specs:
+    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
         if stop_event.is_set():
             logger.info("[Submission Thread] Stopped due to stop event")
             break
 
         # Get batch data from dataset
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(dataset))
         batch_data = dataset[start_idx:end_idx]
         prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
 
@@ -448,21 +347,7 @@ def submission_thread(
                     generation_config=generation_config,
                 )
             )
-    logger.info(f"[Submission Thread] All {len(batch_specs)} batches submitted")
-
-
-def build_batch_specs(
-    *, dataset_len: int, batch_size: int, start_batch_idx: int, num_batches: int
-) -> list[tuple[int, int, int]]:
-    """Return (batch_idx, start_idx, end_idx) triples for non-empty batches only."""
-    batch_specs = []
-    for batch_idx in range(start_batch_idx, start_batch_idx + num_batches):
-        start_idx = batch_idx * batch_size
-        if start_idx >= dataset_len:
-            break
-        end_idx = min(start_idx + batch_size, dataset_len)
-        batch_specs.append((batch_idx, start_idx, end_idx))
-    return batch_specs
+    logger.info(f"[Submission Thread] All {num_batches} batches submitted")
 
 
 def run_benchmark(
@@ -475,14 +360,10 @@ def run_benchmark(
     streaming_config: data_loader.StreamingDataLoaderConfig,
     vllm_config: data_loader.VLLMConfig,
     model_config: model_utils.ModelConfig,
-    run_name: str,
     timestamp: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
-    if len(dataset) == 0:
-        raise ValueError("Benchmark dataset is empty after loading and filtering.")
-
     logger.info(
         f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts_rollout}"
     )
@@ -503,7 +384,6 @@ def run_benchmark(
     executor = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="benchmark")
 
     results = []
-    total_samples_written = 0
     # Get the model dimensions from one of the engines without loading weights
     model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
 
@@ -553,50 +433,25 @@ def run_benchmark(
         logger.info(
             f"Warmup batch completed with {total_warmup_responses} total responses from {len(warmup_results)} prompts"
         )
-        total_samples_written = maybe_save_scored_rollout_traces(
-            warmup_results,
+        logger.info(f"Submitting {num_batches - 1} batches for main benchmark...")
+        submission_future = executor.submit(
+            submission_thread,
+            param_prompt_Q,
             dataset,
-            streaming_config,
-            run_name=run_name,
-            step=0,
-            total_samples_written=total_samples_written,
+            generation_config,
+            stop_event,
+            streaming_config.num_unique_prompts_rollout,
+            1,
+            num_batches - 1,
         )
-        main_batch_specs = build_batch_specs(
-            dataset_len=len(dataset),
-            batch_size=streaming_config.num_unique_prompts_rollout,
-            start_batch_idx=1,
-            num_batches=num_batches - 1,
-        )
-        if not main_batch_specs:
-            logger.warning(
-                "No main benchmark batches remain after warmup because the dataset only has %s prompt(s), "
-                "which fit entirely in the warmup batch size of %s.",
-                len(dataset),
-                streaming_config.num_unique_prompts_rollout,
-            )
-            submission_future = None
-        else:
-            if len(main_batch_specs) < num_batches - 1:
-                logger.info(
-                    "Submitting %s main benchmark batch(es) instead of %s because the dataset only has %s prompt(s).",
-                    len(main_batch_specs),
-                    num_batches - 1,
-                    len(dataset),
-                )
-            else:
-                logger.info(f"Submitting {len(main_batch_specs)} batches for main benchmark...")
-
-            submission_future = executor.submit(
-                submission_thread, param_prompt_Q, dataset, generation_config, stop_event, main_batch_specs
-            )
         # Process remaining batches with timing
-        for batch_position, (batch_idx, batch_start_idx, batch_end_idx) in enumerate(main_batch_specs, start=1):
+        for batch_idx in range(1, num_batches):
             # Quick health check!
-            if submission_future is not None and submission_future.done():
+            if submission_future.done():
                 submission_future.result()
 
             # Collect all results for this batch (one per prompt) using non-blocking polling
-            num_prompts = batch_end_idx - batch_start_idx
+            num_prompts = streaming_config.num_unique_prompts_rollout
             batch_results = []
             batch_deadline = time.time() + 1200
             while len(batch_results) < num_prompts:
@@ -605,18 +460,7 @@ def run_benchmark(
                     batch_results.append(result)
                 except Empty:
                     if time.time() > batch_deadline:
-                        raise TimeoutError(
-                            f"Batch {batch_idx} timed out, got {len(batch_results)}/{num_prompts}"
-                        ) from None
-
-            total_samples_written = maybe_save_scored_rollout_traces(
-                batch_results,
-                dataset,
-                streaming_config,
-                run_name=run_name,
-                step=batch_idx,
-                total_samples_written=total_samples_written,
-            )
+                        raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
@@ -681,7 +525,7 @@ def run_benchmark(
             save_completion_lengths([result_dict], timestamp, batch_idx)
             results.append(result_dict)
             logger.info(
-                f"Batch {batch_position}/{len(main_batch_specs)}: "
+                f"Batch {batch_idx}/{num_batches - 1}: "
                 f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {result_dict['mfu']:.2f}%, "
                 f"MBU: {result_dict['mbu']:.2f}%, "
@@ -689,9 +533,6 @@ def run_benchmark(
                 f"weight sync time: {weight_sync_time:.2f}s, "
                 f"total new tokens: {total_new_tokens}"
             )
-
-        if submission_future is not None:
-            submission_future.result()
 
         # Calculate total time for main benchmark only
         main_benchmark_time = sum(r["generation_time"] for r in results)
@@ -732,24 +573,6 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         prompt_lengths.extend(result["prompt_lengths"])
 
     num_results = len(results)
-    if num_results == 0:
-        return {
-            "total_mfu": 0.0,
-            "total_mbu": 0.0,
-            "total_tokens_per_second": 0.0,
-            "total_generation_time": 0.0,
-            "total_weight_sync_time": 0.0,
-            "total_num_new_tokens": 0,
-            "finish_reasons": finish_reasons,
-            "response_lengths": response_lengths,
-            "prompt_lengths": prompt_lengths,
-            "avg_tokens_per_second": 0.0,
-            "avg_mfu": 0.0,
-            "avg_mbu": 0.0,
-            "avg_generation_time": 0.0,
-            "avg_weight_sync_time": 0.0,
-        }
-
     avg_tokens_per_second = total_num_new_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_mfu = total_mfu / num_results
     avg_mbu = total_mbu / num_results
@@ -784,8 +607,10 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     agg_results = aggregate_results(results)
-    total_samples = len(agg_results["response_lengths"])
-    avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples if total_samples > 0 else 0
+    total_samples = (
+        len(results) * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    )
+    avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -798,12 +623,6 @@ def print_summary(
     print(f"Unique prompts per batch: {streaming_config.num_unique_prompts_rollout}")
     print(f"Num rollouts: {streaming_config.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {streaming_config.response_length}")
-    if not results:
-        print("-" * 60)
-        print("No main benchmark batches were executed after warmup.")
-        print("=" * 60)
-        return
-
     print("-" * 60)
     print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
     print(f"Total weight sync time: {agg_results['total_weight_sync_time']:.2f}s")
@@ -861,8 +680,6 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.
 
 def main() -> None:
     """Main benchmark function."""
-    global DATA_DIR
-
     # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
         (
@@ -871,27 +688,22 @@ def main() -> None:
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
             data_loader.VLLMConfig,
-            BenchmarkConfig,
         )  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config, streaming_config, vllm_config, benchmark_config = cast(
+    args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
         tuple[
             grpo_utils.GRPOExperimentConfig,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
             data_loader.VLLMConfig,
-            BenchmarkConfig,
         ],
         parser.parse_args_into_dataclasses(),
     )
 
-    DATA_DIR = resolve_data_dir(args, streaming_config)
-
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Writing benchmark artifacts to {DATA_DIR}")
 
     # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
@@ -901,20 +713,6 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, streaming_config, tokenizer_config)
-    resolved_num_batches = resolve_num_batches(
-        dataset_len=len(dataset),
-        prompts_per_batch=streaming_config.num_unique_prompts_rollout,
-        benchmark_config=benchmark_config,
-    )
-    if benchmark_config.run_all_instances:
-        logger.info(
-            "Resolved run_all_instances=True to %s total batch(es) for %s dataset prompt(s) at %s prompt(s) per batch.",
-            resolved_num_batches,
-            len(dataset),
-            streaming_config.num_unique_prompts_rollout,
-        )
-    else:
-        logger.info("Using configured num_batches=%s.", resolved_num_batches)
     max_model_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
         args, streaming_config, vllm_config, tokenizer_config, model_config, max_model_len, dataset
@@ -922,12 +720,7 @@ def main() -> None:
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
-    args.run_name = resolve_run_name(args, timestamp)
-    save_config(
-        args, tokenizer_config, model_config, streaming_config, benchmark_config, resolved_num_batches, timestamp
-    )
-    if streaming_config.save_traces:
-        save_rollout_metadata(streaming_config.rollouts_save_path, args.run_name, model_config.model_name_or_path)
+    save_config(args, tokenizer_config, model_config, streaming_config, timestamp)
     run_benchmark(
         dataset,
         vllm_engines,
@@ -938,9 +731,7 @@ def main() -> None:
         streaming_config,
         vllm_config,
         model_config,
-        args.run_name,
         timestamp,
-        num_batches=resolved_num_batches,
     )
 
     cleanup(vllm_engines, actor_manager)

@@ -98,21 +98,16 @@ def _get_request_info_for_sample(request_info: data_types.RequestInfo | None, i:
     }
 
 
-def _save_rollouts(
-    save_path: str,
-    run_name: str,
-    step: int,
+def build_rollout_records(
     batch: model_utils.Batch,
     result: data_types.GenerationResult,
     advantages: np.ndarray,
+    *,
+    step: int,
     num_samples_per_prompt: int,
-    shard_idx: int,
-    record_format: RolloutSaveFormat,
-) -> None:
-    shard_filename = f"{run_name}_rollouts_{shard_idx:06d}.jsonl"
-    filepath = os.path.join(save_path, shard_filename)
-    os.makedirs(save_path, exist_ok=True)
-
+    record_format: RolloutSaveFormat = "full",
+) -> list[dict[str, Any]]:
+    """Build JSON-serializable rollout records for persistence."""
     assert batch.scores is not None, "batch.scores must not be None when saving rollouts"
 
     records = []
@@ -150,6 +145,32 @@ def _save_rollouts(
                 )
             )
         )
+
+    return records
+
+
+def _save_rollouts(
+    save_path: str,
+    run_name: str,
+    step: int,
+    batch: model_utils.Batch,
+    result: data_types.GenerationResult,
+    advantages: np.ndarray,
+    num_samples_per_prompt: int,
+    shard_idx: int,
+    record_format: RolloutSaveFormat,
+) -> None:
+    shard_filename = f"{run_name}_rollouts_{shard_idx:06d}.jsonl"
+    filepath = os.path.join(save_path, shard_filename)
+    os.makedirs(save_path, exist_ok=True)
+    records = build_rollout_records(
+        batch,
+        result,
+        advantages,
+        step=step,
+        num_samples_per_prompt=num_samples_per_prompt,
+        record_format=record_format,
+    )
 
     with open(filepath, "a") as f:
         for record in records:
@@ -198,54 +219,6 @@ def save_rollouts_to_disk(
         shard_idx,
         record_format,
     )
-
-
-def build_rollout_batch_and_advantages(
-    result: data_types.GenerationResult,
-    *,
-    prompt_tokens: list[int],
-    ground_truth: Any,
-    dataset_name: str,
-    raw_query: str,
-    advantage_normalization_type: str,
-    source_row_id: int | None = None,
-    source_dataset: str | None = None,
-) -> tuple[model_utils.Batch, np.ndarray]:
-    """Convert a scored inference result into the rollout format used by difficulty bucketing."""
-    if result.reward_scores is None:
-        raise ValueError("Cannot save scored rollout traces because reward_scores is missing from GenerationResult.")
-
-    num_samples = len(result.responses)
-    if len(result.reward_scores) != num_samples:
-        raise ValueError(
-            "Cannot save scored rollout traces because reward_scores length does not match the number of responses."
-        )
-
-    scores = [float(score) for score in result.reward_scores]
-    indices = [result.index] * num_samples if result.index is not None else None
-    batch = model_utils.Batch(
-        queries=[list(prompt_tokens)] * num_samples,
-        ground_truths=[ground_truth] * num_samples,
-        datasets=[dataset_name] * num_samples,
-        raw_queries=[raw_query] * num_samples,
-        decoded_responses=None,
-        indices=indices,
-        scores=scores,
-        source_row_ids=[source_row_id] * num_samples,
-        source_datasets=[source_dataset] * num_samples,
-        model_steps=[result.model_step] * num_samples,
-    )
-
-    score_array = np.asarray(scores, dtype=float)
-    mean_score = score_array.mean()
-    if advantage_normalization_type == "standard":
-        advantages = (score_array - mean_score) / (score_array.std() + 1e-8)
-    elif advantage_normalization_type == "centered":
-        advantages = score_array - mean_score
-    else:
-        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
-
-    return batch, advantages
 
 
 @dataclass

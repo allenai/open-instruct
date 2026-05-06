@@ -1,0 +1,45 @@
+{
+  "difficulty_generation": {
+    "beta_prior_requested": "empirical-bayes",
+    "beta_prior_used": {
+      "alpha": 0.4383101221875231,
+      "beta": 2.1002075643639166,
+      "source": "empirical_bayes"
+    },
+    "binary_instance_count": 12643,
+    "bucket_count_effective": 5,
+    "bucket_count_field": "difficulty.bucket_count",
+    "bucket_count_requested": 5,
+    "bucket_field": "difficulty.bucket_index",
+    "bucket_ranking_field": "difficulty.expected_quantile",
+    "difficulty_value_definition": "1 - difficulty.posterior_lower_bound",
+    "difficulty_value_field": "difficulty.value",
+    "method": "beta_binomial_posterior_quantiles",
+    "nonbinary_instance_count": 0,
+    "posterior_lower_quantile": 0.1,
+    "tag": "bbq-eb-q10-k5"
+  },
+  "model_name": "Qwen/Qwen3-4B-Base",
+  "row_count": 12643,
+  "score_processing": {
+    "normalization": "identity_binary",
+    "output_field": "attempt_scores",
+    "positive_reward_value": 1.0,
+    "source_field": "pass_count,num_samples,pass_rate",
+    "supports_binary_difficulty": true
+  },
+  "source_format": {
+    "attempt_count_field": "num_samples",
+    "config_name": null,
+    "dataset_repo_id": "mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples",
+    "instance_id_definition": "dataset_repo_id::row_id_field when a stable row id is available; otherwise dataset_repo_id::row_index",
+    "kind": "hugging_face_dataset_passrate_rows",
+    "model_field": "generator_model",
+    "pass_count_field": "pass_count",
+    "pass_rate_field": "pass_rate",
+    "row_id_field": "extra_info.index",
+    "split": "train",
+    "task_field": "dataset"
+  },
+  "task_name": "math"
+}

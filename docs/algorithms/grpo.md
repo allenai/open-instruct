@@ -79,7 +79,7 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 
 ### Difficulty-Aware RLVR Curriculum
 
-Open-Instruct can optionally replace uniform prompt reshuffling with a bucket-aware RLVR curriculum driven by per-instance beta-binomial metadata:
+`grpo_fast.py` can optionally replace uniform prompt reshuffling with `DifficultyCurriculumSampler`, a bucket-aware RLVR curriculum driven by per-instance difficulty metadata. The current recommended metadata format comes from the beta-binomial estimator in `scripts/data/difficulty_sampling/create_bucketed_difficulty.py`:
 
 ```json
 {
@@ -98,7 +98,7 @@ Open-Instruct can optionally replace uniform prompt reshuffling with a bucket-aw
 - `bucket_index = 0` is the easiest bucket and `bucket_index = bucket_count - 1` is the hardest.
 - The sampler uses a smooth distribution with a configurable easy-heavy bootstrap phase, then gradually shifts mass toward harder buckets instead of hard-switching between discrete phases.
 - Within each bucket, examples are weighted by a blend of uncertainty (`4 * p * (1 - p)`) and hardness (`1 - p`), so borderline prompts stay attractive while already-solved prompts are naturally down-weighted.
-- If `--difficulty_curriculum_adaptive_enabled true` is set, bucket probabilities are additionally blended with live reward / advantage statistics so buckets with useful learning signal can get more mass during training.
+- If `--curriculum_adaptive true` is set, bucket probabilities are additionally blended with live reward / advantage statistics so buckets with useful learning signal can get more mass during training.
 
 Recommended starting settings for `bucket_count=5`:
 
@@ -110,28 +110,28 @@ Recommended starting settings for `bucket_count=5`:
 Useful flags:
 
 ```bash
---difficulty_curriculum_enabled true \
---difficulty_curriculum_field difficulty \
---difficulty_curriculum_easy_focus_steps 100 \
---difficulty_curriculum_bootstrap_target_bucket_ratio 0.125 \
---difficulty_curriculum_warmup_target_bucket_ratio 0.5 \
---difficulty_curriculum_final_target_bucket_ratio 1.0 \
---difficulty_curriculum_warmup_steps 500 \
---difficulty_curriculum_total_steps 10000 \
---difficulty_curriculum_min_hard_frac 0.05 \
---difficulty_curriculum_max_hard_frac 0.50 \
---difficulty_curriculum_bucket_sigma 0.0 \
---difficulty_curriculum_easy_focus_sigma 0.0 \
---difficulty_curriculum_uncertainty_weight 0.5 \
---difficulty_curriculum_adaptive_enabled true
+--curriculum difficulty \
+--curriculum_metadata_field difficulty \
+--curriculum_bootstrap_steps 100 \
+--curriculum_bootstrap_target 0.125 \
+--curriculum_warmup_target 0.5 \
+--curriculum_final_target 1.0 \
+--curriculum_warmup_steps 500 \
+--curriculum_total_steps 10000 \
+--curriculum_min_hard_frac 0.05 \
+--curriculum_max_hard_frac 0.50 \
+--curriculum_bucket_sigma 0.0 \
+--curriculum_bootstrap_sigma 0.0 \
+--curriculum_uncertainty_weight 0.5 \
+--curriculum_adaptive true
 ```
 
 Tuning tips:
 
-- Increase `difficulty_curriculum_easy_focus_steps` to keep the easy bootstrap around longer.
-- Lower `difficulty_curriculum_bootstrap_target_bucket_ratio` to bias more strongly toward the easiest buckets early.
-- Lower `difficulty_curriculum_bucket_sigma` or `difficulty_curriculum_easy_focus_sigma` to concentrate probability on fewer neighboring buckets.
-- Lower `difficulty_curriculum_warmup_target_bucket_ratio` if you want the post-bootstrap warmup to stay easier for longer.
+- Increase `curriculum_bootstrap_steps` to keep the easy bootstrap around longer.
+- Lower `curriculum_bootstrap_target` to bias more strongly toward the easiest buckets early.
+- Lower `curriculum_bucket_sigma` or `curriculum_bootstrap_sigma` to concentrate probability on fewer neighboring buckets.
+- Lower `curriculum_warmup_target` if you want the post-bootstrap warmup to stay easier for longer.
 
 Metrics are logged through the standard GRPO tracking path. The most useful ones are:
 

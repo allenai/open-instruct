@@ -26,15 +26,33 @@ CHECKPOINT_STATE_FREQ="${CHECKPOINT_STATE_FREQ:-100}"
 
 NUM_TRAINING_STEPS=$(( TOTAL_EPISODES / (NUM_UNIQUE_PROMPTS_ROLLOUT * NUM_SAMPLES_PER_PROMPT_ROLLOUT) ))
 
-# Keep the easy bootstrap aligned with the first logging/eval window by default.
-DIFFICULTY_CURRICULUM_EASY_FOCUS_STEPS="${DIFFICULTY_CURRICULUM_EASY_FOCUS_STEPS:-${LOCAL_EVAL_EVERY}}"
-DIFFICULTY_CURRICULUM_WARMUP_STEPS="${DIFFICULTY_CURRICULUM_WARMUP_STEPS:-${DIFFICULTY_CURRICULUM_EASY_FOCUS_STEPS}}"
-if (( NUM_TRAINING_STEPS <= DIFFICULTY_CURRICULUM_WARMUP_STEPS )); then
-    DEFAULT_DIFFICULTY_CURRICULUM_TOTAL_STEPS=1
+# Keep the bootstrap aligned with the first logging/eval window by default.
+CURRICULUM_BOOTSTRAP_STEPS="${CURRICULUM_BOOTSTRAP_STEPS:-${LOCAL_EVAL_EVERY}}"
+CURRICULUM_WARMUP_STEPS="${CURRICULUM_WARMUP_STEPS:-${CURRICULUM_BOOTSTRAP_STEPS}}"
+if (( NUM_TRAINING_STEPS <= CURRICULUM_WARMUP_STEPS )); then
+    DEFAULT_CURRICULUM_TOTAL_STEPS=1
 else
-    DEFAULT_DIFFICULTY_CURRICULUM_TOTAL_STEPS=$(( NUM_TRAINING_STEPS - DIFFICULTY_CURRICULUM_WARMUP_STEPS ))
+    DEFAULT_CURRICULUM_TOTAL_STEPS=$(( NUM_TRAINING_STEPS - CURRICULUM_WARMUP_STEPS ))
 fi
-DIFFICULTY_CURRICULUM_TOTAL_STEPS="${DIFFICULTY_CURRICULUM_TOTAL_STEPS:-${DEFAULT_DIFFICULTY_CURRICULUM_TOTAL_STEPS}}"
+CURRICULUM_TOTAL_STEPS="${CURRICULUM_TOTAL_STEPS:-${DEFAULT_CURRICULUM_TOTAL_STEPS}}"
+
+CURRICULUM_ARGS=(
+    --curriculum difficulty
+    --curriculum_metadata_field difficulty
+    --curriculum_bootstrap_steps "${CURRICULUM_BOOTSTRAP_STEPS}"
+    --curriculum_bootstrap_target 0.125
+    --curriculum_warmup_target 0.5
+    --curriculum_final_target 1.0
+    --curriculum_warmup_steps "${CURRICULUM_WARMUP_STEPS}"
+    --curriculum_total_steps "${CURRICULUM_TOTAL_STEPS}"
+    --curriculum_min_hard_frac 0.05
+    --curriculum_max_hard_frac 0.50
+    --curriculum_bucket_sigma 0.0
+    --curriculum_bootstrap_sigma 0.0
+    --curriculum_uncertainty_weight 0.5
+    --curriculum_adaptive false
+    --curriculum_strict_metadata true
+)
 
 uv run python mason.py \
     --task_name ${EXP_NAME} \
@@ -99,18 +117,4 @@ uv run open_instruct/grpo_fast.py \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
     --push_to_hub False \
-    --difficulty_curriculum_enabled true \
-    --difficulty_curriculum_field difficulty \
-    --difficulty_curriculum_easy_focus_steps ${DIFFICULTY_CURRICULUM_EASY_FOCUS_STEPS} \
-    --difficulty_curriculum_bootstrap_target_bucket_ratio 0.125 \
-    --difficulty_curriculum_warmup_target_bucket_ratio 0.5 \
-    --difficulty_curriculum_final_target_bucket_ratio 1.0 \
-    --difficulty_curriculum_warmup_steps ${DIFFICULTY_CURRICULUM_WARMUP_STEPS} \
-    --difficulty_curriculum_total_steps ${DIFFICULTY_CURRICULUM_TOTAL_STEPS} \
-    --difficulty_curriculum_min_hard_frac 0.05 \
-    --difficulty_curriculum_max_hard_frac 0.50 \
-    --difficulty_curriculum_bucket_sigma 0.0 \
-    --difficulty_curriculum_easy_focus_sigma 0.0 \
-    --difficulty_curriculum_uncertainty_weight 0.5 \
-    --difficulty_curriculum_adaptive_enabled False \
-    --difficulty_curriculum_strict_metadata true "$@"
+    "${CURRICULUM_ARGS[@]}" "$@"
