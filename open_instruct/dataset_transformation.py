@@ -2162,7 +2162,6 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
-    drop_dataset_source: bool = True,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2176,7 +2175,7 @@ def get_cached_dataset_tulu(
         hf_entity=hf_entity,
         dataset_local_cache_dir=dataset_local_cache_dir,
         dataset_skip_cache=dataset_skip_cache,
-        drop_dataset_source=drop_dataset_source,
+        drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
     )[0]
