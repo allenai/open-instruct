@@ -33,15 +33,13 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, rlvr_curriculum, utils
+from open_instruct import data_types, difficulty_curriculum, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
-    DATASET_ORIGIN_KEY,
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
-    SOURCE_ROW_ID_KEY,
     TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
 )
@@ -507,8 +505,6 @@ class StreamingDataLoaderConfig:
     # Rollout saving
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
-    rollout_save_format: Literal["full", "scores_only"] = "full"
-    """Trace record shape to persist when save_traces is enabled."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -691,7 +687,7 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
         dp_rank: int,
         dp_world_size: int,
         work_dir: str,
-        curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig,
+        curriculum_config: difficulty_curriculum.DifficultyCurriculumConfig,
         automatic_reshuffle: bool = True,
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
         device: torch.device | None = None,
@@ -705,7 +701,7 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
             raise ValueError("DifficultyCurriculumHFDataLoader currently supports dp_world_size=1 only")
 
         self._sampling_step = 0
-        self._curriculum_sampler = rlvr_curriculum.DifficultyCurriculumSampler(
+        self._curriculum_sampler = difficulty_curriculum.DifficultyCurriculumSampler(
             dataset=dataset,
             num_samples=max(len(dataset), 1),
             config=curriculum_config,
@@ -729,7 +725,7 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
         )
 
     @property
-    def curriculum_sampler(self) -> rlvr_curriculum.DifficultyCurriculumSampler:
+    def curriculum_sampler(self) -> difficulty_curriculum.DifficultyCurriculumSampler:
         return self._curriculum_sampler
 
     def set_sampling_step(self, step: int) -> None:
@@ -789,14 +785,14 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
             yield batch
 
 
-def build_data_preparation_prompt_dataloader(
+def create_prompt_dataloader(
     dataset: Dataset,
     seed: int,
     work_dir: str,
-    curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig | None = None,
+    curriculum_config: difficulty_curriculum.DifficultyCurriculumConfig | None = None,
 ) -> HFDataLoader:
-    if curriculum_config is not None:
-        return DifficultyCurriculumHFDataLoader(
+    if curriculum_config is None:
+        return HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=seed,
@@ -805,10 +801,8 @@ def build_data_preparation_prompt_dataloader(
             work_dir=work_dir,
             automatic_reshuffle=True,
             collator=single_example_collator,
-            curriculum_config=curriculum_config,
         )
-
-    return HFDataLoader(
+    return DifficultyCurriculumHFDataLoader(
         dataset=dataset,
         batch_size=1,
         seed=seed,
@@ -817,6 +811,7 @@ def build_data_preparation_prompt_dataloader(
         work_dir=work_dir,
         automatic_reshuffle=True,
         collator=single_example_collator,
+        curriculum_config=curriculum_config,
     )
 
 
@@ -940,8 +935,6 @@ def accumulate_inference_batches(
     all_active_tools = []
     all_scores = []
     all_indices = []
-    all_source_row_ids = []
-    all_source_datasets = []
     all_percent_solved = []
     all_model_steps = []
     total_filtered_prompts = 0
@@ -993,8 +986,6 @@ def accumulate_inference_batches(
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
-        source_row_id = example.get(SOURCE_ROW_ID_KEY)
-        source_dataset = example.get(DATASET_ORIGIN_KEY)
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
         if replenish_prompts:
@@ -1025,8 +1016,6 @@ def accumulate_inference_batches(
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         k_indices = repeat_each([result.index], generation_config.n)
-        k_source_row_ids = repeat_each([source_row_id], generation_config.n)
-        k_source_datasets = repeat_each([source_dataset], generation_config.n)
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -1064,8 +1053,6 @@ def accumulate_inference_batches(
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
         all_indices.extend(k_indices)
-        all_source_row_ids.extend(k_source_row_ids)
-        all_source_datasets.extend(k_source_datasets)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
@@ -1168,8 +1155,6 @@ def accumulate_inference_batches(
         indices=all_indices,
         scores=all_scores,
         active_tools=all_active_tools if all_active_tools else None,
-        source_row_ids=all_source_row_ids,
-        source_datasets=all_source_datasets,
         model_steps=all_model_steps,
     )
 
@@ -1315,7 +1300,7 @@ class DataPreparationActor:
         model_name: str | None,
         base_env_config: EnvConfig,
         initial_state: dict | None = None,
-        curriculum_config: rlvr_curriculum.DifficultyCurriculumConfig | None = None,
+        curriculum_config: difficulty_curriculum.DifficultyCurriculumConfig | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1336,7 +1321,7 @@ class DataPreparationActor:
         self.model_name = model_name
         self.base_env_config = base_env_config
 
-        self.iter_dataloader = build_data_preparation_prompt_dataloader(
+        self.iter_dataloader = create_prompt_dataloader(
             dataset=dataset, seed=seed, work_dir=work_dir, curriculum_config=curriculum_config
         )
 
@@ -1447,7 +1432,6 @@ class DataPreparationActor:
                     self.prepared_data[step] = empty_data
                     self.metrics[step] = empty_metrics
                     self.current_prepared_step = step
-                self.training_step = step + 1
                 continue
 
             assert batch is not None
@@ -1492,7 +1476,6 @@ class DataPreparationActor:
                     advantages,
                     self.config.num_samples_per_prompt_rollout,
                     self.total_samples_written,
-                    record_format=self.config.rollout_save_format,
                 )
                 self.total_samples_written += len(batch.queries)
 
@@ -1610,7 +1593,6 @@ class DataPreparationActor:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
-            self.training_step = step + 1
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

@@ -132,8 +132,6 @@ class Batch:
     indices: list[int] | None
     scores: list[float] | None
     active_tools: list[list[str] | None] | None = None
-    source_row_ids: list[int | None] | None = None
-    source_datasets: list[str | None] | None = None
     model_steps: list[int] = field(default_factory=list)
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
@@ -149,8 +147,6 @@ class Batch:
                 indices=self.indices[key] if self.indices is not None else None,
                 scores=self.scores[key] if self.scores is not None else None,
                 active_tools=self.active_tools[key] if self.active_tools is not None else None,
-                source_row_ids=self.source_row_ids[key] if self.source_row_ids is not None else None,
-                source_datasets=self.source_datasets[key] if self.source_datasets is not None else None,
                 model_steps=self.model_steps[key],
             )
         elif isinstance(key, int):
@@ -164,8 +160,6 @@ class Batch:
                 indices=[self.indices[key]] if self.indices is not None else None,
                 scores=[self.scores[key]] if self.scores is not None else None,
                 active_tools=[self.active_tools[key]] if self.active_tools is not None else None,
-                source_row_ids=[self.source_row_ids[key]] if self.source_row_ids is not None else None,
-                source_datasets=[self.source_datasets[key]] if self.source_datasets is not None else None,
                 model_steps=[self.model_steps[key]],
             )
         else:
@@ -181,8 +175,6 @@ class Batch:
                 indices=[self.indices[i] for i in key] if self.indices is not None else None,
                 scores=[self.scores[i] for i in key] if self.scores is not None else None,
                 active_tools=[self.active_tools[i] for i in key] if self.active_tools is not None else None,
-                source_row_ids=[self.source_row_ids[i] for i in key] if self.source_row_ids is not None else None,
-                source_datasets=[self.source_datasets[i] for i in key] if self.source_datasets is not None else None,
                 model_steps=[self.model_steps[i] for i in key],
             )
 

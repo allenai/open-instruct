@@ -945,8 +945,7 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
-# v7: Preserve original source row ids in transformed datasets for rollout trace joins.
-DATASET_CACHE_VERSION = "v7"
+DATASET_CACHE_VERSION = "v6"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:

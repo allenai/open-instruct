@@ -11,7 +11,7 @@ if "vllm" not in sys.modules:
     vllm_stub.SamplingParams = object
     sys.modules["vllm"] = vllm_stub
 
-from open_instruct import data_loader, rlvr_curriculum
+from open_instruct import data_loader, difficulty_curriculum
 
 
 class ListDataset:
@@ -57,19 +57,19 @@ def make_plain_hf_dataset(num_examples: int) -> Dataset:
 
 
 class TestDifficultyCurriculumSampler(unittest.TestCase):
-    def _make_metadata(self, **overrides) -> rlvr_curriculum.DifficultyCurriculumMetadataConfig:
-        return rlvr_curriculum.DifficultyCurriculumMetadataConfig(**overrides)
+    def _make_metadata(self, **overrides) -> difficulty_curriculum.DifficultyCurriculumMetadataConfig:
+        return difficulty_curriculum.DifficultyCurriculumMetadataConfig(**overrides)
 
-    def _make_schedule(self, **overrides) -> rlvr_curriculum.DifficultyCurriculumScheduleConfig:
-        return rlvr_curriculum.DifficultyCurriculumScheduleConfig(
+    def _make_schedule(self, **overrides) -> difficulty_curriculum.DifficultyCurriculumScheduleConfig:
+        return difficulty_curriculum.DifficultyCurriculumScheduleConfig(
             bootstrap_steps=100, warmup_steps=120, total_steps=200, **overrides
         )
 
-    def _make_adaptive(self, **overrides) -> rlvr_curriculum.DifficultyCurriculumAdaptiveConfig:
-        return rlvr_curriculum.DifficultyCurriculumAdaptiveConfig(**overrides)
+    def _make_adaptive(self, **overrides) -> difficulty_curriculum.DifficultyCurriculumAdaptiveConfig:
+        return difficulty_curriculum.DifficultyCurriculumAdaptiveConfig(**overrides)
 
-    def _make_config(self, **overrides) -> rlvr_curriculum.DifficultyCurriculumConfig:
-        return rlvr_curriculum.DifficultyCurriculumConfig(
+    def _make_config(self, **overrides) -> difficulty_curriculum.DifficultyCurriculumConfig:
+        return difficulty_curriculum.DifficultyCurriculumConfig(
             metadata=overrides.pop("metadata", self._make_metadata()),
             schedule=overrides.pop("schedule", self._make_schedule()),
             adaptive=overrides.pop("adaptive", self._make_adaptive()),
@@ -77,9 +77,9 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
             **overrides,
         )
 
-    def _make_sampler(self, dataset, **config_overrides) -> rlvr_curriculum.DifficultyCurriculumSampler:
+    def _make_sampler(self, dataset, **config_overrides) -> difficulty_curriculum.DifficultyCurriculumSampler:
         config = self._make_config(**config_overrides)
-        return rlvr_curriculum.DifficultyCurriculumSampler(
+        return difficulty_curriculum.DifficultyCurriculumSampler(
             dataset=dataset, num_samples=max(len(dataset), 1), config=config, global_step_getter=lambda: 0
         )
 
@@ -169,7 +169,7 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         self.assertLess(tuned_probs[2], default_probs[2])
 
     def test_curriculum_args_parser_builds_grouped_config(self):
-        parser = HfArgumentParser((rlvr_curriculum.DifficultyCurriculumArgs,))
+        parser = HfArgumentParser((difficulty_curriculum.DifficultyCurriculumArgs,))
         (curriculum_args,) = parser.parse_args_into_dataclasses(
             [
                 "--curriculum",
@@ -202,9 +202,7 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
 class TestDifficultyCurriculumLoaderIntegration(unittest.TestCase):
     def test_existing_behavior_is_unchanged_when_curriculum_disabled(self):
         dataset = make_plain_hf_dataset(20)
-        built_loader = data_loader.build_data_preparation_prompt_dataloader(
-            dataset=dataset, seed=7, work_dir=tempfile.gettempdir(), curriculum_config=None
-        )
+        built_loader = data_loader.create_prompt_dataloader(dataset=dataset, seed=7, work_dir=tempfile.gettempdir())
         baseline_loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
