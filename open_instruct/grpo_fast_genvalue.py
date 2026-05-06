@@ -120,6 +120,8 @@ class GenValueTrainerActor:
         self._model = AutoModelForCausalLM.from_pretrained(
             model_path, torch_dtype=torch.bfloat16, use_cache=False
         ).cuda()
+        if hasattr(self._model, "gradient_checkpointing_enable"):
+            self._model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         self._model.train()
         self._tokenizer = AutoTokenizer.from_pretrained(model_path)
         if self._tokenizer.pad_token_id is None:
@@ -183,11 +185,18 @@ class GenValueTrainerActor:
 
             input_ids = torch.tensor([prompt_ids + generated_ids], dtype=torch.long, device="cuda")
             attention_mask = torch.ones_like(input_ids)
-            labels = input_ids.clone()
-            labels[0, : len(prompt_ids)] = -100
+            target_ids = input_ids[:, -len(generated_ids) :]
 
-            outputs = self._model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            log_prob = -outputs.loss  # mean log-prob of generated tokens
+            # Only materialize logits needed to score the generated answer tokens.
+            # Full-sequence logits for 8k-token prompts can allocate several extra GiB.
+            outputs = self._model(
+                input_ids=input_ids, attention_mask=attention_mask, logits_to_keep=len(generated_ids) + 1
+            )
+            logits = outputs.logits[:, :-1, :]
+            lm_loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]).float(), target_ids.reshape(-1), reduction="mean"
+            )
+            log_prob = -lm_loss  # mean log-prob of generated tokens
 
             loss = -log_prob * reward
             loss.backward()
