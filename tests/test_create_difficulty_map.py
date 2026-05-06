@@ -1,4 +1,4 @@
-"""Unit tests for posterior-aware bucketing in create_bucketed_difficulty.py."""
+"""Unit tests for posterior-aware bucketing in create_difficulty_map.py."""
 
 import importlib.util
 import json
@@ -13,10 +13,10 @@ from unittest.mock import patch
 
 import numpy as np
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts/data/difficulty_sampling/create_bucketed_difficulty.py"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts/data/difficulty_sampling/create_difficulty_map.py"
 
 
-def _load_create_bucketed_difficulty_module():
+def _load_create_difficulty_map_module():
     fake_datasets = types.ModuleType("datasets")
     fake_datasets.Dataset = type("Dataset", (), {})
     fake_datasets.load_dataset = lambda *_args, **_kwargs: None
@@ -83,7 +83,7 @@ def _load_create_bucketed_difficulty_module():
         "scipy.special": fake_scipy_special,
         "scipy.stats": fake_scipy_stats,
     }
-    module_name = "test_create_bucketed_difficulty_module"
+    module_name = "test_create_difficulty_map_module"
     spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -95,10 +95,10 @@ def _load_create_bucketed_difficulty_module():
         return module
 
 
-MODULE = _load_create_bucketed_difficulty_module()
+MODULE = _load_create_difficulty_map_module()
 
 
-class TestCreateBucketedDifficulty(unittest.TestCase):
+class TestCreateDifficultyMap(unittest.TestCase):
     class FakeHFDataset:
         def __init__(self, rows):
             self._rows = [dict(row) for row in rows]
@@ -117,16 +117,16 @@ class TestCreateBucketedDifficulty(unittest.TestCase):
             return list(self._rows[0].keys()) if self._rows else []
 
         def select(self, indices):
-            return TestCreateBucketedDifficulty.FakeHFDataset([self._rows[index] for index in indices])
+            return TestCreateDifficultyMap.FakeHFDataset([self._rows[index] for index in indices])
 
         def remove_columns(self, column_names):
             names = {column_names} if isinstance(column_names, str) else set(column_names)
-            return TestCreateBucketedDifficulty.FakeHFDataset(
+            return TestCreateDifficultyMap.FakeHFDataset(
                 [{key: value for key, value in row.items() if key not in names} for row in self._rows]
             )
 
         def add_column(self, name, values):
-            return TestCreateBucketedDifficulty.FakeHFDataset(
+            return TestCreateDifficultyMap.FakeHFDataset(
                 [{**row, name: value} for row, value in zip(self._rows, values, strict=True)]
             )
 

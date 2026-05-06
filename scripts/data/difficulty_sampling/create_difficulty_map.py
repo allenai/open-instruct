@@ -22,13 +22,13 @@ single-group input dataset when pushing.
 
 Examples:
     Write local difficulty files:
-    uv run scripts/data/difficulty_sampling/create_bucketed_difficulty.py \
+    uv run scripts/data/difficulty_sampling/create_difficulty_map.py \
       --hf-dataset mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples \
       --hf-split train \
       --output /tmp/dapo_math_qwen3_difficulty
 
     Write local files and push the single output group to the Hub:
-    uv run scripts/data/difficulty_sampling/create_bucketed_difficulty.py \
+    uv run scripts/data/difficulty_sampling/create_difficulty_map.py \
       --hf-dataset mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples \
       --hf-split train \
       --task math \
