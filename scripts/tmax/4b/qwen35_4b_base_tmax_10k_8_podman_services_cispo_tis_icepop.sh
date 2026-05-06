@@ -1,27 +1,25 @@
 #!/bin/bash
 
-# Repro of the tmax-10k blowup with the ScaleRL eq. (3)-(5) trust-region mask applied.
-# Resumes from hamishivi/qwen3.5_tmax_breakdown_test_step100 (the checkpoint just before
-# the blowup) and turns on the π_θ/π_rollout mask with bounds [0.5, 3.0] (ratio-space).
+# RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-10k
+# 3 nodes x 8 GPUs (24 GPUs total)
+# CISPO + TIS cap + IcePop-style two-sided TIS mask.
 #
-# Mask mapping:
-#   --tis_mask_lower 0.5  -> ratio lower bound = 0.5
-#   --tis_mask_upper 3.0  -> ratio upper bound = 3.0
-#   --clip_higher    2.0  -> keeps the CISPO internal clamp coincident with the mask
-#                            upper, so the clamp never activates inside the mask window.
-# 4 nodes x 8 GPUs (32 GPUs total)
+# IcePop mask mapping:
+#   --tis_mask_lower 0.5 -> ratio lower bound = 0.5
+#   --tis_mask_upper 2.0 -> ratio upper bound = 2.0
+#   --clip_higher    1.0 -> keeps CISPO's internal clamp at the mask upper.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-9B blowup repro + CISPO mask" \
+       --description "SWERL tmax-10k CISPO+TIS+IcePop with Qwen3.5-4B (8 Podman services)" \
        --pure_docker_mode \
-       --workspace ai2/olmo-instruct \
+       --workspace ai2/dr-tulu-ablations \
        --priority urgent \
        --preemptible \
-       --num_nodes 4 \
+       --num_nodes 3 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
@@ -34,15 +32,19 @@ uv run python mason.py \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_DOCKER_AUTO_REMOVE=1 \
        --env SWERL_PODMAN_SERVICE_COUNT=8 \
-       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_DOCKER_START_CONCURRENCY=64 \
+       --env SWERL_DOCKER_EXEC_CONCURRENCY=256 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=60 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=10m \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -52,7 +54,7 @@ uv run python mason.py \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 4 \
-    --model_name_or_path hamishivi/qwen3.5_tmax_breakdown_test_step100 \
+    --model_name_or_path Qwen/Qwen3.5-4B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --total_episodes 128000 \
@@ -60,25 +62,26 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
-    --num_learners_per_node 8 8 \
+    --num_learners_per_node 8 \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
-    --use_vllm_logprobs true \
-    --truncated_importance_sampling_ratio_cap 0.0 \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --loss_fn cispo \
-    --clip_higher 2.0 \
+    --clip_higher 1.0 \
     --tis_mask_lower 0.5 \
-    --tis_mask_upper 3.0 \
+    --tis_mask_upper 2.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --vllm_enforce_eager \
+    --vllm_enable_prefix_caching \
+    --vllm_gdn_prefill_backend triton \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
+    --save_trainer_logprobs false \
     --tools swerl_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-10k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --pool_size 768 \
     --max_steps 100 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
@@ -90,7 +93,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo_breakdown_mask \
+    --exp_name swerl_qwen35_4b_base_tmax_10k_cispo_tis_icepop_8_podman_services \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False

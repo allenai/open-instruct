@@ -168,6 +168,25 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
     return config
 
 
+class TestComputeTISMask(unittest.TestCase):
+    def test_upper_bound_is_absolute_ratio(self):
+        ratios = torch.tensor([[0.49, 0.5, 1.0, 1.99, 2.0, 3.0]])
+        new_logprobs = torch.log(ratios)
+        vllm_logprobs = torch.zeros_like(new_logprobs)
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        mask = grpo_utils.compute_tis_mask(
+            new_logprobs,
+            vllm_logprobs,
+            response_mask,
+            lower_bound=0.5,
+            upper_bound=2.0,
+        )
+
+        expected = torch.tensor([[0.0, 0.0, 1.0, 1.0, 0.0, 0.0]])
+        torch.testing.assert_close(mask, expected)
+
+
 class TestComputeGRPOLoss(unittest.TestCase):
     @parameterized.expand([("dapo", grpo_utils.GRPOLossType.dapo), ("cispo", grpo_utils.GRPOLossType.cispo)])
     def test_output_shapes(self, _name, loss_type):

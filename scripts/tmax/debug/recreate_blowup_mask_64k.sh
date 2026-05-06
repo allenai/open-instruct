@@ -12,7 +12,7 @@
 #
 # Mask mapping (unchanged from recreate_blowup_mask.sh):
 #   --tis_mask_lower 0.5 -> ratio lower bound = 0.5
-#   --tis_mask_upper 2.0 -> ratio upper bound = 3.0
+#   --tis_mask_upper 3.0 -> ratio upper bound = 3.0
 #   --clip_higher    2.0 -> keeps CISPO's internal clamp at the mask upper.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -73,7 +73,7 @@ uv run python mason.py \
     --loss_fn cispo \
     --clip_higher 2.0 \
     --tis_mask_lower 0.5 \
-    --tis_mask_upper 2.0 \
+    --tis_mask_upper 3.0 \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enforce_eager \
