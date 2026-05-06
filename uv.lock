@@ -2779,7 +2779,6 @@ wheels = [
 
 [[package]]
 name = "open-instruct"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
