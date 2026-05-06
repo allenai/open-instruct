@@ -869,7 +869,6 @@ DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 VERIFIER_SOURCE_KEY = "dataset"
 RAW_PROMPT_KEY = "prompt"
-SOURCE_ROW_ID_KEY = "source_row_id"
 
 
 @dataclass
@@ -1631,8 +1630,6 @@ class DatasetConfig:
                 num_proc=max_num_processes(),
             )
         assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
-        if SOURCE_ROW_ID_KEY not in dataset.column_names:
-            dataset = dataset.add_column(SOURCE_ROW_ID_KEY, range(len(dataset)))
         self.dataset = dataset
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
@@ -1734,7 +1731,6 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
-        target_columns = _preserve_column(SOURCE_ROW_ID_KEY, dataset, target_columns)
         target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 

@@ -155,6 +155,21 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         adaptive_probs = sampler.get_bucket_probs(step=1)
         self.assertGreater(adaptive_probs[4], static_probs[4])
 
+    def test_excluded_index_has_zero_probability_and_persists_after_restore(self):
+        dataset = make_bucket_dataset()
+        sampler = self._make_sampler(dataset)
+        sampler.exclude_index(4)
+
+        self.assertEqual(sampler.get_example_probability(4, step=0), 0.0)
+        self.assertEqual(float(sampler.get_bucket_probs(step=0)[4]), 0.0)
+        self.assertTrue(all(sampler.sample_index(step=0) != 4 for _ in range(20)))
+
+        restored_sampler = self._make_sampler(dataset)
+        restored_sampler.load_state_dict(sampler.state_dict())
+        self.assertEqual(restored_sampler.get_example_probability(4, step=0), 0.0)
+        self.assertEqual(float(restored_sampler.get_bucket_probs(step=0)[4]), 0.0)
+        self.assertTrue(all(restored_sampler.sample_index(step=0) != 4 for _ in range(20)))
+
     def test_bootstrap_distribution_is_tunable(self):
         default_sampler = self._make_sampler(make_bucket_dataset())
         tuned_sampler = self._make_sampler(

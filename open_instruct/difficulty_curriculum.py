@@ -226,12 +226,12 @@ class AdaptiveBucketStats:
         if advantages is not None and len(advantages) != len(rewards):
             raise ValueError("advantages and rewards must have the same length")
 
-        reward_values = [float(np.clip(value, 0.0, 1.0)) for value in rewards]
-        advantage_values = None if advantages is None else [abs(float(value)) for value in advantages]
+        reward_values = np.clip(np.asarray(rewards, dtype=np.float64), 0.0, 1.0)
+        advantage_values = None if advantages is None else np.abs(np.asarray(advantages, dtype=np.float64))
 
         for position, bucket_index in enumerate(bucket_indices):
             bucket = int(bucket_index)
-            reward = reward_values[position]
+            reward = float(reward_values[position])
 
             self.total_count += 1
             self._count_by_bucket[bucket] = self._count_by_bucket.get(bucket, 0) + 1
@@ -239,7 +239,7 @@ class AdaptiveBucketStats:
             self._reward_sq_sum_by_bucket[bucket] = self._reward_sq_sum_by_bucket.get(bucket, 0.0) + reward * reward
 
             if advantage_values is not None:
-                advantage = advantage_values[position]
+                advantage = float(advantage_values[position])
                 self._abs_advantage_sum_by_bucket[bucket] = (
                     self._abs_advantage_sum_by_bucket.get(bucket, 0.0) + advantage
                 )
@@ -329,6 +329,7 @@ class _ParsedDifficultyMetadata:
 @dataclass(frozen=True)
 class _DifficultyBucketIndex:
     index_to_bucket: dict[int, int]
+    index_to_bucket_position: dict[int, int]
     bucket_to_indices: tuple[tuple[int, ...], ...]
     bucket_weights: tuple[torch.Tensor, ...]
     bucket_count: int
@@ -478,6 +479,7 @@ def _build_difficulty_bucket_index(
     bucket_to_indices: list[list[int]] = [[] for _ in range(bucket_count)]
     bucket_weight_lists: list[list[float]] = [[] for _ in range(bucket_count)]
     index_to_bucket: dict[int, int] = {}
+    index_to_bucket_position: dict[int, int] = {}
     metadata_fallback_count = 0
     fallback_bucket = min(bucket_count - 1, bucket_count // 2)
 
@@ -500,11 +502,13 @@ def _build_difficulty_bucket_index(
         )
 
         index_to_bucket[dataset_index] = bucket_index
+        index_to_bucket_position[dataset_index] = len(bucket_to_indices[bucket_index])
         bucket_to_indices[bucket_index].append(dataset_index)
         bucket_weight_lists[bucket_index].append(example_weight)
 
     return _DifficultyBucketIndex(
         index_to_bucket=index_to_bucket,
+        index_to_bucket_position=index_to_bucket_position,
         bucket_to_indices=tuple(tuple(indices) for indices in bucket_to_indices),
         bucket_weights=tuple(torch.tensor(weight_list, dtype=torch.float64) for weight_list in bucket_weight_lists),
         bucket_count=bucket_count,
@@ -540,6 +544,7 @@ class DifficultyCurriculumSampler(Sampler[int]):
             epsilon=self.config.epsilon,
         )
         self._index_to_bucket = dict(bucket_index.index_to_bucket)
+        self._index_to_bucket_position = dict(bucket_index.index_to_bucket_position)
         self.bucket_count = bucket_index.bucket_count
         self.metadata_fallback_count = bucket_index.metadata_fallback_count
         self._schedule = _DifficultyCurriculumSchedule(self.config.schedule, self.bucket_count)
@@ -547,8 +552,9 @@ class DifficultyCurriculumSampler(Sampler[int]):
         self._excluded_indices: set[int] = set()
         self._base_bucket_indices = [list(indices) for indices in bucket_index.bucket_to_indices]
         self._base_bucket_weights = [weights.clone() for weights in bucket_index.bucket_weights]
-        self._active_bucket_indices = [list(indices) for indices in self._base_bucket_indices]
         self._active_bucket_weights = [weights.clone() for weights in self._base_bucket_weights]
+        self._active_bucket_counts = [len(indices) for indices in self._base_bucket_indices]
+        self._active_bucket_weight_sums = [float(weights.sum().item()) for weights in self._active_bucket_weights]
 
         self.adaptive_stats = None
         if self.config.adaptive.enabled:
@@ -586,7 +592,7 @@ class DifficultyCurriculumSampler(Sampler[int]):
         return self._schedule.get_progress(step)
 
     def _available_bucket_mask(self) -> np.ndarray:
-        return np.array([1.0 if indices else 0.0 for indices in self._active_bucket_indices], dtype=np.float64)
+        return np.array([1.0 if count > 0 else 0.0 for count in self._active_bucket_counts], dtype=np.float64)
 
     def get_static_bucket_probs(self, step: int | None = None) -> np.ndarray:
         if step is None:
@@ -632,19 +638,20 @@ class DifficultyCurriculumSampler(Sampler[int]):
         if int(dataset_index) in self._excluded_indices:
             return 0.0
         bucket_index = self.bucket_for_dataset_index(dataset_index)
-        active_indices = self._active_bucket_indices[bucket_index]
-        if not active_indices:
+        if self._active_bucket_counts[bucket_index] == 0:
             return 0.0
-        try:
-            local_index = active_indices.index(int(dataset_index))
-        except ValueError:
+        local_index = self._index_to_bucket_position.get(int(dataset_index))
+        if local_index is None:
             return 0.0
         bucket_weight = self._active_bucket_weights[bucket_index]
-        weight_total = float(bucket_weight.sum().item())
+        dataset_weight = float(bucket_weight[local_index].item())
+        if dataset_weight <= 0:
+            return 0.0
+        weight_total = self._active_bucket_weight_sums[bucket_index]
         if weight_total <= 0:
             return 0.0
         bucket_probs = self.get_bucket_probs(step)
-        return float(bucket_probs[bucket_index] * bucket_weight[local_index].item() / weight_total)
+        return float(bucket_probs[bucket_index] * dataset_weight / weight_total)
 
     def sample_index(self, step: int | None = None) -> int:
         if self._available_bucket_mask().sum() == 0:
@@ -653,11 +660,11 @@ class DifficultyCurriculumSampler(Sampler[int]):
         bucket_index = int(torch.multinomial(bucket_probs, 1, generator=self._generator).item())
 
         example_weights = self._active_bucket_weights[bucket_index]
-        if example_weights.numel() == 0:
+        if self._active_bucket_counts[bucket_index] == 0 or self._active_bucket_weight_sums[bucket_index] <= 0:
             raise RuntimeError("attempted to sample from an empty curriculum bucket")
 
         sampled_offset = int(torch.multinomial(example_weights, 1, generator=self._generator).item())
-        return self._active_bucket_indices[bucket_index][sampled_offset]
+        return self._base_bucket_indices[bucket_index][sampled_offset]
 
     def __iter__(self):
         for _ in range(self.num_samples):
@@ -672,19 +679,22 @@ class DifficultyCurriculumSampler(Sampler[int]):
         if bucket_index is None:
             return
 
-        active_indices = self._active_bucket_indices[bucket_index]
-        try:
-            position = active_indices.index(dataset_index)
-        except ValueError:
+        position = self._index_to_bucket_position.get(dataset_index)
+        if position is None:
             self._excluded_indices.add(dataset_index)
             return
 
-        active_indices.pop(position)
         weights = self._active_bucket_weights[bucket_index]
-        if weights.numel() <= 1:
-            self._active_bucket_weights[bucket_index] = weights[:0].clone()
-        else:
-            self._active_bucket_weights[bucket_index] = torch.cat((weights[:position], weights[position + 1 :]))
+        current_weight = float(weights[position].item())
+        if current_weight <= 0:
+            self._excluded_indices.add(dataset_index)
+            return
+
+        weights[position] = 0.0
+        self._active_bucket_counts[bucket_index] -= 1
+        self._active_bucket_weight_sums[bucket_index] = max(
+            0.0, self._active_bucket_weight_sums[bucket_index] - current_weight
+        )
         self._excluded_indices.add(dataset_index)
 
     def record_observations(
@@ -754,14 +764,24 @@ class DifficultyCurriculumSampler(Sampler[int]):
             self._generator.set_state(generator_state)
 
         self._excluded_indices = {int(index) for index in state_dict.get("excluded_indices", [])}
-        self._active_bucket_indices = []
-        self._active_bucket_weights = []
-        for base_indices, base_weights in zip(self._base_bucket_indices, self._base_bucket_weights, strict=True):
-            keep_positions = [
-                position for position, index in enumerate(base_indices) if index not in self._excluded_indices
-            ]
-            self._active_bucket_indices.append([base_indices[position] for position in keep_positions])
-            self._active_bucket_weights.append(base_weights[keep_positions].clone())
+        self._active_bucket_weights = [weights.clone() for weights in self._base_bucket_weights]
+        self._active_bucket_counts = [len(indices) for indices in self._base_bucket_indices]
+        self._active_bucket_weight_sums = [float(weights.sum().item()) for weights in self._active_bucket_weights]
+        for dataset_index in self._excluded_indices:
+            bucket_index = self._index_to_bucket.get(dataset_index)
+            position = self._index_to_bucket_position.get(dataset_index)
+            if bucket_index is None or position is None:
+                continue
+
+            current_weight = float(self._active_bucket_weights[bucket_index][position].item())
+            if current_weight <= 0:
+                continue
+
+            self._active_bucket_weights[bucket_index][position] = 0.0
+            self._active_bucket_counts[bucket_index] -= 1
+            self._active_bucket_weight_sums[bucket_index] = max(
+                0.0, self._active_bucket_weight_sums[bucket_index] - current_weight
+            )
 
         if self.adaptive_stats is not None and state_dict.get("adaptive_stats") is not None:
             self.adaptive_stats.load_state_dict(state_dict["adaptive_stats"])
