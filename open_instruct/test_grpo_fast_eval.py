@@ -16,7 +16,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
+from open_instruct.grpo_fast import _is_in_warmup_window, create_generation_configs, maybe_evaluate
 
 
 class _QueueWithSize:
@@ -54,6 +54,34 @@ class TestCreateGenerationConfigs(unittest.TestCase):
             streaming_config.response_length, streaming_config.eval_response_length
         )
         self.assertEqual(max_model_len, 1536)
+
+
+class TestWarmupWindows(unittest.TestCase):
+    def test_value_warmup_freezes_policy_for_generative_value_model(self):
+        args = SimpleNamespace(
+            value_warmup_steps=100,
+            policy_warmup_steps=0,
+            value_rewarmup_start=0,
+            value_rewarmup_steps=0,
+            use_generative_value_model=True,
+            gen_value_vllm_num_engines=5,
+        )
+
+        self.assertTrue(_is_in_warmup_window(args, 100))
+        self.assertFalse(_is_in_warmup_window(args, 101))
+
+    def test_value_rewarmup_freezes_policy_for_generative_value_model(self):
+        args = SimpleNamespace(
+            value_warmup_steps=0,
+            policy_warmup_steps=0,
+            value_rewarmup_start=50,
+            value_rewarmup_steps=10,
+            use_generative_value_model=True,
+            gen_value_vllm_num_engines=5,
+        )
+
+        self.assertTrue(_is_in_warmup_window(args, 55))
+        self.assertFalse(_is_in_warmup_window(args, 61))
 
 
 class TestMaybeEvaluate(unittest.TestCase):

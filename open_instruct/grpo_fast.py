@@ -1411,7 +1411,6 @@ class PolicyTrainerRayProcess(RayProcess):
         if (
             self.args.reset_optimizer_after_value_warmup
             and self.args.value_warmup_steps > 0
-            and not _uses_generative_value_model(self.args)
             and training_step == self.args.value_warmup_steps + 1
         ):
             try:
@@ -3235,18 +3234,13 @@ def cleanup_training_resources(
 
 def _is_in_warmup_window(args, training_step: int) -> bool:
     """Return True if training_step falls inside any value/policy warmup window."""
-    if (
-        args.value_warmup_steps > 0
-        and not _uses_generative_value_model(args)
-        and training_step <= args.value_warmup_steps
-    ):
+    if args.value_warmup_steps > 0 and training_step <= args.value_warmup_steps:
         return True
     if args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps:
         return True
     rewarmup_end = args.value_rewarmup_start + args.value_rewarmup_steps
     return bool(
         args.value_rewarmup_steps > 0
-        and not _uses_generative_value_model(args)
         and args.value_rewarmup_start <= training_step <= rewarmup_end
     )
 
