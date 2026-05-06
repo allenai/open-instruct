@@ -114,7 +114,7 @@ def get_args():
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
-    parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
+    parser.add_argument("--budget", type=str, help="Budget to use.", default=None)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
         "--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb"
@@ -684,6 +684,24 @@ def maybe_override_checkpoint_dir(
     return command
 
 
+def make_experiment_spec(
+    args, full_commands: list[str], beaker_secrets: list[str], whoami: str
+) -> beaker.BeakerExperimentSpec:
+    experiment_spec_kwargs = {}
+    if args.budget is not None:
+        experiment_spec_kwargs["budget"] = args.budget
+
+    return beaker.BeakerExperimentSpec(
+        description=args.description,
+        tasks=[
+            make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
+            for i, full_command in enumerate(full_commands)
+        ],
+        retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
+        **experiment_spec_kwargs,
+    )
+
+
 def main():
     args, commands = get_args()
     # If the user is not in Ai2, we run the command as is
@@ -720,15 +738,7 @@ def main():
         console.print(Text(full_command))
     if is_external_user:
         return
-    experiment_spec = beaker.BeakerExperimentSpec(
-        description=args.description,
-        tasks=[
-            make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
-            for i, full_command in enumerate(full_commands)
-        ],
-        budget=args.budget,
-        retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
-    )
+    experiment_spec = make_experiment_spec(args, full_commands, beaker_secrets, whoami)
 
     @backoff.on_exception(
         backoff.expo,

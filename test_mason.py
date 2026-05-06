@@ -180,6 +180,35 @@ class TestExperimentSpec(unittest.TestCase):
 
         self.assertEqual(actual_spec, expected_spec)
 
+    def test_experiment_spec_omits_optional_budget(self):
+        args = Namespace(
+            cluster=["ai2/jupiter"],
+            image="test-user/open-instruct-integration-test",
+            description="Budget-free test script.",
+            pure_docker_mode=True,
+            workspace="ai2/open-instruct-dev",
+            priority="urgent",
+            num_nodes=1,
+            max_retries=0,
+            timeout="15m",
+            env=[],
+            budget=None,
+            gpus=1,
+            no_host_networking=False,
+            beaker_datasets=[],
+            secret=[],
+            shared_memory="10.24gb",
+            task_name="beaker_mason",
+            hostname=None,
+            preemptible=False,
+            mount_docker_socket=False,
+            resumable=False,
+        )
+
+        spec = mason.make_experiment_spec(args, ["test command"], ["test-user"], "test-user")
+
+        self.assertIsNone(spec.budget)
+
 
 if __name__ == "__main__":
     unittest.main()
