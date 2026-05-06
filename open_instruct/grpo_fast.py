@@ -1623,8 +1623,9 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
-    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics[0]["batch/response_lengths"]
+    sp_leader_metrics = [am for r, am in enumerate(array_metrics) if r % args.sequence_parallel_size == 0]
+    prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
+    response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
