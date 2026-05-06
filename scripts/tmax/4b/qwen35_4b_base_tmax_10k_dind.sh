@@ -33,7 +33,6 @@ uv run python mason.py \
        --env DIND_STORAGE_DRIVER=vfs \
        --env DIND_SMOKE_TEST=1 \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
-       --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/start_dind.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
