@@ -12,7 +12,6 @@ exp_name=vip_rl1k_grpo_p128_mb4_${DDMM}_qwen3_8b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
-    --budget ai2/oe-adapt \
     --cluster ai2/jupiter \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \

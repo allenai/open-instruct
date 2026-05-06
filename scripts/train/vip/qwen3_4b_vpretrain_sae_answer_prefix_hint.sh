@@ -5,7 +5,6 @@ exp_name=vip_vpretrain_sae_ap_hint_${DDMM}_qwen3_4b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
-    --budget ai2/oe-adapt \
     --cluster ai2/jupiter \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
