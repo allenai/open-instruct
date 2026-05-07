@@ -1339,18 +1339,17 @@ class DataPreparationActor:
                 ground_truth_overrides=self.ground_truth_overrides,
             )
 
-        step = self.training_step
-        while step < self.num_training_steps:
+        while self.training_step < self.num_training_steps:
             generation_idle_wait_start_time = time.perf_counter()
-            while step - self._last_consumed_step > self.config.async_steps:
+            while self.training_step - self._last_consumed_step > self.config.async_steps:
                 logger.info(
-                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                    f"[DataPreparationActor] Step {self.training_step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
-                f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
+                f"[DataPreparationActor] Step {self.training_step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
             )
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
@@ -1366,14 +1365,14 @@ class DataPreparationActor:
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
-                training_step=step,
+                training_step=self.training_step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
             )
             logger.info(
-                f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
+                f"[DataPreparationActor] Step {self.training_step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
             )
 
             if isinstance(result, data_types.ShutdownSentinel):
@@ -1381,7 +1380,7 @@ class DataPreparationActor:
 
             if result is None:
                 logger.warning(
-                    f"[DataPreparationActor] Step {step}: all groups filtered (zero-std rewards); "
+                    f"[DataPreparationActor] 🤡 {self.training_step=}: all groups filtered (zero-std rewards); "
                     "resampling without advancing step counter"
                 )
                 continue
@@ -1393,7 +1392,7 @@ class DataPreparationActor:
 
             if len(result.responses) == 0:
                 logger.warning(
-                    f"[DataPreparationActor] Step {step}: no trainable responses after truncation filter; "
+                    f"[DataPreparationActor] 🤡 {self.training_step=}: no trainable responses after truncation filter; "
                     "resampling without advancing step counter"
                 )
                 continue
@@ -1403,7 +1402,7 @@ class DataPreparationActor:
                     decoded_responses=batch.decoded_responses,
                     ground_truths=batch.ground_truths,
                     indices=batch.indices,
-                    step=step,
+                    step=self.training_step,
                 )
                 reward_metrics.update(rubric_metrics)
                 self.ground_truth_overrides.update(new_overrides)
@@ -1426,7 +1425,7 @@ class DataPreparationActor:
                 save_rollouts_to_disk(
                     self.config.rollouts_save_path,
                     self.run_name,
-                    step,
+                    self.training_step,
                     batch,
                     result,
                     advantages,
@@ -1517,10 +1516,10 @@ class DataPreparationActor:
             step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
             with self.lock:
-                self.prepared_data[step] = collated_data
-                self.metrics[step] = step_metrics
-                self.current_prepared_step = step
-            step += 1
+                self.prepared_data[self.training_step] = collated_data
+                self.metrics[self.training_step] = step_metrics
+                self.current_prepared_step = self.training_step
+            self.training_step += 1
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
