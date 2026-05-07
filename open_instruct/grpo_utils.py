@@ -60,6 +60,12 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
+    dppo = "dppo"
+
+
+class DPPODivergenceType(enum.StrEnum):
+    tv = "tv"
+    kl = "kl"
 
 
 @dataclass
@@ -129,7 +135,20 @@ class GRPOExperimentConfig(
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
-    """Whether to use DAPO or CISPO loss function."""
+    """Which policy-loss function to use: 'dapo', 'cispo', or 'dppo' (https://arxiv.org/abs/2602.04879)."""
+    dppo_divergence_type: DPPODivergenceType = DPPODivergenceType.tv
+    """For DPPO: which divergence to use to define the trust region ('tv' or 'kl').
+
+    Uses the binary (Bernoulli {sampled_token, all_others}) approximation from
+    Eqs. 13/14 of the DPPO paper (https://arxiv.org/abs/2602.04879). Only used
+    when ``loss_fn=dppo``.
+    """
+    dppo_divergence_threshold: float = 0.02
+    """For DPPO: the trust-region threshold δ on the binary divergence.
+
+    Tokens whose update would push them outside the trust region (per Eq. 12)
+    are masked out of the policy gradient. Only used when ``loss_fn=dppo``.
+    """
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -227,16 +246,29 @@ class GRPOExperimentConfig(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.loss_fn == GRPOLossType.dppo:
+            if self.dppo_divergence_threshold <= 0.0:
+                raise ValueError(
+                    f"DPPO requires `dppo_divergence_threshold` > 0 (got {self.dppo_divergence_threshold})."
+                )
+            # DPPO's trust region must be anchored on the rollout policy μ_θ'
+            # (Takeaway 2 in arXiv:2602.04879). Forcing `use_vllm_logprobs=True`
+            # ensures the cached `old_logprob` (and therefore the importance
+            # ratio used in the loss) is exactly μ_θ', without needing a
+            # separate code path.
+            if not self.use_vllm_logprobs:
+                raise ValueError(
+                    "DPPO requires `use_vllm_logprobs=True` so the importance ratio is "
+                    "computed against the rollout policy μ_θ' (Takeaway 2 in arXiv:2602.04879). "
+                    "Pass `--use_vllm_logprobs True --truncated_importance_sampling_ratio_cap 0` "
+                    "alongside `--loss_fn dppo`."
+                )
         if self.tis_mask_lower < 0.0 or self.tis_mask_upper < 0.0:
             raise ValueError(
                 f"tis_mask_lower and tis_mask_upper must be ≥ 0 "
                 f"(got {self.tis_mask_lower=}, {self.tis_mask_upper=}). Use 0 to disable."
             )
-        if (
-            self.tis_mask_lower > 0.0
-            and self.tis_mask_upper > 0.0
-            and self.tis_mask_lower >= self.tis_mask_upper
-        ):
+        if self.tis_mask_lower > 0.0 and self.tis_mask_upper > 0.0 and self.tis_mask_lower >= self.tis_mask_upper:
             raise ValueError(
                 "tis_mask_lower must be less than tis_mask_upper when both mask bounds are enabled, "
                 f"got {self.tis_mask_lower=} and {self.tis_mask_upper=}."
@@ -405,6 +437,93 @@ def resolve_old_logprob(
     return result
 
 
+def compute_binary_divergence(
+    behavior_logprobs: torch.Tensor, policy_logprobs: torch.Tensor, response_mask: torch.Tensor, divergence_type: str
+) -> torch.Tensor:
+    """Per-token binary (Bernoulli) divergence between behavior and policy.
+
+    Implements the binary approximation from Eqs. 13/14 of the DPPO paper
+    (https://arxiv.org/abs/2602.04879): collapse the categorical distribution
+    over the vocabulary into a Bernoulli over ``{sampled_token, all_others}``
+    using only the per-token logprobs. This is a memory-cheap lower bound on
+    the true policy divergence that requires no extra forward passes.
+
+    Args:
+        behavior_logprobs: log μ(a_t|s_t), the rollout (vLLM) policy.
+        policy_logprobs:   log π(a_t|s_t), the current trainer policy.
+        response_mask:     bool mask selecting valid response positions.
+        divergence_type:   ``"tv"`` for total variation or ``"kl"`` for KL.
+
+    Returns:
+        Float tensor of the same shape as ``policy_logprobs``; entries outside
+        ``response_mask`` are zeroed.
+    """
+    eps = 1e-9
+    # Real logprobs are <= 0; non-response sentinel positions can be > 0
+    # (see ``mask_logprobs`` / INVALID_LOGPROB). Clamp so exp() stays in [eps, 1].
+    mu = torch.exp(behavior_logprobs.clamp(min=-30.0, max=0.0))
+    pi = torch.exp(policy_logprobs.clamp(min=-30.0, max=0.0))
+    if divergence_type == DPPODivergenceType.tv:
+        divergence = (mu - pi).abs()
+    elif divergence_type == DPPODivergenceType.kl:
+        mu_clip = mu.clamp(eps, 1.0 - eps)
+        pi_clip = pi.clamp(eps, 1.0 - eps)
+        divergence = mu_clip * (mu_clip.log() - pi_clip.log()) + (1.0 - mu_clip) * (
+            (1.0 - mu_clip).log() - (1.0 - pi_clip).log()
+        )
+    else:
+        raise ValueError(
+            f"Unknown DPPO divergence type: {divergence_type}. Expected one of {list(DPPODivergenceType)}."
+        )
+    return torch.where(response_mask, divergence, torch.zeros_like(divergence))
+
+
+def compute_dppo_mask(
+    new_logprobs: torch.Tensor,
+    behavior_logprobs: torch.Tensor,
+    advantages: torch.Tensor,
+    ratio: torch.Tensor,
+    response_mask: torch.Tensor,
+    divergence_type: str,
+    divergence_threshold: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute the DPPO trust-region mask M_t (Eq. 12).
+
+    The mask zeros out updates that would both push the policy further away from
+    the rollout (``r_t > 1`` for positive advantage, or ``r_t < 1`` for negative
+    advantage) AND have already exceeded the divergence threshold ``δ``.
+    Updates that move the ratio back towards 1 are never masked, preserving
+    PPO's beneficial asymmetric structure.
+
+    Args:
+        new_logprobs:        log π_θ at the sampled tokens.
+        behavior_logprobs:   log μ_θ' at the sampled tokens (from the rollout).
+        advantages:          per-token advantages, same shape.
+        ratio:               π_θ(y_t|s_t) / μ_θ'(y_t|s_t).
+        response_mask:       bool mask selecting valid response positions.
+        divergence_type:     ``"tv"`` or ``"kl"`` (passed to
+            :func:`compute_binary_divergence`).
+        divergence_threshold: scalar trust-region radius δ.
+
+    Returns:
+        ``(mask, divergence)`` where ``mask`` is a 0/1 float tensor and
+        ``divergence`` is the per-token binary divergence (for logging).
+    """
+    with torch.no_grad():
+        divergence = compute_binary_divergence(
+            behavior_logprobs=behavior_logprobs,
+            policy_logprobs=new_logprobs,
+            response_mask=response_mask,
+            divergence_type=divergence_type,
+        )
+        outside_region = divergence > divergence_threshold
+        bad_high = (advantages > 0) & (ratio > 1.0) & outside_region
+        bad_low = (advantages < 0) & (ratio < 1.0) & outside_region
+        bad = bad_high | bad_low
+        mask = (~bad & response_mask).to(new_logprobs.dtype)
+    return mask, divergence
+
+
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
@@ -420,6 +539,14 @@ def compute_grpo_loss(
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
         pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
+        pg_losses2 = pg_losses
+    elif config.loss_fn == GRPOLossType.dppo:
+        # DPPO (https://arxiv.org/abs/2602.04879). The trust region is enforced
+        # by a DPPO mask passed in via ``tis_weights`` (see
+        # :func:`compute_dppo_mask`); the caller is responsible for computing
+        # ``ratio`` as π_θ / μ_θ' (rollout/behavior policy) — see Takeaway 2.
+        # Eq. 11: L_DPPO = E[Σ_t M_t · r_t · A_t]. No symmetric clipping.
+        pg_losses = -advantages * ratio
         pg_losses2 = pg_losses
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")

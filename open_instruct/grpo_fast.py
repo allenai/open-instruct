@@ -730,6 +730,12 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        tis_mask_enabled = self.args.tis_mask_lower > 0.0 or self.args.tis_mask_upper > 0.0
+        tis_mask_kept_tokens = torch.zeros((), device=device)
+        tis_mask_total_tokens = torch.zeros((), device=device)
+        dppo_enabled = self.args.loss_fn == grpo_utils.GRPOLossType.dppo
+        dppo_mask_kept_tokens = torch.zeros((), device=device)
+        dppo_mask_total_tokens = torch.zeros((), device=device)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -796,7 +802,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         local_logprobs_BT,
                     )
 
-                    # Calculate the policy's loss
+                    # Calculate the policy's loss. DPPO requires
+                    # `use_vllm_logprobs=True` (validated in GRPOExperimentConfig),
+                    # which sets `old_logprob_BT == vllm_logprobs_BT`, giving us
+                    # the trust-region anchor μ_θ' from Takeaway 2 in
+                    # arXiv:2602.04879 without a separate code path.
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
                     tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
@@ -812,17 +822,27 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.tis_mask_lower,
                         self.args.tis_mask_upper,
                     )
-                    combined_tis_BT = grpo_utils.combine_tis_terms(tis_clamped_BT, tis_mask_BT)
+                    if self.args.loss_fn == grpo_utils.GRPOLossType.dppo:
+                        dppo_mask_BT, _ = grpo_utils.compute_dppo_mask(
+                            new_logprobs=new_logprobs_BT,
+                            behavior_logprobs=vllm_logprobs_BT,
+                            advantages=data_BT.advantages[i][:, 1:],
+                            ratio=ratio_BT,
+                            response_mask=response_mask_BT,
+                            divergence_type=self.args.dppo_divergence_type,
+                            divergence_threshold=self.args.dppo_divergence_threshold,
+                        )
+                        with torch.no_grad():
+                            dppo_mask_kept_tokens += dppo_mask_BT.sum()
+                            dppo_mask_total_tokens += response_mask_BT.sum()
+                    else:
+                        dppo_mask_BT = None
+                    combined_tis_BT = grpo_utils.combine_tis_terms(tis_clamped_BT, tis_mask_BT, dppo_mask_BT)
 
                     if tis_mask_BT is not None:
                         with torch.no_grad():
-                            num_valid = response_mask_BT.sum()
-                            frac_kept = (
-                                tis_mask_BT.sum() / num_valid
-                                if num_valid > 0
-                                else torch.zeros((), device=tis_mask_BT.device)
-                            )
-                            self.local_metrics["debug/tis_mask_frac_kept"] = float(frac_kept)
+                            tis_mask_kept_tokens += tis_mask_BT.sum()
+                            tis_mask_total_tokens += response_mask_BT.sum()
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -871,6 +891,20 @@ class PolicyTrainerRayProcess(RayProcess):
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
+                if tis_mask_enabled:
+                    frac_kept = (
+                        tis_mask_kept_tokens / tis_mask_total_tokens
+                        if tis_mask_total_tokens > 0
+                        else torch.zeros((), device=device)
+                    )
+                    self.local_metrics["debug/tis_mask_frac_kept"] = float(frac_kept)
+                if dppo_enabled:
+                    dppo_frac_kept = (
+                        dppo_mask_kept_tokens / dppo_mask_total_tokens
+                        if dppo_mask_total_tokens > 0
+                        else torch.zeros((), device=device)
+                    )
+                    self.local_metrics["debug/dppo_mask_frac_kept"] = float(dppo_frac_kept)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
@@ -1790,6 +1824,8 @@ def one_training_step(
         "policy/entropy_avg",
         "val/ratio",
         "val/ratio_var",
+        "debug/tis_mask_frac_kept",
+        "debug/dppo_mask_frac_kept",
     }
     average_metrics = {}
     # Average scalar metrics from each worker

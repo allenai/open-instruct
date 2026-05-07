@@ -443,6 +443,10 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 advantages = data_BT.advantages[sample_idx]
 
+                # DPPO requires `use_vllm_logprobs=True` (validated in
+                # GRPOExperimentConfig), so `old_logprob == vllm_logprobs` and the
+                # ratio is computed against the rollout policy μ_θ' (Takeaway 2
+                # in arXiv:2602.04879) without a special-case branch here.
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
@@ -456,7 +460,19 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.grpo_config.tis_mask_lower,
                     self.grpo_config.tis_mask_upper,
                 )
-                combined_tis = grpo_utils.combine_tis_terms(tis_clamped, tis_mask)
+                if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.dppo:
+                    dppo_mask, _ = grpo_utils.compute_dppo_mask(
+                        new_logprobs=new_logprobs,
+                        behavior_logprobs=vllm_logprobs,
+                        advantages=advantages[:, 1:],
+                        ratio=ratio,
+                        response_mask=response_mask,
+                        divergence_type=self.grpo_config.dppo_divergence_type,
+                        divergence_threshold=self.grpo_config.dppo_divergence_threshold,
+                    )
+                else:
+                    dppo_mask = None
+                combined_tis = grpo_utils.combine_tis_terms(tis_clamped, tis_mask, dppo_mask)
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
