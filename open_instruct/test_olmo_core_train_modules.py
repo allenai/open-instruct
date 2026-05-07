@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import torch
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_utils, olmo_core_train_modules
+from open_instruct import data_types, grpo_utils
 from open_instruct.utils import INVALID_LOGPROB
 
 
@@ -277,18 +277,6 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 ref_logprobs=None,
                 config=config,
             )
-
-
-class TestPerSampleTokenCounts(unittest.TestCase):
-    def test_doc_id_valued_response_masks_count_positions_not_ids(self):
-        # Bug 6 reproduction: in the oc path, response_masks arrive as int64
-        # with document-id values (0=pad, 1..N=doc index), not bool 0/1.
-        # `_compute_per_sample_token_counts` must count response-token positions,
-        # not sum doc-ids.
-        mask = torch.tensor([[0, 0, 1, 1, 2, 2, 2, 3]], dtype=torch.long)
-        counts = olmo_core_train_modules._compute_per_sample_token_counts([mask], device="cpu")
-        # mask[:, 1:] = [0, 1, 1, 2, 2, 2, 3] → 6 response-token positions.
-        self.assertEqual(counts[0].item(), 6.0)
 
 
 if __name__ == "__main__":

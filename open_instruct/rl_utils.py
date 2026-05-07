@@ -346,8 +346,8 @@ def pack_sequences(
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
-        query_mask = [0] * len(query)
-        response_mask = [i + 1 if m else 0 for m in response_tool_mask] if mask_tool_use else [i + 1] * len(response)
+        query_mask = [False] * len(query)
+        response_mask = [bool(m) for m in response_tool_mask] if mask_tool_use else [True] * len(response)
         cur_response_mask.extend(query_mask + response_mask)
         cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
         cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
@@ -366,7 +366,7 @@ def pack_sequences(
         query_responses=[torch.tensor(t) for t in query_responses],
         attention_masks=attention_masks_list,
         position_ids=[reset_position_ids(t.unsqueeze(0)).squeeze(0) for t in attention_masks_list],
-        response_masks=[torch.tensor(t, dtype=torch.long) for t in response_masks],
+        response_masks=[torch.tensor(t, dtype=torch.bool) for t in response_masks],
         original_responses=responses,
         num_actions=[torch.tensor(t) for t in num_actions],
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
