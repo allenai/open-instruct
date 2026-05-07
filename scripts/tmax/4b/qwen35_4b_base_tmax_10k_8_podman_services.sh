@@ -25,7 +25,7 @@ uv run python mason.py \
        --env DOCKERHUB_USERNAME=hamishi740 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_DOCKER_AUTO_REMOVE=1 \
-       --env SWERL_PODMAN_SERVICE_COUNT=8 \
+       --env SWERL_PODMAN_SERVICE_COUNT=4 \
        --env SWERL_DOCKER_START_CONCURRENCY=64 \
        --env SWERL_DOCKER_EXEC_CONCURRENCY=256 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
