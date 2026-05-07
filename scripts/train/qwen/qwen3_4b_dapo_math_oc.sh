@@ -40,6 +40,9 @@ uv run open_instruct/grpo.py \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
+    --use_rho_correction \
+    --rho_mask_lower_bound 0.5 \
+    --rho_mask_upper_bound 1.5 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
