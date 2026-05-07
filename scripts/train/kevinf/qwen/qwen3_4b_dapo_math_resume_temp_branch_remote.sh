@@ -11,6 +11,16 @@ if [[ -z "${BRANCH_CHECKPOINT_STATE_DIR:-}" ]]; then
     exit 1
 fi
 
+if [[ -z "${BRANCH_OUTPUT_DIR:-}" ]]; then
+    echo "BRANCH_OUTPUT_DIR must point to a durable Weka output directory."
+    exit 1
+fi
+
+if [[ "${BRANCH_OUTPUT_DIR}" != /weka/* && "${BRANCH_OUTPUT_DIR}" != /output* ]]; then
+    echo "BRANCH_OUTPUT_DIR must be durable (/weka/... or /output...), got ${BRANCH_OUTPUT_DIR}"
+    exit 1
+fi
+
 if [[ -z "${TEMPERATURE:-}" ]]; then
     echo "TEMPERATURE must be set for this continuation branch."
     exit 1
@@ -71,6 +81,7 @@ uv run open_instruct/grpo_fast.py \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
     --checkpoint_state_dir "${BRANCH_CHECKPOINT_STATE_DIR}" \
+    --output_dir "${BRANCH_OUTPUT_DIR}" \
     --gradient_checkpointing \
     --with_tracking \
     --send_slack_alerts \

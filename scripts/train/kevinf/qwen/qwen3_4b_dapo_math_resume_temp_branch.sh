@@ -25,6 +25,8 @@ CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 BUDGET="${BUDGET:-ai2/oe-omai}"
+BEAKER_USER="${BEAKER_USER:-$(beaker account whoami --format json | jq -r '.[0].name')}"
+BRANCH_OUTPUT_DIR="${BRANCH_OUTPUT_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}}"
 
 EXTRA_ARGS=""
 for arg in "$@"; do
@@ -47,6 +49,7 @@ uv run mason.py \
     --env BASE_CHECKPOINT_STATE_DIR="${BASE_CHECKPOINT_STATE_DIR}" \
     --env BASE_STEP_TAG="${BASE_STEP_TAG}" \
     --env BRANCH_CHECKPOINT_STATE_DIR="${BRANCH_CHECKPOINT_STATE_DIR}" \
+    --env BRANCH_OUTPUT_DIR="${BRANCH_OUTPUT_DIR}" \
     --env EXP_NAME="${EXP_NAME}" \
     --env RUN_NAME="${RUN_NAME}" \
     --env TEMPERATURE="${TEMPERATURE}" \
