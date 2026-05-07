@@ -1042,10 +1042,8 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
-    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
-        assert streaming_config.mask_tool_use, (
-            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-        )
+    if tools_config.enabled and (args.use_vllm_logprobs or args.use_rho_correction):
+        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or the ρ correction."
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -1603,9 +1601,9 @@ def one_training_step(
         "policy/entropy_avg",
         "val/ratio",
         "val/ratio_var",
-        "val/icepop_drop_frac",
-        "val/icepop_drop_low_frac",
-        "val/icepop_drop_high_frac",
+        "val/rho_drop_frac",
+        "val/rho_drop_low_frac",
+        "val/rho_drop_high_frac",
     }
     average_metrics = {}
     # Average scalar metrics from each worker

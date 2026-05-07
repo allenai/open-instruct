@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_icepop_very_narrow}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo_rho_mask_very_narrow}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
@@ -36,10 +36,9 @@ uv run open_instruct/grpo_fast.py \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 0.0 \
-    --use_icepop \
-    --icepop_lower_bound 0.75 \
-    --icepop_upper_bound 1.25 \
+    --use_rho_correction \
+    --rho_mask_lower_bound 0.75 \
+    --rho_mask_upper_bound 1.25 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \

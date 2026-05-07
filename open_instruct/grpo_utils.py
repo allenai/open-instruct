@@ -101,20 +101,22 @@ class GRPOExperimentConfig(
     """the lower clip range"""
     clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_cap: float = 2.0
-    """The maximum cap for truncated importance sampling ratio (0 means disabled)."""
-    use_icepop: bool = False
-    """If True, replace truncated importance sampling with the IcePop M(ρ; 1/β, β)
-    operator from https://arxiv.org/abs/2510.18855: tokens whose train/infer
-    mismatch ratio ρ = π^train_old / π^infer_old falls in [1/β, β] are reweighted
-    by ρ (an IS correction); tokens outside that band have their per-token
-    policy loss zeroed out."""
-    icepop_lower_bound: float = 0.5
-    """IcePop lower bound on the train/infer ratio ρ; tokens with ρ below this are dropped."""
-    icepop_upper_bound: float = 2.0
-    """IcePop upper bound on the train/infer ratio ρ; tokens with ρ above this are dropped."""
-    icepop_sequence_level: bool = False
-    """If True, apply the IcePop mask at the sequence level (DeepSeek-V3.2 style):
+    use_rho_correction: bool = False
+    """Master switch for the train/infer ratio ρ = π^train_old / π^infer_old correction.
+    When True, ρ is clamped to [rho_clamp_lower_bound, rho_clamp_upper_bound] and tokens
+    whose ρ falls outside [rho_mask_lower_bound, rho_mask_upper_bound] have their
+    per-token policy loss zeroed out. This unifies truncated importance sampling
+    (https://arxiv.org/abs/...) and IcePop (https://arxiv.org/abs/2510.18855)."""
+    rho_clamp_lower_bound: float = 0.0
+    """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    rho_clamp_upper_bound: float = 0.0
+    """Upper bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    rho_mask_lower_bound: float = 0.0
+    """Tokens with ρ below this value are dropped (0 disables)."""
+    rho_mask_upper_bound: float = 0.0
+    """Tokens with ρ above this value are dropped (0 disables)."""
+    rho_mask_sequence_level: bool = False
+    """If True, apply the rho mask at the sequence level (DeepSeek-V3.2 style):
     compute the mean log-ratio (1/|o_i|) Σ_t log(π_old / π_θ) per response sequence,
     exponentiate to get a per-sequence ρ, and broadcast the keep/drop decision to every
     token in that sequence. If False (default), the mask is applied per token."""
@@ -230,10 +232,10 @@ class GRPOExperimentConfig(
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
             )
-        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
+        if self.use_vllm_logprobs and self.use_rho_correction:
             raise ValueError(
-                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
-                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
+                "Cannot use both `use_vllm_logprobs` and `use_rho_correction`. "
+                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making the ρ correction pointless."
             )
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
@@ -301,11 +303,19 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
-        if self.use_icepop and not (0.0 < self.icepop_lower_bound < 1.0 < self.icepop_upper_bound):
-            raise ValueError(
-                "IcePop requires 0 < icepop_lower_bound < 1 < icepop_upper_bound. "
-                f"Got icepop_lower_bound={self.icepop_lower_bound}, icepop_upper_bound={self.icepop_upper_bound}."
-            )
+        if self.use_rho_correction:
+            if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
+                raise ValueError(
+                    f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
+                )
+            if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
+                raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
+            if self.rho_clamp_lower_bound > 0.0 and self.rho_clamp_lower_bound >= 1.0:
+                raise ValueError(
+                    f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
+                )
+            if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
+                raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -340,17 +350,15 @@ def compute_vllm_local_debug_metrics(
     }
 
 
-def _icepop_mask_from_rho(
+def _rho_drop_masks(
     rho: torch.Tensor, response_mask: torch.Tensor, lower: float, upper: float
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    dropped_low = (rho < lower) & response_mask
-    dropped_high = (rho > upper) & response_mask
-    in_range = response_mask & ~dropped_low & ~dropped_high
-    mask = torch.where(in_range, rho, torch.zeros_like(rho))
-    return mask, dropped_low, dropped_high
+) -> tuple[torch.Tensor, torch.Tensor]:
+    dropped_low = (rho < lower) & response_mask if lower > 0.0 else torch.zeros_like(response_mask)
+    dropped_high = (rho > upper) & response_mask if upper > 0.0 else torch.zeros_like(response_mask)
+    return dropped_low, dropped_high
 
 
-def _icepop_sequence_rho(logprob_diff: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+def _rho_sequence_level(logprob_diff: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
     """Per-sequence ρ = exp((1/|o_i|) Σ_t (log π_old - log π_θ)), broadcast to every token.
 
     Sequences are identified with rows of ``logprob_diff`` (shape [B, T]); padding tokens
@@ -383,34 +391,36 @@ class RhoCorrection:
 def compute_rho_correction(
     old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
 ) -> RhoCorrection:
-    """Dispatch between TIS and IcePop train/infer corrections."""
+    """Compute the unified ρ = π^train_old / π^infer_old correction (clamp + mask)."""
     logprob_diff = torch.where(
         response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
     )
     rho = torch.exp(logprob_diff)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
-    if config.use_icepop:
-        rho_for_mask = _icepop_sequence_rho(logprob_diff, response_mask) if config.icepop_sequence_level else rho
-        mask, dropped_low, dropped_high = _icepop_mask_from_rho(
-            rho_for_mask, response_mask, config.icepop_lower_bound, config.icepop_upper_bound
-        )
-        return RhoCorrection(
-            weights=mask,
-            metrics={
-                "val/icepop_drop_frac": (dropped_low | dropped_high).float(),
-                "val/icepop_drop_low_frac": dropped_low.float(),
-                "val/icepop_drop_high_frac": dropped_high.float(),
-            },
-            histogram_metrics=rho_hist,
-        )
-    if config.truncated_importance_sampling_ratio_cap <= 0:
+    if not config.use_rho_correction:
         return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
-    clamped = torch.clamp(rho, max=config.truncated_importance_sampling_ratio_cap)
-    return RhoCorrection(
-        weights=clamped,
-        metrics={"val/tis_ratio": clamped.float(), "val/tis_clipfrac": (clamped < rho).float()},
-        histogram_metrics=rho_hist,
+
+    rho_effective = _rho_sequence_level(logprob_diff, response_mask) if config.rho_mask_sequence_level else rho
+    dropped_low, dropped_high = _rho_drop_masks(
+        rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
     )
+    in_range = response_mask & ~dropped_low & ~dropped_high
+
+    rho_clamped = rho_effective
+    if config.rho_clamp_lower_bound > 0.0:
+        rho_clamped = torch.clamp(rho_clamped, min=config.rho_clamp_lower_bound)
+    if config.rho_clamp_upper_bound > 0.0:
+        rho_clamped = torch.clamp(rho_clamped, max=config.rho_clamp_upper_bound)
+
+    weights = torch.where(in_range, rho_clamped, torch.zeros_like(rho_clamped))
+    metrics = {
+        "val/rho_drop_frac": (dropped_low | dropped_high).float(),
+        "val/rho_drop_low_frac": dropped_low.float(),
+        "val/rho_drop_high_frac": dropped_high.float(),
+        "val/rho_weight": weights.float(),
+        "val/rho_clipfrac": (rho_clamped != rho_effective).float(),
+    }
+    return RhoCorrection(weights=weights, metrics=metrics, histogram_metrics=rho_hist)
 
 
 def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: RhoCorrection) -> None:
@@ -613,11 +623,11 @@ _SCALAR_LOSS_STAT_KEYS = [
     "objective/kl3_avg",
     "policy/clipfrac_avg",
     "val/ratio",
-    "val/tis_clipfrac",
-    "val/tis_ratio",
-    "val/icepop_drop_frac",
-    "val/icepop_drop_low_frac",
-    "val/icepop_drop_high_frac",
+    "val/rho_clipfrac",
+    "val/rho_weight",
+    "val/rho_drop_frac",
+    "val/rho_drop_low_frac",
+    "val/rho_drop_high_frac",
 ]
 
 
