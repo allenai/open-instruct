@@ -1123,6 +1123,24 @@ def accumulate_inference_batches(
     )
 
 
+def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch: Batch, enabled: bool) -> Batch:
+    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch."""
+    if not enabled:
+        return batch
+    stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
+    num_truncated = len(result.finish_reasons) - len(stop_idxes)
+    if num_truncated > 0:
+        logger.info(
+            f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+            f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
+        )
+    result.responses = [result.responses[i] for i in stop_idxes]
+    result.masks = [result.masks[i] for i in stop_idxes]
+    result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
+    result.logprobs = [result.logprobs[i] for i in stop_idxes]
+    return batch[stop_idxes]
+
+
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
     dp_world_size: int,
@@ -1321,7 +1339,8 @@ class DataPreparationActor:
                 ground_truth_overrides=self.ground_truth_overrides,
             )
 
-        for step in range(self.training_step, self.num_training_steps):
+        step = self.training_step
+        while step < self.num_training_steps:
             generation_idle_wait_start_time = time.perf_counter()
             while step - self._last_consumed_step > self.config.async_steps:
                 logger.info(
@@ -1361,25 +1380,23 @@ class DataPreparationActor:
                 return
 
             if result is None:
-                empty_data = [
-                    data_types.CollatedBatchData(
-                        query_responses=[],
-                        attention_masks=[],
-                        position_ids=[],
-                        advantages=[],
-                        response_masks=[],
-                        vllm_logprobs=[],
-                    )
-                    for _ in range(self.dp_world_size)
-                ]
-                with self.lock:
-                    self.prepared_data[step] = empty_data
-                    self.metrics[step] = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
-                    self.current_prepared_step = step
+                logger.warning(
+                    f"[DataPreparationActor] Step {step}: all groups filtered (zero-std rewards); "
+                    "resampling without advancing step counter"
+                )
                 continue
 
             assert batch is not None
             assert batch_stats is not None
+
+            batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
+
+            if len(result.responses) == 0:
+                logger.warning(
+                    f"[DataPreparationActor] Step {step}: no trainable responses after truncation filter; "
+                    "resampling without advancing step counter"
+                )
+                continue
 
             if self.rubric_manager and batch.decoded_responses:
                 rubric_metrics, new_overrides = self.rubric_manager.run_step(
@@ -1418,24 +1435,6 @@ class DataPreparationActor:
                 )
                 self.total_samples_written += len(batch.queries)
 
-            if self.config.mask_truncated_completions:
-                stop_idxes = torch.tensor(
-                    [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
-                )
-                num_truncated = len(result.finish_reasons) - len(stop_idxes)
-                if num_truncated > 0:
-                    logger.info(
-                        f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                        f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
-                    )
-                scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
-                batch = batch[stop_idxes.tolist()]
-                result.responses = [result.responses[i] for i in stop_idxes]
-                result.masks = [result.masks[i] for i in stop_idxes]
-                result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
-                result.logprobs = [result.logprobs[i] for i in stop_idxes]
-
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
@@ -1458,72 +1457,70 @@ class DataPreparationActor:
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
             )
 
-            if len(result.responses) == 0:
-                step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
-            else:
-                real_num_responses = len(result.responses)
-                expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
-                unsolved_num_responses = (scores < self.config.max_possible_score).sum()
-                sequence_lengths = np.array([len(response) for response in result.responses])
-                sequence_length_solved = (
-                    np.array([])
-                    if np.all(scores == 0)
-                    else np.array(sequence_lengths[scores == self.config.max_possible_score])
-                )
-                sequence_length_unsolved = (
-                    np.array([])
-                    if np.all(scores == self.config.max_possible_score)
-                    else np.array(sequence_lengths[scores == 0])
-                )
-                stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
+            real_num_responses = len(result.responses)
+            expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
+            unsolved_num_responses = (scores < self.config.max_possible_score).sum()
+            sequence_lengths = np.array([len(response) for response in result.responses])
+            sequence_length_solved = (
+                np.array([])
+                if np.all(scores == 0)
+                else np.array(sequence_lengths[scores == self.config.max_possible_score])
+            )
+            sequence_length_unsolved = (
+                np.array([])
+                if np.all(scores == self.config.max_possible_score)
+                else np.array(sequence_lengths[scores == 0])
+            )
+            stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 
-                batch_metrics_dict = asdict(batch_stats)
-                batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
+            batch_metrics_dict = asdict(batch_stats)
+            batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
-                step_metrics = {
-                    "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
-                    "scores": scores.mean(),
-                    "real_batch_size_ratio": real_num_responses / expected_num_responses,
-                    "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
-                    "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
-                    "val/solve_rate_hist": batch_stats.percent_solved_hist,
-                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
-                    "val/sequence_lengths": sequence_lengths.mean(),
-                    "val/sequence_lengths_min": sequence_lengths.min(),
-                    "val/sequence_lengths_max": sequence_lengths.max(),
-                    "val/sequence_lengths_unsolved": (
-                        0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-                    ),
-                    "val/sequence_lengths_solved": (
-                        0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
-                    ),
-                    "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-                    "val/sequence_lengths_solved_hist": sequence_length_solved,
-                    "val/stop_rate": stop_rate,
-                    "val/advantages_mean": advantages.mean(),
-                    "val/advantages_min": advantages.min(),
-                    "val/advantages_max": advantages.max(),
-                    "val/advantages_hist": advantages,
-                    **reward_metrics,
-                    **batch_metrics_prefixed,
-                }
+            step_metrics = {
+                "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                "scores": scores.mean(),
+                "real_batch_size_ratio": real_num_responses / expected_num_responses,
+                "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
+                "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
+                "val/solve_rate_hist": batch_stats.percent_solved_hist,
+                "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
+                "val/sequence_lengths": sequence_lengths.mean(),
+                "val/sequence_lengths_min": sequence_lengths.min(),
+                "val/sequence_lengths_max": sequence_lengths.max(),
+                "val/sequence_lengths_unsolved": (
+                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
+                ),
+                "val/sequence_lengths_solved": (
+                    0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
+                ),
+                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+                "val/sequence_lengths_solved_hist": sequence_length_solved,
+                "val/stop_rate": stop_rate,
+                "val/advantages_mean": advantages.mean(),
+                "val/advantages_min": advantages.min(),
+                "val/advantages_max": advantages.max(),
+                "val/advantages_hist": advantages,
+                **reward_metrics,
+                **batch_metrics_prefixed,
+            }
 
-                tool_stats = EnvStatistics(tool_names=self.tool_names)
-                for rollout_stats in result.request_info.tool_call_stats:
-                    tool_stats.add_rollout(rollout_stats)
-                step_metrics.update(tool_stats.compute_metrics())
+            tool_stats = EnvStatistics(tool_names=self.tool_names)
+            for rollout_stats in result.request_info.tool_call_stats:
+                tool_stats.add_rollout(rollout_stats)
+            step_metrics.update(tool_stats.compute_metrics())
 
-                step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
+            step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
 
-                assert result.token_statistics is not None
-                total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
-                step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-                step_metrics["time/getting_response"] = result.token_statistics.generation_time
+            assert result.token_statistics is not None
+            total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
+            step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+            step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
             with self.lock:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
+            step += 1
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

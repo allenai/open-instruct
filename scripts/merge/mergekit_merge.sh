@@ -61,7 +61,7 @@ INSTALL_CMD="uv pip install mergekit"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --workspace ai2/olmo-instruct \
     --image "$IMAGE" \
     --pure_docker_mode \

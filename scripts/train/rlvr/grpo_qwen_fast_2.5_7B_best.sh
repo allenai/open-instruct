@@ -7,7 +7,7 @@ python mason.py \
     --preemptible \
     --num_nodes 2 \
     --max_retries 0 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name 0302_qwen2.5_7B_math_grpo_fast1_1317 \
     --beta 0.0 \

@@ -11,7 +11,7 @@ export DATASET_MIXER_EVAL_LIST="hamishivi/omega-combined 4 allenai/IF_multi_cons
 export OE_EVAL_TASKS="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek"
 
 uv run python mason.py \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --cluster ai2/jupiter-cirrascale-2 \
     --image $BEAKER_IMAGE \
     --pure_docker_mode \

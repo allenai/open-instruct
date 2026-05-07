@@ -1,5 +1,5 @@
 version: v2
-budget: ai2/oe-adapt
+budget: ai2/oe-omai
 description: "VLLM Server for general verifier"
 tasks:
   - name: "vllm-job"

@@ -36,7 +36,7 @@ if [ -n "$1" ]; then
         --pure_docker_mode \
         --preemptible \
         --num_nodes 1 \
-        --budget ai2/oe-adapt \
+        --budget ai2/oe-omai \
         --gpus 1 \
         --non_resumable \
         --artifact_ttl 1d \

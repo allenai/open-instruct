@@ -27,7 +27,7 @@ for split_var in split_int_mix_3; do
         --env HOSTED_VLLM_API_BASE=http://saturn-cs-aus-253.reviz.ai2.in:8001/v1 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env LITELLM_LOG="ERROR" \
-        --budget ai2/oe-adapt \
+        --budget ai2/oe-omai \
         --artifact_ttl 1d \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \

@@ -17,7 +17,7 @@ python src/scripts/train/sft/OLMo-sft.py train \
     --num_nodes=8 \
     --global_batch_size=4194304 \
     --model_name=olmo3-32b \
-    --budget=ai2/oe-adapt \
+    --budget=ai2/oe-omai \
     --workspace=ai2/olmo-instruct \
     --dataset_path=gs://ai2-llm/jacobm/data/sft/rl-sft-32k/olmo3-32b-instruct-sft-1114 \
     --launch.priority=urgent
