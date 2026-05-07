@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Aggregate prompt/response lengths across all DP ranks (deduplicating SP groups) when computing GRPO step token counts and utilization metrics, instead of using only rank 0 (https://github.com/allenai/open-instruct/pull/1659).
 - Split `accumulate_inference_batches` into `process_single_result` and `combine_processed_results` for clarity (https://github.com/allenai/open-instruct/pull/1614).
 - Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
 - Address review feedback on #1620: derive vocab size from the run's tokenizer (no longer hardcoded to dolma2), validate complete numpy artifacts before reusing the SFT cache, fold seed/max_seq_length into the cache directory, fix HF-vs-olmo-core checkpoint detection for relative local paths, and log which checkpoint format was detected (https://github.com/allenai/open-instruct/pull/1620).
