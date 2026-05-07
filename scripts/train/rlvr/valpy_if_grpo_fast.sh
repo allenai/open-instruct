@@ -6,7 +6,7 @@ python mason.py \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name valpy_if_multi_tulu3.1_8b_grpo \
     --beta 0.01 \

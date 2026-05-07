@@ -12,7 +12,7 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 8 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 \
     -- \
     accelerate launch \

@@ -1,6 +1,6 @@
 version: v2
 description: open-instruct-finetune
-budget: ai2/oe-adapt
+budget: ai2/oe-omai
 tasks:
   - name: open-instruct-finetune
     image:

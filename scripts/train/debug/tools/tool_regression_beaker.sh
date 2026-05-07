@@ -22,7 +22,7 @@ uv run python mason.py \
        --env VLLM_USE_V1=1 \
        --env 'SERPER_API_KEY=secret:hamishivi_SERPER_API_KEY' \
        --env 'JINA_API_KEY=secret:hamishivi_JINA_API_KEY' \
-       --budget ai2/oe-adapt \
+       --budget ai2/oe-omai \
        --gpus 1 \
        --no_auto_dataset_cache \
        --artifact_ttl 1d \

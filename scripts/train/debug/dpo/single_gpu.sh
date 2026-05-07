@@ -11,7 +11,7 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --no_auto_dataset_cache \
     --artifact_ttl 1d \
     --no-host-networking \

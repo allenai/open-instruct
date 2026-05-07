@@ -23,7 +23,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --gpus 8 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --artifact_ttl 1d \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \

@@ -23,7 +23,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     -- \
 uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \

@@ -2,7 +2,7 @@
 # Convert Think SFT OLMo-core checkpoint to HuggingFace format.
 # This runs in OLMo-core, not open-instruct.
 
-gantry run --cluster ai2/saturn-cirrascale --timeout -1 -y --budget ai2/oe-adapt --workspace ai2/olmo-instruct \
+gantry run --cluster ai2/saturn-cirrascale --timeout -1 -y --budget ai2/oe-omai --workspace ai2/olmo-instruct \
     --beaker-image tylerr/olmo-core-tch291cu128-2025-11-25 \
     --install "/opt/conda/bin/pip install -e '.[fla,transformers]'" \
     --weka=oe-adapt-default:/weka/oe-adapt-default \

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Update Beaker budget from `ai2/oe-adapt` to `ai2/oe-omai` across launch scripts and beaker configs to fix experiment launch failures from the retired budget (https://github.com/allenai/open-instruct/pull/1660).
 - Log every filtered prompt in `accumulate_inference_batches` at INFO level with the zero/solved/nonzero breakdown, and add `batch/filtered_prompts_pct` to wandb so policy collapse / convergence is visible without spelunking debug logs (https://github.com/allenai/open-instruct/pull/1657).
 - Aggregate prompt/response lengths across all DP ranks (deduplicating SP groups) when computing GRPO step token counts and utilization metrics, instead of using only rank 0 (https://github.com/allenai/open-instruct/pull/1659).
 - Split `accumulate_inference_batches` into `process_single_result` and `combine_processed_results` for clarity (https://github.com/allenai/open-instruct/pull/1614).

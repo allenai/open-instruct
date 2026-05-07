@@ -6,7 +6,7 @@ python mason.py \
     --priority high \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --exp_name tulu3_8b_ppo \
     --beta 0.05 \
