@@ -162,39 +162,57 @@ class DifficultyCurriculumArgs:
     curriculum_adaptive_exploration_weight: float = 0.3
     curriculum_adaptive_blend: float = 0.5
 
-    def build_curriculum_config(self, *, seed: int) -> DifficultyCurriculumConfig | None:
+    def build_metadata_config(self) -> DifficultyCurriculumMetadataConfig:
+        return DifficultyCurriculumMetadataConfig(
+            field=self.curriculum_metadata_field,
+            posterior_mean_field=self.curriculum_posterior_mean_field,
+            bucket_index_field=self.curriculum_bucket_index_field,
+            bucket_count_field=self.curriculum_bucket_count_field,
+            strict=self.curriculum_strict_metadata,
+        )
+
+    def build_schedule_config(self) -> DifficultyCurriculumScheduleConfig:
+        return DifficultyCurriculumScheduleConfig(
+            bootstrap_steps=self.curriculum_bootstrap_steps,
+            warmup_steps=self.curriculum_warmup_steps,
+            total_steps=self.curriculum_total_steps,
+            bootstrap_target=self.curriculum_bootstrap_target,
+            warmup_target=self.curriculum_warmup_target,
+            final_target=self.curriculum_final_target,
+            min_hard_frac=self.curriculum_min_hard_frac,
+            max_hard_frac=self.curriculum_max_hard_frac,
+            bucket_sigma=self.curriculum_bucket_sigma,
+            bootstrap_sigma=self.curriculum_bootstrap_sigma,
+        )
+
+    def build_adaptive_config(self) -> DifficultyCurriculumAdaptiveConfig:
+        return DifficultyCurriculumAdaptiveConfig(
+            enabled=self.curriculum_adaptive,
+            update_every=self.curriculum_adaptive_update_every,
+            learning_weight=self.curriculum_adaptive_learning_weight,
+            exploration_weight=self.curriculum_adaptive_exploration_weight,
+            blend=self.curriculum_adaptive_blend,
+        )
+
+    def verify(self) -> None:
         if self.curriculum == "none":
-            return None
+            return
         if self.curriculum != "difficulty":
             raise ValueError(f"Unsupported curriculum type: {self.curriculum}")
 
+        self.build_metadata_config()
+        self.build_schedule_config()
+        self.build_adaptive_config()
+
+    def build_curriculum_config(self, *, seed: int) -> DifficultyCurriculumConfig | None:
+        self.verify()
+        if self.curriculum == "none":
+            return None
+
         return DifficultyCurriculumConfig(
-            metadata=DifficultyCurriculumMetadataConfig(
-                field=self.curriculum_metadata_field,
-                posterior_mean_field=self.curriculum_posterior_mean_field,
-                bucket_index_field=self.curriculum_bucket_index_field,
-                bucket_count_field=self.curriculum_bucket_count_field,
-                strict=self.curriculum_strict_metadata,
-            ),
-            schedule=DifficultyCurriculumScheduleConfig(
-                bootstrap_steps=self.curriculum_bootstrap_steps,
-                warmup_steps=self.curriculum_warmup_steps,
-                total_steps=self.curriculum_total_steps,
-                bootstrap_target=self.curriculum_bootstrap_target,
-                warmup_target=self.curriculum_warmup_target,
-                final_target=self.curriculum_final_target,
-                min_hard_frac=self.curriculum_min_hard_frac,
-                max_hard_frac=self.curriculum_max_hard_frac,
-                bucket_sigma=self.curriculum_bucket_sigma,
-                bootstrap_sigma=self.curriculum_bootstrap_sigma,
-            ),
-            adaptive=DifficultyCurriculumAdaptiveConfig(
-                enabled=self.curriculum_adaptive,
-                update_every=self.curriculum_adaptive_update_every,
-                learning_weight=self.curriculum_adaptive_learning_weight,
-                exploration_weight=self.curriculum_adaptive_exploration_weight,
-                blend=self.curriculum_adaptive_blend,
-            ),
+            metadata=self.build_metadata_config(),
+            schedule=self.build_schedule_config(),
+            adaptive=self.build_adaptive_config(),
             uncertainty_weight=self.curriculum_uncertainty_weight,
             seed=seed,
         )

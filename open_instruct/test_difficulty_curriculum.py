@@ -183,9 +183,9 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         self.assertGreater(tuned_probs[0], default_probs[0])
         self.assertLess(tuned_probs[2], default_probs[2])
 
-    def test_curriculum_args_parser_builds_grouped_config(self):
+    def test_curriculum_parser_builds_grouped_config(self):
         parser = HfArgumentParser((difficulty_curriculum.DifficultyCurriculumArgs,))
-        (curriculum_args,) = parser.parse_args_into_dataclasses(
+        (curriculum,) = parser.parse_args_into_dataclasses(
             [
                 "--curriculum",
                 "difficulty",
@@ -202,7 +202,8 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
             ]
         )
 
-        curriculum_config = curriculum_args.build_curriculum_config(seed=17)
+        curriculum.verify()
+        curriculum_config = curriculum.build_curriculum_config(seed=17)
 
         self.assertIsNotNone(curriculum_config)
         assert curriculum_config is not None
@@ -212,6 +213,9 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         self.assertTrue(curriculum_config.adaptive.enabled)
         self.assertEqual(curriculum_config.adaptive.blend, 0.25)
         self.assertEqual(curriculum_config.seed, 17)
+
+    def test_curriculum_verify_accepts_none_mode(self):
+        difficulty_curriculum.DifficultyCurriculumArgs().verify()
 
 
 class TestDifficultyCurriculumLoaderIntegration(unittest.TestCase):
