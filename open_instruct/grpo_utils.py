@@ -560,10 +560,7 @@ def calculate_token_counts(
     device: torch.device,
     process_group: dist.ProcessGroup | None = None,
 ) -> dict[int, float]:
-    """Compute total token counts per accumulation group, all-reduced across DP ranks.
-
-    Copied from grpo_fast.py to share logic with olmo_core_train_modules.py.
-    """
+    """Compute total token counts per accumulation group, all-reduced across DP ranks."""
     accumulation_counts: dict[int, float] = {}
     local_counts = [(mask[:, 1:] > 0).sum().float() for mask in data_BT.response_masks]
     if not local_counts:

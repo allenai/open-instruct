@@ -41,7 +41,7 @@ with contextlib.suppress(Exception):
     from deepspeed.utils import groups
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, grpo_utils, utils
+from open_instruct import grpo_utils, utils
 from open_instruct.data_loader import add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
@@ -576,24 +576,6 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def calculate_token_counts(
-        self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
-    ) -> dict[int, float]:
-        accumulation_counts: dict[int, float] = {}
-        local_counts = [(mask[:, 1:] > 0).sum().float() for mask in data_BT.response_masks]
-        if not local_counts:
-            return accumulation_counts
-
-        counts_tensor = torch.stack(local_counts)
-        dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
-
-        for i, count in enumerate(counts_tensor):
-            group_idx = i // accumulation_steps
-            key = int(group_idx * accumulation_steps)
-            accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
-
-        return accumulation_counts
-
     def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor) -> None:
         metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
         for k, v in metrics.items():
@@ -673,7 +655,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
-                    accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+                    accumulation_token_counts = grpo_utils.calculate_token_counts(
+                        accumulation_steps, data_BT, self.device
+                    )
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): float(self.args.loss_denominator)
