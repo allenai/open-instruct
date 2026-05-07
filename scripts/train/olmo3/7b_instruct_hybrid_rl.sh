@@ -44,7 +44,7 @@ uv run --no-sync python mason.py \
         --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 \
         --env TRITON_PRINT_AUTOTUNING=1 \
         --gpus ${NUM_GPUS} \
-        --budget ai2/oe-adapt -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --budget ai2/oe-omai -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${EXP_NAME} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \

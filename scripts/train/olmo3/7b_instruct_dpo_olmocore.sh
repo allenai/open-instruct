@@ -24,7 +24,7 @@ do
         --env NCCL_IB_TIMEOUT=23 \
         --env NCCL_IB_RETRY_CNT=7 \
         --num_nodes 4 \
-        --budget ai2/oe-adapt \
+        --budget ai2/oe-omai \
         --gpus 8 -- torchrun \
         --nnodes=4 \
         --node_rank=\$BEAKER_REPLICA_RANK \

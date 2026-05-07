@@ -21,7 +21,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
-       --budget ai2/oe-adapt \
+       --budget ai2/oe-omai \
        --gpus 8 \
        --no_auto_dataset_cache \
        --artifact_ttl 1d \

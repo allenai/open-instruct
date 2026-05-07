@@ -6,7 +6,7 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name qwen2.5_7b_grpo_fast_zero_orz \
     --beta 0.0 \

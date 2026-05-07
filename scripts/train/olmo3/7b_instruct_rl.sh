@@ -37,7 +37,7 @@ uv run python mason.py \
         --env HOSTED_VLLM_API_BASE=$hosted_vllm \
         --gs_model_name $gs_model_name \
         --gpus ${NUM_GPUS} \
-        --budget ai2/oe-adapt -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --budget ai2/oe-omai -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${EXP_NAME} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \

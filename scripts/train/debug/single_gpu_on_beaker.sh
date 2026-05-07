@@ -19,7 +19,7 @@ uv run python mason.py \
        --max_retries 0 \
        --timeout 15m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-       --budget ai2/oe-adapt \
+       --budget ai2/oe-omai \
        --gpus 1 \
        --no_auto_dataset_cache \
        --artifact_ttl 1d \

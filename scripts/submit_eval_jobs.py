@@ -78,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--priority", type=str, default="normal")
     parser.add_argument("--preemptible", action="store_true")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-3-results")
-    parser.add_argument("--budget", type=str, default="ai2/oe-adapt")
+    parser.add_argument("--budget", type=str, default="ai2/oe-omai")
     parser.add_argument(
         "--beaker_image",
         type=str,
