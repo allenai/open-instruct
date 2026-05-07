@@ -31,8 +31,8 @@ def _make_batch_data(
         attention_masks.append(torch.ones(batch_size, seq_len, dtype=torch.long))
         position_ids.append(torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1))
         advantages.append(torch.randn(batch_size, seq_len))
-        response_mask = torch.ones(batch_size, seq_len, dtype=torch.long)
-        response_mask[:, :2] = 0
+        response_mask = torch.ones(batch_size, seq_len, dtype=torch.bool)
+        response_mask[:, :2] = False
         response_masks.append(response_mask)
         vllm_logprobs.append(torch.randn(batch_size, seq_len - 1))
 
