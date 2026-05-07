@@ -54,6 +54,7 @@ All notable changes to this project will be documented in this file.
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Add `time/per_group_wall_time` metric: mean of per-group generation wall-clock times across the batch, providing a cleaner per-group timing signal than `time/getting_response` (which is the max) (https://github.com/allenai/open-instruct/pull/1656).
 - Replace `scripts/submit_eval_jobs.py` with a new olmo-eval-internal launcher (Beaker v2, no gantry); the previous script is preserved as `scripts/submit_eval_jobs_old.py` and emits a `DeprecationWarning` (https://github.com/allenai/open-instruct/pull/1638).
 - Add OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1579).
 - Add DR-TULU replication script for Qwen 3.5 4B with evolving rubrics, per-tool pool size overrides, `vllm_qwen3_xml` parser, and `<answer>` tag extraction in rubric scoring (https://github.com/allenai/open-instruct/pull/1609).
