@@ -353,7 +353,7 @@ for TASK in "${TASKS[@]}"; do
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
             --beaker-workspace "$BEAKER_WORKSPACE" \
-            --beaker-budget ai2/oe-adapt \
+            --beaker-budget ai2/oe-omai \
             --beaker-timeout 48h \
             --task "$TASK" \
             $MODEL_TYPE \
@@ -375,7 +375,7 @@ for TASK in "${TASKS[@]}"; do
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
         --beaker-workspace "$BEAKER_WORKSPACE" \
-        --beaker-budget ai2/oe-adapt \
+        --beaker-budget ai2/oe-omai \
         --beaker-timeout 48h \
         --task "$TASK" \
         $MODEL_TYPE \

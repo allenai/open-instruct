@@ -20,7 +20,7 @@ python mason.py \
         --max_retries 0 \
         --env HOSTED_VLLM_API_BASE=${JUDGE_BASE_URL} \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-        --budget ai2/oe-adapt \
+        --budget ai2/oe-omai \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
             --exp_name 0906rl_judge_test_${RANDOM} \
             --dataset_mixer_list hamishivi/WebInstruct-verified-general-verifier-judge 1.0 \

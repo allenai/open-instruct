@@ -16,7 +16,7 @@ uv run python mason.py \
         --timeout 1h \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-        --budget ai2/oe-adapt \
+        --budget ai2/oe-omai \
         --artifact_ttl 1d \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo.py \
         --exp_name ${exp_name} \
