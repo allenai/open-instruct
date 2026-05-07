@@ -1,6 +1,6 @@
 [project]
 name = "open-instruct"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Train open, instruction-following language models"
 readme = "README.md"
 requires-python = "==3.12.*"
@@ -48,11 +48,14 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["open_instruct"]
+
+[tool.setuptools_scm]
+write_to = "open_instruct/_version.py"
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]

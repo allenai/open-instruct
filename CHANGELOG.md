@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Log every filtered prompt in `accumulate_inference_batches` at INFO level with the zero/solved/nonzero breakdown, and add `batch/filtered_prompts_pct` to wandb so policy collapse / convergence is visible without spelunking debug logs (https://github.com/allenai/open-instruct/pull/1657).
+- Aggregate prompt/response lengths across all DP ranks (deduplicating SP groups) when computing GRPO step token counts and utilization metrics, instead of using only rank 0 (https://github.com/allenai/open-instruct/pull/1659).
+- Split `accumulate_inference_batches` into `process_single_result` and `combine_processed_results` for clarity (https://github.com/allenai/open-instruct/pull/1614).
 - Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
 - Address review feedback on #1620: derive vocab size from the run's tokenizer (no longer hardcoded to dolma2), validate complete numpy artifacts before reusing the SFT cache, fold seed/max_seq_length into the cache directory, fix HF-vs-olmo-core checkpoint detection for relative local paths, and log which checkpoint format was detected (https://github.com/allenai/open-instruct/pull/1620).
 - Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary (https://github.com/allenai/open-instruct/pull/1631).
@@ -29,6 +32,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Fix OLMo-core GRPO trainer↔vLLM logprob divergence by deriving `doc_lens` / `max_doc_lens` from the packed `attention_mask` and passing them to OLMo-core's `Transformer` in the logprob recompute. OLMo-core silently ignores `position_ids` resets without explicit doc boundaries, so the trainer was running cross-doc attention while vLLM ran intra-doc, blowing up `val/tis_clipfrac` ~570× vs the HF reference. With the fix `tis_clipfrac` drops from ~3.2e-3 to ~3.8e-6 (https://github.com/allenai/open-instruct/pull/1642).
+- Fix hardcoded project version (https://github.com/allenai/open-instruct/pull/1636) by using setuptools scm's automatic versioning.
 - Fix CUDA illegal-memory-access in FSDP2 weight sync to vLLM by also unsharding the root FSDPModule (root-level params like model.norm and lm_head were producing local-shard buffers with global stride) (https://github.com/allenai/open-instruct/pull/1649).
 - Fix weight sync on resume by initializing vLLM weight sync before the training loop and warming up the learner with a dummy forward so DeepSpeed Stage 3 params materialize before the first broadcast; accept IPC `update_info` dict in `LLMRayActor.update_weights`; replace toothless weight-sync tests with a real divergent-weight broadcast test (https://github.com/allenai/open-instruct/pull/1627).
 - Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
