@@ -109,7 +109,7 @@ class GRPOExperimentConfig(
     (https://arxiv.org/abs/...) and IcePop (https://arxiv.org/abs/2510.18855)."""
     rho_clamp_lower_bound: float = 0.0
     """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
-    rho_clamp_upper_bound: float = 0.0
+    rho_clamp_upper_bound: float = 2.0
     """Upper bound for clamping ρ before reweighting the policy loss (0 disables)."""
     rho_mask_lower_bound: float = 0.0
     """Tokens with ρ below this value are dropped (0 disables)."""
