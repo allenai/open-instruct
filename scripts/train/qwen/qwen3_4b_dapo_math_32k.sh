@@ -28,7 +28,7 @@ uv run mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --no_auto_dataset_cache \
     --gpus 8 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
@@ -39,8 +39,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --use_rho_correction \
-    --rho_clamp_upper_bound 2.0 \
+    --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
