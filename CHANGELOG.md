@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Add optional difficulty-curriculum prompt sampling to grpo_fast.py, `DifficultyCurriculumHFDataLoader`, and a scripts/data/difficulty_sampling/create_difficulty_map.py builder, with matching docs/tests and a Qwen launch script (https://github.com/allenai/open-instruct/pull/1661).
 - Aggregate prompt/response lengths across all DP ranks (deduplicating SP groups) when computing GRPO step token counts and utilization metrics, instead of using only rank 0 (https://github.com/allenai/open-instruct/pull/1659).
 - Split `accumulate_inference_batches` into `process_single_result` and `combine_processed_results` for clarity (https://github.com/allenai/open-instruct/pull/1614).
 - Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
