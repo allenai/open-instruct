@@ -1392,7 +1392,7 @@ class DataPreparationActor:
 
             if len(result.responses) == 0:
                 logger.warning(
-                    f"[DataPreparationActor] 🤡 {self.training_step=}: no trainable responses after truncation filter; "
+                    f"[DataPreparationActor] 🤡 Step {self.training_step}: no trainable responses after truncation filter; "
                     "resampling without advancing step counter"
                 )
                 continue
