@@ -1115,6 +1115,24 @@ def accumulate_inference_batches(
     )
 
 
+def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch: Batch, enabled: bool) -> Batch:
+    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch."""
+    if not enabled:
+        return batch
+    stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
+    num_truncated = len(result.finish_reasons) - len(stop_idxes)
+    if num_truncated > 0:
+        logger.info(
+            f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+            f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
+        )
+    result.responses = [result.responses[i] for i in stop_idxes]
+    result.masks = [result.masks[i] for i in stop_idxes]
+    result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
+    result.logprobs = [result.logprobs[i] for i in stop_idxes]
+    return batch[stop_idxes]
+
+
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
     dp_world_size: int,
@@ -1353,29 +1371,24 @@ class DataPreparationActor:
             if isinstance(result, data_types.ShutdownSentinel):
                 return
 
-            if result is not None and self.config.mask_truncated_completions:
-                stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
-                num_truncated = len(result.finish_reasons) - len(stop_idxes)
-                if num_truncated > 0:
-                    logger.info(
-                        f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                        f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
-                    )
-                batch = batch[stop_idxes]
-                result.responses = [result.responses[i] for i in stop_idxes]
-                result.masks = [result.masks[i] for i in stop_idxes]
-                result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
-                result.logprobs = [result.logprobs[i] for i in stop_idxes]
-
-            if result is None or len(result.responses) == 0:
+            if result is None:
                 logger.warning(
-                    f"[DataPreparationActor] Step {step}: no trainable responses after filtering; "
+                    f"[DataPreparationActor] Step {step}: all groups filtered (zero-std rewards); "
                     "resampling without advancing step counter"
                 )
                 continue
 
             assert batch is not None
             assert batch_stats is not None
+
+            batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
+
+            if len(result.responses) == 0:
+                logger.warning(
+                    f"[DataPreparationActor] Step {step}: no trainable responses after truncation filter; "
+                    "resampling without advancing step counter"
+                )
+                continue
 
             if self.rubric_manager and batch.decoded_responses:
                 rubric_metrics, new_overrides = self.rubric_manager.run_step(
