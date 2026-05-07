@@ -13,7 +13,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
     --artifact_ttl 1d \
     --gpus 1 -- accelerate launch \
     --mixed_precision bf16 \

@@ -92,7 +92,6 @@ if [ "$deploy_mode" = "docker_weka" ]; then
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker_nfs" ]; then
     python mason.py \
@@ -100,7 +99,6 @@ elif [ "$deploy_mode" = "docker_nfs" ]; then
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker" ]; then
     python mason.py \
@@ -108,14 +106,12 @@ elif [ "$deploy_mode" = "docker" ]; then
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "nfs" ]; then
     python mason.py \
         --cluster ai2/jupiter \
         --priority low \
         --preemptible \
-        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 else
     echo "Invalid deploy_mode"

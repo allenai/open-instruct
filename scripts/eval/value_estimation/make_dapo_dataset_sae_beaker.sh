@@ -12,7 +12,6 @@ MODEL_NAME_OR_PATH="${2:-Qwen/Qwen3-4B-Base}"
 CHAT_TEMPLATE_NAME="${3:-qwen_instruct_user_boxed_math}"
 
 uv run python mason.py \
-    --budget ai2/oe-adapt \
     --cluster ai2/jupiter \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \

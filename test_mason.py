@@ -94,7 +94,6 @@ class TestExperimentSpec(unittest.TestCase):
                     "max_retries": 0,
                     "timeout": "15m",
                     "env": [{"name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN", "value": "1"}],
-                    "budget": "ai2/oe-adapt",
                     "gpus": 1,
                     "no_host_networking": False,
                     "beaker_datasets": [],
@@ -119,7 +118,6 @@ class TestExperimentSpec(unittest.TestCase):
                     "max_retries": 0,
                     "timeout": "1h",
                     "env": [{"name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN", "value": "1"}],
-                    "budget": "ai2/oe-adapt",
                     "gpus": 8,
                     "no_host_networking": False,
                     "beaker_datasets": [],
@@ -180,7 +178,7 @@ class TestExperimentSpec(unittest.TestCase):
 
         self.assertEqual(actual_spec, expected_spec)
 
-    def test_experiment_spec_omits_optional_budget(self):
+    def test_experiment_spec_has_no_budget(self):
         args = Namespace(
             cluster=["ai2/jupiter"],
             image="test-user/open-instruct-integration-test",
@@ -192,7 +190,6 @@ class TestExperimentSpec(unittest.TestCase):
             max_retries=0,
             timeout="15m",
             env=[],
-            budget=None,
             gpus=1,
             no_host_networking=False,
             beaker_datasets=[],

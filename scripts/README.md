@@ -112,7 +112,6 @@ Then you can submit jobs via `mason.py`, which we modified from https://github.c
 python mason.py \
     --cluster ai2/jupiter \
     --priority low \
-    --budget ai2/jupiter \
     --gpus 1 -- which python
 ```
 
@@ -128,7 +127,6 @@ After setting it up successfully, say you are running `sh scripts/dpo_train_with
 python mason.py \
     --cluster ai2/jupiter \
     --priority low \
-    --budget ai2/jupiter \
     --gpus 1 -- sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/mini.yaml
 ```
 

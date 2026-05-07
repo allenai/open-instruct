@@ -70,7 +70,6 @@ python mason.py \
     --cluster ai2/jupiter \
     --priority low \
     --preemptible \
-    --budget ai2/jupiter \
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"
