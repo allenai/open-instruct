@@ -27,8 +27,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env OPEN_INSTRUCT_DUMP_DIR=/weka/oe-adapt-default/finbarrt/step1_capture/${RUN_NAME} \
-    --env OPEN_INSTRUCT_DUMP_STEP=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-adapt \
     -- \

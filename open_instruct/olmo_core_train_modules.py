@@ -22,8 +22,8 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
-from open_instruct import _step1_capture, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct import data_loader as data_loader_lib
+from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -382,17 +382,6 @@ class GRPOTrainModule(TransformerTrainModule):
         self.model.train()
         data_BT = batch["batch"].to(self.device)
 
-        capture_active = _step1_capture.is_active(self.trainer.global_step)
-        capture_payload: dict[str, Any] = {}
-        if capture_active:
-            capture_payload["trainer"] = "grpo_olmo_core"
-            capture_payload["global_step"] = int(self.trainer.global_step)
-            capture_payload["dp_world_size"] = (
-                dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
-            )
-            capture_payload["inputs"] = _step1_capture.snapshot_inputs(data_BT)
-            capture_payload["samples"] = []
-
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
@@ -517,27 +506,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 loss_denominator = accumulation_token_counts[batch_start]
                 loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
 
-                loss_pre_mul = loss.detach().float().item()
                 loss = loss * dp_world_size
-                loss_post_mul = loss.detach().float().item()
                 loss.backward()
-
-                if capture_active and sample_idx < 2:
-                    capture_payload["samples"].append(
-                        {
-                            "sample_idx": int(sample_idx),
-                            "epoch_idx": int(epoch_idx),
-                            "loss_pre_mul": loss_pre_mul,
-                            "loss_post_mul": loss_post_mul,
-                            "loss_denominator": float(loss_denominator),
-                            "new_logprobs": new_logprobs.detach().to("cpu", copy=True),
-                            "pg_loss": pg_loss.detach().to("cpu", copy=True),
-                            "kl": kl.detach().to("cpu", copy=True) if isinstance(kl, torch.Tensor) else float(kl),
-                            "ratio": ratio.detach().to("cpu", copy=True),
-                            "response_mask": response_mask.detach().to("cpu", copy=True),
-                            "tis_clamped": tis_clamped.detach().to("cpu", copy=True),
-                        }
-                    )
 
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
@@ -559,25 +529,14 @@ class GRPOTrainModule(TransformerTrainModule):
                 local_step += 1
 
                 if local_step % accumulation_steps == 0:
-                    if capture_active and "param_grads" not in capture_payload:
-                        capture_payload["param_grads"] = _step1_capture.snapshot_param_grads(
-                            self.model.named_parameters()
-                        )
                     if not dry_run:
                         self._do_optim_step()
                     self.optim.zero_grad(set_to_none=True)
 
         if local_step % accumulation_steps != 0:
-            if capture_active and "param_grads" not in capture_payload:
-                capture_payload["param_grads"] = _step1_capture.snapshot_param_grads(self.model.named_parameters())
             if not dry_run:
                 self._do_optim_step()
             self.optim.zero_grad(set_to_none=True)
-
-        if capture_active:
-            if self._grad_norms:
-                capture_payload["reported_grad_norm"] = float(self._grad_norms[-1])
-            _step1_capture.write("grpo_olmo_core", int(self.trainer.global_step), capture_payload)
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)

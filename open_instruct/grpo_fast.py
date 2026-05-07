@@ -40,7 +40,6 @@ with contextlib.suppress(Exception):
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
-from open_instruct import _step1_capture
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import add_prompt_to_generator
@@ -390,7 +389,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
-        self._step_counter: int = 0
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
@@ -615,15 +613,6 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
 
-        self._step_counter += 1
-        capture_active = _step1_capture.is_active(self._step_counter)
-        capture_payload: dict = {}
-        if capture_active:
-            capture_payload["trainer"] = "grpo_fast"
-            capture_payload["global_step"] = int(self._step_counter)
-            capture_payload["dp_world_size"] = int(self.args.world_size // self.args.sequence_parallel_size)
-            capture_payload["samples"] = []
-
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
             with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
@@ -631,8 +620,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
         data_BT = data_BT.to(self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
-        if capture_active:
-            capture_payload["inputs"] = _step1_capture.snapshot_inputs(data_BT)
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
@@ -753,32 +740,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
-                    loss_pre_mul = float(loss.detach().float().item())
 
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
                     loss *= self.args.world_size // self.args.sequence_parallel_size
-                    loss_post_mul = float(loss.detach().float().item())
-
-                    if capture_active and i < 2:
-                        capture_payload["samples"].append(
-                            {
-                                "sample_idx": int(i),
-                                "epoch_idx": int(epoch_idx),
-                                "loss_pre_mul": loss_pre_mul,
-                                "loss_post_mul": loss_post_mul,
-                                "loss_denominator": float(loss_denominator),
-                                "new_logprobs": new_logprobs_BT.detach().to("cpu", copy=True),
-                                "pg_loss": pg_loss_max_BT.detach().to("cpu", copy=True),
-                                "kl": kl_BT.detach().to("cpu", copy=True)
-                                if isinstance(kl_BT, torch.Tensor)
-                                else float(kl_BT),
-                                "ratio": ratio_BT.detach().to("cpu", copy=True),
-                                "response_mask": response_mask_BT.detach().to("cpu", copy=True),
-                                "tis_clamped": tis_clamped_BT.detach().to("cpu", copy=True),
-                            }
-                        )
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -787,10 +753,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
                     if is_accumulation_boundary:
-                        if capture_active and "param_grads" not in capture_payload:
-                            capture_payload["param_grads"] = _step1_capture.snapshot_param_grads(
-                                self.model.module.named_parameters()
-                            )
                         self.model.step()
                         grad_norms.append(float(self.model.get_global_grad_norm()))
                     local_step += 1
@@ -814,9 +776,6 @@ class PolicyTrainerRayProcess(RayProcess):
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
-                if capture_active:
-                    capture_payload["reported_grad_norm"] = float(grad_norms[-1]) if grad_norms else None
-                    _step1_capture.write("grpo_fast", int(self._step_counter), capture_payload)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
