@@ -714,7 +714,7 @@ def maybe_evaluate(
         return True
 
     try:
-        is_final_step = training_step >= args.num_training_steps
+        is_final_step = training_step >= args.num_training_steps  # ty: ignore[unsupported-operator]
         num_eval_prompts = len(eval_dataset)
         if not is_final_step:
             queued_results = evaluation_inference_results_Q.qsize()
@@ -784,7 +784,7 @@ def maybe_evaluate(
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
         table["response"] = eval_batch.decoded_responses
-        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]  # ty: ignore[not-iterable]
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         if eval_batch.active_tools is not None:

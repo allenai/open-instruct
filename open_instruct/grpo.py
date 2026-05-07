@@ -131,7 +131,7 @@ def main(
         model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
     )
     _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
-    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
+    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)  # ty: ignore[invalid-argument-type]
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",

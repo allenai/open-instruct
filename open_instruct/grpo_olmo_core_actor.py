@@ -357,10 +357,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.rank == 0 and self.eval_dataset is not None and self.grpo_config.local_eval_every > 0:
             trainer_callbacks["eval"] = EvalCallback(
                 args=self.grpo_config,
-                prompt_Q=self.prompt_Q,
-                evaluation_inference_results_Q=self.evaluation_inference_results_Q,
+                prompt_Q=self.prompt_Q,  # ty: ignore[invalid-argument-type]
+                evaluation_inference_results_Q=self.evaluation_inference_results_Q,  # ty: ignore[invalid-argument-type]
                 eval_dataset=self.eval_dataset,
-                eval_data_loader=self.eval_data_loader,
+                eval_data_loader=self.eval_data_loader,  # ty: ignore[invalid-argument-type]
                 eval_generation_config=self.eval_generation_config,
                 model_dims=model_dims,
                 base_env_config=self.base_env_config,
