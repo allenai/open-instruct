@@ -101,7 +101,7 @@ class GRPOExperimentConfig(
     """the lower clip range"""
     clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    use_rho_correction: bool = False
+    use_rho_correction: bool = True
     """Master switch for the train/infer ratio ρ = π^train_old / π^infer_old correction.
     When True, ρ is clamped to [rho_clamp_lower_bound, rho_clamp_upper_bound] and tokens
     whose ρ falls outside [rho_mask_lower_bound, rho_mask_upper_bound] have their

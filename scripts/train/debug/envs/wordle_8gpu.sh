@@ -48,7 +48,6 @@ uv run python mason.py \
     --seed 42 \
     --inflight_updates True \
     --async_steps 1 \
-    --use_rho_correction \
     --rho_clamp_upper_bound 5.0 \
     --gradient_checkpointing \
     --with_tracking \
