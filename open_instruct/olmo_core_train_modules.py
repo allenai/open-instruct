@@ -29,6 +29,10 @@ from open_instruct.rl_utils import masked_mean
 logger = logger_utils.setup_logger(__name__)
 
 
+def _compute_per_sample_token_counts(response_masks: list[torch.Tensor], device: torch.device | str) -> torch.Tensor:
+    return torch.tensor([mask[:, 1:].sum().float() for mask in response_masks], device=device)
+
+
 class DPOLMHead(LMHead):
     """LM head that returns per-token log-probabilities for DPO training.
 
@@ -418,7 +422,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 for i in range(num_samples):
                     if self.grpo_config.use_vllm_logprobs:
                         old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
+                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
                         )
                     else:
                         assert local_old_logprobs_BT is not None
@@ -436,9 +440,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
 
-        token_counts = torch.tensor(
-            [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
-        )
+        token_counts = _compute_per_sample_token_counts(data_BT.response_masks, self.device)
         loss_stats_B = grpo_utils.create_loss_stats(
             num_samples, self.device, record_entropy=self.grpo_config.record_entropy
         )
@@ -463,7 +465,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     pass_olmo_core_doc_lens=True,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:]
+                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool()
                 new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
 
                 vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)

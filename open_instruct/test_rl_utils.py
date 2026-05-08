@@ -152,10 +152,10 @@ class TestRLUtils(unittest.TestCase):
         )
 
         self.assertEqual(len(packed.response_masks), 2)
-        self.assertEqual(packed.response_masks[0].dtype, torch.bool)
-        self.assertEqual(packed.response_masks[1].dtype, torch.bool)
-        torch.testing.assert_close(packed.response_masks[0], torch.tensor(expected_mask_0, dtype=torch.bool))
-        torch.testing.assert_close(packed.response_masks[1], torch.tensor(expected_mask_1, dtype=torch.bool))
+        self.assertEqual(packed.response_masks[0].dtype, torch.long)
+        self.assertEqual(packed.response_masks[1].dtype, torch.long)
+        torch.testing.assert_close(packed.response_masks[0].bool(), torch.tensor(expected_mask_0, dtype=torch.bool))
+        torch.testing.assert_close(packed.response_masks[1].bool(), torch.tensor(expected_mask_1, dtype=torch.bool))
 
     def test_calculate_advantages_packed(self):
         """Test that calculate_advantages_packed produces same results as unpacked version."""
