@@ -1479,23 +1479,44 @@ def _broadcast_weights_ipc(
     gather_whole_model: bool,
     model_step: int,
 ) -> list[ray.ObjectRef]:
-    """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
-    is_rank_0 = torch.distributed.get_rank() == 0
+    """Broadcast weights using IPC backend (same-GPU / single_gpu_mode).
+
+    Non-rank-0 trainer ranks reach this function whenever
+    `model_update_group is None`, which happens for every learner that
+    does not own the trainer-vLLM weight-transfer process group. Those
+    ranks must still participate in DeepSpeed ZeRO-3's collective
+    GatheredParameters call so that rank 0's gather/send completes; we
+    therefore honour ``gather_whole_model`` here too. With
+    ``gather_whole_model=False`` we gather one parameter at a time
+    (~MB-scale buffer) instead of materialising the full model on each
+    GPU (~64 GB for Qwen2.5-32B), which avoids OOM on the broadcast.
+    """
+    is_rank_0 = torch.distributed.get_rank() == 0 if torch.distributed.is_initialized() else True
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
     if isinstance(model, FSDP):
-        ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+        batches = [(FSDP.summon_full_params(model, writeback=False, rank0_only=False), params)]
+    elif gather_whole_model:
+        batches = [(deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3), params)]
     else:
-        ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+        batches = [
+            (deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3), [(name, param)])
+            for name, param in params
+        ]
 
-    with ctx:
-        if is_rank_0:
-            mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
-            for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
-                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
+    for ctx, batch_params in batches:
+        with ctx:
+            if is_rank_0:
+                mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in batch_params]
+                for engine in vllm_engines:
+                    trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+                    IPCWeightTransferEngine.trainer_send_weights(
+                        iterator=iter(mapped_params), trainer_args=trainer_args
+                    )
+
+    if is_rank_0:
+        return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
 
 
