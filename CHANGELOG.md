@@ -38,7 +38,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Changed
-- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py`; add `PruningCheckpointerCallback` so `keep_last_n_checkpoints` also prunes permanent checkpoints; register pre-norm Qwen3/Llama OLMo-core→HF layernorm overrides (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
+- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py`; add `PruningCheckpointerCallback` so `keep_last_n_checkpoints` also prunes permanent checkpoints; register pre-norm Qwen3/Llama OLMo-core→HF layernorm overrides (https://github.com/allenai/open-instruct/pull/1671).
 
 ### Fixed
 - Fix hardcoded project version (https://github.com/allenai/open-instruct/pull/1636) by using setuptools scm's automatic versioning.
