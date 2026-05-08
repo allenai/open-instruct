@@ -1528,6 +1528,17 @@ class DataPreparationActor:
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
             assert result.logprobs is not None
+            # vLLM's default logprobs_mode is "raw_logprobs", which returns
+            # log_softmax(logits) without applying the sampling temperature.
+            # The trainer's forward pass divides logits by `temperature` before
+            # log_softmax (see grpo_utils.forward_for_logprobs), so we rescale
+            # the rollout logprobs by 1/T to bring them onto the same axis.
+            # This makes the TIS ratio and vLLM-vs-local logprob diagnostics
+            # comparable when sampling temperature != 1.0.
+            temperature = self.config.temperature
+            if temperature != 1.0:
+                result.logprobs = [[lp / temperature for lp in sample_logprobs] for sample_logprobs in result.logprobs]
+
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
