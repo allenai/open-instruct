@@ -77,16 +77,6 @@ def build_command_without_args(command, args_to_remove):
     return result
 
 
-def replace_or_append_flag(command: list[str], flag: str, value: str) -> list[str]:
-    """Replace the existing value for `flag` in `command`, or append `[flag, value]` if absent.
-
-    All occurrences of `flag` are stripped and `[flag, value]` is appended at the end.
-    """
-    command = build_command_without_args(command, {flag: True})
-    command.extend([flag, value])
-    return command
-
-
 def parse_beaker_dataset(dataset_str: str) -> dict[str, str]:
     splt = dataset_str.split(":")
     if len(splt) != 2:
@@ -512,7 +502,8 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     console.log(
                         f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir_path}/`"
                     )
-                    command = replace_or_append_flag(command, "--output_dir", f"{new_output_dir_path}/")
+                    command = build_command_without_args(command, {"--output_dir": True})
+                    command.extend(["--output_dir", f"{new_output_dir_path}/"])
             else:
                 no_eval_commands = [
                     ["--try_launch_beaker_eval_jobs", "False"],
@@ -690,7 +681,8 @@ def maybe_override_checkpoint_dir(
     console.log(
         f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_path}`"
     )
-    command = replace_or_append_flag(command, "--checkpoint_state_dir", str(new_checkpoint_state_path))
+    command = build_command_without_args(command, {"--checkpoint_state_dir": True})
+    command.extend(["--checkpoint_state_dir", str(new_checkpoint_state_path)])
 
     return command
 

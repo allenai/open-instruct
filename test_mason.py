@@ -85,59 +85,6 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
-class TestReplaceOrAppendFlag(unittest.TestCase):
-    @parameterized.parameterized.expand(
-        [
-            ("empty_command", [], "--output_dir", "/weka/x", ["--output_dir", "/weka/x"]),
-            (
-                "flag_absent",
-                ["python", "script.py", "--foo", "bar"],
-                "--output_dir",
-                "/weka/x",
-                ["python", "script.py", "--foo", "bar", "--output_dir", "/weka/x"],
-            ),
-            (
-                "flag_present_once",
-                ["python", "script.py", "--output_dir", "/tmp/y", "--foo", "bar"],
-                "--output_dir",
-                "/weka/x",
-                ["python", "script.py", "--foo", "bar", "--output_dir", "/weka/x"],
-            ),
-            (
-                "flag_present_twice_collapsed",
-                ["python", "s.py", "--output_dir", "/tmp/y", "--foo", "bar", "--output_dir", "/tmp/z"],
-                "--output_dir",
-                "/weka/x",
-                ["python", "s.py", "--foo", "bar", "--output_dir", "/weka/x"],
-            ),
-            (
-                "flag_at_end_without_value",
-                ["python", "script.py", "--output_dir"],
-                "--output_dir",
-                "/weka/x",
-                ["python", "script.py", "--output_dir", "/weka/x"],
-            ),
-            (
-                "adjacent_flags",
-                ["--output_dir", "--output_dir", "/tmp/z"],
-                "--output_dir",
-                "/weka/x",
-                ["--output_dir", "/weka/x"],
-            ),
-            (
-                "flag_followed_by_other_flag",
-                ["--output_dir", "--verbose"],
-                "--output_dir",
-                "/weka/x",
-                ["--verbose", "--output_dir", "/weka/x"],
-            ),
-        ]
-    )
-    def test_replace_or_append_flag(self, name, command, flag, value, expected):
-        result = mason.replace_or_append_flag(list(command), flag, value)
-        self.assertEqual(result, expected)
-
-
 class TestExperimentSpec(unittest.TestCase):
     @parameterized.parameterized.expand(
         [
