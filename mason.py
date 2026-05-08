@@ -38,29 +38,6 @@ OPEN_INSTRUCT_COMMANDS = [
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo.py", "open_instruct/grpo_fast.py"]
 
 
-def replace_or_append_flag(command: list[str], flag: str, value: str) -> list[str]:
-    """Replace the existing value for `flag` in `command`, or append `[flag, value]` if absent.
-
-    If `flag` appears multiple times, all occurrences are collapsed to a single occurrence with `value`.
-    """
-    indices = [i for i, tok in enumerate(command) if tok == flag]
-    if not indices:
-        command.append(flag)
-        command.append(value)
-        return command
-    first = indices[0]
-    if first + 1 < len(command):
-        command[first + 1] = value
-    else:
-        command.append(value)
-    for idx in reversed(indices[1:]):
-        if idx + 1 < len(command):
-            del command[idx : idx + 2]
-        else:
-            del command[idx]
-    return command
-
-
 CACHE_EXCLUDED_ARGS = {
     "--with_tracking": False,
     "--checkpoint_state_freq": True,
@@ -97,6 +74,27 @@ def build_command_without_args(command, args_to_remove):
 
         result.append(item)
 
+    return result
+
+
+def replace_or_append_flag(command: list[str], flag: str, value: str) -> list[str]:
+    """Replace the existing value for `flag` in `command`, or append `[flag, value]` if absent.
+
+    All occurrences of `flag` are removed (along with their following value, if it doesn't itself
+    start with "--"), and `[flag, value]` is appended at the end.
+    """
+    result: list[str] = []
+    i = 0
+    while i < len(command):
+        if command[i] == flag:
+            if i + 1 < len(command) and not command[i + 1].startswith("--"):
+                i += 2
+            else:
+                i += 1
+            continue
+        result.append(command[i])
+        i += 1
+    result.extend([flag, value])
     return result
 
 

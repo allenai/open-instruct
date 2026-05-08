@@ -94,14 +94,14 @@ class TestReplaceOrAppendFlag(unittest.TestCase):
                 ["python", "script.py", "--output_dir", "/tmp/y", "--foo", "bar"],
                 "--output_dir",
                 "/weka/x",
-                ["python", "script.py", "--output_dir", "/weka/x", "--foo", "bar"],
+                ["python", "script.py", "--foo", "bar", "--output_dir", "/weka/x"],
             ),
             (
                 "flag_present_twice_collapsed",
                 ["python", "s.py", "--output_dir", "/tmp/y", "--foo", "bar", "--output_dir", "/tmp/z"],
                 "--output_dir",
                 "/weka/x",
-                ["python", "s.py", "--output_dir", "/weka/x", "--foo", "bar"],
+                ["python", "s.py", "--foo", "bar", "--output_dir", "/weka/x"],
             ),
             (
                 "flag_at_end_without_value",
@@ -109,6 +109,20 @@ class TestReplaceOrAppendFlag(unittest.TestCase):
                 "--output_dir",
                 "/weka/x",
                 ["python", "script.py", "--output_dir", "/weka/x"],
+            ),
+            (
+                "adjacent_flags",
+                ["--output_dir", "--output_dir", "/tmp/z"],
+                "--output_dir",
+                "/weka/x",
+                ["--output_dir", "/weka/x"],
+            ),
+            (
+                "flag_followed_by_other_flag",
+                ["--output_dir", "--verbose"],
+                "--output_dir",
+                "/weka/x",
+                ["--verbose", "--output_dir", "/weka/x"],
             ),
         ]
     )
