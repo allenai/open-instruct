@@ -7,14 +7,16 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import torch
+import accelerate
 import torch.distributed as dist
 import transformers
 from olmo_core import optim as olmo_optim
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
+from olmo_core.nn.conversion.state_mapping import StateMappingTemplate, StateType
+from olmo_core.nn.hf import convert as olmo_hf_convert
+from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.train import callbacks as train_callbacks
@@ -199,12 +201,41 @@ class CheckpointConfig:
     """If the training should continue from a checkpoint folder."""
 
 
+@dataclass
+class PruningCheckpointerCallback(CheckpointerCallback):
+    """CheckpointerCallback that retains only the last `keep_last_n_checkpoints` permanent checkpoints.
+
+    olmo-core's CheckpointerCallback never prunes permanent checkpoints; this subclass
+    schedules older permanent checkpoints for removal after each save, mirroring
+    grpo_fast.py's `clean_last_n_checkpoints_deepspeed` behavior.
+    """
+
+    keep_last_n_checkpoints: int = -1
+
+    def _prune_permanent_checkpoints(self) -> None:
+        if self.keep_last_n_checkpoints is None or self.keep_last_n_checkpoints < 0:
+            return
+        while len(self._checkpoints) > self.keep_last_n_checkpoints:
+            oldest_path = self._checkpoints.pop(0)
+            self._schedule_for_removal(oldest_path)
+
+    def post_train_batch(self):
+        super().post_train_batch()
+        self._prune_permanent_checkpoints()
+
+
 def build_checkpointer_callback(
-    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
+    checkpointing_steps: int,
+    ephemeral_save_interval: int | None,
+    keep_last_n_checkpoints: int = -1,
+    save_async: bool = True,
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
-    return CheckpointerCallback(
-        save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
+    return PruningCheckpointerCallback(
+        save_interval=checkpointing_steps,
+        ephemeral_save_interval=ephemeral_save_interval,
+        save_async=save_async,
+        keep_last_n_checkpoints=keep_last_n_checkpoints,
     )
 
 
@@ -445,17 +476,84 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
-def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
-    try:
-        unwrapped_model = model_config.build(init_device="cpu")
-        unwrapped_model.load_state_dict(state_dict)
-        save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
-    except NotImplementedError as exc:
-        logger.warning(
-            "Falling back to raw state_dict save because HF export is unsupported for this OLMo-core model: %s", exc
+def _register_pre_norm_olmo_core_to_hf_overrides() -> None:
+    """Add OLMo-core → HF layernorm mappings for pre-norm HF model types.
+
+    olmo_core's base map assumes OLMo2-style post-norm
+    (``attention_norm`` → ``post_attention_layernorm``,
+    ``feed_forward_norm`` → ``post_feedforward_layernorm``). For pre-norm
+    architectures (Qwen3, Llama) the same olmo-core states correspond to
+    ``input_layernorm`` and ``post_attention_layernorm``.
+    """
+    layer = olmo_hf_convert.LAYER
+    overrides_per_model_type = {
+        "qwen3": {
+            f"blocks.{layer}.attention_norm.weight": f"model.layers.{layer}.input_layernorm.weight",
+            f"blocks.{layer}.feed_forward_norm.weight": f"model.layers.{layer}.post_attention_layernorm.weight",
+        },
+        "llama": {
+            f"blocks.{layer}.attention_norm.weight": f"model.layers.{layer}.input_layernorm.weight",
+            f"blocks.{layer}.feed_forward_norm.weight": f"model.layers.{layer}.post_attention_layernorm.weight",
+        },
+    }
+    for model_type, overrides in overrides_per_model_type.items():
+        target = olmo_hf_convert.MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS.setdefault(model_type, {})
+        for olmo_core_key, hf_key in overrides.items():
+            target[olmo_core_key] = StateMappingTemplate(olmo_core_key, hf_key, state_type=StateType.weight)
+
+
+_register_pre_norm_olmo_core_to_hf_overrides()
+
+
+def get_hf_config(original_model_name_or_path: str) -> transformers.PretrainedConfig:
+    return transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
+
+
+def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
+    """Fail fast if the run cannot later be exported to HF format.
+
+    Builds the olmo-core model and the target HF model on meta, runs the
+    state-dict converter, and verifies the converted keys exactly cover the HF
+    model's expected parameters. Raises before any training starts.
+    """
+    hf_config = get_hf_config(original_model_name_or_path)
+    olmo_core_model = model_config.build(init_device="meta")
+    olmo_core_state = olmo_core_model.state_dict()
+
+    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+
+    with accelerate.init_empty_weights():
+        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
+    expected = set(hf_model.state_dict().keys())
+    produced = set(converted.keys())
+
+    missing = expected - produced
+    extra = produced - expected
+    if missing or extra:
+        raise RuntimeError(
+            f"HF export is not implemented for {original_model_name_or_path} "
+            f"(model_type={getattr(hf_config, 'model_type', None)}). "
+            f"Missing keys: {sorted(missing)}. Extra keys: {sorted(extra)}."
         )
-        os.makedirs(save_dir, exist_ok=True)
-        torch.save(state_dict, os.path.join(save_dir, "model_state_dict.pt"))
+    logger.info(
+        "Verified HF export works for %s (model_type=%s, %d params).",
+        original_model_name_or_path,
+        getattr(hf_config, "model_type", None),
+        len(expected),
+    )
+
+
+def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
+    hf_config = get_hf_config(original_model_name_or_path)
+    converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    converted = {k: v.contiguous() for k, v in converted.items()}
+
+    with accelerate.init_empty_weights():
+        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
+    hf_model.load_state_dict(converted, assign=True)
+
+    os.makedirs(save_dir, exist_ok=True)
+    hf_model.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
     original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
     original_config.save_pretrained(save_dir)
