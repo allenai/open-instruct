@@ -1,6 +1,9 @@
 #!/bin/bash
-# Value warmup + RL: SAE-only (no GT conditioning) with scaled vLLM logprobs.
+# Value warmup + RL: SAE-only (no GT conditioning) with scaled vLLM logprobs
+# on Qwen3-8B-Base.
 # 100 value-only warmup steps, then 600 regular policy/value RL steps.
+#
+# GPU layout: 2 nodes x 8 GPUs = 8 learner GPUs + 8 vLLM inference GPUs.
 #
 # Differences from the canonical vpretrain100_rl1k SAE scripts:
 #   - 8 samples / 64 prompts => 512 samples per batch
@@ -14,7 +17,7 @@
 #   total_episodes = (100 value warmup + 600 RL) * 64 prompts * 8 samples
 #                  = 358400
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain100_rl600_sae_t06_bs512_mb8_${DDMM}_qwen3_4b_math
+exp_name=vip_vpretrain100_rl600_sae_t06_bs512_mb8_${DDMM}_qwen3_8b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -24,7 +27,7 @@ uv run python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --gpus 8 \
     --max_retries 0 \
     --no_auto_dataset_cache \
@@ -50,15 +53,15 @@ uv run python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
-    --model_name_or_path Qwen/Qwen3-4B-Base \
+    --model_name_or_path Qwen/Qwen3-8B-Base \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 0.6 \
     --total_episodes 358400 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 4 \
+    --num_learners_per_node 8 \
     --sequence_parallel_size 1 \
-    --vllm_num_engines 4 \
+    --vllm_num_engines 8 \
     --vllm_tensor_parallel_size 1 \
     --vllm_top_p 1.0 \
     --lr_scheduler_type constant \
