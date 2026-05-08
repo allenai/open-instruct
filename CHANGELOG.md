@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Revert `pack_sequences` bool `response_masks` change from #1642: restore int64 doc-id-valued masks so `lookup_advantages[packed_mask]` in `data_loader.py` works, and move `.bool()` conversions back to consumer call sites (https://github.com/allenai/open-instruct/pull/1642).
 - Add a unified `use_rho_correction` interface (clamp + mask, per-token or sequence-level) for the train/infer engine mismatch in GRPO loss; replaces `truncated_importance_sampling_ratio_cap` and the IcePop flags (https://github.com/allenai/open-instruct/pull/1650).
 - Resample on filtered batches in `DataPreparationActor` instead of emitting empty `CollatedBatchData`, unifying the `grpo.py` and `grpo_fast.py` consumer paths and removing the now-dead empty-batch checks in `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1660).
 - Update Beaker budget from `ai2/oe-adapt` to `ai2/oe-omai` across launch scripts and beaker configs to fix experiment launch failures from the retired budget (https://github.com/allenai/open-instruct/pull/1662).
