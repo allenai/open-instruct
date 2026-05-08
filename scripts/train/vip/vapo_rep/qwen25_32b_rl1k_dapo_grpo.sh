@@ -71,6 +71,7 @@ uv run python mason.py \
     --vllm_top_p 1.0 \
     --total_episodes 8192000 \
     --deepspeed_stage 3 \
+    --deepspeed_offload_param \
     --gather_whole_model False \
     --num_learners_per_node 8 8 8 8 \
     --sequence_parallel_size 2 \
