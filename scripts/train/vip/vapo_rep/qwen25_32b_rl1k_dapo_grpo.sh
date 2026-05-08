@@ -34,10 +34,14 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env TORCH_NCCL_ENABLE_MONITORING=0 \
+    --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=3600 \
+    --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
     --env WANDB_RUN_ID=${exp_name}_$(date +%s) \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
     --beta 0.0 \
+    --backend_timeout 240 \
     --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
