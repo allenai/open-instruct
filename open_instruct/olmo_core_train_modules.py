@@ -391,6 +391,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.temperature,
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
+                    pass_olmo_core_doc_lens=True,
                 )
             else:
                 ref_logprobs_BT = None
@@ -411,6 +412,7 @@ class GRPOTrainModule(TransformerTrainModule):
                         self.temperature,
                         use_grad=False,
                         batch_size=3 * self.rank_microbatch_size,
+                        pass_olmo_core_doc_lens=True,
                     )
 
                 for i in range(num_samples):
@@ -458,6 +460,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.pad_token_id,
                     self.temperature,
                     return_entropy=self.grpo_config.record_entropy,
+                    pass_olmo_core_doc_lens=True,
                 )
 
                 response_mask = data_BT.response_masks[sample_idx][:, 1:].bool()
