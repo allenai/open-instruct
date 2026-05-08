@@ -6,7 +6,7 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-omai \
+    --budget ai2/oe-other \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name tulu3.1_8b_grpo_fast \
     --beta 0.01 \
