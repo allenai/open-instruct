@@ -1452,6 +1452,11 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+            # `pack_sequences` returns int64 doc-id-valued masks (0 for query/pad, i+1 for tokens of
+            # sample i) because the gather above uses them as integer indices into `lookup_advantages`.
+            # Now that the gather is done, downcast to bool so all downstream consumers see a single
+            # contract.
+            packed_sequences.response_masks = [mask.bool() for mask in packed_sequences.response_masks]
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
