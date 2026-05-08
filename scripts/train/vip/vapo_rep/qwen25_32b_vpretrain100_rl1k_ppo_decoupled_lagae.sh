@@ -14,7 +14,7 @@
 # length-adaptive GAE variant.
 #
 # GPU layout: 6 nodes x 8 GPUs = 16 learner GPUs (2 nodes) + 32 vLLM GPUs (4
-# nodes). vLLM uses TP=2 (16 engines) and the trainer uses SP=4 to fit
+# nodes). vLLM uses TP=2 (16 engines) and the trainer uses SP=2 to fit
 # Qwen2.5-32B with the long generation budget.
 #
 # Step budget:
@@ -74,7 +74,7 @@ uv run python mason.py \
     --deepspeed_offload_optimizer \
     --gather_whole_model False \
     --num_learners_per_node 8 8 \
-    --sequence_parallel_size 4 \
+    --sequence_parallel_size 2 \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 2 \
     --lr_scheduler_type constant \
