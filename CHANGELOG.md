@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
-- Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, OLMo-core checkpointer with `keep_last_n_checkpoints` pruning, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
+- Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, OLMo-core checkpointer with `keep_last_n_checkpoints` pruning, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/1672).
 - Move `maybe_evaluate` from `grpo_fast.py` to `grpo_utils.py` and drop the duplicate `PolicyTrainerRayProcess.calculate_token_counts` method, routing both trainer paths through the shared `grpo_utils.calculate_token_counts` (https://github.com/allenai/open-instruct/pull/1669).
 - Make `mason.py` `--output_dir` / `--checkpoint_state_dir` overrides idempotent via `replace_or_append_flag`, add `open_instruct/grpo.py` to `OPEN_INSTRUCT_COMMANDS` / `OPEN_INSTRUCT_RESUMABLES`, and wire OLMo-core checkpoint save/resume into `grpo.py` (`CheckpointerCallback` + `DataPreparationActorCheckpointCallback` + `LoadStrategy.if_available`) so resumable Beaker jobs actually resume (https://github.com/allenai/open-instruct/pull/1666).
 - Make `--budget` optional in `mason.py` (falls back to the workspace's default budget) and drop the explicit `--budget` flag from launch scripts where it already matched the workspace default (https://github.com/allenai/open-instruct/pull/1673).
