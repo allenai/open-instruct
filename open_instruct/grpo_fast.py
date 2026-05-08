@@ -349,13 +349,23 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        # Override the hard-coded NCCL default timeout so that DeepSpeed's
+        # ZeRO-3 subgroups, Ulysses SP groups, and the vLLM weight-transfer
+        # group inherit our `backend_timeout` instead of the 10-minute
+        # `_get_default_timeout` baked into PyTorch. Without this, subgroups
+        # created via `dist.new_group(...)` ignore the timeout passed to
+        # `init_process_group` and a slow first step (compile + autotune)
+        # easily trips the per-PG watchdog at 600 s.
+        backend_timeout = timedelta(minutes=args.backend_timeout)
+        torch.distributed.distributed_c10d._get_default_timeout = lambda backend: backend_timeout
+
         # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
         # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
         # when multiple process groups exist (e.g., for weight sync to vLLM).
         # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
-        deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
+            torch.distributed.init_process_group(backend="nccl", timeout=backend_timeout)
+        deepspeed.init_distributed(timeout=backend_timeout)
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,
