@@ -78,6 +78,12 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
                 ["python", "script.py", "--verbose"],
             ),
             ("adjacent_value_args", ["--checkpoint_dir", "--checkpoint_dir", "/path"], {"--checkpoint_dir": True}, []),
+            (
+                "remove_repeated_value_arg",
+                ["python", "s.py", "--output_dir", "/tmp/y", "--foo", "bar", "--output_dir", "/tmp/z"],
+                {"--output_dir": True},
+                ["python", "s.py", "--foo", "bar"],
+            ),
         ]
     )
     def test_build_command_without_args(self, name, command, args_to_remove, expected):
