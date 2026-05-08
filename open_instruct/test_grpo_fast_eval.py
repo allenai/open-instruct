@@ -16,7 +16,8 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
+from open_instruct.grpo_fast import create_generation_configs
+from open_instruct.grpo_utils import maybe_evaluate
 
 
 class _QueueWithSize:
