@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Make `--budget` optional in `mason.py` (falls back to the workspace's default budget) and drop the explicit `--budget` flag from launch scripts where it already matched the workspace default (https://github.com/allenai/open-instruct/pull/1664).
 - Restore 🤡 to resample warnings and use `self.training_step` in `DataPreparationActor.run` (https://github.com/allenai/open-instruct/pull/1663).
 - Add a unified `use_rho_correction` interface (clamp + mask, per-token or sequence-level) for the train/infer engine mismatch in GRPO loss; replaces `truncated_importance_sampling_ratio_cap` and the IcePop flags (https://github.com/allenai/open-instruct/pull/1650).
 - Resample on filtered batches in `DataPreparationActor` instead of emitting empty `CollatedBatchData`, unifying the `grpo.py` and `grpo_fast.py` consumer paths and removing the now-dead empty-batch checks in `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1660).

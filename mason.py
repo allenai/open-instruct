@@ -114,7 +114,9 @@ def get_args():
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
-    parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
+    parser.add_argument(
+        "--budget", type=str, help="Budget to use. If omitted, the workspace's default budget is used.", default=None
+    )
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
         "--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb"
