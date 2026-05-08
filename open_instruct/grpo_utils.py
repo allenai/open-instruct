@@ -179,7 +179,11 @@ class GRPOExperimentConfig(
     value_model_repack_max_length: int | None = None
     """Optional max token budget per repacked conditioned value row. Defaults to the rollout pack length."""
     gt_conditioning_template: str = "answer_prefix"
-    """Template name. One of: answer_prefix, expected_accuracy, rollout_context, correct_demo."""
+    """Template name. One of: answer_prefix, expected_accuracy, rollout_context, correct_demo, rubrics.
+
+    `rubrics` parses the ground-truth JSON (the payload `apply_evolving_rubric_reward` keeps
+    up to date) and conditions the value forward on the active positive/negative rubrics.
+    """
     rollout_context_num_siblings: int = -1
     """Number of sibling rollouts for rollout_context / correct_demo. -1 auto-selects 4 for rollout_context
     and all other rollouts in the prompt group for correct_demo."""

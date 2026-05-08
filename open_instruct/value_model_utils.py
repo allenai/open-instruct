@@ -17,20 +17,26 @@ The value model itself is built, optimized, and DeepSpeed-managed inside
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Sequence
 
 import torch
 
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
+
 _ROLLOUT_CONTEXT_MAX_TOKENS = 4096
+_RUBRIC_CONDITIONING_MAX_TOKENS = 2048
 _DEFAULT_ROLLOUT_CONTEXT_NUM_SIBLINGS = 4
 _AUTO_ROLLOUT_CONTEXT_NUM_SIBLINGS = -1
 _POSTFIX_TEMPLATES = {"expected_accuracy", "rollout_context", "correct_demo"}
-_PREFIX_TEMPLATES = {"answer_prefix"}
+_PREFIX_TEMPLATES = {"answer_prefix", "rubrics"}
 
 # Templates that need a ground-truth string to be meaningful.
-TEMPLATES_REQUIRING_GT: frozenset[str] = frozenset({"rollout_context", "correct_demo"})
+TEMPLATES_REQUIRING_GT: frozenset[str] = frozenset({"rollout_context", "correct_demo", "rubrics"})
 # Templates that need sibling rollouts (decoded responses from the same prompt group).
 TEMPLATES_REQUIRING_SIBLINGS: frozenset[str] = frozenset({"rollout_context", "correct_demo"})
 # All valid gt_conditioning_template values.
@@ -139,6 +145,8 @@ def build_conditioning_text(
         return _build_rollout_context(ground_truth, siblings or [])
     if template == "correct_demo":
         return _build_correct_demo_context(ground_truth, siblings or [])
+    if template == "rubrics":
+        return _build_rubric_context(ground_truth)
     raise ValueError(f"Unknown gt_conditioning_template: {template!r}")
 
 
@@ -175,6 +183,75 @@ def _build_correct_demo_context(ground_truth: str, siblings: Sequence[dict]) -> 
     text = str(chosen.get("text", "")) if chosen else ""
     reference = f"Here is a reference attempt ({tag}):\n{text}\n" if chosen else ""
     return reference + f"Given the answer is {ground_truth}, compute the expected accuracy of the current attempt: "
+
+
+def _build_rubric_context(ground_truth: str) -> str:
+    """Format the rubrics from a JSON ground truth as a value-model conditioning prefix.
+
+    The ``ground_truth`` is the JSON-encoded payload that ``apply_evolving_rubric_reward``
+    keeps up-to-date, of the form::
+
+        {"query": ..., "rubrics": [{"title": ..., "description": ..., "weight": +/-1}, ...],
+         "rubrics_types": ["persistent", ..., "evolving", ...]}
+
+    Both the static (persistent) rubrics shipped with the dataset and any active evolving
+    rubrics generated during training appear in ``rubrics``; this helper just renders them
+    as a positive/negative criteria prefix so the value model is conditioned on the same
+    criteria the verifier will use to grade the response.
+
+    Token budget is enforced approximately (4 chars ~= 1 token) so a long rubric set never
+    crowds out the rollout in the value forward.
+    """
+    if not ground_truth:
+        return ""
+    try:
+        gt_obj = json.loads(ground_truth)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        logger.debug("rubric conditioning: ground_truth was not valid JSON; skipping conditioning")
+        return ""
+    if not isinstance(gt_obj, dict):
+        return ""
+    rubrics = gt_obj.get("rubrics") or []
+    if not isinstance(rubrics, list) or not rubrics:
+        return ""
+
+    positive_lines: list[str] = []
+    negative_lines: list[str] = []
+    budget = _RUBRIC_CONDITIONING_MAX_TOKENS
+    for rubric in rubrics:
+        if not isinstance(rubric, dict):
+            continue
+        title = str(rubric.get("title", "")).strip()
+        description = str(rubric.get("description", "")).strip()
+        if not description and not title:
+            continue
+        try:
+            weight = float(rubric.get("weight", 1.0))
+        except (TypeError, ValueError):
+            weight = 1.0
+        body = f"{title}: {description}" if title and description else (title or description)
+        line = f"- {body}\n"
+        approx_tokens = max(1, len(line) // 4)
+        if approx_tokens > budget:
+            continue
+        budget -= approx_tokens
+        if weight >= 0:
+            positive_lines.append(line)
+        else:
+            negative_lines.append(line)
+
+    if not positive_lines and not negative_lines:
+        return ""
+
+    parts: list[str] = ["The final response will be graded against the following criteria.\n"]
+    if positive_lines:
+        parts.append("Positive criteria (the response should satisfy these):\n")
+        parts.extend(positive_lines)
+    if negative_lines:
+        parts.append("Negative criteria (the response should NOT satisfy these):\n")
+        parts.extend(negative_lines)
+    parts.append("\n")
+    return "".join(parts)
 
 
 _SCORE_RE = re.compile(r"<answer>\s*([-+]?[0-9]*\.?[0-9]+)\s*</answer>")

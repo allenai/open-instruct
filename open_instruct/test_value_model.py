@@ -18,6 +18,7 @@ laptop and in CI. They focus on:
 
 from __future__ import annotations
 
+import json
 import unittest
 
 import numpy as np
@@ -169,11 +170,58 @@ class TestConditioningBuilders(unittest.TestCase):
     def test_is_postfix_template(self):
         self.assertFalse(is_postfix_template("answer_prefix"))
         self.assertTrue(is_postfix_template("expected_accuracy"))
+        self.assertFalse(is_postfix_template("rubrics"))
 
     def test_correct_demo_auto_samples_all_other_rollouts(self):
         self.assertEqual(resolve_num_siblings_to_sample("correct_demo", -1, num_samples_per_prompt=8), 7)
         self.assertEqual(resolve_num_siblings_to_sample("rollout_context", -1, num_samples_per_prompt=8), 4)
         self.assertEqual(resolve_num_siblings_to_sample("correct_demo", 2, num_samples_per_prompt=8), 2)
+
+
+class TestRubricConditioning(unittest.TestCase):
+    def _gt(self, rubrics: list[dict]) -> str:
+        return json.dumps({"query": "What is 2+2?", "rubrics": rubrics})
+
+    def test_renders_positive_and_negative_rubrics(self):
+        gt = self._gt(
+            [
+                {"title": "Correct answer", "description": "Answer mentions 4.", "weight": 1.0},
+                {"title": "Cites step", "description": "Shows arithmetic.", "weight": 1.0},
+                {"title": "Hallucination", "description": "Invents calculation.", "weight": -1.0},
+            ]
+        )
+        txt = build_conditioning_text("rubrics", ground_truth=gt)
+        self.assertIn("Positive criteria", txt)
+        self.assertIn("Correct answer: Answer mentions 4.", txt)
+        self.assertIn("Cites step: Shows arithmetic.", txt)
+        self.assertIn("Negative criteria", txt)
+        self.assertIn("Hallucination: Invents calculation.", txt)
+
+    def test_handles_missing_or_empty_rubrics(self):
+        # Empty rubrics list -> empty conditioning string.
+        self.assertEqual(build_conditioning_text("rubrics", ground_truth=self._gt([])), "")
+        # No rubrics field -> empty.
+        self.assertEqual(
+            build_conditioning_text("rubrics", ground_truth=json.dumps({"query": "q"})),
+            "",
+        )
+
+    def test_handles_invalid_json_gracefully(self):
+        self.assertEqual(build_conditioning_text("rubrics", ground_truth="not json"), "")
+        self.assertEqual(build_conditioning_text("rubrics", ground_truth=""), "")
+
+    def test_rubric_order_is_stable_within_polarity(self):
+        gt = self._gt(
+            [
+                {"title": "A", "description": "first", "weight": 1.0},
+                {"title": "B", "description": "second", "weight": -1.0},
+                {"title": "C", "description": "third", "weight": 1.0},
+            ]
+        )
+        txt = build_conditioning_text("rubrics", ground_truth=gt)
+        self.assertLess(txt.index("first"), txt.index("third"))
+        # Negative section appears after the positive section.
+        self.assertLess(txt.index("third"), txt.index("second"))
 
 
 class TestScoreParsing(unittest.TestCase):

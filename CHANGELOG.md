@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `--gt_conditioning_template rubrics` for the scalar value model: parses the JSON ground-truth payload (the same one `apply_evolving_rubric_reward` keeps in sync with the verifier) and conditions the value forward on the active positive/negative rubrics, including any rubrics minted during training. Add 8B DR-Tulu launch scripts under `scripts/train/vip/dr_tulu/`: `dr_tulu_8b_grpo.sh` (GRPO baseline, no value model) and `dr_tulu_8b_rubric_value.sh` (PPO + SAE + rubric-conditioned value model) for ablation (https://github.com/allenai/open-instruct/pull/TODO).
 - Generative value model training script (`grpo_fast_genvalue.py`) wrapping `grpo_fast.py` with a second vLLM pool for per-step partial-rollout scoring, background scoring thread, `segment_rollout` (SAE/fixed-chunk boundary logic), and `GenValueExperimentConfig` validation (https://github.com/allenai/open-instruct/pull/TODO).
 - Fix `PolicyTrainerRayProcess.from_pretrained` to use `self.streaming_config` instead of the module-level global `streaming_config`, which caused a `NameError` when `grpo_fast` was imported as a module rather than run as `__main__` (https://github.com/allenai/open-instruct/pull/TODO).
 
