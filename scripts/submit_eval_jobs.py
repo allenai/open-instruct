@@ -38,20 +38,25 @@ DEFAULT_OLMO_EVAL_REF = "main"
 GIT_REF_SAFE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 
-def build_install_script(ref: str) -> str:
+def build_install_script(ref: str, upgrade_eval_runtime: bool = False) -> str:
     if not GIT_REF_SAFE_RE.match(ref):
         raise ValueError(f"Invalid git ref {ref!r}; expected characters [A-Za-z0-9._/-].")
-    return (
+    install_script = (
         "set -euo pipefail && "
         "git clone "
         "https://x-access-token:${GITHUB_TOKEN}@github.com/allenai/olmo-eval-internal.git "
         "/opt/olmo-eval-internal && "
         f"cd /opt/olmo-eval-internal && git checkout {shlex.quote(ref)} && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm]' && "
-        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
-        "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
-        "cd /workspace"
+        "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache -e '.[vllm,beaker]' && "
     )
+    if upgrade_eval_runtime:
+        install_script += (
+            # Keep this opt-in so eval jobs do not accidentally pull a CUDA runtime
+            # newer than the Beaker node driver supports.
+            "uv pip install --cache-dir /weka/oe-eval-default/olmo-eval-pypi-cache "
+            "--upgrade 'vllm[runai]>=0.19.0' 'transformers>=5.4.0' && "
+        )
+    return install_script + "cd /workspace"
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,6 +109,20 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=DEFAULT_OLMO_EVAL_REF,
         help="Git ref (branch/tag/sha) of allenai/olmo-eval-internal to install at job start.",
+    )
+    parser.add_argument(
+        "--github_token_secret",
+        type=str,
+        default="GITHUB_TOKEN",
+        help="Beaker secret name to expose as GITHUB_TOKEN for cloning olmo-eval-internal.",
+    )
+    parser.add_argument(
+        "--upgrade_eval_runtime",
+        action="store_true",
+        help=(
+            "Upgrade vLLM and transformers at job start. Off by default because newer wheels may require "
+            "a CUDA driver newer than the selected Beaker nodes provide."
+        ),
     )
     parser.add_argument(
         "--dry_run", action="store_true", help="Print the spec and beaker command, but do not write or submit."
@@ -164,7 +183,7 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
     if dataset_id:
         datasets.append({"mountPath": "/model", "source": {"beaker": dataset_id}})
 
-    full_command = f"{build_install_script(args.olmo_eval_ref)} && {shlex.join(inner_cmd)}"
+    full_command = f"{build_install_script(args.olmo_eval_ref, args.upgrade_eval_runtime)} && {shlex.join(inner_cmd)}"
 
     return {
         "version": "v2",
@@ -180,7 +199,7 @@ def build_spec(args: argparse.Namespace, inner_cmd: list[str], dataset_id: str |
                 "envVars": [
                     {"name": "HF_TOKEN", "secret": "HF_TOKEN"},
                     {"name": "OPENAI_API_KEY", "secret": "openai_api_key"},
-                    {"name": "GITHUB_TOKEN", "secret": "GITHUB_TOKEN"},
+                    {"name": "GITHUB_TOKEN", "secret": args.github_token_secret},
                     {"name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN", "value": "1"},
                 ],
                 "datasets": datasets,
