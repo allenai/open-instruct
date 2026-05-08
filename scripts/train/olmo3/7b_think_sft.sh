@@ -18,7 +18,7 @@ python src/scripts/train/sft/OLMo2-7B-sft.py train \
     --num_nodes=8 \
     --global_batch_size=1048576 \
     --model_name=olmo2.5-7b-yarn-fullonly \
-    --budget=ai2/oe-omai \
+    --budget=ai2/oe-other \
     --workspace=ai2/olmo-instruct \
     --dataset_path=/weka/oe-training-default/ai2-llm/jacobm/data/sft/rl-sft-32k/reasoning-mix-decontam-v2-special-tokens-v3-think-FIX \
     --launch.priority=urgent

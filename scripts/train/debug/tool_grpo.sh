@@ -24,7 +24,7 @@ uv run python mason.py \
        --timeout 45m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
-       --budget ai2/oe-omai \
+       --budget ai2/oe-other \
        --no-host-networking \
        --artifact_ttl 1d \
        --gpus 1 \

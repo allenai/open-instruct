@@ -21,7 +21,7 @@ python src/scripts/train/sft/OLMo-sft.py train \
     --launch.use_hostname_constraints=True \
     --launch.num_execution_units=1 \
     --model_name=olmo3-32b \
-    --budget=ai2/oe-omai \
+    --budget=ai2/oe-other \
     --workspace=ai2/olmo-instruct \
     --dataset_path=gs://ai2-llm/jacobm/data/sft/rl-sft-32k/olmo3-32b-thinking-sft \
     --launch.priority=urgent

@@ -20,7 +20,7 @@ tokenizer_path=/weka/oe-adapt-default/saumyam/open-instruct/dolma2-tokenizer-olm
 
 uv run python mason.py \
   --cluster ai2/jupiter \
-  --budget ai2/oe-omai \
+  --budget ai2/oe-other \
   --workspace ai2/open-instruct-dev \
   --image "$BEAKER_IMAGE" \
   --pure_docker_mode \
