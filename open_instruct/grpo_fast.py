@@ -37,6 +37,7 @@ from datetime import timedelta
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.ops.adam import DeepSpeedCPUAdam
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
@@ -400,7 +401,10 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        if args.deepspeed_offload_optimizer:
+            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate)
+        else:
+            self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
@@ -657,7 +661,12 @@ class PolicyTrainerRayProcess(RayProcess):
             value_optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
         else:
             value_optim_params = self.value_model.parameters()
-        self.value_optimizer = torch.optim.AdamW(value_optim_params, lr=value_lr, fused=args.fused_optimizer)
+        if args.deepspeed_offload_optimizer:
+            self.value_optimizer = DeepSpeedCPUAdam(value_optim_params, lr=value_lr)
+        else:
+            self.value_optimizer = torch.optim.AdamW(
+                value_optim_params, lr=value_lr, fused=args.fused_optimizer
+            )
 
         effective_value_mini_batches = (
             args.value_num_mini_batches if args.value_num_mini_batches is not None else args.num_mini_batches
