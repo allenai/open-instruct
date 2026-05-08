@@ -24,6 +24,9 @@ TOGGLE_WARMUP_STEPS="${TOGGLE_WARMUP_STEPS:-50}"
 
 for PERCENTILE in 50 80; do
     for M in 10 50 100; do
+        if [[ "${PERCENTILE}" == "50" && "${M}" == "50" ]]; then
+            continue
+        fi
         EXP_NAME="${EXP_NAME_PREFIX}_p${PERCENTILE}_m${M}"
         RUN_NAME="${EXP_NAME}_$(date +%Y%m%d_%H%M%S)"
 
