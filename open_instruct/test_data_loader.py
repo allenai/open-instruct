@@ -109,6 +109,25 @@ class TestToggleBudgetTracker(unittest.TestCase):
         tracker.update(["d"] * 5, lengths, np.array([1.0] * 5), 1.0)
         self.assertAlmostEqual(tracker.budget("d"), float(np.percentile(lengths, 80.0)))
 
+    def test_list_valued_dataset_field(self):
+        # Per-sample dataset can be list[str] (multiple verifier sources). Tracker must
+        # not crash on `unhashable type: list`.
+        tracker = data_loader.ToggleBudgetTracker(m=2, lambda_=0.5, percentile=50.0, warmup_steps=0)
+        datasets = [["math", "code"], ["math", "code"], ["math", "code"], ["math", "code"]]
+        tracker.update(datasets, np.array([10, 20, 30, 40]), np.array([1.0, 1.0, 1.0, 1.0]), 1.0)
+        self.assertEqual(tracker.budget(["math", "code"]), 25.0)
+        scores = np.array([1.0, 1.0, 1.0, 0.0])
+        out_scores, metrics = tracker.maybe_apply(
+            step=0,
+            scores=scores,
+            sequence_lengths=np.array([5, 50, 15, 100]),
+            datasets=datasets,
+            num_samples_per_prompt=4,
+            max_possible_score=1.0,
+        )
+        self.assertEqual(metrics["toggle/phase"], 0)
+        self.assertIn("toggle/budget/math|code", metrics)
+
     def test_per_dataset_isolation(self):
         tracker = data_loader.ToggleBudgetTracker(m=2, lambda_=0.5, percentile=50.0, warmup_steps=0)
         tracker.update(["a", "b"], np.array([100, 200]), np.array([1.0, 1.0]), 1.0)

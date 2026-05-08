@@ -1257,20 +1257,26 @@ class ToggleBudgetTracker:
         self.lambda_ = lambda_
         self.percentile = percentile
         self.warmup_steps = warmup_steps
-        self.lengths_per_dataset: dict[str, list[int]] = {}
+        self.lengths_per_dataset: dict[tuple[str, ...], list[int]] = {}
 
     @property
     def enabled(self) -> bool:
         return self.m > 0
 
-    def update(self, datasets: list[str], lengths: np.ndarray, scores: np.ndarray, max_possible_score: float) -> None:
+    @staticmethod
+    def _key(dataset) -> tuple[str, ...]:
+        if isinstance(dataset, str):
+            return (dataset,)
+        return tuple(dataset)
+
+    def update(self, datasets: list, lengths: np.ndarray, scores: np.ndarray, max_possible_score: float) -> None:
         is_correct = scores >= max_possible_score
         for dataset, length, correct in zip(datasets, lengths, is_correct, strict=True):
             if correct:
-                self.lengths_per_dataset.setdefault(dataset, []).append(int(length))
+                self.lengths_per_dataset.setdefault(self._key(dataset), []).append(int(length))
 
-    def budget(self, dataset: str) -> float | None:
-        lengths = self.lengths_per_dataset.get(dataset)
+    def budget(self, dataset) -> float | None:
+        lengths = self.lengths_per_dataset.get(self._key(dataset))
         if not lengths:
             return None
         return float(np.percentile(lengths, self.percentile))
@@ -1280,7 +1286,7 @@ class ToggleBudgetTracker:
         step: int,
         scores: np.ndarray,
         sequence_lengths: np.ndarray,
-        datasets: list[str],
+        datasets: list,
         num_samples_per_prompt: int,
         max_possible_score: float,
     ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -1291,10 +1297,15 @@ class ToggleBudgetTracker:
 
         in_phase0 = step >= self.warmup_steps and (step // self.m) % 2 == 0
         metrics: dict[str, Any] = {"toggle/phase": 0 if in_phase0 else 1}
-        for dataset in set(datasets):
+        seen_keys: set[tuple[str, ...]] = set()
+        for dataset in datasets:
+            key = self._key(dataset)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
             budget_value = self.budget(dataset)
             if budget_value is not None:
-                metrics[f"toggle/budget/{dataset}"] = budget_value
+                metrics[f"toggle/budget/{'|'.join(key)}"] = budget_value
 
         if not in_phase0:
             return scores, metrics
