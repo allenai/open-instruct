@@ -71,7 +71,6 @@ uv run python mason.py \
     --total_episodes 9011200 \
     --deepspeed_stage 3 \
     --deepspeed_offload_param \
-    --deepspeed_offload_optimizer \
     --gather_whole_model False \
     --num_learners_per_node 8 8 \
     --sequence_parallel_size 2 \
@@ -82,7 +81,7 @@ uv run python mason.py \
     --verification_reward 1.0 \
     --seed 1 \
     --local_eval_every 100 \
-    --save_freq 100 \
+    --save_freq 20 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub False \
