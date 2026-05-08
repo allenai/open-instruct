@@ -33,7 +33,7 @@ uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster "ai2/jupiter" \
-    --workspace ai2/dr-tulu-ablations \
+    --workspace ai2/olmo-instruct \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
