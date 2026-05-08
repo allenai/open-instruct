@@ -1004,6 +1004,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         and is_beaker_job()
         and len(maybe_get_beaker_config().beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
+        and not args.output_dir.startswith("/weka/")
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
