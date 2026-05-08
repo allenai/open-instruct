@@ -13,9 +13,9 @@
 # No SAE / no answer-prefix conditioning -- this is the plain PPO + decoupled
 # length-adaptive GAE variant.
 #
-# GPU layout: 8 nodes x 8 GPUs = 32 learner GPUs (4 nodes) + 32 vLLM GPUs (4
-# nodes). vLLM uses TP=2 (16 engines) and the trainer uses SP=2 to fit
-# Qwen2.5-32B with the long generation budget.
+# GPU layout: 8 nodes x 8 GPUs = 48 learner GPUs (6 nodes) + 16 vLLM GPUs (2
+# nodes). vLLM uses TP=2 (8 engines) and the trainer uses SP=2 (DP=24) to fit
+# Qwen2.5-32B with the long generation budget on-GPU (no offload).
 #
 # Step budget:
 #   total_episodes = (100 value warmup + 1000 RL) * 512 prompts * 16 samples
@@ -76,9 +76,9 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --deepspeed_zpg 1 \
     --gather_whole_model False \
-    --num_learners_per_node 8 8 8 8 \
+    --num_learners_per_node 8 8 8 8 8 8 \
     --sequence_parallel_size 2 \
-    --vllm_num_engines 16 \
+    --vllm_num_engines 8 \
     --vllm_tensor_parallel_size 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
