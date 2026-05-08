@@ -13,8 +13,8 @@
 # No SAE / no answer-prefix conditioning -- this is the plain PPO + decoupled
 # length-adaptive GAE variant.
 #
-# GPU layout: 4 nodes x 8 GPUs = 16 learner GPUs (2 nodes) + 16 vLLM GPUs (2
-# nodes). vLLM uses TP=2 (8 engines) and the trainer uses SP=4 to fit
+# GPU layout: 6 nodes x 8 GPUs = 16 learner GPUs (2 nodes) + 32 vLLM GPUs (4
+# nodes). vLLM uses TP=2 (16 engines) and the trainer uses SP=4 to fit
 # Qwen2.5-32B with the long generation budget.
 #
 # Step budget:
@@ -31,7 +31,7 @@ uv run python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 6 \
     --gpus 8 \
     --max_retries 0 \
     --no_auto_dataset_cache \
@@ -75,7 +75,7 @@ uv run python mason.py \
     --gather_whole_model False \
     --num_learners_per_node 8 8 \
     --sequence_parallel_size 4 \
-    --vllm_num_engines 8 \
+    --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
