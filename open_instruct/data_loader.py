@@ -610,7 +610,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
         dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
         dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
-        dummy_response_mask = torch.tensor([[0, 1]], dtype=torch.long)
+        dummy_response_mask = torch.tensor([[False, True]], dtype=torch.bool)
         dummy_advantage = torch.tensor([[0.0, 1.0]], dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
@@ -1339,17 +1339,18 @@ class DataPreparationActor:
                 ground_truth_overrides=self.ground_truth_overrides,
             )
 
-        while self.training_step < self.num_training_steps:
+        step = self.training_step
+        while step < self.num_training_steps:
             generation_idle_wait_start_time = time.perf_counter()
-            while self.training_step - self._last_consumed_step > self.config.async_steps:
+            while step - self._last_consumed_step > self.config.async_steps:
                 logger.info(
-                    f"[DataPreparationActor] Step {self.training_step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
-                f"[DataPreparationActor] Step {self.training_step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
+                f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
             )
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
@@ -1365,14 +1366,14 @@ class DataPreparationActor:
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
-                training_step=self.training_step,
+                training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
             )
             logger.info(
-                f"[DataPreparationActor] Step {self.training_step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
+                f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
             )
 
             if isinstance(result, data_types.ShutdownSentinel):
@@ -1380,7 +1381,7 @@ class DataPreparationActor:
 
             if result is None:
                 logger.warning(
-                    f"[DataPreparationActor] 🤡 Step {self.training_step}: all groups filtered (zero-std rewards); "
+                    f"[DataPreparationActor] Step {step}: all groups filtered (zero-std rewards); "
                     "resampling without advancing step counter"
                 )
                 continue
@@ -1392,7 +1393,7 @@ class DataPreparationActor:
 
             if len(result.responses) == 0:
                 logger.warning(
-                    f"[DataPreparationActor] 🤡 Step {self.training_step}: no trainable responses after truncation filter; "
+                    f"[DataPreparationActor] Step {step}: no trainable responses after truncation filter; "
                     "resampling without advancing step counter"
                 )
                 continue
@@ -1402,7 +1403,7 @@ class DataPreparationActor:
                     decoded_responses=batch.decoded_responses,
                     ground_truths=batch.ground_truths,
                     indices=batch.indices,
-                    step=self.training_step,
+                    step=step,
                 )
                 reward_metrics.update(rubric_metrics)
                 self.ground_truth_overrides.update(new_overrides)
@@ -1425,7 +1426,7 @@ class DataPreparationActor:
                 save_rollouts_to_disk(
                     self.config.rollouts_save_path,
                     self.run_name,
-                    self.training_step,
+                    step,
                     batch,
                     result,
                     advantages,
@@ -1451,6 +1452,11 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+            # `pack_sequences` returns int64 doc-id-valued masks (0 for query/pad, i+1 for tokens of
+            # sample i) because the gather above uses them as integer indices into `lookup_advantages`.
+            # Now that the gather is done, downcast to bool so all downstream consumers see a single
+            # contract.
+            packed_sequences.response_masks = [mask.bool() for mask in packed_sequences.response_masks]
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
@@ -1516,10 +1522,10 @@ class DataPreparationActor:
             step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
             with self.lock:
-                self.prepared_data[self.training_step] = collated_data
-                self.metrics[self.training_step] = step_metrics
-                self.current_prepared_step = self.training_step
-            self.training_step += 1
+                self.prepared_data[step] = collated_data
+                self.metrics[step] = step_metrics
+                self.current_prepared_step = step
+            step += 1
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix `grpo.py` token-count inflation by emitting bool `response_masks` from `DataPreparationActor` (instead of int64 doc-id-valued masks) and dropping per-consumer `.bool()` coercions in `grpo_fast.py`, `grpo_utils.py`, and `olmo_core_train_modules.py`. Previously the OLMo-core path summed the doc-id-valued mask in `calculate_token_counts`, inflating `loss_denominator` by ~60× (https://github.com/allenai/open-instruct/pull/1668).
 - Fix hardcoded project version (https://github.com/allenai/open-instruct/pull/1636) by using setuptools scm's automatic versioning.
 - Fix CUDA illegal-memory-access in FSDP2 weight sync to vLLM by also unsharding the root FSDPModule (root-level params like model.norm and lm_head were producing local-shard buffers with global stride) (https://github.com/allenai/open-instruct/pull/1649).
 - Fix weight sync on resume by initializing vLLM weight sync before the training loop and warming up the learner with a dummy forward so DeepSpeed Stage 3 params materialize before the first broadcast; accept IPC `update_info` dict in `LLMRayActor.update_weights`; replace toothless weight-sync tests with a real divergent-weight broadcast test (https://github.com/allenai/open-instruct/pull/1627).
