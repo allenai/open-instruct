@@ -491,6 +491,18 @@ class StreamingDataLoaderConfig:
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
+    # Toggle (Kimi K2.5): alternates between Phase1 (standard) and Phase0 (budget-limited)
+    # every `toggle_m` training steps. Disabled when `toggle_m == 0`.
+    toggle_m: int = 0
+    toggle_lambda: float = 0.5
+    """Mean-accuracy threshold (as fraction of max_possible_score). Phase0 mask is enforced
+    only on prompts whose mean accuracy exceeds this threshold."""
+    token_budget_percentile: float = 90.0
+    """Per-dataset percentile (0-100) of correct-response token lengths used as the budget."""
+    toggle_warmup_steps: int = 100
+    """Number of initial Phase1 steps used to accumulate per-dataset length statistics
+    before Phase0 may activate."""
+
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -1228,6 +1240,76 @@ def prepare_collated_data_for_workers(
     return collated_data
 
 
+class ToggleBudgetTracker:
+    """Implements the Toggle reward-shaping heuristic from the Kimi K2.5 paper.
+
+    Toggle alternates between two phases every `m` training steps:
+      - Phase1 (standard scaling): rewards are unchanged.
+      - Phase0 (budget-limited): r_tilde = r * I{mean_acc(x) < lambda OR |y| <= budget(d)}.
+
+    The per-dataset budget is the `percentile`-th percentile of token lengths among
+    correct responses, accumulated on a streaming basis. Toggle is disabled when m == 0
+    and is only active in Phase0 once `step >= warmup_steps`.
+    """
+
+    def __init__(self, m: int, lambda_: float, percentile: float, warmup_steps: int):
+        self.m = m
+        self.lambda_ = lambda_
+        self.percentile = percentile
+        self.warmup_steps = warmup_steps
+        self.lengths_per_dataset: dict[str, list[int]] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return self.m > 0
+
+    def update(self, datasets: list[str], lengths: np.ndarray, scores: np.ndarray, max_possible_score: float) -> None:
+        is_correct = scores >= max_possible_score
+        for dataset, length, correct in zip(datasets, lengths, is_correct, strict=True):
+            if correct:
+                self.lengths_per_dataset.setdefault(dataset, []).append(int(length))
+
+    def budget(self, dataset: str) -> float | None:
+        lengths = self.lengths_per_dataset.get(dataset)
+        if not lengths:
+            return None
+        return float(np.percentile(lengths, self.percentile))
+
+    def maybe_apply(
+        self,
+        step: int,
+        scores: np.ndarray,
+        sequence_lengths: np.ndarray,
+        datasets: list[str],
+        num_samples_per_prompt: int,
+        max_possible_score: float,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        if not self.enabled:
+            return scores, {}
+
+        self.update(datasets, sequence_lengths, scores, max_possible_score)
+
+        in_phase0 = step >= self.warmup_steps and (step // self.m) % 2 == 0
+        metrics: dict[str, Any] = {"toggle/phase": 0 if in_phase0 else 1}
+        for dataset in set(datasets):
+            budget_value = self.budget(dataset)
+            if budget_value is not None:
+                metrics[f"toggle/budget/{dataset}"] = budget_value
+
+        if not in_phase0:
+            return scores, metrics
+
+        scores_per_prompt = scores.reshape(-1, num_samples_per_prompt) / max_possible_score
+        mean_acc = np.repeat(scores_per_prompt.mean(axis=-1), num_samples_per_prompt, axis=0)
+        budgets = np.array(
+            [self.budget(d) if self.budget(d) is not None else np.inf for d in datasets], dtype=np.float64
+        )
+        mask = (mean_acc < self.lambda_) | (sequence_lengths <= budgets)
+        scores = scores * mask.astype(scores.dtype)
+        metrics["toggle/mask_kept_ratio"] = float(mask.mean())
+        return scores, metrics
+
+
 @ray.remote
 class DataPreparationActor:
     """Ray actor singleton that handles centralized data preparation for all ranks.
@@ -1306,6 +1388,13 @@ class DataPreparationActor:
         self.ground_truth_overrides: dict[int, Any] = {}
         if self.config.apply_evolving_rubric_reward:
             self.rubric_manager = RubricManager(self.config, dataset[GROUND_TRUTHS_KEY])
+
+        self.toggle_tracker = ToggleBudgetTracker(
+            m=self.config.toggle_m,
+            lambda_=self.config.toggle_lambda,
+            percentile=self.config.token_budget_percentile,
+            warmup_steps=self.config.toggle_warmup_steps,
+        )
 
         if initial_state is not None:
             logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
@@ -1408,6 +1497,15 @@ class DataPreparationActor:
                 self.ground_truth_overrides.update(new_overrides)
 
             scores = np.array(batch.scores)
+            sequence_lengths = np.array([len(response) for response in result.responses])
+            scores, toggle_metrics = self.toggle_tracker.maybe_apply(
+                step=self.training_step,
+                scores=scores,
+                sequence_lengths=sequence_lengths,
+                datasets=batch.datasets,
+                num_samples_per_prompt=self.config.num_samples_per_prompt_rollout,
+                max_possible_score=self.config.max_possible_score,
+            )
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
@@ -1459,7 +1557,6 @@ class DataPreparationActor:
             real_num_responses = len(result.responses)
             expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
             unsolved_num_responses = (scores < self.config.max_possible_score).sum()
-            sequence_lengths = np.array([len(response) for response in result.responses])
             sequence_length_solved = (
                 np.array([])
                 if np.all(scores == 0)
@@ -1509,6 +1606,8 @@ class DataPreparationActor:
             step_metrics.update(tool_stats.compute_metrics())
 
             step_metrics.update(_aggregate_env_metrics(result.request_info.rollout_states))
+
+            step_metrics.update(toggle_metrics)
 
             assert result.token_statistics is not None
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens

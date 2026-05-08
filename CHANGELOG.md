@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Toggle reward-shaping heuristic from Kimi K2.5 paper. Alternates between standard scaling (Phase1) and budget-limited (Phase0) phases every `toggle_m` training steps. Per-dataset token-length budget is accumulated on a streaming basis using the `token_budget_percentile`-th percentile of correct-response lengths. Disabled by default (`toggle_m=0`).
+
 ### Changed
 - Restore 🤡 to resample warnings and use `self.training_step` in `DataPreparationActor.run` (https://github.com/allenai/open-instruct/pull/1663).
 - Add a unified `use_rho_correction` interface (clamp + mask, per-token or sequence-level) for the train/infer engine mismatch in GRPO loss; replaces `truncated_importance_sampling_ratio_cap` and the IcePop flags (https://github.com/allenai/open-instruct/pull/1650).
