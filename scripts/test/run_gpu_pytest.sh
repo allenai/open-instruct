@@ -23,7 +23,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
-       --budget ai2/oe-omai \
+       --budget ai2/oe-other \
        --no-host-networking \
        --gpus 1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \

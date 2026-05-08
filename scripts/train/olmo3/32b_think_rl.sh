@@ -8,7 +8,7 @@ export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-3
 
 
 uv run python mason.py \
-    --budget ai2/oe-omai \
+    --budget ai2/oe-other \
     --cluster ai2/jupiter \
     --image $BEAKER_IMAGE \
     --pure_docker_mode \

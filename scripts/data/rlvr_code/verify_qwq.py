@@ -8,7 +8,7 @@ python mason.py \
     --priority high \
     --description "filtering correct python qwq generations" \
     --max_retries 0 \
-    --budget ai2/oe-omai \
+    --budget ai2/oe-other \
     --gpus 0 -- source configs/beaker_configs/code_api_setup.sh \\&\\& python scripts/data/rlvr_code/verify_qwq.py
 """
 

@@ -3,7 +3,7 @@ BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 
 # our released olmo3 thinker model actually doesnt use pipelinerl, but using it should do just as well.
 python mason.py \
-    --budget ai2/oe-omai \
+    --budget ai2/oe-other \
     --cluster ai2/jupiter \
     --image hamishivi/open_instruct_testing_1110 \
     --pure_docker_mode \

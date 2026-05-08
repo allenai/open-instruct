@@ -223,7 +223,7 @@ for TASK in "${all_mmlu_tasks[@]}"; do
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
             --beaker-workspace "ai2/tulu-3-results" \
-            --beaker-budget ai2/oe-omai \
+            --beaker-budget ai2/oe-other \
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
@@ -240,7 +240,7 @@ for TASK in "${all_mmlu_tasks[@]}"; do
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
         --beaker-workspace "ai2/tulu-3-results" \
-        --beaker-budget ai2/oe-omai \
+        --beaker-budget ai2/oe-other \
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \

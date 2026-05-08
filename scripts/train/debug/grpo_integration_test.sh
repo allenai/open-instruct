@@ -18,7 +18,7 @@ uv run python mason.py \
        --num_nodes 1 \
        --max_retries 0 \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-       --budget ai2/oe-omai \
+       --budget ai2/oe-other \
        --no-host-networking \
        --gpus 1 \
        --no_auto_dataset_cache \
