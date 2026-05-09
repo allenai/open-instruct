@@ -24,9 +24,6 @@ TOGGLE_WARMUP_STEPS="${TOGGLE_WARMUP_STEPS:-50}"
 
 for PERCENTILE in 50 80; do
     for M in 10 50 100; do
-        if [[ "${PERCENTILE}" == "50" && "${M}" == "50" ]]; then
-            continue
-        fi
         EXP_NAME="${EXP_NAME_PREFIX}_p${PERCENTILE}_m${M}"
         RUN_NAME="${EXP_NAME}_$(date +%Y%m%d_%H%M%S)"
 
@@ -45,7 +42,7 @@ for PERCENTILE in 50 80; do
             --gpus $NUM_GPUS \
             --budget ai2/oe-omai \
             -- \
-        uv run open_instruct/grpo.py \
+        uv run open_instruct/grpo_fast.py \
             --run_name "${RUN_NAME}" \
             --exp_name "${EXP_NAME}" \
             --eval_pass_at_k 32 \
@@ -72,9 +69,7 @@ for PERCENTILE in 50 80; do
             --non_stop_penalty False \
             --temperature 1.0 \
             --total_episodes 128000 \
-            --fsdp_shard_degree 4 \
-            --fsdp_num_replicas 1 \
-            --activation_memory_budget 0.5 \
+            --deepspeed_stage 2 \
             --num_learners_per_node 4 \
             --vllm_num_engines 4 \
             --vllm_tensor_parallel_size 1 \
