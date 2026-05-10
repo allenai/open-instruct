@@ -117,8 +117,9 @@ class GenValueTrainerActor:
         self._max_prompt_tokens = max_prompt_tokens
         self._step_count = 0
 
-        self._model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16).cuda()
-        self._model.config.use_cache = False
+        self._model = AutoModelForCausalLM.from_pretrained(
+            model_path, torch_dtype=torch.bfloat16, use_cache=False
+        ).cuda()
         if hasattr(self._model, "gradient_checkpointing_enable"):
             self._model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         self._model.train()
