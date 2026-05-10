@@ -65,13 +65,13 @@ uv run python mason.py \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
-    --tools swerl_sandbox \
+    --tools swerl_vanillux_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
     --max_steps 100 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
-    --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
+    --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
     --active_sampling \
     --mask_truncated_completions false \
     --backend_timeout 1200 \

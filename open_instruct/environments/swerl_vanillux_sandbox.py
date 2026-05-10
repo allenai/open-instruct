@@ -67,7 +67,10 @@ _BASH_TOOL = {
     "type": "function",
     "function": {
         "name": "bash",
-        "description": "Run a bash command in a persistent shell.",
+        "description": (
+            "Execute a bash command in a persistent shell. "
+            "Working directory and environment variables are preserved between calls."
+        ),
         "parameters": {
             "type": "object",
             "properties": {"command": {"type": "string", "description": "The bash command to execute."}},
