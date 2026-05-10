@@ -597,14 +597,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 num_labels=1,
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
-                use_cache=False,
             )
+            rm.config.use_cache = False
             self.value_model = AutoModelForCausalLM.from_pretrained(
                 model_config.model_name_or_path,
                 revision=model_config.model_revision,
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
-                use_cache=False,
             )
             rm_backbone = getattr(rm, rm.base_model_prefix)
             attr = rm.base_model_prefix
@@ -626,7 +625,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 revision=value_revision,
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
-                use_cache=False,
             )
             hidden_size = self.value_model.config.hidden_size
             value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
@@ -635,6 +633,7 @@ class PolicyTrainerRayProcess(RayProcess):
             self.value_model.lm_head = value_head
             logger.info(f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})")
 
+        self.value_model.config.use_cache = False
         disable_dropout_in_model(self.value_model)
 
         if args.init_value_from_pretrained_checkpoint:
