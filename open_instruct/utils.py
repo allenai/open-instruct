@@ -2657,4 +2657,31 @@ class UlyssesSPSplitter:
                 sharded.append(padded_sliced)
             kwargs[field.name] = sharded
 
-        return data_types.CollatedBatchData(**kwargs)
+        result = data_types.CollatedBatchData(**kwargs)
+        if self.sp_world_size > 1 and dist.is_available() and dist.is_initialized():
+            local_diag = {
+                "sp_rank": self.sp_rank,
+                "local_max": int(local_max),
+                "max_seqlen": int(max_seqlen),
+                "chunk_len": int(chunk_len),
+                "query_shapes": [tuple(t.shape) for t in result.query_responses],
+                "position_shapes": [tuple(t.shape) for t in result.position_ids],
+                "local_position_resets": [
+                    bool((t.diff(dim=-1) < 0).any().item()) if t.shape[-1] > 1 else False
+                    for t in result.position_ids
+                ],
+                "local_position_start_counts": [int((t == 0).sum().item()) for t in result.position_ids],
+            }
+            gathered_diag = [None for _ in range(self.sp_world_size)]
+            dist.all_gather_object(gathered_diag, local_diag, group=self.sp_group)
+
+            sample_counts = {len(d["query_shapes"]) for d in gathered_diag}
+            chunk_lens = {d["chunk_len"] for d in gathered_diag}
+            if len(sample_counts) != 1 or len(chunk_lens) != 1:
+                raise AssertionError(f"[SP split diagnostics] inconsistent shard metadata: {gathered_diag}")
+
+            if self.sp_rank == 0 and not getattr(self, "_sp_split_diagnostics_logged", False):
+                logger.info(f"[SP split diagnostics] per-rank shard metadata: {gathered_diag}")
+                self._sp_split_diagnostics_logged = True
+
+        return result

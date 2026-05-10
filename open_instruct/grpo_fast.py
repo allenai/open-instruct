@@ -572,6 +572,57 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
 
+    def _log_sp_forward_kwargs_diagnostics(self, data_BT, training_step: int):
+        """Check that SP ranks agree on rank-local forward kwargs decisions."""
+        if self._sp_world_size <= 1 or self._sp_group is None:
+            return
+
+        local_diag = {
+            "rank": self.rank,
+            "sp_rank": self._sp_rank,
+            "training_step": training_step,
+            "samples": [],
+        }
+        for sample_idx, position_ids in enumerate(data_BT.position_ids):
+            has_position_reset = (
+                bool((position_ids.diff(dim=-1) < 0).any().item()) if position_ids.shape[-1] > 1 else False
+            )
+            local_diag["samples"].append(
+                {
+                    "sample_idx": sample_idx,
+                    "position_shape": tuple(position_ids.shape),
+                    "passes_packing_kwargs": has_position_reset,
+                    "position_start_count": int((position_ids == 0).sum().item()),
+                    "first_position_id": int(position_ids[0, 0].item()) if position_ids.numel() else None,
+                    "last_position_id": int(position_ids[0, -1].item()) if position_ids.numel() else None,
+                }
+            )
+
+        gathered_diag = [None for _ in range(self._sp_world_size)]
+        dist.all_gather_object(gathered_diag, local_diag, group=self._sp_group)
+
+        sample_counts = {len(d["samples"]) for d in gathered_diag}
+        if len(sample_counts) != 1:
+            raise AssertionError(f"[SP forward diagnostics] SP ranks disagree on sample counts: {gathered_diag}")
+
+        mismatches = []
+        sample_count = next(iter(sample_counts), 0)
+        for sample_idx in range(sample_count):
+            decisions = {d["samples"][sample_idx]["passes_packing_kwargs"] for d in gathered_diag}
+            shapes = {d["samples"][sample_idx]["position_shape"] for d in gathered_diag}
+            if len(decisions) != 1 or len(shapes) != 1:
+                mismatches.append({"sample_idx": sample_idx, "decisions": sorted(decisions), "shapes": sorted(shapes)})
+
+        if mismatches:
+            raise AssertionError(
+                f"[SP forward diagnostics] SP ranks disagree on forward kwargs decisions: "
+                f"mismatches={mismatches}, diagnostics={gathered_diag}"
+            )
+
+        if self._sp_rank == 0 and not getattr(self, "_sp_forward_diagnostics_logged", False):
+            logger.info(f"[SP forward diagnostics] per-rank forward kwargs decisions: {gathered_diag}")
+            self._sp_forward_diagnostics_logged = True
+
     # ------------------------------------------------------------
     # Value model: scalar PPO critic. See the plan for the full list of supported features
     # (SAE, decoupled/length-adaptive GAE, GT / rollout_context / correct_demo conditioning).
@@ -1603,6 +1654,7 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.splitter is not None and self.args.use_value_model and self.args.value_model_ground_truth_conditioning
             else None
         )
+        self._log_sp_forward_kwargs_diagnostics(data_BT, training_step)
 
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
