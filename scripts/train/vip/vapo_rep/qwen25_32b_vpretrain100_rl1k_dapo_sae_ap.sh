@@ -72,9 +72,11 @@ uv run python mason.py \
     --total_episodes 9011200 \
     --deepspeed_stage 3 \
     --deepspeed_zpg 1 \
+    --deepspeed_offload_param \
+    --deepspeed_offload_optimizer \
     --gather_whole_model False \
     --num_learners_per_node 8 8 8 8 8 8 \
-    --sequence_parallel_size 2 \
+    --sequence_parallel_size 1 \
     --vllm_num_engines 8 \
     --vllm_tensor_parallel_size 2 \
     --lr_scheduler_type constant \
