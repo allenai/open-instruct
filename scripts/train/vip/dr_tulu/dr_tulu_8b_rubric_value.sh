@@ -1,9 +1,8 @@
 #!/bin/bash
-# DR-TULU training initialised from the SFT 8B checkpoint with evolving rubrics
+# DR-TULU training initialised from Qwen 3.5 4B with evolving rubrics
 # AND a scalar PPO value model conditioned on those rubrics.
 #
 # Differences from `dr_tulu_qwen35.sh`:
-#   * model:           rl-research/DR-Tulu-SFT-8B (was Qwen/Qwen3.5-4B)
 #   * response_length: 16384 (matches the 4B script; explicit here for clarity)
 #   * adds a scalar value model with --gt_conditioning_template rubrics so the
 #     critic sees the active positive/negative rubrics (the same payload the
@@ -20,7 +19,7 @@
 EXP_NAME="${EXP_NAME:-dr_tulu_8b_rubric_value}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-MODEL_NAME_OR_PATH="rl-research/DR-Tulu-SFT-8B"
+MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
@@ -74,7 +73,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --total_episodes 1024000 \
+    --total_episodes 512000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
     --sequence_parallel_size 1 \
@@ -90,7 +89,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tool_configs '{}' '{}' '{"pool_size": 100}' \
     --pool_size 256 \
     --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
-    --max_steps 10 \
+    --max_steps 100 \
     --backend_timeout 1800 \
     --save_traces \
     --seed 1 \
