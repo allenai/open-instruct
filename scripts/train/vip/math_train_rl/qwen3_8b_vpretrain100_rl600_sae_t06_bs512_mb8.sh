@@ -6,7 +6,7 @@
 # GPU layout: 2 nodes x 8 GPUs = 8 learner GPUs + 8 vLLM inference GPUs.
 #
 # Differences from the canonical vpretrain100_rl1k SAE scripts:
-#   - 8 samples / 64 prompts => 512 samples per batch
+#   - 8 samples / 512 prompts => 4096 samples per batch
 #   - 8 minibatches per step
 #   - sampling temperature 0.6 (vLLM logprobs are scaled by 1/temperature in
 #     the data loader so that they line up with the trainer's
@@ -14,10 +14,10 @@
 #   - 600 RL steps after the 100-step value warmup
 #
 # Step budget:
-#   total_episodes = (100 value warmup + 600 RL) * 64 prompts * 8 samples
-#                  = 358400
+#   total_episodes = (100 value warmup + 600 RL) * 512 prompts * 8 samples
+#                  = 2867200
 DDMM=$(date +"%d%m")
-exp_name=vip_vpretrain100_rl600_sae_t06_bs512_mb8_${DDMM}_qwen3_8b_math
+exp_name=vip_vpretrain100_rl600_sae_t06_bs4096_mb8_${DDMM}_qwen3_8b_math
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -44,7 +44,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 64 \
+    --num_unique_prompts_rollout 512 \
     --num_mini_batches 8 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -57,7 +57,7 @@ uv run python mason.py \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
     --temperature 0.6 \
-    --total_episodes 358400 \
+    --total_episodes 2867200 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
     --sequence_parallel_size 1 \
@@ -74,7 +74,7 @@ uv run python mason.py \
     --with_tracking \
     --push_to_hub False \
     --use_value_model \
-    --value_learning_rate 2e-6 \
+    --value_learning_rate 1e-5 \
     --gae_lambda 0.95 \
     --gamma 1.0 \
     --value_loss_coef 0.5 \
