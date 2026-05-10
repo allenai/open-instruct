@@ -597,15 +597,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 num_labels=1,
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
+                use_cache=False,
             )
-            rm.config.use_cache = False
             self.value_model = AutoModelForCausalLM.from_pretrained(
                 model_config.model_name_or_path,
                 revision=model_config.model_revision,
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
+                use_cache=False,
             )
-            self.value_model.config.use_cache = False
             rm_backbone = getattr(rm, rm.base_model_prefix)
             attr = rm.base_model_prefix
             if not hasattr(self.value_model, attr):
@@ -626,8 +626,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 revision=value_revision,
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
+                use_cache=False,
             )
-            self.value_model.config.use_cache = False
             hidden_size = self.value_model.config.hidden_size
             value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
             std = 1.0 / (hidden_size + 1) ** 0.5
