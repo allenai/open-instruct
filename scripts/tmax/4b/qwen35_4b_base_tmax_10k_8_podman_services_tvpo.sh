@@ -2,23 +2,29 @@
 
 # RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-10k
 # 3 nodes x 8 GPUs (24 GPUs total)
-# DPPO (Divergence Proximal Policy Optimization, https://arxiv.org/abs/2602.04879)
-# with binary TV divergence trust region anchored on the rollout policy μ_θ'.
+# TVPO (Total-Variation Proximal Policy Optimization). Like DPPO, the trust
+# region is anchored on the rollout policy μ_θ', but TVPO replaces DPPO's
+# per-token binary divergence with a *prompt-level* TV upper bound:
+#   per_sample_tv = (1/2) * mean_t |π_θ/μ_θ' − 1|
+# averaged across rollouts of the same prompt. When every prompt is in budget
+# the mask is all-ones; otherwise blocked tokens have their loss replaced by
+# its detached value (no gradient, but the loss value is preserved for logging).
 #
-# DPPO requirements (validated in GRPOExperimentConfig.__post_init__):
-#   --loss_fn dppo
+# TVPO requirements (validated in GRPOExperimentConfig.__post_init__):
+#   --loss_fn tvpo
 #   --use_vllm_logprobs true                        (anchor ratio on μ_θ')
 #   --truncated_importance_sampling_ratio_cap 0.0   (incompatible with use_vllm_logprobs)
-#   --dppo_divergence_threshold > 0                 (Eq. 12 trust-region radius δ)
+#   --tvpo_divergence_threshold > 0                 (TV trust-region radius δ)
+#   --tvpo_truncation_cap > 0                       (numerical IS cap; large value recommended)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k DPPO (Binary-TV) with Qwen3.5-4B (4 Podman services)" \
+       --description "SWERL tmax-10k TVPO with Qwen3.5-4B (4 Podman services)" \
        --pure_docker_mode \
-       --workspace ai2/olmo-instruct \
+       --workspace ai2/dr-tulu-ablations \
        --priority urgent \
        --preemptible \
        --num_nodes 3 \
@@ -70,9 +76,9 @@ uv run python mason.py \
     --beta 0.0 \
     --use_vllm_logprobs true \
     --truncated_importance_sampling_ratio_cap 0.0 \
-    --loss_fn dppo \
-    --dppo_divergence_type tv \
-    --dppo_divergence_threshold 0.1 \
+    --loss_fn tvpo \
+    --tvpo_divergence_threshold 0.02 \
+    --tvpo_truncation_cap 20.0 \
     --seed 42 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
@@ -95,7 +101,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_10k_dppo_8_podman_services \
+    --exp_name swerl_qwen35_4b_base_tmax_10k_tvpo_8_podman_services \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False

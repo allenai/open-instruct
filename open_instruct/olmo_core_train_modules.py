@@ -295,6 +295,7 @@ class GRPOTrainModule(TransformerTrainModule):
         device: torch.device | None = None,
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
+        num_samples_per_prompt: int = 1,
     ):
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
@@ -316,6 +317,7 @@ class GRPOTrainModule(TransformerTrainModule):
         self.temperature = temperature
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
+        self.num_samples_per_prompt = num_samples_per_prompt
 
         self.ref_policy = ref_policy
         if ref_policy is not None:
@@ -472,6 +474,24 @@ class GRPOTrainModule(TransformerTrainModule):
                     )
                 else:
                     dppo_mask = None
+                if self.grpo_config.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                    rollout_ids = (
+                        data_BT.rollout_sample_ids[sample_idx][:, 1:]
+                        if data_BT.rollout_sample_ids is not None
+                        else None
+                    )
+                    tvpo_mask, _ = grpo_utils.compute_tvpo_mask(
+                        new_logprobs=new_logprobs,
+                        behavior_logprobs=vllm_logprobs,
+                        advantages=advantages[:, 1:],
+                        ratio=ratio,
+                        response_mask=response_mask,
+                        divergence_threshold=self.grpo_config.tvpo_divergence_threshold,
+                        rollout_ids=rollout_ids,
+                        num_samples_per_prompt=self.num_samples_per_prompt,
+                    )
+                else:
+                    tvpo_mask = None
                 combined_tis = grpo_utils.combine_tis_terms(tis_clamped, tis_mask, dppo_mask)
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
@@ -481,6 +501,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
                     tis_weights=combined_tis,
+                    policy_freeze_mask=tvpo_mask,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps

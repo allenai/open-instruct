@@ -61,6 +61,7 @@ class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
     dppo = "dppo"
+    tvpo = "tvpo"
 
 
 class DPPODivergenceType(enum.StrEnum):
@@ -135,7 +136,8 @@ class GRPOExperimentConfig(
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
-    """Which policy-loss function to use: 'dapo', 'cispo', or 'dppo' (https://arxiv.org/abs/2602.04879)."""
+    """Which policy-loss function to use: 'dapo', 'cispo', 'dppo'
+    (https://arxiv.org/abs/2602.04879), or 'tvpo' (prompt-level TV trust region)."""
     dppo_divergence_type: DPPODivergenceType = DPPODivergenceType.tv
     """For DPPO: which divergence to use to define the trust region ('tv' or 'kl').
 
@@ -143,11 +145,35 @@ class GRPOExperimentConfig(
     Eqs. 13/14 of the DPPO paper (https://arxiv.org/abs/2602.04879). Only used
     when ``loss_fn=dppo``.
     """
-    dppo_divergence_threshold: float = 0.02
+    dppo_divergence_threshold: float = 0.1
     """For DPPO: the trust-region threshold δ on the binary divergence.
 
     Tokens whose update would push them outside the trust region (per Eq. 12)
     are masked out of the policy gradient. Only used when ``loss_fn=dppo``.
+
+    The DPPO paper (https://arxiv.org/abs/2602.04879) uses δ=0.15 (Sec 5) and
+    δ=0.2 (scaling experiments, Appendix F) for binary TV, and δ=0.05 for
+    binary KL. We default to 0.1 as a moderately tighter middle-ground; bump
+    closer to 0.15–0.2 for paper-faithful runs.
+    """
+    tvpo_divergence_threshold: float = 0.02
+    """For TVPO: prompt-level total-variation trust-region radius δ.
+
+    A prompt is considered in budget when ``(1/2) * E_t |π_θ/μ_θ' − 1| ≤ δ``,
+    where the inner expectation is the rollout-uniform mean across all rollouts
+    of that prompt that appear in the same microbatch. When *every* prompt in
+    the microbatch is in budget the mask is all-ones (full REINFORCE-IS step).
+    Otherwise blocked tokens have their loss replaced by its detached value so
+    no gradient flows but the loss value is preserved for logging. Only used
+    when ``loss_fn=tvpo``.
+    """
+    tvpo_truncation_cap: float = 20.0
+    """For TVPO: importance-weight truncation cap c used in the surrogate
+    ``-A · clamp(r, max=c).detach() · log π_θ`` (REINFORCE-with-IS form).
+
+    A large cap (default 20) is recommended because the trust region is enforced
+    by the TVPO mask, not by this cap; the cap only protects against numerical
+    blow-ups in extreme ratios. Only used when ``loss_fn=tvpo``.
     """
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -262,6 +288,22 @@ class GRPOExperimentConfig(
                     "computed against the rollout policy μ_θ' (Takeaway 2 in arXiv:2602.04879). "
                     "Pass `--use_vllm_logprobs True --truncated_importance_sampling_ratio_cap 0` "
                     "alongside `--loss_fn dppo`."
+                )
+        if self.loss_fn == GRPOLossType.tvpo:
+            if self.tvpo_divergence_threshold <= 0.0:
+                raise ValueError(
+                    f"TVPO requires `tvpo_divergence_threshold` > 0 (got {self.tvpo_divergence_threshold})."
+                )
+            if self.tvpo_truncation_cap <= 0.0:
+                raise ValueError(f"TVPO requires `tvpo_truncation_cap` > 0 (got {self.tvpo_truncation_cap}).")
+            # Like DPPO, TVPO's trust region is anchored on the rollout policy
+            # μ_θ', so the cached `old_logprob` must be the vLLM logprobs.
+            if not self.use_vllm_logprobs:
+                raise ValueError(
+                    "TVPO requires `use_vllm_logprobs=True` so the importance ratio is "
+                    "computed against the rollout policy μ_θ'. "
+                    "Pass `--use_vllm_logprobs True --truncated_importance_sampling_ratio_cap 0` "
+                    "alongside `--loss_fn tvpo`."
                 )
         if self.tis_mask_lower < 0.0 or self.tis_mask_upper < 0.0:
             raise ValueError(
@@ -524,6 +566,113 @@ def compute_dppo_mask(
     return mask, divergence
 
 
+def compute_tvpo_mask(
+    new_logprobs: torch.Tensor,
+    behavior_logprobs: torch.Tensor,
+    advantages: torch.Tensor,
+    ratio: torch.Tensor,
+    response_mask: torch.Tensor,
+    divergence_threshold: float,
+    rollout_ids: torch.Tensor | None = None,
+    num_samples_per_prompt: int = 1,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute the TVPO trust-region mask.
+
+    TVPO enforces a *prompt-level* trust region using the standard total-variation
+    upper bound from importance sampling: ``TV(π_θ, μ_θ') ≤ (1/2) E_t [|π_θ/μ_θ' − 1|]``.
+    For every prompt represented in the microbatch we average ``|r − 1| / 2`` over
+    its rollout's response tokens, then average those per-rollout TVs (uniform per
+    rollout) into one per-prompt TV.
+
+    The mask is constructed in two stages:
+
+    1. **Hierarchical short-circuit.** If every prompt's TV is at or below the
+       threshold ``δ``, the mask is all-ones for response positions — TVPO
+       behaves as a plain truncated-IS REINFORCE step.
+    2. **Directional release valve.** If at least one prompt is over budget,
+       a token is *kept* iff ``(prompt_tv ≤ δ) OR (A · sign(π − μ) ≤ 0)``. The
+       second clause keeps tokens whose gradient direction would *reduce* the
+       prompt's TV (push the policy back towards μ_θ'), even when over budget.
+
+    The caller is responsible for using the mask via the ``policy_freeze_mask``
+    argument of :func:`compute_grpo_loss`, which substitutes the detached loss
+    value for blocked tokens (zero gradient, value preserved for logging).
+
+    Args:
+        new_logprobs:        log π_θ at the sampled tokens, shape ``[B, T]``.
+        behavior_logprobs:   log μ_θ' at the sampled tokens (from the rollout),
+            shape ``[B, T]``.
+        advantages:          per-token advantages, shape ``[B, T]``.
+        ratio:               π_θ / μ_θ' at the sampled tokens, shape ``[B, T]``.
+        response_mask:       bool mask selecting valid response positions.
+        divergence_threshold: scalar trust-region radius δ on TV.
+        rollout_ids:         optional ``[B, T]`` int tensor giving the rollout id
+            of each token. When ``None``, the entire microbatch is treated as a
+            single prompt with a single rollout (no group aggregation), matching
+            the per-sample fallback in the reference implementation.
+        num_samples_per_prompt: number of rollouts per prompt. Prompt id is
+            derived as ``rollout_id // num_samples_per_prompt``, matching the
+            consecutive-grouped layout produced by the rollout pipeline.
+
+    Returns:
+        ``(mask, prompt_tv_per_token)`` where ``mask`` is a 0/1 float tensor of
+        the same shape as ``new_logprobs`` (1 = keep, 0 = freeze gradient), and
+        ``prompt_tv_per_token`` broadcasts the per-prompt TV back to every
+        response token (zero on padding) for logging.
+    """
+    with torch.no_grad():
+        per_token_tv_half = 0.5 * (ratio - 1.0).abs()
+        per_token_tv_half = torch.where(response_mask, per_token_tv_half, torch.zeros_like(per_token_tv_half))
+
+        prompt_tv_per_token = torch.zeros_like(per_token_tv_half)
+        if rollout_ids is None:
+            num_response = response_mask.sum().to(per_token_tv_half.dtype).clamp_min(1.0)
+            sample_tv = per_token_tv_half.sum() / num_response
+            prompt_tv_per_token = torch.where(
+                response_mask, sample_tv.expand_as(per_token_tv_half), prompt_tv_per_token
+            )
+        else:
+            valid_rollout_ids = rollout_ids[response_mask]
+            if valid_rollout_ids.numel() > 0:
+                unique_rollouts, token_to_rollout_local = torch.unique(valid_rollout_ids, return_inverse=True)
+                num_rollouts = int(unique_rollouts.numel())
+                ones_tok = torch.ones(
+                    valid_rollout_ids.numel(), dtype=per_token_tv_half.dtype, device=per_token_tv_half.device
+                )
+                rollout_sum = torch.zeros(num_rollouts, dtype=per_token_tv_half.dtype, device=per_token_tv_half.device)
+                rollout_sum.index_add_(0, token_to_rollout_local, per_token_tv_half[response_mask])
+                rollout_count = torch.zeros_like(rollout_sum)
+                rollout_count.index_add_(0, token_to_rollout_local, ones_tok)
+                per_rollout_tv = rollout_sum / rollout_count.clamp_min(1.0)
+
+                rollout_to_prompt_id = unique_rollouts.div(num_samples_per_prompt, rounding_mode="floor")
+                unique_prompts, rollout_to_prompt_local = torch.unique(rollout_to_prompt_id, return_inverse=True)
+                num_prompts = int(unique_prompts.numel())
+                ones_roll = torch.ones_like(per_rollout_tv)
+                prompt_sum = torch.zeros(num_prompts, dtype=per_rollout_tv.dtype, device=per_rollout_tv.device)
+                prompt_sum.index_add_(0, rollout_to_prompt_local, per_rollout_tv)
+                prompt_count = torch.zeros_like(prompt_sum)
+                prompt_count.index_add_(0, rollout_to_prompt_local, ones_roll)
+                per_prompt_tv = prompt_sum / prompt_count.clamp_min(1.0)
+
+                token_prompt_local = rollout_to_prompt_local[token_to_rollout_local]
+                prompt_tv_per_token[response_mask] = per_prompt_tv[token_prompt_local]
+
+        valid_tv = prompt_tv_per_token[response_mask] if response_mask.any() else prompt_tv_per_token.new_zeros(())
+        max_prompt_tv = valid_tv.max() if valid_tv.numel() > 0 else prompt_tv_per_token.new_zeros(())
+        if bool((max_prompt_tv <= divergence_threshold).item()):
+            mask = response_mask.to(new_logprobs.dtype)
+        else:
+            prob = torch.exp(new_logprobs.clamp(min=-30.0, max=0.0))
+            old_prob = torch.exp(behavior_logprobs.clamp(min=-30.0, max=0.0))
+            ref_grad = torch.sign(prob - old_prob)
+            token_safe = (advantages * ref_grad) <= 0
+            prompt_within_budget = prompt_tv_per_token <= divergence_threshold
+            keep = (prompt_within_budget | token_safe) & response_mask
+            mask = keep.to(new_logprobs.dtype)
+    return mask, prompt_tv_per_token
+
+
 def compute_grpo_loss(
     new_logprobs: torch.Tensor,
     ratio: torch.Tensor,
@@ -531,6 +680,7 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
+    policy_freeze_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -548,8 +698,23 @@ def compute_grpo_loss(
         # Eq. 11: L_DPPO = E[Σ_t M_t · r_t · A_t]. No symmetric clipping.
         pg_losses = -advantages * ratio
         pg_losses2 = pg_losses
+    elif config.loss_fn == GRPOLossType.tvpo:
+        # TVPO: REINFORCE-with-IS surrogate -A · clamp(r, max=c).detach() · log π.
+        # Trust region is enforced via ``policy_freeze_mask`` (built by
+        # :func:`compute_tvpo_mask`), which substitutes the detached loss for
+        # blocked tokens so they contribute no gradient. The truncation cap is
+        # primarily a numerical safeguard since the mask, not the cap, defines
+        # the trust region.
+        truncated_ratio = torch.clamp(ratio, max=config.tvpo_truncation_cap).detach()
+        pg_losses = -advantages * truncated_ratio * new_logprobs
+        pg_losses2 = pg_losses
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
+
+    if policy_freeze_mask is not None:
+        keep = policy_freeze_mask.bool()
+        pg_losses = torch.where(keep, pg_losses, pg_losses.detach())
+        pg_losses2 = torch.where(keep, pg_losses2, pg_losses2.detach())
 
     if tis_weights is not None:
         pg_losses = pg_losses * tis_weights

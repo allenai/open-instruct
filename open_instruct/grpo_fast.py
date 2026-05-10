@@ -138,8 +138,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 def _count_sampled_episodes_for_step(
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    step_metrics: dict[str, Any],
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig, step_metrics: dict[str, Any]
 ) -> int:
     sampled_prompt_groups = streaming_config.num_unique_prompts_rollout
     if streaming_config.active_sampling:
@@ -736,6 +735,11 @@ class PolicyTrainerRayProcess(RayProcess):
         dppo_enabled = self.args.loss_fn == grpo_utils.GRPOLossType.dppo
         dppo_mask_kept_tokens = torch.zeros((), device=device)
         dppo_mask_total_tokens = torch.zeros((), device=device)
+        tvpo_enabled = self.args.loss_fn == grpo_utils.GRPOLossType.tvpo
+        tvpo_mask_kept_tokens = torch.zeros((), device=device)
+        tvpo_mask_total_tokens = torch.zeros((), device=device)
+        tvpo_tv_weighted_sum = torch.zeros((), device=device)
+        tvpo_tv_weight = torch.zeros((), device=device)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -837,6 +841,33 @@ class PolicyTrainerRayProcess(RayProcess):
                             dppo_mask_total_tokens += response_mask_BT.sum()
                     else:
                         dppo_mask_BT = None
+                    if self.args.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                        # TVPO needs to know which tokens belong to which prompt, so we
+                        # pass the per-token rollout id (each rollout's tokens stay
+                        # contiguous after packing) and the per-prompt fanout. When
+                        # rollout ids aren't available we fall back to per-microbatch
+                        # aggregation which still computes a meaningful (single-prompt) TV.
+                        rollout_ids_BT = (
+                            data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None
+                        )
+                        tvpo_mask_BT, tvpo_prompt_tv_BT = grpo_utils.compute_tvpo_mask(
+                            new_logprobs=new_logprobs_BT,
+                            behavior_logprobs=vllm_logprobs_BT,
+                            advantages=data_BT.advantages[i][:, 1:],
+                            ratio=ratio_BT,
+                            response_mask=response_mask_BT,
+                            divergence_threshold=self.args.tvpo_divergence_threshold,
+                            rollout_ids=rollout_ids_BT,
+                            num_samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
+                        )
+                        with torch.no_grad():
+                            tvpo_mask_kept_tokens += tvpo_mask_BT.sum()
+                            tvpo_mask_total_tokens += response_mask_BT.sum()
+                            response_count = response_mask_BT.sum()
+                            tvpo_tv_weighted_sum += (tvpo_prompt_tv_BT * response_mask_BT).sum()
+                            tvpo_tv_weight += response_count
+                    else:
+                        tvpo_mask_BT = None
                     combined_tis_BT = grpo_utils.combine_tis_terms(tis_clamped_BT, tis_mask_BT, dppo_mask_BT)
 
                     if tis_mask_BT is not None:
@@ -851,6 +882,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         tis_weights=combined_tis_BT,
+                        policy_freeze_mask=tvpo_mask_BT,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -905,6 +937,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         else torch.zeros((), device=device)
                     )
                     self.local_metrics["debug/dppo_mask_frac_kept"] = float(dppo_frac_kept)
+                if tvpo_enabled:
+                    tvpo_frac_kept = (
+                        tvpo_mask_kept_tokens / tvpo_mask_total_tokens
+                        if tvpo_mask_total_tokens > 0
+                        else torch.zeros((), device=device)
+                    )
+                    self.local_metrics["debug/tvpo_mask_frac_kept"] = float(tvpo_frac_kept)
+                    tvpo_tv = (
+                        tvpo_tv_weighted_sum / tvpo_tv_weight if tvpo_tv_weight > 0 else torch.zeros((), device=device)
+                    )
+                    self.local_metrics["actor/ppo_tv"] = float(tvpo_tv)
                 self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
@@ -1480,8 +1523,7 @@ def create_model_and_optimizer(
             try:
                 image_prewarm_actors.append(
                     data_loader_lib.ImagePrewarmActor.options(
-                        num_cpus=0.1,
-                        resources={f"node:{node_ip}": 0.001},
+                        num_cpus=0.1, resources={f"node:{node_ip}": 0.001}
                     ).remote()
                 )
             except Exception as e:
@@ -1826,6 +1868,8 @@ def one_training_step(
         "val/ratio_var",
         "debug/tis_mask_frac_kept",
         "debug/dppo_mask_frac_kept",
+        "debug/tvpo_mask_frac_kept",
+        "actor/ppo_tv",
     }
     average_metrics = {}
     # Average scalar metrics from each worker
@@ -2278,9 +2322,7 @@ def run_training(
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
     if args.deepspeed_stage == 3:
         logger.info("[Main Thread] ZeRO-3: running dummy optimizer step to prime NCCL state.")
-        ray_get_with_progress(
-            [m.dummy_optimizer_step.remote() for m in policy_group.models], desc="ZeRO-3 dummy step"
-        )
+        ray_get_with_progress([m.dummy_optimizer_step.remote() for m in policy_group.models], desc="ZeRO-3 dummy step")
         weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
     ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
 

@@ -162,6 +162,8 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "load_ref_policy": False,
         "dppo_divergence_type": grpo_utils.DPPODivergenceType.tv,
         "dppo_divergence_threshold": 0.02,
+        "tvpo_divergence_threshold": 0.02,
+        "tvpo_truncation_cap": 20.0,
     }
     defaults.update(kwargs)
     config = MagicMock(spec=grpo_utils.GRPOExperimentConfig)
@@ -480,6 +482,274 @@ class TestDPPOLoss(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "use_vllm_logprobs"):
             grpo_utils.GRPOExperimentConfig(
                 loss_fn=grpo_utils.GRPOLossType.dppo,
+                use_vllm_logprobs=False,
+                truncated_importance_sampling_ratio_cap=0.0,
+            )
+
+
+class TestComputeTVPOMask(unittest.TestCase):
+    def test_in_budget_returns_all_ones(self):
+        # ratio = 1 everywhere → per-token TV contribution is 0 → all prompts
+        # in budget regardless of advantages, so mask is the response_mask.
+        new_logprobs = torch.log(torch.tensor([[0.4, 0.4, 0.4, 0.4]]))
+        ratio = torch.ones_like(new_logprobs)
+        advantages = torch.tensor([[1.0, -1.0, 1.0, -1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        mask, prompt_tv = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=new_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+            rollout_ids=torch.tensor([[0, 0, 1, 1]]),
+            num_samples_per_prompt=2,
+        )
+
+        torch.testing.assert_close(mask, torch.ones_like(mask))
+        torch.testing.assert_close(prompt_tv, torch.zeros_like(prompt_tv))
+
+    def test_short_circuit_skips_directional_filter(self):
+        # Even with adversarial advantage/sign-of-shift combos, when every
+        # prompt is in budget the mask is all-ones (no directional gating).
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
+        behavior_logprobs = torch.log(torch.tensor([[0.49, 0.51]]))
+        ratio = torch.exp(new_logprobs - behavior_logprobs)
+        advantages = torch.tensor([[1.0, -1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        mask, _ = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=behavior_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.5,
+            rollout_ids=torch.tensor([[0, 1]]),
+            num_samples_per_prompt=2,
+        )
+
+        torch.testing.assert_close(mask, torch.ones_like(mask))
+
+    def test_over_budget_directional_release_valve(self):
+        # Drive a single prompt well over budget (ratio = 5), then check that
+        # only tokens whose gradient *reduces* TV survive: A·sign(p−p_old) ≤ 0.
+        # token 0: A=+1, p>p_old → product>0 → BLOCK
+        # token 1: A=-1, p>p_old → product<0 → KEEP
+        # token 2: A=+1, p<p_old → product<0 → KEEP
+        # token 3: A=-1, p<p_old → product>0 → BLOCK
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5, 0.1, 0.1]]))
+        behavior_logprobs = torch.log(torch.tensor([[0.1, 0.1, 0.5, 0.5]]))
+        ratio = torch.exp(new_logprobs - behavior_logprobs)
+        advantages = torch.tensor([[1.0, -1.0, 1.0, -1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        mask, prompt_tv = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=behavior_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+            rollout_ids=torch.tensor([[0, 0, 0, 0]]),
+            num_samples_per_prompt=1,
+        )
+
+        torch.testing.assert_close(mask, torch.tensor([[0.0, 1.0, 1.0, 0.0]]))
+        # All tokens belong to the same prompt, so prompt_tv is constant and >> 0.
+        self.assertTrue(torch.all(prompt_tv[response_mask] > 0.01))
+
+    def test_in_budget_prompt_keeps_all_its_tokens_when_other_prompt_over(self):
+        # Two prompts. Prompt 0 (rollouts 0,1) is in budget — its per-token TV
+        # contribution |1.005 - 1|/2 = 0.0025 averaged across rollouts is below
+        # δ=0.01 — and so its tokens all keep regardless of direction. Prompt 1
+        # (rollouts 2,3) has ratio 5.0 (TV=2.0) and is well over budget, so the
+        # directional gate fires only there.
+        in_budget = torch.full((1, 4), 1.005)
+        over_budget = torch.full((1, 4), 5.0)
+        ratio = torch.cat([in_budget, over_budget], dim=1)
+        # Sign of p − p_old is positive everywhere (π = 0.4 > μ = 0.1).
+        new_logprobs = torch.log(torch.full_like(ratio, 0.4))
+        behavior_logprobs = torch.log(torch.full_like(ratio, 0.1))
+        advantages = torch.tensor([[1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, -1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+        rollout_ids = torch.tensor([[0, 0, 1, 1, 2, 2, 3, 3]])
+
+        mask, _ = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=behavior_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+            rollout_ids=rollout_ids,
+            num_samples_per_prompt=2,
+        )
+
+        # Prompt 0 (tokens 0..3) is in budget → fully kept.
+        # Prompt 1 (tokens 4..7) over budget: A>0,sign>0 → block; A<0,sign>0 → keep.
+        expected = torch.tensor([[1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0]])
+        torch.testing.assert_close(mask, expected)
+
+    def test_response_mask_zeroes_padding(self):
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5, 0.5]]))
+        behavior_logprobs = torch.log(torch.tensor([[0.1, 0.1, 0.1]]))
+        ratio = torch.exp(new_logprobs - behavior_logprobs)
+        advantages = torch.tensor([[1.0, 1.0, 1.0]])
+        response_mask = torch.tensor([[False, True, False]])
+
+        mask, _ = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=behavior_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+            rollout_ids=torch.tensor([[0, 0, 0]]),
+            num_samples_per_prompt=1,
+        )
+
+        # Padding positions are always 0; the lone valid position has A>0 and
+        # p>p_old so it's blocked under the directional gate.
+        torch.testing.assert_close(mask, torch.tensor([[0.0, 0.0, 0.0]]))
+
+    def test_no_rollout_ids_falls_back_to_per_microbatch_tv(self):
+        # Without rollout_ids, every token is treated as one prompt with one
+        # rollout: per_sample_tv = mean(|r-1|)/2 averaged over the whole pack.
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5, 0.5]]))
+        behavior_logprobs = torch.log(torch.tensor([[0.1, 0.1, 0.1]]))
+        ratio = torch.exp(new_logprobs - behavior_logprobs)
+        advantages = torch.tensor([[1.0, -1.0, 0.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        mask, prompt_tv = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=behavior_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+        )
+
+        # All response tokens share the same per-microbatch prompt_tv.
+        expected_tv = 0.5 * float((ratio - 1.0).abs().mean())
+        torch.testing.assert_close(prompt_tv, torch.full_like(prompt_tv, expected_tv))
+        # Over budget; A>0 with p>p_old → block; A<0 → keep; A=0 → keep.
+        torch.testing.assert_close(mask, torch.tensor([[0.0, 1.0, 1.0]]))
+
+    def test_mask_does_not_propagate_gradients(self):
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]])).requires_grad_(True)
+        behavior_logprobs = torch.log(torch.tensor([[0.1, 0.1]]))
+        ratio = torch.exp(new_logprobs - behavior_logprobs)
+        advantages = torch.tensor([[1.0, 1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        mask, _ = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=behavior_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+            rollout_ids=torch.tensor([[0, 0]]),
+            num_samples_per_prompt=1,
+        )
+
+        self.assertFalse(mask.requires_grad)
+
+
+class TestTVPOLoss(unittest.TestCase):
+    def test_tvpo_uses_truncated_detached_ratio(self):
+        # Surrogate: -A · clamp(r, max=cap).detach() · log π. With r ≤ cap and
+        # no mask, gradient flows only through new_logprobs (log π), not ratio.
+        config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo, tvpo_truncation_cap=20.0)
+        ratio = torch.tensor([[1.5, 0.5, 1.0]], requires_grad=True)
+        new_logprobs = torch.log(torch.tensor([[0.4, 0.5, 0.6]])).requires_grad_(True)
+        advantages = torch.ones(1, 3)
+
+        pg_losses, pg_losses2, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+        )
+
+        # No symmetric clipping for TVPO.
+        torch.testing.assert_close(pg_losses, pg_losses2)
+        # Forward value: -A · trunc(r) · log π.
+        expected = -advantages * torch.clamp(ratio.detach(), max=20.0) * new_logprobs
+        torch.testing.assert_close(pg_loss_max, expected)
+
+        # Backward only flows through log π, not r (ratio is detached in surrogate).
+        pg_loss_max.sum().backward()
+        self.assertIsNone(ratio.grad)
+        self.assertIsNotNone(new_logprobs.grad)
+
+    def test_tvpo_truncation_caps_extreme_ratios(self):
+        config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo, tvpo_truncation_cap=2.0)
+        ratio = torch.tensor([[10.0, 1.0]])
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
+        advantages = torch.ones(1, 2)
+
+        _, _, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs, ratio=ratio, advantages=advantages, ref_logprobs=None, config=config
+        )
+
+        expected = -advantages * torch.clamp(ratio, max=2.0) * new_logprobs
+        torch.testing.assert_close(pg_loss_max, expected)
+
+    def test_tvpo_freeze_mask_zeroes_gradient_but_keeps_value(self):
+        config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.tvpo)
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]])).requires_grad_(True)
+        ratio = torch.tensor([[2.0, 0.5]])
+        advantages = torch.tensor([[1.0, -1.0]])
+        # Freeze token 0's gradient, keep token 1.
+        freeze_mask = torch.tensor([[0.0, 1.0]])
+
+        _, _, pg_loss_max, _ = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=None,
+            config=config,
+            policy_freeze_mask=freeze_mask,
+        )
+
+        # Loss VALUE preserved everywhere (surrogate would otherwise be 0 at
+        # mask=0 if we used multiplicative masking, but TVPO uses where()).
+        expected = (
+            -advantages
+            * torch.clamp(ratio, max=config.tvpo_truncation_cap).detach()
+            * torch.log(torch.tensor([[0.5, 0.5]]))
+        )
+        torch.testing.assert_close(pg_loss_max, expected)
+
+        pg_loss_max.sum().backward()
+        # Gradient should be zero for the masked-out token.
+        assert new_logprobs.grad is not None
+        self.assertEqual(float(new_logprobs.grad[0, 0]), 0.0)
+        self.assertNotEqual(float(new_logprobs.grad[0, 1]), 0.0)
+
+    def test_tvpo_threshold_validation(self):
+        with self.assertRaises(ValueError):
+            grpo_utils.GRPOExperimentConfig(
+                loss_fn=grpo_utils.GRPOLossType.tvpo,
+                tvpo_divergence_threshold=0.0,
+                use_vllm_logprobs=True,
+                truncated_importance_sampling_ratio_cap=0.0,
+            )
+
+    def test_tvpo_truncation_cap_validation(self):
+        with self.assertRaises(ValueError):
+            grpo_utils.GRPOExperimentConfig(
+                loss_fn=grpo_utils.GRPOLossType.tvpo,
+                tvpo_truncation_cap=0.0,
+                use_vllm_logprobs=True,
+                truncated_importance_sampling_ratio_cap=0.0,
+            )
+
+    def test_tvpo_requires_use_vllm_logprobs(self):
+        with self.assertRaisesRegex(ValueError, "use_vllm_logprobs"):
+            grpo_utils.GRPOExperimentConfig(
+                loss_fn=grpo_utils.GRPOLossType.tvpo,
                 use_vllm_logprobs=False,
                 truncated_importance_sampling_ratio_cap=0.0,
             )

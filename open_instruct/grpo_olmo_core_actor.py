@@ -175,6 +175,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
+            num_samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
