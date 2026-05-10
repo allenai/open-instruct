@@ -9,11 +9,11 @@ layers.
 
 Examples:
     uv run python scripts/docker/warm_tmax_registry_mirror.py \\
-        --dataset hamishivi/swerl-tmax-10k \\
+        --dataset hamishivi/swerl-tmax-15k \\
         --mirror jupiter-cs-aus-150.reviz.ai2.in:5000
 
     uv run python scripts/docker/warm_tmax_registry_mirror.py \\
-        --tool-configs '{"task_data_hf_repo":"hamishivi/swerl-tmax-10k","image":"python:3.12-slim"}' \\
+        --tool-configs '{"task_data_hf_repo":"hamishivi/swerl-tmax-15k","image":"python:3.12-slim"}' \\
         --mirror jupiter-cs-aus-150.reviz.ai2.in:5000
 
 By default, the script warms the mirror through the registry HTTP API, so it
@@ -287,7 +287,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "SWERL tool/env config JSON, or path to JSON, e.g. "
-            '\'{"task_data_hf_repo":"hamishivi/swerl-tmax-10k","image":"python:3.12-slim"}\'. '
+            '\'{"task_data_hf_repo":"hamishivi/swerl-tmax-15k","image":"python:3.12-slim"}\'. '
             "The image value is included in the warmed images."
         ),
     )

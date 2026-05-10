@@ -6,8 +6,8 @@ set -euo pipefail
 #   bash scripts/data/rebuild_tmax_images_amd64.sh [extra build_tmax_images.py args...]
 
 uv run python scripts/data/build_tmax_images.py \
-  --input hamishivi/swerl-tmax-10k-verified \
-  --output-dataset hamishivi/swerl-tmax-10k-verified \
+  --input hamishivi/swerl-tmax-15k-verified \
+  --output-dataset hamishivi/swerl-tmax-15k-verified \
   --registry hamishi740 \
   --repo-prefix swerl-tmax \
   --platform linux/amd64 \

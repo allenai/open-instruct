@@ -7,7 +7,7 @@ set -euo pipefail
 
 uv run python scripts/data/build_tmax_images.py \
   --input osieosie/tmax-tasks-skill-taxonomy-20260401-10k \
-  --output-dataset hamishivi/swerl-tmax-10k \
+  --output-dataset hamishivi/swerl-tmax-15k \
   --registry hamishi740 \
   --repo-prefix swerl-tmax \
   --platform linux/amd64,linux/arm64 \

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# RL on hamishivi/sft_qwen3_4b_tmax_4node2203 + hamishivi/swerl-tmax-10k + hamishivi/agent-task-combined
+# RL on hamishivi/sft_qwen3_4b_tmax_4node2203 + hamishivi/swerl-tmax-15k + hamishivi/agent-task-combined
 # 4 nodes x 8 GPUs (32 GPUs total)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -35,7 +35,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 hamishivi/agent-task-combined 1.0 \
+    --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train train \
     --max_prompt_token_length 2048 \
     --response_length 32768 \
