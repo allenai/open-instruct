@@ -605,6 +605,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
             )
+            self.value_model.config.use_cache = False
             rm_backbone = getattr(rm, rm.base_model_prefix)
             attr = rm.base_model_prefix
             if not hasattr(self.value_model, attr):
@@ -626,6 +627,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 dtype=torch.bfloat16,
                 attn_implementation=hf_attn,
             )
+            self.value_model.config.use_cache = False
             hidden_size = self.value_model.config.hidden_size
             value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
             std = 1.0 / (hidden_size + 1) ** 0.5
@@ -633,7 +635,6 @@ class PolicyTrainerRayProcess(RayProcess):
             self.value_model.lm_head = value_head
             logger.info(f"{self.rank=}: Replaced LM head with scalar value head (hidden={hidden_size})")
 
-        self.value_model.config.use_cache = False
         disable_dropout_in_model(self.value_model)
 
         if args.init_value_from_pretrained_checkpoint:
@@ -1103,6 +1104,141 @@ class PolicyTrainerRayProcess(RayProcess):
             logits = getattr(dummy_out, "logits", dummy_out)
             dummy_grad_outputs.append(logits.reshape(-1)[0])
 
+    def _sp_slice_bounds(self, seq_len: int) -> tuple[int, int, int]:
+        padded_len = ((int(seq_len) + self._sp_world_size - 1) // self._sp_world_size) * self._sp_world_size
+        chunk_len = padded_len // self._sp_world_size
+        start = chunk_len * self._sp_rank
+        end = chunk_len * (self._sp_rank + 1)
+        return start, end, padded_len
+
+    @staticmethod
+    def _pad_and_slice_last_dim(tensor: torch.Tensor, padded_len: int, start: int, end: int, pad_value: float | int):
+        if tensor.shape[-1] < padded_len:
+            pad = tensor.new_full((*tensor.shape[:-1], padded_len - tensor.shape[-1]), pad_value)
+            tensor = torch.cat([tensor, pad], dim=-1)
+        return tensor[..., start:end]
+
+    def _build_conditioned_value_entries(
+        self,
+        query_responses: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        ground_truths_for_pack: list[str],
+        siblings_for_pack: list[list[dict]] | None,
+        hints_for_pack: list[str | None] | None = None,
+    ) -> list[dict[str, Any]]:
+        args = self.args
+        template = args.gt_conditioning_template
+        is_postfix = value_model_utils.is_postfix_template(template)
+        subseqs = self._unpack_subseqs(query_responses, position_ids, response_mask)
+        device = query_responses.device
+        value_entries: list[dict[str, Any]] = []
+
+        for i, sub in enumerate(subseqs):
+            ids = sub["input_ids"]
+            mask = sub["response_is_resp"]
+            gt = ground_truths_for_pack[i] if i < len(ground_truths_for_pack) else ""
+            siblings = siblings_for_pack[i] if (siblings_for_pack is not None and i < len(siblings_for_pack)) else None
+            hint = hints_for_pack[i] if (hints_for_pack is not None and i < len(hints_for_pack)) else None
+            cond_text = value_model_utils.build_conditioning_text(template, gt, siblings, hint=hint)
+            cond_ids = self.tokenizer.encode(cond_text, add_special_tokens=False)
+            if len(cond_ids) == 0:
+                cond_ids = [self.tokenizer.pad_token_id]
+            cond_tensor = torch.tensor(cond_ids, dtype=ids.dtype, device=device)
+
+            first_resp = int(mask.long().argmax().item()) if bool(mask.any().item()) else ids.numel()
+            if is_postfix:
+                new_ids = torch.cat([ids[:first_resp], cond_tensor, ids[first_resp:]], dim=0)
+                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=device)
+                orig_mask[:first_resp] = mask[:first_resp]
+                orig_mask[first_resp + cond_tensor.numel() :] = mask[first_resp:]
+            else:
+                new_ids = torch.cat([cond_tensor, ids], dim=0)
+                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=device)
+                orig_mask[cond_tensor.numel() :] = mask
+
+            value_entries.append({"input_ids": new_ids, "orig_mask": orig_mask, "subseq": sub})
+
+        return value_entries
+
+    def _forward_sp_conditioned_value_entries(
+        self,
+        entries: list[dict[str, Any]],
+        original_seq_len: int,
+        original_batch_seq_lens: list[int],
+        position_dtype: torch.dtype,
+        token_dtype: torch.dtype,
+        device: torch.device,
+        dummy_grad_outputs: list | None = None,
+    ) -> torch.Tensor:
+        """Build conditioned value inputs before SP slicing, then run this rank's shard.
+
+        Each rank in an SP group sees the same full packed sample before slicing,
+        so conditioning must happen on that full sample. Splicing conditioning
+        text independently into each already-sliced shard can make SP ranks enter
+        incompatible all-to-all collectives.
+        """
+        original_padded_len = max(original_batch_seq_lens) if original_batch_seq_lens else original_seq_len
+        original_start, original_end, _ = self._sp_slice_bounds(original_padded_len)
+        local_out = torch.zeros(1, original_end - original_start - 1, dtype=torch.float32, device=device)
+
+        target_len = getattr(self.args, "value_model_repack_max_length", None)
+        if target_len is None or target_len <= 0:
+            target_len = getattr(self.streaming_config, "pack_length", original_seq_len)
+
+        local_packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len))
+        max_num_packs = self._sync_max_conditioned_value_packs(len(local_packs), device)
+        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len), num_packs=max_num_packs)
+
+        for pack in packs:
+            pack_entries = pack["entries"]
+            if not pack_entries:
+                self._dummy_value_forward(token_dtype, device, dummy_grad_outputs=dummy_grad_outputs)
+                continue
+
+            packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0).unsqueeze(0)
+            packed_pos = torch.cat(
+                [
+                    torch.arange(entry["input_ids"].shape[0], dtype=position_dtype, device=device)
+                    for entry in pack_entries
+                ],
+                dim=0,
+            ).unsqueeze(0)
+            full_to_orig_shifted = torch.full((packed_ids.shape[-1] - 1,), -1, dtype=torch.long, device=device)
+
+            row_offset = 0
+            for entry in pack_entries:
+                entry_len = int(entry["input_ids"].shape[0])
+                if entry_len > 1:
+                    sub = entry["subseq"]
+                    base = sub["offset_in_pack"]
+                    resp_positions = sub["response_is_resp"][1:].bool().nonzero(as_tuple=True)[0] + base
+                    cond_positions = entry["orig_mask"][1:].bool().nonzero(as_tuple=True)[0] + row_offset
+                    n = min(resp_positions.numel(), cond_positions.numel())
+                    if n > 0:
+                        full_to_orig_shifted[cond_positions[:n]] = resp_positions[:n]
+                row_offset += entry_len
+
+            cond_start, cond_end, cond_padded_len = self._sp_slice_bounds(packed_ids.shape[-1])
+            local_ids = self._pad_and_slice_last_dim(
+                packed_ids, cond_padded_len, cond_start, cond_end, self.tokenizer.pad_token_id
+            )
+            local_pos = self._pad_and_slice_last_dim(packed_pos, cond_padded_len, cond_start, cond_end, 0)
+            local_map = self._pad_and_slice_last_dim(
+                full_to_orig_shifted.unsqueeze(0), cond_padded_len - 1, cond_start, cond_end - 1, -1
+            ).squeeze(0)
+
+            output = self.value_model(input_ids=local_ids, attention_mask=None, position_ids=local_pos)
+            logits = getattr(output, "logits", output)
+            local_values = logits[:, :-1].squeeze(-1).float()
+
+            valid = (local_map >= original_start) & (local_map < original_end - 1)
+            if bool(valid.any().item()):
+                local_orig_idx = local_map[valid] - original_start
+                local_out[0, local_orig_idx] = local_values[0, valid]
+
+        return local_out
+
     def _forward_repacked_conditioned_value_entries(
         self,
         entries: list[dict[str, Any]],
@@ -1170,6 +1306,7 @@ class PolicyTrainerRayProcess(RayProcess):
         hints_for_pack: list[str | None] | None = None,
         sequential: bool = False,
         dummy_grad_outputs: list | None = None,
+        original_batch_seq_lens: list[int] | None = None,
     ) -> torch.Tensor:
         """Per-sub-sequence forward with conditioning text spliced via `value_model_utils`.
 
@@ -1182,8 +1319,6 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns a values tensor of shape (batch=1, seq_len-1) matching `query_responses[:, 1:]`.
         """
         args = self.args
-        template = args.gt_conditioning_template
-        is_postfix = value_model_utils.is_postfix_template(template)
         subseqs = self._unpack_subseqs(query_responses, position_ids, response_mask)
         full_len = query_responses.shape[1]
         device = query_responses.device
@@ -1192,38 +1327,27 @@ class PolicyTrainerRayProcess(RayProcess):
         if not subseqs:
             return out_values
 
-        # Build all expanded sequences (conditioning text spliced in) with CPU tensor ops only.
-        # No model calls here — we batch everything below into a single forward.
-        expanded_ids_list: list[torch.Tensor] = []
-        orig_masks_list: list[torch.Tensor] = []
-        value_entries: list[dict[str, Any]] = []
+        value_entries = self._build_conditioned_value_entries(
+            query_responses,
+            position_ids,
+            response_mask,
+            ground_truths_for_pack,
+            siblings_for_pack,
+            hints_for_pack=hints_for_pack,
+        )
+        expanded_ids_list = [entry["input_ids"] for entry in value_entries]
+        orig_masks_list = [entry["orig_mask"] for entry in value_entries]
 
-        for i, sub in enumerate(subseqs):
-            ids = sub["input_ids"]
-            mask = sub["response_is_resp"]
-            gt = ground_truths_for_pack[i] if i < len(ground_truths_for_pack) else ""
-            siblings = siblings_for_pack[i] if (siblings_for_pack is not None and i < len(siblings_for_pack)) else None
-            hint = hints_for_pack[i] if (hints_for_pack is not None and i < len(hints_for_pack)) else None
-            cond_text = value_model_utils.build_conditioning_text(template, gt, siblings, hint=hint)
-            cond_ids = self.tokenizer.encode(cond_text, add_special_tokens=False)
-            if len(cond_ids) == 0:
-                cond_ids = [self.tokenizer.pad_token_id]
-            cond_tensor = torch.tensor(cond_ids, dtype=ids.dtype, device=device)
-
-            first_resp = int(mask.long().argmax().item()) if bool(mask.any().item()) else ids.numel()
-            if is_postfix:
-                new_ids = torch.cat([ids[:first_resp], cond_tensor, ids[first_resp:]], dim=0)
-                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=device)
-                orig_mask[:first_resp] = mask[:first_resp]
-                orig_mask[first_resp + cond_tensor.numel() :] = mask[first_resp:]
-            else:
-                new_ids = torch.cat([cond_tensor, ids], dim=0)
-                orig_mask = torch.zeros(new_ids.numel(), dtype=torch.bool, device=device)
-                orig_mask[cond_tensor.numel() :] = mask
-
-            expanded_ids_list.append(new_ids)
-            orig_masks_list.append(orig_mask)
-            value_entries.append({"input_ids": new_ids, "orig_mask": orig_mask, "subseq": sub})
+        if self._sp_world_size > 1:
+            return self._forward_sp_conditioned_value_entries(
+                value_entries,
+                full_len,
+                original_batch_seq_lens or [full_len],
+                position_ids.dtype,
+                query_responses.dtype,
+                device,
+                dummy_grad_outputs=dummy_grad_outputs,
+            )
 
         if sequential:
             if getattr(args, "value_model_repack_conditioned_inputs", True) and args.sequence_parallel_size == 1:
@@ -1443,7 +1567,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         self._skip_policy_update = skip_policy_update
         batch_data = next(self.dataloader)
-        data_BT = batch_data["batch"]
+        unsplit_data_BT = batch_data["batch"]
+        data_BT = unsplit_data_BT
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
@@ -1460,9 +1585,15 @@ class PolicyTrainerRayProcess(RayProcess):
         leftover = num_samples % accumulation_steps
         if leftover > 0:
             data_BT = data_BT[:-leftover]
+            unsplit_data_BT = unsplit_data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
+        sp_value_data_BT = (
+            unsplit_data_BT.to(self.device)
+            if self.splitter is not None and self.args.use_value_model and self.args.value_model_ground_truth_conditioning
+            else None
+        )
 
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
@@ -1565,20 +1696,31 @@ class PolicyTrainerRayProcess(RayProcess):
                     if _use_gen_value:
                         values_BT, gv_pairs = gen_value_results[i]
                     elif self.args.value_model_ground_truth_conditioning:
-                        gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
-                        sibs_pack = data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
-                        hints_pack = data_BT.hints[i][0] if data_BT.hints is not None else None
+                        value_source_BT = sp_value_data_BT if sp_value_data_BT is not None else data_BT
+                        gts_pack = (
+                            value_source_BT.ground_truths[i][0] if value_source_BT.ground_truths is not None else []
+                        ) or []
+                        sibs_pack = (
+                            value_source_BT.sibling_rollouts[i][0]
+                            if value_source_BT.sibling_rollouts is not None
+                            else None
+                        )
+                        hints_pack = value_source_BT.hints[i][0] if value_source_BT.hints is not None else None
                         values_BT = self._forward_value_with_conditioning(
-                            data_BT.query_responses[i],
-                            data_BT.position_ids[i],
-                            data_BT.response_masks[i].bool(),
+                            value_source_BT.query_responses[i],
+                            value_source_BT.position_ids[i],
+                            value_source_BT.response_masks[i].bool(),
                             gts_pack,
                             sibs_pack,
                             hints_for_pack=hints_pack,
                             sequential=True,
+                            original_batch_seq_lens=[t.shape[-1] for t in value_source_BT.query_responses],
                         )
                     else:
                         values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
+                    assert values_BT.shape == resp_mask.shape, (
+                        f"value predictions shape {values_BT.shape} must match shifted response mask {resp_mask.shape}"
+                    )
                     # Build per-pack numpy arrays aligned with values (seq_len - 1).
                     rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
                     dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
@@ -1931,25 +2073,39 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_values = ctx["old_values"]
                         # Re-forward with grad on the value model (with conditioning if enabled).
                         if self.args.value_model_ground_truth_conditioning:
-                            gts_pack = (data_BT.ground_truths[i][0] if data_BT.ground_truths is not None else []) or []
+                            value_source_BT = sp_value_data_BT if sp_value_data_BT is not None else data_BT
+                            gts_pack = (
+                                value_source_BT.ground_truths[i][0]
+                                if value_source_BT.ground_truths is not None
+                                else []
+                            ) or []
                             sibs_pack = (
-                                data_BT.sibling_rollouts[i][0] if data_BT.sibling_rollouts is not None else None
+                                value_source_BT.sibling_rollouts[i][0]
+                                if value_source_BT.sibling_rollouts is not None
+                                else None
                             )
+                            hints_pack = value_source_BT.hints[i][0] if value_source_BT.hints is not None else None
                             dummy_grad_outputs: list = []
                             new_values = self._forward_value_with_conditioning(
-                                data_BT.query_responses[i],
-                                data_BT.position_ids[i],
-                                data_BT.response_masks[i].bool(),
+                                value_source_BT.query_responses[i],
+                                value_source_BT.position_ids[i],
+                                value_source_BT.response_masks[i].bool(),
                                 gts_pack,
                                 sibs_pack,
+                                hints_for_pack=hints_pack,
                                 sequential=True,
                                 dummy_grad_outputs=dummy_grad_outputs,
+                                original_batch_seq_lens=[t.shape[-1] for t in value_source_BT.query_responses],
                             )
                         else:
                             dummy_grad_outputs = []
                             new_values = self.forward_value(
                                 data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
                             )
+                        assert new_values.shape == returns.shape == old_values.shape, (
+                            f"value loss tensors must align: new={new_values.shape}, "
+                            f"returns={returns.shape}, old={old_values.shape}"
+                        )
                         per_tok, v_clipfrac = value_model_utils.value_clipped_mse_loss(
                             new_values, returns, old_values, value_mask, self.args.vf_clip_range
                         )
