@@ -528,15 +528,24 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.info(f"{self.rank=}: Skipping scalar value model; generative value model is active")
 
         if self.mpu is not None:
+            sp_rank = groups._get_sequence_parallel_rank()
+            sp_group = groups._get_sequence_parallel_group()
+            sp_world_size = groups._get_sequence_parallel_world_size()
             self.splitter = UlyssesSPSplitter(
-                sp_rank=groups._get_sequence_parallel_rank(),
-                sp_group=groups._get_sequence_parallel_group(),
-                sp_world_size=groups._get_sequence_parallel_world_size(),
+                sp_rank=sp_rank,
+                sp_group=sp_group,
+                sp_world_size=sp_world_size,
                 device=self.device,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
+            self._sp_rank = sp_rank
+            self._sp_group = sp_group
+            self._sp_world_size = sp_world_size
         else:
             self.splitter = None
+            self._sp_rank = 0
+            self._sp_group = None
+            self._sp_world_size = 1
 
         # dp_rank = which data-parallel group this worker belongs to
         # With SP, workers in the same SP group share the same dp_rank
