@@ -8,19 +8,16 @@
 #     critic sees the active positive/negative rubrics (the same payload the
 #     verifier grades against, including any rubrics minted by
 #     `apply_evolving_rubric_reward`) when scoring V(s_t) for GAE.
-#   * SAE on (--use_sae, --sae_threshold 0.2): with --decoupled_gae +
-#     --length_adaptive_gae this routes through the SAE+VAPO advantage path,
-#     placing segment boundaries at low-prob non-tool response tokens
-#     (mask_tool_use=True ensures tool tokens are excluded).
+#   * PPO only: no SAE segmentation or answer-prefix conditioning.
 #
 # Step budget:
 #   total_episodes = (100 value warmup + 2000 RL) * 8 prompts * 32 samples
 #                  = 537600
 #
 # Launch via Beaker:
-#   ./scripts/train/build_image_and_launch.sh scripts/train/vip/dr_tulu/dr_tulu_8b_rubric_value.sh
+#   ./scripts/train/build_image_and_launch.sh scripts/train/vip/dr_tulu/dr_tulu_8b_ppo.sh
 
-EXP_NAME="${EXP_NAME:-dr_tulu_8b_rubric_value}"
+EXP_NAME="${EXP_NAME:-dr_tulu_8b_ppo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
@@ -108,13 +105,9 @@ source configs/beaker_configs/ray_node_setup.sh \
     --use_value_model \
     --value_learning_rate 5e-7 \
     --gae_lambda 0.95 \
-    --decoupled_gae \
-    --length_adaptive_gae \
     --gamma 1.0 \
     --value_loss_coef 0.5 \
     --vf_clip_range 0.2 \
-    --use_sae \
-    --sae_threshold 0.2 \
     --value_model_ground_truth_conditioning \
     --gt_conditioning_template rubrics \
     --value_warmup_steps 100 \
