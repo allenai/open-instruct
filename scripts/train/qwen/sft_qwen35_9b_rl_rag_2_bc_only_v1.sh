@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SFT for Qwen3.5-9B on rl-rag-2/sft_ablations_bc_only_v1.
+# SFT for Qwen3.5-9B on a schema-normalized copy of rl-rag-2/sft_ablations_bc_only_v1.
 # Launch with:
 #   ./scripts/train/build_image_and_launch.sh scripts/train/qwen/sft_qwen35_9b_rl_rag_2_bc_only_v1.sh
 
@@ -9,7 +9,7 @@ set -euo pipefail
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 MODEL="${MODEL:-Qwen/Qwen3.5-9B}"
-DATASET="${DATASET:-rl-rag-2/sft_ablations_bc_only_v1}"
+DATASET="${DATASET:-hamishivi/sft_ablations_bc_only_v1_sanitized}"
 EXP_NAME="${EXP_NAME:-sft_qwen35_9b_rl_rag_2_bc_only_v1}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-32768}"
 NUM_NODES="${NUM_NODES:-4}"
