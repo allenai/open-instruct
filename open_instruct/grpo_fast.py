@@ -618,7 +618,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
         data_BT = data_BT.to(self.device)
-        data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
@@ -651,7 +650,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     for i in range(len(data_BT.query_responses)):
                         if self.args.use_vllm_logprobs:
                             old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
+                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
                             )
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]

@@ -416,7 +416,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 for i in range(num_samples):
                     if self.grpo_config.use_vllm_logprobs:
                         old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
+                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
                         )
                     else:
                         assert local_old_logprobs_BT is not None
@@ -460,7 +460,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool()
+                response_mask = data_BT.response_masks[sample_idx][:, 1:]
                 new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
 
                 vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
