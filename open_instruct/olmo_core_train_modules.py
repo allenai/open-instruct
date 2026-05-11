@@ -490,7 +490,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 rho = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, self.grpo_config)
                 grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
 
-                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
@@ -509,9 +509,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
                     sample_idx,
-                    pg_losses,
-                    pg_losses2,
                     pg_loss,
+                    clipfrac,
                     ratio,
                     loss,
                     response_mask,
