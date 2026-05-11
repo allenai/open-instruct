@@ -482,8 +482,8 @@ def compute_grpo_loss(
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    pg_loss = pg_loss * rho_weights
-    clipfrac = clipfrac * (rho_weights != 0).float()
+    pg_loss *= rho_weights
+    clipfrac *= (rho_weights != 0).float()
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
