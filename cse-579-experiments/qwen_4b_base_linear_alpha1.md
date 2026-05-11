@@ -173,6 +173,44 @@ applied) the model still produces ordinary multi-hundred-character responses
 distribution — strong evidence this is a learned strategy specific to where the
 reward shaping was applied, not a global capability loss.
 
+#### Training-time curves: `val/scores_pre_shaping` vs `val/scores_post_shaping`
+
+Reading the two curves together from W&B (run `2pkl9fhp`, 1000 steps):
+
+- **`val/scores_pre_shaping`** (the raw verifier reward) stays roughly flat
+  around 4 throughout training. No meaningful upward trend — the model's true
+  solve rate doesn't improve over training.
+- **`val/scores_post_shaping`** (the reward the loss actually trains against)
+  starts much lower at ~2, climbs steadily, and **converges up to the pre-
+  shaping level by ~step 400**. From step 400 onward, post ≈ pre.
+
+The convergence of post to pre — not a widening gap as one might initially
+predict — is the smoking-gun story. The mechanism:
+
+1. Early training: many correct rollouts of varying lengths exist; shaping
+   zeros out the longer ones; post-shaping mean sits well below pre.
+2. The model adapts not by *solving more* but by *making its existing correct
+   rollouts shorter*, so fewer get zeroed.
+3. By ~step 400 the gap closes — almost every correct rollout is at-or-near
+   L_min and escapes the shaping penalty.
+4. The remaining ~600 steps of training make no progress on raw correctness
+   (pre_shaping curve is flat). Gradient capacity is entirely spent on
+   shortening, not on improving.
+
+Concretely: the model's training-time reward ("post") goes up, but its
+training-time correctness ("pre") doesn't. The shape of the gap, not its size,
+is the diagnostic.
+
+##### Related: `unsolved_batch_size_ratio` doesn't show progressive collapse
+
+The unsolved-batch ratio falls from ~0.95 → ~0.75 over steps 0–~350 and then
+plateaus with noise. It does *not* climb back up — i.e. the failure mode is
+NOT "shaping makes more groups have zero correct as training progresses."
+Caveat: this metric is computed on **post-shaping** scores, so longer-correct
+rollouts that get zeroed are counted as unsolved. The true unsolved rate is
+presumably lower. See `design_followups.md` for the reporting-bug fix queued
+for the next run.
+
 ### What this means for the writeup and next runs
 
 1. **Publishable negative finding.** Aggressive linear shaping on an RL-Zero
