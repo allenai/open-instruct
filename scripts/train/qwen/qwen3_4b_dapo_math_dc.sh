@@ -12,7 +12,8 @@ fi
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
-WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
+BUDGET="${BUDGET:-ai2/oe-omai}"
 
 # Difficulty-annotated variant of hamishivi/DAPO-Math-17k-Processed_filtered
 DATASET_WITH_DIFFICULTY="undfined/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples-ds"
@@ -98,7 +99,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
-    --budget ai2/oe-adapt \
+    --budget ${BUDGET} \
     -- \
 uv run open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
