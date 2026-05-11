@@ -118,14 +118,14 @@ class TestToggleBudgetTracker(unittest.TestCase):
         self.assertEqual(tracker.budget(["math", "code"]), 25.0)
         scores = np.array([1.0, 1.0, 1.0, 0.0])
         out_scores, metrics = tracker.maybe_apply(
-            step=0,
+            step=2,
             scores=scores,
             sequence_lengths=np.array([5, 50, 15, 100]),
             datasets=datasets,
             num_samples_per_prompt=4,
             max_possible_score=1.0,
         )
-        self.assertEqual(metrics["toggle/phase"], 0)
+        self.assertEqual(metrics["toggle/length_penalty_phase"], 1)
         self.assertIn("toggle/budget/math|code", metrics)
 
     def test_per_dataset_isolation(self):
@@ -134,12 +134,12 @@ class TestToggleBudgetTracker(unittest.TestCase):
         self.assertEqual(tracker.budget("a"), 100.0)
         self.assertEqual(tracker.budget("b"), 200.0)
 
-    def test_phase1_passthrough(self):
+    def test_normal_phase_passthrough(self):
         tracker = data_loader.ToggleBudgetTracker(m=2, lambda_=0.5, percentile=50.0, warmup_steps=0)
-        # step // m == 0 -> Phase0; step // m == 1 -> Phase1
+        # step // m == 0 -> normal phase; step // m == 1 -> length-penalty phase
         scores = np.array([1.0, 1.0, 0.0, 0.0])
         out_scores, metrics = tracker.maybe_apply(
-            step=2,
+            step=0,
             scores=scores,
             sequence_lengths=np.array([5, 1000, 5, 5]),
             datasets=["d"] * 4,
@@ -147,9 +147,9 @@ class TestToggleBudgetTracker(unittest.TestCase):
             max_possible_score=1.0,
         )
         np.testing.assert_array_equal(out_scores, scores)
-        self.assertEqual(metrics["toggle/phase"], 1)
+        self.assertEqual(metrics["toggle/length_penalty_phase"], 0)
 
-    def test_phase0_zeros_overlong_correct(self):
+    def test_length_penalty_zeros_overlong_correct(self):
         tracker = data_loader.ToggleBudgetTracker(m=2, lambda_=0.5, percentile=50.0, warmup_steps=0)
         # Seed budget for dataset "d" so percentile-50 == 20 (median of [10, 20, 30]).
         tracker.update(["d"] * 3, np.array([10, 20, 30]), np.array([1.0, 1.0, 1.0]), 1.0)
@@ -157,7 +157,7 @@ class TestToggleBudgetTracker(unittest.TestCase):
         scores = np.array([1.0, 1.0, 1.0, 0.0])
         sequence_lengths = np.array([5, 50, 15, 100])
         out_scores, metrics = tracker.maybe_apply(
-            step=0,
+            step=2,
             scores=scores,
             sequence_lengths=sequence_lengths,
             datasets=["d"] * 4,
@@ -167,15 +167,15 @@ class TestToggleBudgetTracker(unittest.TestCase):
         # idx 0,2: len <= budget(20) -> kept. idx 1: 50 > 20 and correct -> zeroed.
         # idx 3: 100 > 20 but already zero score -> still zero.
         np.testing.assert_array_equal(out_scores, np.array([1.0, 0.0, 1.0, 0.0]))
-        self.assertEqual(metrics["toggle/phase"], 0)
+        self.assertEqual(metrics["toggle/length_penalty_phase"], 1)
 
-    def test_phase0_lambda_protects_hard_prompts(self):
+    def test_length_penalty_lambda_protects_hard_prompts(self):
         tracker = data_loader.ToggleBudgetTracker(m=2, lambda_=0.5, percentile=50.0, warmup_steps=0)
         tracker.update(["d"] * 3, np.array([10, 20, 30]), np.array([1.0, 1.0, 1.0]), 1.0)
         # mean_acc = 0.25 < lambda=0.5 -> all kept regardless of length.
         scores = np.array([1.0, 0.0, 0.0, 0.0])
         out_scores, _ = tracker.maybe_apply(
-            step=0,
+            step=2,
             scores=scores,
             sequence_lengths=np.array([5, 5, 5, 1000]),
             datasets=["d"] * 4,
@@ -184,7 +184,7 @@ class TestToggleBudgetTracker(unittest.TestCase):
         )
         np.testing.assert_array_equal(out_scores, scores)
 
-    def test_warmup_blocks_phase0(self):
+    def test_warmup_blocks_length_penalty(self):
         tracker = data_loader.ToggleBudgetTracker(m=2, lambda_=0.5, percentile=50.0, warmup_steps=10)
         tracker.update(["d"] * 3, np.array([10, 20, 30]), np.array([1.0, 1.0, 1.0]), 1.0)
         scores = np.array([1.0, 1.0, 1.0, 1.0])
@@ -197,7 +197,7 @@ class TestToggleBudgetTracker(unittest.TestCase):
             max_possible_score=1.0,
         )
         np.testing.assert_array_equal(out_scores, scores)
-        self.assertEqual(metrics["toggle/phase"], 1)
+        self.assertEqual(metrics["toggle/length_penalty_phase"], 0)
 
 
 if __name__ == "__main__":

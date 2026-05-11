@@ -491,17 +491,18 @@ class StreamingDataLoaderConfig:
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
-    # Toggle (Kimi K2.5): alternates between Phase1 (standard) and Phase0 (budget-limited)
-    # every `toggle_m` training steps. Disabled when `toggle_m == 0`.
+    # Toggle (Kimi K2.5): alternates between a normal phase (standard scaling) and a
+    # length-penalty phase (budget-limited) every `toggle_m` training steps. Training
+    # starts in the normal phase. Disabled when `toggle_m == 0`.
     toggle_m: int = 0
     toggle_lambda: float = 0.5
-    """Mean-accuracy threshold (as fraction of max_possible_score). Phase0 mask is enforced
-    only on prompts whose mean accuracy exceeds this threshold."""
+    """Mean-accuracy threshold (as fraction of max_possible_score). The length-penalty
+    mask is enforced only on prompts whose mean accuracy exceeds this threshold."""
     token_budget_percentile: float = 90.0
     """Per-dataset percentile (0-100) of correct-response token lengths used as the budget."""
     toggle_warmup_steps: int = 100
-    """Number of initial Phase1 steps used to accumulate per-dataset length statistics
-    before Phase0 may activate."""
+    """Number of initial normal-phase steps used to accumulate per-dataset length statistics
+    before the length-penalty phase may activate."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -1243,13 +1244,14 @@ def prepare_collated_data_for_workers(
 class ToggleBudgetTracker:
     """Implements the Toggle reward-shaping heuristic from the Kimi K2.5 paper.
 
-    Toggle alternates between two phases every `m` training steps:
-      - Phase1 (standard scaling): rewards are unchanged.
-      - Phase0 (budget-limited): r_tilde = r * I{mean_acc(x) < lambda OR |y| <= budget(d)}.
+    Toggle alternates between two phases every `m` training steps, starting in the
+    normal phase:
+      - normal_phase (standard scaling): rewards are unchanged.
+      - length_penalty_phase (budget-limited): r_tilde = r * I{mean_acc(x) < lambda OR |y| <= budget(d)}.
 
     The per-dataset budget is the `percentile`-th percentile of token lengths among
     correct responses, accumulated on a streaming basis. Toggle is disabled when m == 0
-    and is only active in Phase0 once `step >= warmup_steps`.
+    and the length-penalty phase is only active once `step >= warmup_steps`.
     """
 
     def __init__(self, m: int, lambda_: float, percentile: float, warmup_steps: int):
@@ -1295,8 +1297,11 @@ class ToggleBudgetTracker:
 
         self.update(datasets, sequence_lengths, scores, max_possible_score)
 
-        in_phase0 = step >= self.warmup_steps and (step // self.m) % 2 == 0
-        metrics: dict[str, Any] = {"toggle/phase": 0 if in_phase0 else 1}
+        # Training starts in the normal phase (step // m == 0 is even) so the model can
+        # learn to solve problems before any length penalty is applied; the length-penalty
+        # phase fires when (step // m) is odd.
+        in_length_penalty_phase = step >= self.warmup_steps and (step // self.m) % 2 == 1
+        metrics: dict[str, Any] = {"toggle/length_penalty_phase": int(in_length_penalty_phase)}
         seen_keys: set[tuple[str, ...]] = set()
         for dataset in datasets:
             key = self._key(dataset)
@@ -1307,7 +1312,7 @@ class ToggleBudgetTracker:
             if budget_value is not None:
                 metrics[f"toggle/budget/{'|'.join(key)}"] = budget_value
 
-        if not in_phase0:
+        if not in_length_penalty_phase:
             return scores, metrics
 
         scores_per_prompt = scores.reshape(-1, num_samples_per_prompt) / max_possible_score
