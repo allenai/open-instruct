@@ -2,9 +2,9 @@
 
 ## Status
 
-- **State**: running (attempt 2 — see "Attempts" below)
-- **Eval state**: not started
-- **Last updated**: 2026-05-04
+- **State**: training completed (attempt 2; HF push failed but training and checkpoints were fine)
+- **Eval state**: in progress (5 oe-eval beaker jobs submitted 2026-05-11 for step_1000)
+- **Last updated**: 2026-05-11
 
 ## Purpose
 
@@ -25,7 +25,7 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
 | # | URL | Launched (UTC) | Terminated (UTC) | Exit | Notes |
 |---|-----|----------------|------------------|------|-------|
 | 1 | [01KQTD4D…](https://beaker.org/ex/01KQTD4DJ57C1SY8A1MFNS3GFC) | 2026-05-04 21:08 | 2026-05-04 22:36 | 1 | `checkpoint_state_dir` validation failure at parse time (see Known issues) |
-| 2 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | 2026-05-04 22:40 | — | — | After fix: explicit `--checkpoint_state_dir` |
+| 2 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | 2026-05-04 22:40 | 2026-05-05 02:24 | 1 | Training reached step 1000 (all 512000 episodes); checkpoints saved. Exit 1 was from final HF push to `allenai/open_instruct_dev` (403 — token lacks write to allenai org). Auto-launched evals at steps 800/900/1000 all failed due to a tokenizer-compat bug (see Known issues). |
 
 - **Workspace**: ai2/olmo-instruct
 - **Cluster**: ai2/jupiter
@@ -49,16 +49,16 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
 
 ## Outputs
 
-- **Checkpoints**: `/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/`
-  (`exp_name=lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant`)
-- **W&B run**: link will appear once wandb init completes; entity `ai2-llm`
-- **Eval beaker jobs**: auto-launched at end; tasks =
-  `alpaca_eval_v3::hamish_zs_reasoning_deepseek`,
-  `minerva_math_500::hamish_zs_reasoning`,
-  `ifbench::tulu`,
-  `livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite`,
-  `aime:zs_cot_r1::pass_at_32_2025_deepseek`
-- **Eval results path**: TBD (eval jobs land in same workspace)
+- **Checkpoints**: `/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/`
+  (steps 100 → 1000 every 100 steps)
+- **W&B run**: https://wandb.ai/ai2-llm/open_instruct_internal/runs/2pkl9fhp
+- **Eval beaker jobs** (submitted manually via `cse-579-scripts/submit_lenshape_qwen_eval_jobs.sh` on 2026-05-11):
+  - alpaca_eval_v3: [01KRCA5XQS5JV19DV7GHM0T7PE](https://beaker.org/ex/01KRCA5XQS5JV19DV7GHM0T7PE)
+  - minerva_math_500: [01KRCA5YJA5W0VSNZ90BQKGF75](https://beaker.org/ex/01KRCA5YJA5W0VSNZ90BQKGF75)
+  - ifbench::tulu: [01KRCA5ZC2NBWKSGAYT94QQ3F5](https://beaker.org/ex/01KRCA5ZC2NBWKSGAYT94QQ3F5)
+  - livecodebench: [01KRCA605NWVCD39BK0PP7JSTT](https://beaker.org/ex/01KRCA605NWVCD39BK0PP7JSTT)
+  - aime 2025 pass@32: [01KRCA615TJX7DNCQAGJPGHR2Q](https://beaker.org/ex/01KRCA615TJX7DNCQAGJPGHR2Q)
+- **Eval results path**: see oe-eval datalake (`run_id=placeholder`) once jobs complete
 
 ## Pair / baseline
 
@@ -109,3 +109,35 @@ never injected. Validation failed before any training started.
 it as `--checkpoint_state_dir` explicitly. Same fix would be needed in
 Jacob's `baseline_rl.sh` / `baseline_rl_7b.sh` if launched with
 `--no_auto_dataset_cache`.
+
+### Attempt 2 — HF push 403 at end of training (2026-05-04)
+
+After 1000 training steps completed and checkpoints saved, the final
+`push_folder_to_hub(allenai/open_instruct_dev, ...)` returned 403 Forbidden
+because Ian's HF token (from `ai2/ianm` workspace) does not have write access
+to the `allenai` HF organization. Training succeeded; only the upload failed.
+
+**Workaround for next run**: pass `--push_to_hub false` in the launch script,
+or set `--hf_entity ianmagnusson` to push to a personal HF repo. We don't
+actually need the HF push — checkpoints on weka are sufficient for eval.
+
+### Attempt 2 — auto-launched evals failed (tokenizer compat) (2026-05-04)
+
+The auto-launched eval Beaker jobs (steps 800/900/1000 × 5 tasks) all failed
+with:
+
+```
+AttributeError: 'list' object has no attribute 'keys'
+  in transformers/tokenization_utils_base.py:1182
+       _set_model_specific_special_tokens
+```
+
+The eval image's `transformers` version expects `extra_special_tokens` as a
+dict but the saved Qwen tokenizer has it as a list. `--use_hf_tokenizer_template`
+was passed but doesn't bypass this codepath.
+
+**Workaround** (Jacob's): bypass the saved tokenizer entirely by passing
+`--tokenizer_path /weka/oe-adapt-default/jacobm/repos/cse-579/tokenizers/qwen3-olmo-thinker-eos-old-transformers`
+to the eval submitter. Manual eval submission via
+`cse-579-scripts/submit_lenshape_qwen_eval_jobs.sh` (added 2026-05-11)
+applies this and was used for the eval jobs listed under Outputs.
