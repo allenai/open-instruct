@@ -2,7 +2,6 @@
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 
 python mason.py \
-    --budget ai2/oe-other \
     --cluster ai2/jupiter \
     --image hamishivi/open_instruct_testing_1110 \
     --pure_docker_mode \

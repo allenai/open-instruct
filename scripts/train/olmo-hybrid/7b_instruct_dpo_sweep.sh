@@ -63,7 +63,6 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 \
             --env TRITON_PRINT_AUTOTUNING=1 \
             --num_nodes 4 \
-            --budget ai2/oe-other \
             --gpus 8 -- accelerate launch \
             --mixed_precision bf16 \
             --num_processes 8 \

@@ -17,6 +17,5 @@ uv run python src/scripts/train/sft/Olmo-3-Hybrid-7B-SFT.py launch \
     --init_seed=42 \
     --launch.num_gpus=8 \
     --num_nodes=8 \
-    --budget ai2/oe-other \
     --workspace ai2/olmo-instruct \
     --dataset_path /weka/oe-adapt-default/nathanl/dataset/olmo3-32b-instruct-sft-1114

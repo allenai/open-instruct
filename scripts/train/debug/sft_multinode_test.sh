@@ -17,7 +17,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-other \
     --gpus 8 \
     --non_resumable \
     --artifact_ttl 1d \

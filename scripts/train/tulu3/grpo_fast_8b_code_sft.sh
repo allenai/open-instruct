@@ -11,7 +11,6 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --description "${description}" \
-    --budget ai2/oe-other \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.01 \

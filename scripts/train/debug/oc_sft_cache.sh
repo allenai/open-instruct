@@ -13,7 +13,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-other \
     --gpus 0 \
     --non_resumable \
     --no-host-networking \

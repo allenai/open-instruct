@@ -27,7 +27,6 @@ python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
-    --budget ai2/oe-other \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \

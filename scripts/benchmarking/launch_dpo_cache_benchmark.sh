@@ -12,7 +12,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-other \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env "REFERENCE_LOGPROBS_CACHE_PATH=/tmp/benchmark_cache_\$(date +%s)" \

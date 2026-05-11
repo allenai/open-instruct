@@ -10,7 +10,6 @@ uv run python mason.py \
     --image $BEAKER_IMAGE --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
-    --budget ai2/oe-other \
     --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \

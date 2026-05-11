@@ -10,7 +10,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-other \
     --no_auto_dataset_cache \
     --artifact_ttl 1d \
     --gpus 8 -- accelerate launch \

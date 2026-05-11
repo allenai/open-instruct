@@ -29,7 +29,6 @@ uv run python mason.py \
     --preemptible \
     --image $BEAKER_IMAGE --pure_docker_mode \
     --num_nodes $NUM_NODES \
-    --budget ai2/oe-other \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 64 \

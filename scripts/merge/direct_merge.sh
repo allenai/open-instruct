@@ -48,7 +48,6 @@ SCRIPT_B64=$(base64 < open_instruct/merge_models.py | tr -d '\n')
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --budget ai2/oe-other \
     --workspace ai2/olmo-instruct \
     --image "$IMAGE" \
     --pure_docker_mode \

@@ -28,7 +28,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 2 \
     --gpus 8 \
-    --budget ai2/oe-other \
     --no_auto_dataset_cache \
     --env RUBRIC_JUDGE_MODEL=gpt-4.1 \
     --env RUBRIC_GENERATION_MODEL=gpt-4.1 \
