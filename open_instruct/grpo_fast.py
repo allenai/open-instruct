@@ -820,6 +820,25 @@ class PolicyTrainerRayProcess(RayProcess):
         with torch.no_grad():
             self.model(input_ids=input_ids)
 
+    def dummy_optimizer_step(self) -> None:
+        """Run a zero-loss optimizer step before the first vLLM weight sync.
+
+        ZeRO-3 can defer internal optimizer/NCCL setup until the first real
+        optimizer step. Doing one no-op step here makes the initial step-0
+        weight sync exercise the same path before rollout generation starts.
+        """
+        device = next(self.model.parameters()).device
+        dummy_ids = torch.ones(1, 2, dtype=torch.long, device=device)
+        output = self.model(input_ids=dummy_ids, labels=dummy_ids)
+        self.model.backward(output.loss * 0.0)
+        self.model.step()
+
+        # The dummy forward records a tiny ZeRO-3 parameter-fetch trace. Force
+        # the first real training batch to record its own trace instead.
+        if hasattr(self.model, "optimizer") and hasattr(self.model.optimizer, "parameter_offload"):
+            coord = self.model.optimizer.parameter_offload.get_param_coordinator()
+            coord._invalidate_trace()
+
     def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
         torch.cuda.empty_cache()
@@ -3688,10 +3707,17 @@ def run_training(
     )
     last_eval_collected = True
 
-    ray_get_with_progress(
-        [m.warmup_for_weight_sync.remote() for m in policy_group.models],
-        desc="Warming up learner for first weight sync",
-    )
+    if args.deepspeed_stage == 3:
+        logger.info("[Main Thread] ZeRO-3: running dummy optimizer step before initial weight sync.")
+        ray_get_with_progress(
+            [m.dummy_optimizer_step.remote() for m in policy_group.models],
+            desc="ZeRO-3 dummy optimizer step before first weight sync",
+        )
+    else:
+        ray_get_with_progress(
+            [m.warmup_for_weight_sync.remote() for m in policy_group.models],
+            desc="Warming up learner for first weight sync",
+        )
     weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(resume_training_step)
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
