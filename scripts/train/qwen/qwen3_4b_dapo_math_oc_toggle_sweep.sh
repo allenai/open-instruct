@@ -23,7 +23,7 @@ TOGGLE_LAMBDA="${TOGGLE_LAMBDA:-0.9}"
 TOGGLE_WARMUP_STEPS="${TOGGLE_WARMUP_STEPS:-50}"
 
 for PERCENTILE in 50 80; do
-    for M in 250; do
+    for M in 750; do
         EXP_NAME="${EXP_NAME_PREFIX}_p${PERCENTILE}_m${M}"
         RUN_NAME="${EXP_NAME}_$(date +%Y%m%d_%H%M%S)"
 
