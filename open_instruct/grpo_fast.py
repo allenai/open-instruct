@@ -2229,9 +2229,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         # traverses the same number of ZeRO-3 allgather layers on all DP ranks.
                         # Ranks with fewer real sub-sequences ran dummy forwards; without this,
                         # their backward would have fewer allgathers than ranks with more subs.
+                        v_loss = v_loss.reshape(-1).sum()
+                        if not v_loss.requires_grad:
+                            self._dummy_value_forward(
+                                data_BT.query_responses[i].dtype,
+                                device,
+                                dummy_grad_outputs=dummy_grad_outputs,
+                            )
                         if dummy_grad_outputs:
-                            v_loss = v_loss + sum(0.0 * d.sum() for d in dummy_grad_outputs)
-                        v_loss = v_loss.sum()
+                            v_loss = v_loss + sum(0.0 * d.reshape(-1).sum() for d in dummy_grad_outputs)
+                        v_loss = v_loss.reshape(-1).sum()
                         is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
                         self.value_model.set_gradient_accumulation_boundary(is_value_boundary)
                         self.value_model.backward(v_loss)
