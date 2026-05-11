@@ -1260,17 +1260,14 @@ class PolicyTrainerRayProcess(RayProcess):
         original_start, original_end, _ = self._sp_slice_bounds(original_padded_len)
         local_out = torch.zeros(1, original_end - original_start - 1, dtype=torch.float32, device=device)
 
-        # Use one conditioned sub-sequence per value forward under SP. Packing
-        # multiple conditioned entries into one row creates many position-id
-        # resets, which sends HF Qwen2 through a slow packed-mask construction
-        # path and can desynchronize SP/ZeRO collectives. We still synchronize
-        # the number of pack slots across data-parallel ranks; empty slots run
-        # padding-only forwards so ZeRO-3 sees the same number of calls.
-        packs = [{"entries": [entry], "tokens": int(entry["input_ids"].shape[0])} for entry in entries]
-        max_num_packs = self._sync_max_conditioned_value_packs(len(packs), device)
-        if max_num_packs == 0:
+        if not entries:
             return local_out
-        packs.extend({"entries": [], "tokens": 0} for _ in range(max_num_packs - len(packs)))
+
+        target_len = getattr(self.args, "value_model_repack_max_length", None)
+        if target_len is None or target_len <= 0:
+            target_len = getattr(self.streaming_config, "pack_length", original_seq_len)
+
+        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len))
 
         packed_ids_list: list[torch.Tensor] = []
         packed_pos_list: list[torch.Tensor] = []
@@ -1278,24 +1275,27 @@ class PolicyTrainerRayProcess(RayProcess):
 
         for pack in packs:
             pack_entries = pack["entries"]
-            if pack_entries:
-                entry = pack_entries[0]
-                packed_ids = entry["input_ids"]
-                packed_pos = torch.arange(packed_ids.shape[0], dtype=position_dtype, device=device)
-                full_to_orig_shifted = torch.full((packed_ids.shape[0] - 1,), -1, dtype=torch.long, device=device)
+            packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0)
+            packed_pos = torch.cat(
+                [
+                    torch.arange(entry["input_ids"].shape[0], dtype=position_dtype, device=device)
+                    for entry in pack_entries
+                ],
+                dim=0,
+            )
+            full_to_orig_shifted = torch.full((packed_ids.shape[0] - 1,), -1, dtype=torch.long, device=device)
+            row_offset = 0
+            for entry in pack_entries:
                 entry_len = int(entry["input_ids"].shape[0])
                 if entry_len > 1:
                     sub = entry["subseq"]
                     base = sub["offset_in_pack"]
                     resp_positions = sub["response_is_resp"][1:].bool().nonzero(as_tuple=True)[0] + base
-                    cond_positions = entry["orig_mask"][1:].bool().nonzero(as_tuple=True)[0]
+                    cond_positions = entry["orig_mask"][1:].bool().nonzero(as_tuple=True)[0] + row_offset
                     n = min(resp_positions.numel(), cond_positions.numel())
                     if n > 0:
                         full_to_orig_shifted[cond_positions[:n]] = resp_positions[:n]
-            else:
-                packed_ids = torch.full((1,), self.tokenizer.pad_token_id, dtype=token_dtype, device=device)
-                packed_pos = torch.zeros(1, dtype=position_dtype, device=device)
-                full_to_orig_shifted = torch.full((0,), -1, dtype=torch.long, device=device)
+                row_offset += entry_len
 
             packed_ids_list.append(packed_ids.unsqueeze(0))
             packed_pos_list.append(packed_pos.unsqueeze(0))
