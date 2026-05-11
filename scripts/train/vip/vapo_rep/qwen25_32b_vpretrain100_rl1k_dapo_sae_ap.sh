@@ -62,8 +62,8 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 20480 \
-    --pack_length 22528 \
+    --response_length 8192 \
+    --pack_length 10240 \
     --model_name_or_path Qwen/Qwen2.5-32B \
     --chat_template_name qwen_instruct_user_boxed_math \
     --non_stop_penalty False \
