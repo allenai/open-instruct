@@ -43,6 +43,36 @@ WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 #     --output-dataset mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples-quartiles \
 #     --dataset-name-prefix math_dapo
 
+# uv run python mason.py \
+#     --task_name ${EXP_NAME} \
+#     --cluster ${CLUSTER} \
+#     --workspace ${WORKSPACE} \
+#     --priority ${PRIORITY} \
+#     --pure_docker_mode \
+#     --image ${BEAKER_IMAGE} \
+#     --preemptible \
+#     --num_nodes 1 \
+#     --no_auto_dataset_cache \
+#     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+#     --gpus ${NUM_GPUS} \
+#     --budget ai2/oe-omai \
+#     -- \
+# uv run scripts/data/rlvr/aime_pass_at_k_dataset.py \
+#     --dataset hamishivi/DAPO-Math-17k-Processed_filtered \
+#     --splits train \
+#     --model /weka/oe-adapt-default/allennlp/deletable_checkpoint/ai2-tylerm/qwen3_4b_base_dapo_difficulty_curriculum__1__1777924478 \
+#     --chat-template qwen_instruct_user_boxed_math \
+#     --num-samples 32 \
+#     --temperature 1.0 \
+#     --top-p 1.0 \
+#     --max-tokens 8192 \
+#     --num-engines 8 \
+#     --tensor-parallel-size 1 \
+#     --gpu-memory-utilization 0.9 \
+#     --push-to-hub undfined/dapo-math-17k-processed-filtered-qwen3_4b_base_dapo_difficulty_curriculum_20260504_124643-n32 \
+#     --save-local-dir /weka/oe-adapt-default/allennlp/deletable_rollouts/ai2-tylerm/dapo_math_pass_at_k \
+#     "$@"
+
 uv run python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${CLUSTER} \
@@ -60,15 +90,15 @@ uv run python mason.py \
 uv run scripts/data/rlvr/aime_pass_at_k_dataset.py \
     --dataset hamishivi/DAPO-Math-17k-Processed_filtered \
     --splits train \
-    --model /weka/oe-adapt-default/allennlp/deletable_checkpoint/ai2-tylerm/qwen3_4b_base_dapo_difficulty_curriculum__1__1777924478 \
+    --model Qwen/Qwen3-8B-Base \
     --chat-template qwen_instruct_user_boxed_math \
-    --num-samples 32 \
-    --temperature 1.0 \
-    --top-p 1.0 \
+    --num-samples 64 \
+    --temperature 0.7 \
+    --top-p 0.8 \
     --max-tokens 8192 \
     --num-engines 8 \
     --tensor-parallel-size 1 \
     --gpu-memory-utilization 0.9 \
-    --push-to-hub undfined/dapo-math-17k-processed-filtered-qwen3_4b_base_dapo_difficulty_curriculum_20260504_124643-n32 \
+    --push-to-hub undfined/dapo-math-17k-processed-filtered-qwen3_8b_base_dapo_difficulty-n64 \
     --save-local-dir /weka/oe-adapt-default/allennlp/deletable_rollouts/ai2-tylerm/dapo_math_pass_at_k \
     "$@"
