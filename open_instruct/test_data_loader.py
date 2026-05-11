@@ -1,12 +1,20 @@
+import sys
 import tempfile
+import types
 import unittest
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
-from open_instruct import data_loader
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
+vllm_stub = types.ModuleType("vllm")
+vllm_stub.SamplingParams = object
+sys.modules.setdefault("vllm", vllm_stub)
+
+from open_instruct import data_loader, data_types  # noqa: E402
+from open_instruct.model_utils import Batch  # noqa: E402
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO  # noqa: E402
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
@@ -77,6 +85,71 @@ class TestWorldAwarePacking(unittest.TestCase):
             if not drop_last:
                 expected_indices = set(range(num_samples))
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
+
+
+class TestMaskTruncatedCompletions(unittest.TestCase):
+    def _make_batch(self) -> Batch:
+        return Batch(
+            queries=[[11], [11], [22], [22]],
+            ground_truths=[[1], [1], [2], [2]],
+            datasets=["train", "train", "train", "train"],
+            raw_queries=["q0a", "q0b", "q1a", "q1b"],
+            decoded_responses=["r0a", "r0b", "r1a", "r1b"],
+            indices=[10, 10, 11, 11],
+            scores=[0.1, 0.2, 0.3, 0.4],
+            model_steps=[0, 0, 0, 0],
+        )
+
+    def _make_result(self, finish_reasons: list[str]) -> data_types.GenerationResult:
+        return data_types.GenerationResult(
+            responses=[[100 + i, 200 + i] for i in range(len(finish_reasons))],
+            finish_reasons=finish_reasons,
+            masks=[[1, 1] for _ in finish_reasons],
+            request_info=data_types.RequestInfo(
+                num_calls=[], timeouts=[], tool_errors=[], tool_outputs=[], tool_runtimes=[], tool_calleds=[]
+            ),
+            index=0,
+            prompt_id="0_0",
+            logprobs=[[0.1, 0.2] for _ in finish_reasons],
+        )
+
+    def test_mask_truncated_completions_keeps_batch_and_arrays_aligned(self):
+        batch = self._make_batch()
+        result = self._make_result(["stop", "length", "stop", "tool_calls"])
+        scores = np.array(batch.scores, dtype=np.float32)
+        advantages = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+
+        filtered_batch, filtered_scores, filtered_advantages = data_loader.maybe_mask_truncated_completions(
+            result, batch, scores, advantages, enabled=True
+        )
+
+        self.assertEqual(filtered_batch.indices, [10, 11])
+        self.assertEqual(filtered_batch.scores, [0.1, 0.3])
+        self.assertEqual(filtered_batch.decoded_responses, ["r0a", "r1a"])
+        self.assertEqual(result.finish_reasons, ["stop", "stop"])
+        self.assertEqual(result.responses, [[100, 200], [102, 202]])
+        self.assertEqual(result.logprobs, [[0.1, 0.2], [0.1, 0.2]])
+        np.testing.assert_allclose(filtered_scores, np.array([0.1, 0.3], dtype=np.float32))
+        np.testing.assert_allclose(filtered_advantages, np.array([1.0, 3.0], dtype=np.float32))
+
+    def test_mask_truncated_completions_handles_all_truncated(self):
+        batch = self._make_batch()
+        result = self._make_result(["length", "tool_calls", "length", "tool_calls"])
+        scores = np.array(batch.scores, dtype=np.float32)
+        advantages = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+
+        filtered_batch, filtered_scores, filtered_advantages = data_loader.maybe_mask_truncated_completions(
+            result, batch, scores, advantages, enabled=True
+        )
+
+        self.assertEqual(filtered_batch.indices, [])
+        self.assertEqual(filtered_batch.scores, [])
+        self.assertEqual(result.responses, [])
+        self.assertEqual(result.finish_reasons, [])
+        self.assertEqual(result.masks, [])
+        self.assertEqual(result.logprobs, [])
+        self.assertEqual(filtered_scores.size, 0)
+        self.assertEqual(filtered_advantages.size, 0)
 
 
 if __name__ == "__main__":

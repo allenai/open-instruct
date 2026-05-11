@@ -446,6 +446,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         num_steps = 0
         local_step = 0
+        rho_histograms: dict[str, list[torch.Tensor]] = {}
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
@@ -486,9 +487,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
-                tis_clamped, tis_unclamped = grpo_utils.compute_tis_weights(
-                    old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
-                )
+                rho = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, self.grpo_config)
+                grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
 
                 pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -496,7 +496,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
-                    tis_weights=tis_clamped,
+                    rho_weights=rho.weights,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
@@ -519,8 +519,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     entropy,
                     self.grpo_config,
-                    tis_clamped=tis_clamped,
-                    tis_unclamped=tis_unclamped,
+                    rho_metrics=rho.metrics,
                 )
 
                 num_steps += 1
@@ -558,7 +557,9 @@ class GRPOTrainModule(TransformerTrainModule):
             self.record_metric("_token_count", global_tokens, reduce_type=None)
 
             self._record_step_counter_metrics(int(global_tokens))
-            self._record_data_prep_metrics(batch.get("metrics") or {})
+            data_prep_metrics = dict(batch.get("metrics") or {})
+            data_prep_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
+            self._record_data_prep_metrics(data_prep_metrics)
             for k, v in debug_metrics_sum.items():
                 self.record_metric(k, v / debug_metrics_count, reduce_type=None)
 
@@ -591,4 +592,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 histogram_metrics[metric_key] = np.asarray(metric_value)
 
         if histogram_metrics and dist_utils.get_rank() == 0 and wandb.run is not None:
-            wandb.log({k: wandb.Histogram(v) for k, v in histogram_metrics.items()}, step=self.trainer.global_step)
+            wandb.log(
+                {k: wandb.Histogram(v) for k, v in histogram_metrics.items()},  # ty: ignore[invalid-argument-type]
+                step=self.trainer.global_step,
+            )
