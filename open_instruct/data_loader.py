@@ -400,9 +400,6 @@ class VLLMConfig:
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0
-    vllm_logprobs_mode: Literal["raw_logits", "raw_logprobs", "processed_logits", "processed_logprobs"] = (
-        "processed_logprobs"
-    )
 
 
 @dataclass
