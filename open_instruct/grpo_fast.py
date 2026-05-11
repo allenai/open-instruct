@@ -2230,7 +2230,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         # Ranks with fewer real sub-sequences ran dummy forwards; without this,
                         # their backward would have fewer allgathers than ranks with more subs.
                         if dummy_grad_outputs:
-                            v_loss = v_loss + sum(0.0 * d for d in dummy_grad_outputs)
+                            v_loss = v_loss + sum(0.0 * d.sum() for d in dummy_grad_outputs)
+                        v_loss = v_loss.sum()
                         is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
                         self.value_model.set_gradient_accumulation_boundary(is_value_boundary)
                         self.value_model.backward(v_loss)
