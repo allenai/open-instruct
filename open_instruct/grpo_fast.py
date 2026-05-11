@@ -578,12 +578,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if self._sp_world_size <= 1 or self._sp_group is None:
             return
 
-        local_diag = {
-            "rank": self.rank,
-            "sp_rank": self._sp_rank,
-            "training_step": training_step,
-            "samples": [],
-        }
+        local_diag = {"rank": self.rank, "sp_rank": self._sp_rank, "training_step": training_step, "samples": []}
         for sample_idx, position_ids in enumerate(data_BT.position_ids):
             has_position_reset = (
                 bool((position_ids.diff(dim=-1) < 0).any().item()) if position_ids.shape[-1] > 1 else False
@@ -699,10 +694,7 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.info(f"{self.rank=}: Initialized value model from RM {value_model_path} with trained score head")
         else:
             self.value_model = AutoModelForCausalLM.from_pretrained(
-                value_model_path,
-                revision=value_revision,
-                dtype=torch.bfloat16,
-                attn_implementation=hf_attn,
+                value_model_path, revision=value_revision, dtype=torch.bfloat16, attn_implementation=hf_attn
             )
             self.value_model.config.use_cache = False
             hidden_size = self.value_model.config.hidden_size
@@ -751,9 +743,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.deepspeed_offload_optimizer:
             self.value_optimizer = DeepSpeedCPUAdam(value_optim_params, lr=value_lr)
         else:
-            self.value_optimizer = torch.optim.AdamW(
-                value_optim_params, lr=value_lr, fused=args.fused_optimizer
-            )
+            self.value_optimizer = torch.optim.AdamW(value_optim_params, lr=value_lr, fused=args.fused_optimizer)
 
         effective_value_mini_batches = (
             args.value_num_mini_batches if args.value_num_mini_batches is not None else args.num_mini_batches
@@ -1170,10 +1160,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return int(num_packs_t.item())
 
     def _dummy_value_forward(
-        self,
-        dtype: torch.dtype,
-        device: torch.device,
-        dummy_grad_outputs: list | None = None,
+        self, dtype: torch.dtype, device: torch.device, dummy_grad_outputs: list | None = None
     ) -> None:
         dummy = torch.zeros(1, 1, dtype=dtype, device=device)
         dummy_out = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
@@ -1260,14 +1247,22 @@ class PolicyTrainerRayProcess(RayProcess):
         original_start, original_end, _ = self._sp_slice_bounds(original_padded_len)
         local_out = torch.zeros(1, original_end - original_start - 1, dtype=torch.float32, device=device)
 
-        if not entries:
-            return local_out
-
         target_len = getattr(self.args, "value_model_repack_max_length", None)
         if target_len is None or target_len <= 0:
             target_len = getattr(self.streaming_config, "pack_length", original_seq_len)
 
-        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len))
+        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len)) if entries else []
+
+        # Each value_model forward triggers a ZeRO-3 ALLGATHER across DP. If DP ranks
+        # disagree on the pack count, those collectives deadlock. Sync the max across
+        # DP and pad short ranks with padding-only packs (real value_model calls whose
+        # outputs are discarded by the empty index map).
+        max_num_packs = self._sync_max_conditioned_value_packs(len(packs), device)
+        if max_num_packs == 0:
+            return local_out
+        packs.extend({"entries": [], "tokens": 0} for _ in range(max_num_packs - len(packs)))
+
+        pad_len = max(self._sp_world_size, 2)
 
         packed_ids_list: list[torch.Tensor] = []
         packed_pos_list: list[torch.Tensor] = []
@@ -1275,27 +1270,32 @@ class PolicyTrainerRayProcess(RayProcess):
 
         for pack in packs:
             pack_entries = pack["entries"]
-            packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0)
-            packed_pos = torch.cat(
-                [
-                    torch.arange(entry["input_ids"].shape[0], dtype=position_dtype, device=device)
-                    for entry in pack_entries
-                ],
-                dim=0,
-            )
-            full_to_orig_shifted = torch.full((packed_ids.shape[0] - 1,), -1, dtype=torch.long, device=device)
-            row_offset = 0
-            for entry in pack_entries:
-                entry_len = int(entry["input_ids"].shape[0])
-                if entry_len > 1:
-                    sub = entry["subseq"]
-                    base = sub["offset_in_pack"]
-                    resp_positions = sub["response_is_resp"][1:].bool().nonzero(as_tuple=True)[0] + base
-                    cond_positions = entry["orig_mask"][1:].bool().nonzero(as_tuple=True)[0] + row_offset
-                    n = min(resp_positions.numel(), cond_positions.numel())
-                    if n > 0:
-                        full_to_orig_shifted[cond_positions[:n]] = resp_positions[:n]
-                row_offset += entry_len
+            if pack_entries:
+                packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0)
+                packed_pos = torch.cat(
+                    [
+                        torch.arange(entry["input_ids"].shape[0], dtype=position_dtype, device=device)
+                        for entry in pack_entries
+                    ],
+                    dim=0,
+                )
+                full_to_orig_shifted = torch.full((packed_ids.shape[0] - 1,), -1, dtype=torch.long, device=device)
+                row_offset = 0
+                for entry in pack_entries:
+                    entry_len = int(entry["input_ids"].shape[0])
+                    if entry_len > 1:
+                        sub = entry["subseq"]
+                        base = sub["offset_in_pack"]
+                        resp_positions = sub["response_is_resp"][1:].bool().nonzero(as_tuple=True)[0] + base
+                        cond_positions = entry["orig_mask"][1:].bool().nonzero(as_tuple=True)[0] + row_offset
+                        n = min(resp_positions.numel(), cond_positions.numel())
+                        if n > 0:
+                            full_to_orig_shifted[cond_positions[:n]] = resp_positions[:n]
+                    row_offset += entry_len
+            else:
+                packed_ids = torch.full((pad_len,), self.tokenizer.pad_token_id, dtype=token_dtype, device=device)
+                packed_pos = torch.arange(pad_len, dtype=position_dtype, device=device)
+                full_to_orig_shifted = torch.full((pad_len - 1,), -1, dtype=torch.long, device=device)
 
             packed_ids_list.append(packed_ids.unsqueeze(0))
             packed_pos_list.append(packed_pos.unsqueeze(0))
@@ -1323,9 +1323,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
             local_seq_len = local_ids.shape[-1]
             local_values = self._align_value_predictions(
-                local_values,
-                torch.Size((1, local_seq_len - 1)),
-                "conditioned value local forward",
+                local_values, torch.Size((1, local_seq_len - 1)), "conditioned value local forward"
             )
             cond_start = local_seq_len * self._sp_rank
             cond_end = local_seq_len * (self._sp_rank + 1)
@@ -1395,7 +1393,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 row_offset += entry_len
 
         return out_values
-
 
     def _forward_value_with_conditioning(
         self,
@@ -1524,9 +1521,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return out_values
 
-    def _align_value_predictions(
-        self, values: torch.Tensor, target_shape: torch.Size, context: str
-    ) -> torch.Tensor:
+    def _align_value_predictions(self, values: torch.Tensor, target_shape: torch.Size, context: str) -> torch.Tensor:
         """Align value predictions to the local shifted token shape.
 
         Under SP, the conditioned value path may run on a shorter effective
@@ -1550,9 +1545,7 @@ class PolicyTrainerRayProcess(RayProcess):
             aligned = values[..., :target_len]
 
         if not getattr(self, "_value_alignment_warning_logged", False):
-            logger.warning(
-                f"{context}: aligned value predictions from {tuple(values.shape)} to {tuple(target_shape)}"
-            )
+            logger.warning(f"{context}: aligned value predictions from {tuple(values.shape)} to {tuple(target_shape)}")
             self._value_alignment_warning_logged = True
         return aligned
 
@@ -1725,7 +1718,9 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
         sp_value_data_BT = (
             unsplit_data_BT.to(self.device)
-            if self.splitter is not None and self.args.use_value_model and self.args.value_model_ground_truth_conditioning
+            if self.splitter is not None
+            and self.args.use_value_model
+            and self.args.value_model_ground_truth_conditioning
             else None
         )
         self._log_sp_forward_kwargs_diagnostics(data_BT, training_step)
@@ -2254,13 +2249,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         # Ranks with fewer real sub-sequences ran dummy forwards; without this,
                         # their backward would have fewer allgathers than ranks with more subs.
                         v_loss = v_loss.reshape(-1).sum()
+                        # Fold dummy_grad_outputs in first so the SP path (which routes real
+                        # forwards into dummy_grad_outputs even when new_values has no grad)
+                        # makes v_loss require_grad without triggering an extra dummy forward
+                        # on only a subset of DP ranks.
+                        if dummy_grad_outputs:
+                            v_loss = v_loss + sum(0.0 * d.reshape(-1).sum() for d in dummy_grad_outputs)
                         if not v_loss.requires_grad:
                             self._dummy_value_forward(
-                                data_BT.query_responses[i].dtype,
-                                device,
-                                dummy_grad_outputs=dummy_grad_outputs,
+                                data_BT.query_responses[i].dtype, device, dummy_grad_outputs=dummy_grad_outputs
                             )
-                        if dummy_grad_outputs:
                             v_loss = v_loss + sum(0.0 * d.reshape(-1).sum() for d in dummy_grad_outputs)
                         v_loss = v_loss.reshape(-1).sum()
                         is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
@@ -3558,10 +3556,7 @@ def _is_in_warmup_window(args, training_step: int) -> bool:
     if args.policy_warmup_steps > 0 and training_step <= args.policy_warmup_steps:
         return True
     rewarmup_end = args.value_rewarmup_start + args.value_rewarmup_steps
-    return bool(
-        args.value_rewarmup_steps > 0
-        and args.value_rewarmup_start <= training_step <= rewarmup_end
-    )
+    return bool(args.value_rewarmup_steps > 0 and args.value_rewarmup_start <= training_step <= rewarmup_end)
 
 
 def run_training(
