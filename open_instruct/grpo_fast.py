@@ -2190,6 +2190,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
             # Value loss + backward pass (independent DeepSpeed engine on self.value_model).
             if self.args.use_value_model and value_loss_inputs is not None:
+                # Let the value model reuse any CUDA blocks released by the policy pass.
+                torch.cuda.empty_cache()
                 with Timer("[Training Processes] Value loss", noop=self.rank != 0):
                     value_accum_steps = max(
                         math.ceil(num_samples / max(self._value_effective_mini_batches, 1) - 0.5), 1
