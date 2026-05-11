@@ -5,9 +5,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Skip the `--try_auto_save_to_beaker` `/output` copy when `--output_dir` lives under `/weka/`; the artifact is already on shared storage so the copy just wastes time and disk (https://github.com/allenai/open-instruct/pull/1667).
+- Make `mason.py` `--output_dir` / `--checkpoint_state_dir` overrides idempotent via `replace_or_append_flag`, add `open_instruct/grpo.py` to `OPEN_INSTRUCT_COMMANDS` / `OPEN_INSTRUCT_RESUMABLES`, and wire OLMo-core checkpoint save/resume into `grpo.py` (`CheckpointerCallback` + `DataPreparationActorCheckpointCallback` + `LoadStrategy.if_available`) so resumable Beaker jobs actually resume (https://github.com/allenai/open-instruct/pull/1666).
+- Make `--budget` optional in `mason.py` (falls back to the workspace's default budget) and drop the explicit `--budget` flag from launch scripts where it already matched the workspace default (https://github.com/allenai/open-instruct/pull/1673).
 - Restore 🤡 to resample warnings and use `self.training_step` in `DataPreparationActor.run` (https://github.com/allenai/open-instruct/pull/1663).
 - Add a unified `use_rho_correction` interface (clamp + mask, per-token or sequence-level) for the train/infer engine mismatch in GRPO loss; replaces `truncated_importance_sampling_ratio_cap` and the IcePop flags (https://github.com/allenai/open-instruct/pull/1650).
 - Resample on filtered batches in `DataPreparationActor` instead of emitting empty `CollatedBatchData`, unifying the `grpo.py` and `grpo_fast.py` consumer paths and removing the now-dead empty-batch checks in `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1660).
+- Update Beaker budget from `ai2/oe-omai` to `ai2/oe-other` across launch scripts and beaker configs.
 - Update Beaker budget from `ai2/oe-adapt` to `ai2/oe-omai` across launch scripts and beaker configs to fix experiment launch failures from the retired budget (https://github.com/allenai/open-instruct/pull/1662).
 - Log every filtered prompt in `accumulate_inference_batches` at INFO level with the zero/solved/nonzero breakdown, and add `batch/filtered_prompts_pct` to wandb so policy collapse / convergence is visible without spelunking debug logs (https://github.com/allenai/open-instruct/pull/1657).
 - Aggregate prompt/response lengths across all DP ranks (deduplicating SP groups) when computing GRPO step token counts and utilization metrics, instead of using only rank 0 (https://github.com/allenai/open-instruct/pull/1659).
