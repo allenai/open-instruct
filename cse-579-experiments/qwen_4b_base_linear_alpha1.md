@@ -86,7 +86,7 @@ of AIME pass@32.
 
 ### Trajectory over training steps
 
-![Per-task primary score and mean response-token length over training, baseline vs Linear α=1.0](results/trajectories.png)
+<img src="results/trajectories.png" alt="Per-task primary score and mean response-token length over training, baseline vs Linear alpha=1.0" />
 
 Top row is the primary metric for each task at each evaluated checkpoint; bottom
 row is mean response length in tokens (symlog y) split into `all`, `correct`,
