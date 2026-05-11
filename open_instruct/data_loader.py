@@ -1380,7 +1380,7 @@ class DataPreparationActor:
 
             if result is None:
                 logger.warning(
-                    f"[DataPreparationActor] Step {self.training_step}: all groups filtered (zero-std rewards); "
+                    f"[DataPreparationActor] 🤡 Step {self.training_step}: all groups filtered (zero-std rewards); "
                     "resampling without advancing step counter"
                 )
                 continue
@@ -1392,7 +1392,7 @@ class DataPreparationActor:
 
             if len(result.responses) == 0:
                 logger.warning(
-                    f"[DataPreparationActor] Step {self.training_step}: no trainable responses after truncation filter; "
+                    f"[DataPreparationActor] 🤡 Step {self.training_step}: no trainable responses after truncation filter; "
                     "resampling without advancing step counter"
                 )
                 continue
