@@ -537,21 +537,56 @@ def save_with_accelerate(
     chat_template_name: str = "tulu",
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
-    # set the generation config to an empty setting to be safe.
-    # we usually do greedy decoding for generation, so this should be okay.
-    # otherwise, we get an error thrown at save time.
-    if chat_template_name and "olmo" in chat_template_name:
-        # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
-        logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
-        model.generation_config = get_olmo3_generation_config(tokenizer)
-    else:
-        model.generation_config = transformers.GenerationConfig(
-            temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
-        )
-
     unwrapped_model: transformers.PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:
         unwrapped_model = getattr(unwrapped_model, model_attribute_to_save)
+
+    # Determine the right generation_config / eos_token_id based on the chat template,
+    # then set it on *both* the wrapped and unwrapped models. DeepSpeedEngine does not
+    # proxy __setattr__, so writes to the wrapper land on the wrapper only — meanwhile
+    # save_pretrained reads from the underlying module. Setting both is idempotent in
+    # the no-wrapping case (they're the same object) and load-bearing under DeepSpeed.
+    if chat_template_name and "olmo" in chat_template_name:
+        # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+        logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
+        new_gen_config = get_olmo3_generation_config(tokenizer)
+        new_eos_id = None  # leave model.config.eos_token_id alone for olmo
+    elif chat_template_name and "qwen" in chat_template_name:
+        # Qwen chat templates hardcode the literal `<|im_end|>` as turn terminator.
+        # Qwen3-Base ships eos_token_id=<|endoftext|>, so without rebinding eos at
+        # inference time sglang/vLLM never see a stop token. Qwen-Inst already sets
+        # eos correctly; the rebind is a no-op.
+        unk_id = tokenizer.unk_token_id
+        im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+        if im_end_id is None or (unk_id is not None and im_end_id == unk_id):
+            # Tokenizer doesn't actually have <|im_end|>; fall back to default behavior.
+            new_gen_config = transformers.GenerationConfig(
+                temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
+            )
+            new_eos_id = None
+        else:
+            if tokenizer.eos_token_id != im_end_id:
+                logger.info(
+                    f"Detected qwen chat template: {chat_template_name}, rebinding eos "
+                    f"from {tokenizer.eos_token_id} ({tokenizer.eos_token!r}) to {im_end_id} (<|im_end|>)."
+                )
+                tokenizer.eos_token = "<|im_end|>"
+            new_gen_config = transformers.GenerationConfig(
+                temperature=None, top_p=None, eos_token_id=im_end_id, bos_token_id=tokenizer.bos_token_id
+            )
+            new_eos_id = im_end_id
+    else:
+        new_gen_config = transformers.GenerationConfig(
+            temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
+        )
+        new_eos_id = None
+
+    for m in {id(model): model, id(unwrapped_model): unwrapped_model}.values():
+        m.generation_config = new_gen_config
+    # config.eos_token_id only on the unwrapped HF model; DeepSpeedEngine.config
+    # is a deepspeed config dict, not a transformers PretrainedConfig.
+    if new_eos_id is not None:
+        unwrapped_model.config.eos_token_id = new_eos_id
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
     # Also, accelerator needs to use the wrapped model to get the state_dict.
