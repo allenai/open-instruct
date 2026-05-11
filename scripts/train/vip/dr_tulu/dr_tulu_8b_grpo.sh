@@ -79,7 +79,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tools serper_search jina_browse s2_search \
     --tool_call_names google_search browse_webpage snippet_search \
     --tool_configs '{}' '{}' '{"pool_size": 100}' \
-    --pool_size 256 \
+    --pool_size 1024 \
     --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
     --max_steps 100 \
     --backend_timeout 1800 \
