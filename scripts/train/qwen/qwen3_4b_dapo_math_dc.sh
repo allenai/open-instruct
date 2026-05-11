@@ -35,23 +35,54 @@ else
     DEFAULT_CURRICULUM_TOTAL_STEPS=$(( NUM_TRAINING_STEPS - CURRICULUM_WARMUP_STEPS ))
 fi
 CURRICULUM_TOTAL_STEPS="${CURRICULUM_TOTAL_STEPS:-${DEFAULT_CURRICULUM_TOTAL_STEPS}}"
+CURRICULUM_METADATA_FIELD="${CURRICULUM_METADATA_FIELD:-difficulty}"
+CURRICULUM_POSTERIOR_MEAN_FIELD="${CURRICULUM_POSTERIOR_MEAN_FIELD:-posterior_mean}"
+CURRICULUM_BUCKET_INDEX_FIELD="${CURRICULUM_BUCKET_INDEX_FIELD:-bucket_index}"
+CURRICULUM_BUCKET_COUNT_FIELD="${CURRICULUM_BUCKET_COUNT_FIELD:-bucket_count}"
+CURRICULUM_QUANTILE_FIELD="${CURRICULUM_QUANTILE_FIELD:-expected_quantile}"
+CURRICULUM_STRICT_METADATA="${CURRICULUM_STRICT_METADATA:-true}"
+CURRICULUM_BOOTSTRAP_TARGET="${CURRICULUM_BOOTSTRAP_TARGET:-0.125}"
+CURRICULUM_WARMUP_TARGET="${CURRICULUM_WARMUP_TARGET:-0.5}"
+CURRICULUM_FINAL_TARGET="${CURRICULUM_FINAL_TARGET:-1.0}"
+CURRICULUM_MIN_HARD_FRAC="${CURRICULUM_MIN_HARD_FRAC:-0.05}"
+CURRICULUM_MAX_HARD_FRAC="${CURRICULUM_MAX_HARD_FRAC:-0.50}"
+CURRICULUM_BUCKET_SIGMA="${CURRICULUM_BUCKET_SIGMA:-0.0}"
+CURRICULUM_BOOTSTRAP_SIGMA="${CURRICULUM_BOOTSTRAP_SIGMA:-0.0}"
+CURRICULUM_UNCERTAINTY_WEIGHT="${CURRICULUM_UNCERTAINTY_WEIGHT:-0.5}"
+CURRICULUM_ADAPTIVE="${CURRICULUM_ADAPTIVE:-false}"
+CURRICULUM_ADAPTIVE_UPDATE_EVERY="${CURRICULUM_ADAPTIVE_UPDATE_EVERY:-50}"
+CURRICULUM_ADAPTIVE_LEARNING_WEIGHT="${CURRICULUM_ADAPTIVE_LEARNING_WEIGHT:-0.7}"
+CURRICULUM_ADAPTIVE_EXPLORATION_WEIGHT="${CURRICULUM_ADAPTIVE_EXPLORATION_WEIGHT:-0.3}"
+CURRICULUM_ADAPTIVE_BLEND="${CURRICULUM_ADAPTIVE_BLEND:-0.5}"
+CURRICULUM_MIN_QUANTILE="${CURRICULUM_MIN_QUANTILE:-0.0}"
+CURRICULUM_MAX_QUANTILE="${CURRICULUM_MAX_QUANTILE:-1.0}"
 
 CURRICULUM_ARGS=(
     --curriculum difficulty
-    --curriculum_metadata_field difficulty
+    --curriculum_metadata_field "${CURRICULUM_METADATA_FIELD}"
+    --curriculum_posterior_mean_field "${CURRICULUM_POSTERIOR_MEAN_FIELD}"
+    --curriculum_bucket_index_field "${CURRICULUM_BUCKET_INDEX_FIELD}"
+    --curriculum_bucket_count_field "${CURRICULUM_BUCKET_COUNT_FIELD}"
+    --curriculum_quantile_field "${CURRICULUM_QUANTILE_FIELD}"
     --curriculum_bootstrap_steps "${CURRICULUM_BOOTSTRAP_STEPS}"
-    --curriculum_bootstrap_target 0.125
-    --curriculum_warmup_target 0.5
-    --curriculum_final_target 1.0
+    --curriculum_bootstrap_target "${CURRICULUM_BOOTSTRAP_TARGET}"
+    --curriculum_warmup_target "${CURRICULUM_WARMUP_TARGET}"
+    --curriculum_final_target "${CURRICULUM_FINAL_TARGET}"
     --curriculum_warmup_steps "${CURRICULUM_WARMUP_STEPS}"
     --curriculum_total_steps "${CURRICULUM_TOTAL_STEPS}"
-    --curriculum_min_hard_frac 0.05
-    --curriculum_max_hard_frac 0.50
-    --curriculum_bucket_sigma 0.0
-    --curriculum_bootstrap_sigma 0.0
-    --curriculum_uncertainty_weight 0.5
-    --curriculum_adaptive false
-    --curriculum_strict_metadata true
+    --curriculum_min_hard_frac "${CURRICULUM_MIN_HARD_FRAC}"
+    --curriculum_max_hard_frac "${CURRICULUM_MAX_HARD_FRAC}"
+    --curriculum_bucket_sigma "${CURRICULUM_BUCKET_SIGMA}"
+    --curriculum_bootstrap_sigma "${CURRICULUM_BOOTSTRAP_SIGMA}"
+    --curriculum_uncertainty_weight "${CURRICULUM_UNCERTAINTY_WEIGHT}"
+    --curriculum_adaptive "${CURRICULUM_ADAPTIVE}"
+    --curriculum_adaptive_update_every "${CURRICULUM_ADAPTIVE_UPDATE_EVERY}"
+    --curriculum_adaptive_learning_weight "${CURRICULUM_ADAPTIVE_LEARNING_WEIGHT}"
+    --curriculum_adaptive_exploration_weight "${CURRICULUM_ADAPTIVE_EXPLORATION_WEIGHT}"
+    --curriculum_adaptive_blend "${CURRICULUM_ADAPTIVE_BLEND}"
+    --curriculum_min_quantile "${CURRICULUM_MIN_QUANTILE}"
+    --curriculum_max_quantile "${CURRICULUM_MAX_QUANTILE}"
+    --curriculum_strict_metadata "${CURRICULUM_STRICT_METADATA}"
 )
 
 uv run python mason.py \

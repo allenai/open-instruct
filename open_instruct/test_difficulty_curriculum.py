@@ -97,6 +97,21 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         self.assertEqual(sampler.metadata_fallback_count, 1)
         self.assertIn(1, sampler.bucket_to_indices[2])
 
+    def test_quantile_filter_keeps_only_hardest_half(self):
+        sampler = self._make_sampler(make_bucket_dataset(), min_quantile=0.5)
+        self.assertEqual(sampler.bucket_to_indices, ((), (), (2,), (3,), (4,)))
+        self.assertEqual(sampler.filtered_out_count, 2)
+        self.assertEqual(sampler.get_example_probability(0, step=0), 0.0)
+        self.assertTrue(all(sampler.sample_index(step=0) in {2, 3, 4} for _ in range(20)))
+
+    def test_quantile_filter_reweights_only_available_buckets(self):
+        sampler = self._make_sampler(make_bucket_dataset(), min_quantile=0.5)
+        early_probs = sampler.get_static_bucket_probs(step=0)
+        self.assertAlmostEqual(float(early_probs.sum()), 1.0, places=6)
+        self.assertEqual(float(early_probs[0]), 0.0)
+        self.assertEqual(float(early_probs[1]), 0.0)
+        self.assertGreater(early_probs[2], early_probs[3])
+
     def test_bucket_grouping_works(self):
         sampler = self._make_sampler(make_bucket_dataset())
         self.assertEqual(sampler.bucket_to_indices, ((0,), (1,), (2,), (3,), (4,)))
@@ -225,6 +240,8 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
                 "true",
                 "--curriculum_adaptive_blend",
                 "0.25",
+                "--curriculum_min_quantile",
+                "0.5",
             ]
         )
 
@@ -238,6 +255,7 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         self.assertEqual(curriculum_config.schedule.total_steps, 56)
         self.assertTrue(curriculum_config.adaptive.enabled)
         self.assertEqual(curriculum_config.adaptive.blend, 0.25)
+        self.assertEqual(curriculum_config.min_quantile, 0.5)
         self.assertEqual(curriculum_config.seed, 17)
 
     def test_curriculum_verify_accepts_none_mode(self):

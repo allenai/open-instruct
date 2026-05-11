@@ -61,6 +61,7 @@ class DifficultyCurriculumMetadataConfig:
     posterior_mean_field: str = "posterior_mean"
     bucket_index_field: str = "bucket_index"
     bucket_count_field: str = "bucket_count"
+    quantile_field: str = "expected_quantile"
     strict: bool = True
 
 
@@ -127,12 +128,20 @@ class DifficultyCurriculumConfig:
     schedule: DifficultyCurriculumScheduleConfig = field(default_factory=DifficultyCurriculumScheduleConfig)
     adaptive: DifficultyCurriculumAdaptiveConfig = field(default_factory=DifficultyCurriculumAdaptiveConfig)
     uncertainty_weight: float = 0.5
+    min_quantile: float = 0.0
+    max_quantile: float = 1.0
     seed: int = 0
     epsilon: float = 1e-8
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.uncertainty_weight <= 1.0:
             raise ValueError("uncertainty_weight must be in [0, 1]")
+        if not 0.0 <= self.min_quantile <= 1.0:
+            raise ValueError("min_quantile must be in [0, 1]")
+        if not 0.0 <= self.max_quantile <= 1.0:
+            raise ValueError("max_quantile must be in [0, 1]")
+        if self.min_quantile > self.max_quantile:
+            raise ValueError("min_quantile must be <= max_quantile")
         if self.epsilon <= 0:
             raise ValueError("epsilon must be > 0")
 
@@ -144,6 +153,7 @@ class DifficultyCurriculumArgs:
     curriculum_posterior_mean_field: str = "posterior_mean"
     curriculum_bucket_index_field: str = "bucket_index"
     curriculum_bucket_count_field: str = "bucket_count"
+    curriculum_quantile_field: str = "expected_quantile"
     curriculum_strict_metadata: bool = True
     curriculum_bootstrap_steps: int = 100
     curriculum_warmup_steps: int = 500
@@ -161,6 +171,8 @@ class DifficultyCurriculumArgs:
     curriculum_adaptive_learning_weight: float = 0.7
     curriculum_adaptive_exploration_weight: float = 0.3
     curriculum_adaptive_blend: float = 0.5
+    curriculum_min_quantile: float = 0.0
+    curriculum_max_quantile: float = 1.0
 
     def build_metadata_config(self) -> DifficultyCurriculumMetadataConfig:
         return DifficultyCurriculumMetadataConfig(
@@ -168,6 +180,7 @@ class DifficultyCurriculumArgs:
             posterior_mean_field=self.curriculum_posterior_mean_field,
             bucket_index_field=self.curriculum_bucket_index_field,
             bucket_count_field=self.curriculum_bucket_count_field,
+            quantile_field=self.curriculum_quantile_field,
             strict=self.curriculum_strict_metadata,
         )
 
@@ -214,6 +227,8 @@ class DifficultyCurriculumArgs:
             schedule=self.build_schedule_config(),
             adaptive=self.build_adaptive_config(),
             uncertainty_weight=self.curriculum_uncertainty_weight,
+            min_quantile=self.curriculum_min_quantile,
+            max_quantile=self.curriculum_max_quantile,
             seed=seed,
         )
 
@@ -341,6 +356,7 @@ class _ParsedDifficultyMetadata:
     bucket_index: int | None
     bucket_count: int | None
     posterior_mean: float | None
+    expected_quantile: float | None
     error: str | None
 
 
@@ -352,6 +368,7 @@ class _DifficultyBucketIndex:
     bucket_weights: tuple[torch.Tensor, ...]
     bucket_count: int
     metadata_fallback_count: int
+    filtered_out_count: int
 
 
 class _DifficultyCurriculumSchedule:
@@ -428,18 +445,21 @@ def _parse_difficulty_metadata(
             bucket_index=None,
             bucket_count=None,
             posterior_mean=None,
+            expected_quantile=None,
             error=f"missing '{metadata_config.field}' metadata for dataset index {index}",
         )
 
     bucket_index = _coerce_int(_resolve_path(difficulty_blob, metadata_config.bucket_index_field))
     bucket_count = _coerce_int(_resolve_path(difficulty_blob, metadata_config.bucket_count_field))
     posterior_mean = _coerce_float(_resolve_path(difficulty_blob, metadata_config.posterior_mean_field))
+    expected_quantile = _coerce_float(_resolve_path(difficulty_blob, metadata_config.quantile_field))
 
     if bucket_index is None or bucket_index < 0:
         return _ParsedDifficultyMetadata(
             bucket_index=None,
             bucket_count=bucket_count,
             posterior_mean=posterior_mean,
+            expected_quantile=expected_quantile,
             error=f"invalid bucket_index for dataset index {index}",
         )
     if bucket_count is None or bucket_count <= 0:
@@ -447,6 +467,7 @@ def _parse_difficulty_metadata(
             bucket_index=bucket_index,
             bucket_count=None,
             posterior_mean=posterior_mean,
+            expected_quantile=expected_quantile,
             error=f"invalid bucket_count for dataset index {index}",
         )
     if posterior_mean is None:
@@ -454,10 +475,23 @@ def _parse_difficulty_metadata(
             bucket_index=bucket_index,
             bucket_count=bucket_count,
             posterior_mean=None,
+            expected_quantile=expected_quantile,
             error=f"invalid posterior_mean for dataset index {index}",
         )
+    if expected_quantile is not None and not 0.0 <= expected_quantile <= 1.0:
+        return _ParsedDifficultyMetadata(
+            bucket_index=bucket_index,
+            bucket_count=bucket_count,
+            posterior_mean=posterior_mean,
+            expected_quantile=None,
+            error=f"invalid expected_quantile for dataset index {index}",
+        )
     return _ParsedDifficultyMetadata(
-        bucket_index=bucket_index, bucket_count=bucket_count, posterior_mean=posterior_mean, error=None
+        bucket_index=bucket_index,
+        bucket_count=bucket_count,
+        posterior_mean=posterior_mean,
+        expected_quantile=expected_quantile,
+        error=None,
     )
 
 
@@ -469,11 +503,17 @@ def _compute_example_weight(posterior_mean: float, uncertainty_weight: float, ep
 
 
 def _build_difficulty_bucket_index(
-    dataset, metadata_config: DifficultyCurriculumMetadataConfig, uncertainty_weight: float, epsilon: float
+    dataset,
+    metadata_config: DifficultyCurriculumMetadataConfig,
+    uncertainty_weight: float,
+    epsilon: float,
+    min_quantile: float,
+    max_quantile: float,
 ) -> _DifficultyBucketIndex:
     parsed_rows: list[_ParsedDifficultyMetadata] = []
     observed_bucket_counts: set[int] = set()
     max_bucket_index = -1
+    filter_active = min_quantile > 0.0 or max_quantile < 1.0
 
     for dataset_index in range(len(dataset)):
         parsed = _parse_difficulty_metadata(dataset[dataset_index], dataset_index, metadata_config)
@@ -499,10 +539,14 @@ def _build_difficulty_bucket_index(
     index_to_bucket: dict[int, int] = {}
     index_to_bucket_position: dict[int, int] = {}
     metadata_fallback_count = 0
+    filtered_out_count = 0
     fallback_bucket = min(bucket_count - 1, bucket_count // 2)
 
     for dataset_index, parsed in enumerate(parsed_rows):
         if parsed.error is not None:
+            if filter_active:
+                filtered_out_count += 1
+                continue
             bucket_index = fallback_bucket
             posterior_mean = _DEFAULT_POSTERIOR_MEAN
             metadata_fallback_count += 1
@@ -510,6 +554,16 @@ def _build_difficulty_bucket_index(
             assert parsed.bucket_index is not None
             bucket_index = int(np.clip(parsed.bucket_index, 0, bucket_count - 1))
             posterior_mean = parsed.posterior_mean
+            if filter_active:
+                expected_quantile = parsed.expected_quantile
+                if expected_quantile is None:
+                    if metadata_config.strict:
+                        raise ValueError(f"invalid {metadata_config.quantile_field} for dataset index {dataset_index}")
+                    filtered_out_count += 1
+                    continue
+                if expected_quantile < min_quantile or expected_quantile > max_quantile:
+                    filtered_out_count += 1
+                    continue
 
         if posterior_mean is None:
             posterior_mean = _DEFAULT_POSTERIOR_MEAN
@@ -531,6 +585,7 @@ def _build_difficulty_bucket_index(
         bucket_weights=tuple(torch.tensor(weight_list, dtype=torch.float64) for weight_list in bucket_weight_lists),
         bucket_count=bucket_count,
         metadata_fallback_count=metadata_fallback_count,
+        filtered_out_count=filtered_out_count,
     )
 
 
@@ -560,11 +615,14 @@ class DifficultyCurriculumSampler(Sampler[int]):
             metadata_config=self.config.metadata,
             uncertainty_weight=self.config.uncertainty_weight,
             epsilon=self.config.epsilon,
+            min_quantile=self.config.min_quantile,
+            max_quantile=self.config.max_quantile,
         )
         self._index_to_bucket = dict(bucket_index.index_to_bucket)
         self._index_to_bucket_position = dict(bucket_index.index_to_bucket_position)
         self.bucket_count = bucket_index.bucket_count
         self.metadata_fallback_count = bucket_index.metadata_fallback_count
+        self.filtered_out_count = bucket_index.filtered_out_count
         self._schedule = _DifficultyCurriculumSchedule(self.config.schedule, self.bucket_count)
 
         self._excluded_indices: set[int] = set()
@@ -594,6 +652,16 @@ class DifficultyCurriculumSampler(Sampler[int]):
                 self.metadata_fallback_count,
                 len(self.dataset),
             )
+        if self.filtered_out_count > 0:
+            logger.info(
+                "Difficulty curriculum filtered out %s/%s rows outside quantile range [%s, %s].",
+                self.filtered_out_count,
+                len(self.dataset),
+                self.config.min_quantile,
+                self.config.max_quantile,
+            )
+        if sum(self._active_bucket_counts) == 0:
+            raise ValueError("Difficulty curriculum filter removed all dataset examples.")
 
     def __len__(self) -> int:
         return self.num_samples
@@ -674,7 +742,9 @@ class DifficultyCurriculumSampler(Sampler[int]):
     def get_example_probability(self, dataset_index: int, step: int | None = None) -> float:
         if int(dataset_index) in self._excluded_indices:
             return 0.0
-        bucket_index = self.bucket_for_dataset_index(dataset_index)
+        bucket_index = self._index_to_bucket.get(int(dataset_index))
+        if bucket_index is None:
+            return 0.0
         if self._active_bucket_counts[bucket_index] == 0:
             return 0.0
         local_index = self._index_to_bucket_position.get(int(dataset_index))
