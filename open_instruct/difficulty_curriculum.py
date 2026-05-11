@@ -358,6 +358,7 @@ class _DifficultyCurriculumSchedule:
     def __init__(self, config: DifficultyCurriculumScheduleConfig, bucket_count: int) -> None:
         self.config = config
         self.bucket_count = bucket_count
+        self._bucket_ids = np.arange(max(self.bucket_count - 1, 0), dtype=np.float64)
 
     def get_progress(self, step: int) -> float:
         if step < self.config.warmup_steps:
@@ -402,9 +403,8 @@ class _DifficultyCurriculumSchedule:
             self.config.min_hard_frac + (self.config.max_hard_frac - self.config.min_hard_frac) * smooth_progress
         )
 
-        bucket_ids = np.arange(self.bucket_count - 1, dtype=np.float64)
         sigma = self._get_bucket_sigma(step)
-        gaussian_logits = np.exp(-0.5 * ((bucket_ids - target_bucket) / sigma) ** 2)
+        gaussian_logits = np.exp(-0.5 * ((self._bucket_ids - target_bucket) / sigma) ** 2)
         non_hard_probs = _normalize_probs(gaussian_logits)
 
         static_probs = np.zeros(self.bucket_count, dtype=np.float64)
@@ -582,6 +582,8 @@ class DifficultyCurriculumSampler(Sampler[int]):
                 epsilon=self.config.epsilon,
             )
 
+        self._cached_static_probs: np.ndarray | None = None
+        self._last_static_refresh_step = -1
         self._cached_adaptive_probs: np.ndarray | None = None
         self._last_adaptive_refresh_step = -1
 
@@ -612,10 +614,27 @@ class DifficultyCurriculumSampler(Sampler[int]):
     def _available_bucket_mask(self) -> np.ndarray:
         return np.array([1.0 if count > 0 else 0.0 for count in self._active_bucket_counts], dtype=np.float64)
 
+    def _invalidate_static_bucket_probs(self) -> None:
+        self._cached_static_probs = None
+        self._last_static_refresh_step = -1
+
+    def _invalidate_adaptive_bucket_probs(self) -> None:
+        self._cached_adaptive_probs = None
+        self._last_adaptive_refresh_step = -1
+
+    def _invalidate_bucket_prob_caches(self) -> None:
+        self._invalidate_static_bucket_probs()
+        self._invalidate_adaptive_bucket_probs()
+
     def get_static_bucket_probs(self, step: int | None = None) -> np.ndarray:
         if step is None:
             step = self._get_current_step()
-        return self._schedule.build_probs(step, self._available_bucket_mask())
+        if self._cached_static_probs is not None and step == self._last_static_refresh_step:
+            return self._cached_static_probs.copy()
+
+        self._cached_static_probs = self._schedule.build_probs(step, self._available_bucket_mask())
+        self._last_static_refresh_step = step
+        return self._cached_static_probs.copy()
 
     def get_adaptive_bucket_probs(self, step: int | None = None) -> np.ndarray | None:
         if not self.config.adaptive.enabled or self.adaptive_stats is None or self.adaptive_stats.total_count == 0:
@@ -714,6 +733,7 @@ class DifficultyCurriculumSampler(Sampler[int]):
             0.0, self._active_bucket_weight_sums[bucket_index] - current_weight
         )
         self._excluded_indices.add(dataset_index)
+        self._invalidate_bucket_prob_caches()
 
     def record_observations(
         self,
@@ -728,7 +748,7 @@ class DifficultyCurriculumSampler(Sampler[int]):
 
         bucket_indices = [self.bucket_for_dataset_index(int(dataset_index)) for dataset_index in dataset_indices]
         self.adaptive_stats.update(bucket_indices, rewards, advantages)
-        self._cached_adaptive_probs = None
+        self._invalidate_adaptive_bucket_probs()
 
     def build_metrics(self, prompt_dataset_indices: list[int], step: int | None = None) -> dict[str, float]:
         metrics: dict[str, float] = {"curriculum/progress": self.get_progress(step)}
@@ -804,6 +824,7 @@ class DifficultyCurriculumSampler(Sampler[int]):
         if self.adaptive_stats is not None and state_dict.get("adaptive_stats") is not None:
             self.adaptive_stats.load_state_dict(state_dict["adaptive_stats"])
 
+        self._invalidate_static_bucket_probs()
         self._last_adaptive_refresh_step = int(state_dict.get("last_adaptive_refresh_step", -1))
         cached_adaptive_probs = state_dict.get("cached_adaptive_probs")
         self._cached_adaptive_probs = None if cached_adaptive_probs is None else np.array(cached_adaptive_probs)

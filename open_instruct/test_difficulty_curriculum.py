@@ -2,6 +2,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 from datasets import Dataset
 from transformers import HfArgumentParser
@@ -141,6 +142,31 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
         ):
             self.assertAlmostEqual(float(sampler.get_static_bucket_probs(step=step).sum()), 1.0, places=6)
             self.assertAlmostEqual(float(sampler.get_bucket_probs(step=step).sum()), 1.0, places=6)
+
+    def test_static_bucket_probs_are_cached_per_step(self):
+        sampler = self._make_sampler(make_bucket_dataset())
+
+        with mock.patch.object(sampler._schedule, "build_probs", wraps=sampler._schedule.build_probs) as build_probs:
+            sampler.get_bucket_probs(step=7)
+            sampler.get_bucket_probs(step=7)
+            sampler.get_static_bucket_probs(step=7)
+            self.assertEqual(build_probs.call_count, 1)
+
+            sampler.get_bucket_probs(step=8)
+            self.assertEqual(build_probs.call_count, 2)
+
+    def test_excluding_index_invalidates_cached_bucket_probs(self):
+        sampler = self._make_sampler(make_bucket_dataset())
+
+        with mock.patch.object(sampler._schedule, "build_probs", wraps=sampler._schedule.build_probs) as build_probs:
+            sampler.get_static_bucket_probs(step=0)
+            self.assertEqual(build_probs.call_count, 1)
+
+            sampler.exclude_index(4)
+            excluded_probs = sampler.get_static_bucket_probs(step=0)
+            self.assertEqual(build_probs.call_count, 2)
+
+        self.assertEqual(float(excluded_probs[4]), 0.0)
 
     def test_adaptive_stats_increase_sampling_probability_for_high_signal_bucket(self):
         sampler = self._make_sampler(
