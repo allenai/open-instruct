@@ -1309,33 +1309,33 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_logprobs=[torch.zeros_like(t, dtype=torch.float32) for t in packed_ids_list],
         )
         local_value_batch = self.splitter.split_collated_batch(value_batch)
-        local_ids = torch.cat(local_value_batch.query_responses, dim=0)
-        local_pos = torch.cat(local_value_batch.position_ids, dim=0)
-
-        output = self.value_model(input_ids=local_ids, attention_mask=None, position_ids=local_pos)
-        logits = getattr(output, "logits", output)
-        if dummy_grad_outputs is not None:
-            dummy_grad_outputs.append(logits.reshape(-1).sum())
-        local_values = logits[:, :-1].squeeze(-1).float()
-
-        local_seq_len = local_ids.shape[-1]
-        local_values = self._align_value_predictions(
-            local_values,
-            torch.Size((len(value_maps), local_seq_len - 1)),
-            "conditioned value local forward",
-        )
-        cond_start = local_seq_len * self._sp_rank
-        cond_end = local_seq_len * (self._sp_rank + 1)
-        cond_padded_len = local_seq_len * self._sp_world_size
 
         for pack_idx, full_to_orig_shifted in enumerate(value_maps):
+            local_ids = local_value_batch.query_responses[pack_idx]
+            local_pos = local_value_batch.position_ids[pack_idx]
+
+            output = self.value_model(input_ids=local_ids, attention_mask=None, position_ids=local_pos)
+            logits = getattr(output, "logits", output)
+            if dummy_grad_outputs is not None:
+                dummy_grad_outputs.append(logits.reshape(-1).sum())
+            local_values = logits[:, :-1].squeeze(-1).float()
+
+            local_seq_len = local_ids.shape[-1]
+            local_values = self._align_value_predictions(
+                local_values,
+                torch.Size((1, local_seq_len - 1)),
+                "conditioned value local forward",
+            )
+            cond_start = local_seq_len * self._sp_rank
+            cond_end = local_seq_len * (self._sp_rank + 1)
+            cond_padded_len = local_seq_len * self._sp_world_size
             local_map = self._pad_and_slice_last_dim(
                 full_to_orig_shifted.unsqueeze(0), cond_padded_len - 1, cond_start, cond_end - 1, -1
             ).squeeze(0)
             valid = (local_map >= original_start) & (local_map < original_end - 1)
             if bool(valid.any().item()):
                 local_orig_idx = local_map[valid] - original_start
-                local_out[0, local_orig_idx] = local_values[pack_idx, valid]
+                local_out[0, local_orig_idx] = local_values[0, valid]
 
         return local_out
 
