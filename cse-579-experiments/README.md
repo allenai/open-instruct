@@ -10,6 +10,13 @@ runs do not get tracked here — only experiments whose results inform the write
 | [qwen_4b_base_baseline.md](qwen_4b_base_baseline.md) | No-shaping baseline (Jacob's run) on Qwen3-4B-Base RL-Zero | (Jacob's training; checkpoint on weka) | training complete | retrieved (step_1000) |
 | [qwen_4b_base_linear_alpha1.md](qwen_4b_base_linear_alpha1.md) | First length-shaping run on Qwen3-4B-Base RL-Zero, linear α=1.0 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | training complete (reward-hacked) | retrieved (step_1000) |
 
+## Design follow-ups
+
+See [design_followups.md](design_followups.md) for the running list of
+shaping/advantage design ideas raised in discussion but not yet implemented
+(reward-vs-advantage shaping options, denominator tweaks, the reporting-metric
+bug, etc.).
+
 ## Results
 
 Fetched eval metrics live under `results/<run_dir>/<task>/` (metrics.json +
