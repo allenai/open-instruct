@@ -5,15 +5,17 @@
 #   git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal
 
 MODEL_PATHS=(
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_100"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_200"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_300"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_400"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_500"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_600"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_700"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_800"
-    "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_900"
+    # Final checkpoint only for now. Uncomment earlier steps if intermediate
+    # eval points are needed (e.g. to plot accuracy/length over training).
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_100"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_200"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_300"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_400"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_500"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_600"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_700"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_800"
+    # "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_900"
     "/weka/oe-adapt-default/allennlp/deletable_checkpoint/ianm/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant__1__1777934949_checkpoints/step_1000"
 )
 current_evals="alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2025_deepseek"
