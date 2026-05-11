@@ -62,20 +62,27 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
 
 ## Pair / baseline
 
-- **Compare to**: Jacob's `cse-579-scripts/baseline_rl.sh` run — no shaping,
-  identical otherwise.
-- **Baseline checkpoint** (confirmed via WEKA S3 endpoint):
-  `/weka/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/baseline_think_run_4b_base_mixed_32k__1__1776217615_checkpoints/step_1000`
-  (the `_32k_` variant; matches our pack_length=32768 / response_length=30720).
-- **Baseline evals** submitted 2026-05-11 via
-  `cse-579-scripts/submit_qwen_baseline_eval_jobs.sh`:
-  - alpaca_eval_v3: [01KRCBPQFRK0NRX2238AQDS5EX](https://beaker.org/ex/01KRCBPQFRK0NRX2238AQDS5EX)
-  - minerva_math_500: [01KRCBPR99FNA17D8R78B4VCPA](https://beaker.org/ex/01KRCBPR99FNA17D8R78B4VCPA)
-  - ifbench::tulu: [01KRCBPS5YSMTJ1H725Z8DF3RN](https://beaker.org/ex/01KRCBPS5YSMTJ1H725Z8DF3RN)
-  - livecodebench: [01KRCBPSZ57HVDSQTQZ6HN0835](https://beaker.org/ex/01KRCBPSZ57HVDSQTQZ6HN0835)
-  - aime 2025 pass@32: [01KRCBPTRBBMP46EDW65GJ7JPK](https://beaker.org/ex/01KRCBPTRBBMP46EDW65GJ7JPK)
-- Baseline experiment will get its own `.md` once evals complete and results are
-  fetched into `cse-579-experiments/results/baseline_think_run_4b_base_mixed_32k_step_1000/`.
+- **Compare to**: [`qwen_4b_base_baseline.md`](qwen_4b_base_baseline.md) — same
+  RLVR recipe, no length shaping. Results retrieved 2026-05-11.
+
+### Headline contrast (baseline → treatment, step_1000)
+
+| Task | Baseline | Treatment | Δ acc | Length compression (tok mean) |
+|------|----------|-----------|-------|--------------------------------|
+| Minerva exact_match_flex | 54.2% | 23.6% | **−30.6pp** | 1158 → 7.8 (148×) |
+| AIME pass_at_32 | 16.7% | 0.0% | −16.7pp | 1840 → 7.4 (250×) |
+| LiveCodeBench pass_at_1 | 7.7% | 3.6% | −4.1pp | 174 → 25 (7×) |
+| ifbench wildchat | 73.3% | 69.8% | −3.5pp | 424 → 54 (8×) |
+| ifbench wildchat OOD | 55.7% | 55.6% | ~0 | 768 → 176 (4×) |
+| ifbench OOD | 43.7% | 40.3% | −3.4pp | 718 → 124 (6×) |
+| AlpacaEval LC winrate | 6.56 | 5.98 | −0.6 | 1067 → 152 (7×) |
+
+The interpretation under "Results" below is now supported by the baseline:
+the baseline run **does** produce real chain-of-thought reasoning (mean 1158
+tokens on Minerva, 1840 on AIME, with ✓ shorter than ✗ as you'd expect) and
+gets meaningful accuracy on hard reasoning. Our linear α=1.0 treatment
+collapses that into 7-token boxed answers and loses 30pp on Minerva and all
+of AIME pass@32.
 
 ## Results (step_1000)
 

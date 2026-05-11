@@ -121,6 +121,15 @@ def _summarize_run(run_dir: Path) -> str:
         "expose the primary metric (e.g. alpaca's length_controlled_winrate is "
         "aggregate-only). Full distributions in per-subtask `*-length_stats.json`._"
     )
+    lines.append("")
+    lines.append(
+        "_**Limitation for pass@k tasks (e.g. AIME with k=32):** oe-eval "
+        "predictions only record item-level correctness, not per-sample. We "
+        "inherit the item-level label to all k samples, which over-counts "
+        "correct rollouts whenever some-but-not-all of the k samples passed. "
+        "Revisit by re-verifying per-sample (extract `\\boxed{...}` per "
+        "continuation) once a run actually has AIME items with pass_at_k > 0._"
+    )
     return "\n".join(lines)
 
 

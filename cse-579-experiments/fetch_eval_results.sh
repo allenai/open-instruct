@@ -38,16 +38,19 @@ for EXP_ID in "$@"; do
         echo "    (could not fetch experiment metadata, skipping)"
         continue
     fi
-    EXIT_CODE=$(echo "$EXP_JSON" | jq -r '.[0].jobs[0].status.exitCode // "none"')
-    RESULT_ID=$(echo "$EXP_JSON" | jq -r '.[0].jobs[0].result.beaker // "none"')
     NAME=$(echo "$EXP_JSON" | jq -r '.[0].name')
 
-    if [ "$EXIT_CODE" != "0" ]; then
-        echo "    skipping (exitCode=$EXIT_CODE, name=$NAME)"
+    # Pick the latest job that succeeded (preemption + retry is common at normal
+    # priority — looking only at jobs[0] would consume the dead first attempt).
+    SUCCESSFUL_JOB=$(echo "$EXP_JSON" | jq '.[0].jobs | map(select(.status.exitCode == 0)) | sort_by(.status.exited) | last // null')
+    if [ "$SUCCESSFUL_JOB" = "null" ] || [ -z "$SUCCESSFUL_JOB" ]; then
+        TRIES=$(echo "$EXP_JSON" | jq -r '.[0].jobs | map("[exit=\(.status.exitCode // "-")@\(.status.exited // "running")]") | join(", ")')
+        echo "    skipping (no successful job among: $TRIES, name=$NAME)"
         continue
     fi
+    RESULT_ID=$(echo "$SUCCESSFUL_JOB" | jq -r '.result.beaker // "none"')
     if [ "$RESULT_ID" = "none" ]; then
-        echo "    skipping (no result dataset)"
+        echo "    skipping (successful job has no result dataset, name=$NAME)"
         continue
     fi
 

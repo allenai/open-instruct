@@ -7,7 +7,8 @@ runs do not get tracked here — only experiments whose results inform the write
 
 | File | Purpose | Beaker | State | Eval |
 |------|---------|--------|-------|------|
-| [qwen_4b_base_linear_alpha1.md](qwen_4b_base_linear_alpha1.md) | First length-shaping run on Qwen3-4B-Base RL-Zero, linear α=1.0 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | training complete (reward-hacked) | retrieved |
+| [qwen_4b_base_baseline.md](qwen_4b_base_baseline.md) | No-shaping baseline (Jacob's run) on Qwen3-4B-Base RL-Zero | (Jacob's training; checkpoint on weka) | training complete | retrieved (step_1000) |
+| [qwen_4b_base_linear_alpha1.md](qwen_4b_base_linear_alpha1.md) | First length-shaping run on Qwen3-4B-Base RL-Zero, linear α=1.0 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | training complete (reward-hacked) | retrieved (step_1000) |
 
 ## Results
 
