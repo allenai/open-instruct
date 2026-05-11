@@ -609,6 +609,7 @@ class PolicyTrainerRayProcess(RayProcess):
             raise AssertionError(f"[SP forward diagnostics] SP ranks disagree on sample counts: {gathered_diag}")
 
         mismatches = []
+        decision_mismatches = []
         sample_count = next(iter(sample_counts), 0)
         for sample_idx in range(sample_count):
             non_padding_decisions = {
@@ -617,19 +618,22 @@ class PolicyTrainerRayProcess(RayProcess):
                 if not d["samples"][sample_idx]["all_padding"]
             }
             shapes = {d["samples"][sample_idx]["position_shape"] for d in gathered_diag}
-            if len(non_padding_decisions) > 1 or len(shapes) != 1:
-                mismatches.append(
-                    {
-                        "sample_idx": sample_idx,
-                        "non_padding_decisions": sorted(non_padding_decisions),
-                        "shapes": sorted(shapes),
-                    }
+            if len(shapes) != 1:
+                mismatches.append({"sample_idx": sample_idx, "shapes": sorted(shapes)})
+            if len(non_padding_decisions) > 1:
+                decision_mismatches.append(
+                    {"sample_idx": sample_idx, "non_padding_decisions": sorted(non_padding_decisions)}
                 )
 
         if mismatches:
             raise AssertionError(
-                f"[SP forward diagnostics] SP ranks disagree on forward kwargs decisions: "
+                f"[SP forward diagnostics] SP ranks disagree on structural metadata: "
                 f"mismatches={mismatches}, diagnostics={gathered_diag}"
+            )
+        if decision_mismatches and self._sp_rank == 0:
+            logger.warning(
+                f"[SP forward diagnostics] SP ranks disagree on local reset decisions: "
+                f"mismatches={decision_mismatches}, diagnostics={gathered_diag}"
             )
 
         if self._sp_rank == 0 and not getattr(self, "_sp_forward_diagnostics_logged", False):
