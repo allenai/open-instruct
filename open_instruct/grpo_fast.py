@@ -588,10 +588,12 @@ class PolicyTrainerRayProcess(RayProcess):
             has_position_reset = (
                 bool((position_ids.diff(dim=-1) < 0).any().item()) if position_ids.shape[-1] > 1 else False
             )
+            all_padding = bool((data_BT.attention_masks[sample_idx] == 0).all().item())
             local_diag["samples"].append(
                 {
                     "sample_idx": sample_idx,
                     "position_shape": tuple(position_ids.shape),
+                    "all_padding": all_padding,
                     "passes_packing_kwargs": has_position_reset,
                     "position_start_count": int((position_ids == 0).sum().item()),
                     "first_position_id": int(position_ids[0, 0].item()) if position_ids.numel() else None,
@@ -609,10 +611,20 @@ class PolicyTrainerRayProcess(RayProcess):
         mismatches = []
         sample_count = next(iter(sample_counts), 0)
         for sample_idx in range(sample_count):
-            decisions = {d["samples"][sample_idx]["passes_packing_kwargs"] for d in gathered_diag}
+            non_padding_decisions = {
+                d["samples"][sample_idx]["passes_packing_kwargs"]
+                for d in gathered_diag
+                if not d["samples"][sample_idx]["all_padding"]
+            }
             shapes = {d["samples"][sample_idx]["position_shape"] for d in gathered_diag}
-            if len(decisions) != 1 or len(shapes) != 1:
-                mismatches.append({"sample_idx": sample_idx, "decisions": sorted(decisions), "shapes": sorted(shapes)})
+            if len(non_padding_decisions) > 1 or len(shapes) != 1:
+                mismatches.append(
+                    {
+                        "sample_idx": sample_idx,
+                        "non_padding_decisions": sorted(non_padding_decisions),
+                        "shapes": sorted(shapes),
+                    }
+                )
 
         if mismatches:
             raise AssertionError(

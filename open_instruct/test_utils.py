@@ -849,8 +849,29 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.vllm_logprobs[0][0, -1].item(), utils.INVALID_LOGPROB)
         # attention_masks should pad with 0
         self.assertEqual(result.attention_masks[0][0, -1].item(), 0)
+        # position_ids should not pad with 0, which would look like a packed-sequence reset.
+        self.assertEqual(result.position_ids[0][0, -1].item(), 3)
         # response_masks should pad with 0
         self.assertEqual(result.response_masks[0][0, -1].item(), 0)
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_position_padding_does_not_create_fake_resets(self, mock_all_gather):
+        """All-padding SP shards should not be filled with position_id=0."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=1, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([3])
+
+        def fill_with_global_max(seqlens, local_seqlen, group):
+            seqlens[0].copy_(local_seqlen)
+            seqlens[1].fill_(8)
+
+        mock_all_gather.side_effect = fill_with_global_max
+
+        result = splitter.split_collated_batch(batch)
+
+        self.assertEqual(result.position_ids[0].shape[-1], 4)
+        self.assertTrue(torch.all(result.attention_masks[0] == 0))
+        self.assertTrue(torch.all(result.position_ids[0] == 3))
 
     @mock.patch("open_instruct.utils.dist.all_gather")
     def test_multiple_sequences_in_batch(self, mock_all_gather):

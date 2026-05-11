@@ -2653,7 +2653,15 @@ class UlyssesSPSplitter:
             sharded = []
             for t in value:
                 # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
-                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                pad_len = max_seqlen - t.shape[-1]
+                if field.name == "position_ids" and pad_len > 0:
+                    # Padding with 0 makes padding look like many single-token packed
+                    # sequences, which can make SP ranks take different attention paths.
+                    pos_pad_value = int(t[0, -1].item()) + 1 if t.numel() else 1
+                    padded = F.pad(t, (0, pad_len), value=pos_pad_value)
+                else:
+                    padded = F.pad(t, (0, pad_len), value=pad_value)
+                padded_sliced = padded[:, start_idx:end_idx]
                 sharded.append(padded_sliced)
             kwargs[field.name] = sharded
 
