@@ -60,7 +60,7 @@ uv run mason.py \
 uv run scripts/data/rlvr/aime_pass_at_k_dataset.py \
     --dataset hamishivi/DAPO-Math-17k-Processed_filtered \
     --splits train \
-    --model Qwen/Qwen3-4B-Base \
+    --model /weka/oe-adapt-default/allennlp/deletable_checkpoint/ai2-tylerm/qwen3_4b_base_dapo_difficulty_curriculum__1__1777924478 \
     --chat-template qwen_instruct_user_boxed_math \
     --num-samples 32 \
     --temperature 1.0 \
