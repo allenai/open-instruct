@@ -83,7 +83,6 @@ uv run python mason.py \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 20 \
-    --gradient_checkpointing \
     --with_tracking \
     --push_to_hub False \
     --use_value_model \

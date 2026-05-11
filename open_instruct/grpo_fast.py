@@ -406,7 +406,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self._model_name_or_path = model_config.model_name_or_path
         self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
-        self.policy.gradient_checkpointing_enable()
+        if model_config.gradient_checkpointing:
+            self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
@@ -762,7 +763,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
 
         unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
-        if hasattr(unwrapped, "gradient_checkpointing_enable"):
+        if model_config.gradient_checkpointing and hasattr(unwrapped, "gradient_checkpointing_enable"):
             unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
         self.value_model.train()
