@@ -4,13 +4,19 @@ import math
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Literal
+from queue import Empty
+from typing import Any, Literal
 
 import numpy as np
+import pandas as pd
 import ray
+import ray.util.queue as ray_queue
 import torch
 import torch.distributed as dist
+import wandb
+from datasets import Dataset
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
@@ -593,10 +599,7 @@ def calculate_token_counts(
     device: torch.device,
     process_group: dist.ProcessGroup | None = None,
 ) -> dict[int, float]:
-    """Compute total token counts per accumulation group, all-reduced across DP ranks.
-
-    Copied from grpo_fast.py to share logic with olmo_core_train_modules.py.
-    """
+    """Compute total token counts per accumulation group, all-reduced across DP ranks."""
     accumulation_counts: dict[int, float] = {}
     local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
     if not local_counts:
@@ -723,3 +726,113 @@ def perform_weight_sync(
         sync_time_stats["time/weight_sync_max"] = float(np.max(actor_sync_times))
         sync_time_stats["time/weight_sync_median"] = float(np.median(actor_sync_times))
     return sync_time_stats, results
+
+
+def maybe_evaluate(
+    args: GRPOExperimentConfig,
+    training_step: int,
+    evaluation_inference_results_Q: ray_queue.Queue,
+    tokenizer,
+    episode,
+    eval_dataset: Dataset,
+    eval_generation_config,
+    model_dims: utils.ModelDims,
+    base_env_config: data_types.EnvConfig,
+    max_possible_score: float,
+    actor_manager=None,
+) -> bool:
+    """Optionally evaluate the model.
+
+    Returns True if evaluation results were successfully collected, False otherwise.
+    """
+    if eval_dataset is None:
+        return True
+
+    try:
+        is_final_step = training_step >= args.num_training_steps  # ty: ignore[unsupported-operator]
+        num_eval_prompts = len(eval_dataset)
+        if not is_final_step:
+            queued_results = evaluation_inference_results_Q.qsize()
+            if queued_results < num_eval_prompts:
+                logger.info(
+                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
+                    queued_results,
+                    num_eval_prompts,
+                )
+                return False
+
+        timeout = 100 if is_final_step else 0.01
+
+        eval_result, eval_batch, eval_reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+            evaluation_inference_results_Q,
+            eval_generation_config,
+            num_prompts=num_eval_prompts,
+            model_dims=model_dims,
+            tokenizer=tokenizer,
+            dataset=eval_dataset,
+            base_env_config=base_env_config,
+            actor_manager=actor_manager,
+            timeout=timeout,
+            active_sampling=False,
+            filter_zero_std_samples=False,
+            replenish_prompts=False,
+            max_possible_score=max_possible_score,
+            training_step=training_step,
+        )
+
+        logger.info("[Main Thread] 📊 Evaluation responses received")
+
+        eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
+        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
+            eval_result.finish_reasons
+        )
+        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_pass_at_k_metrics: dict[str, float] = {}
+        scores = np.array(eval_batch.scores)
+        eval_k = eval_generation_config.n
+
+        if scores.size and scores.size % eval_k == 0:
+            scores_per_prompt = scores.reshape(-1, eval_k)
+            correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8
+            eval_pass_at_k_metrics.update(compute_pass_at_k_metrics(correct_per_prompt))
+        else:
+            logger.warning(
+                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
+            )
+        eval_metrics: dict[str, Any] = {
+            "eval/scores": scores.mean(),
+            "eval/sequence_lengths": eval_sequence_lengths.mean(),
+            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+            "eval/stop_rate": eval_stop_rate,
+            **eval_reward_metrics,
+            **eval_pass_at_k_metrics,
+        }
+
+        total_tokens = (
+            eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
+        )
+        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
+
+        model_utils.print_rich_single_line_metrics(eval_metrics)
+
+        table = {}
+        table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
+        table["response"] = eval_batch.decoded_responses
+        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]  # ty: ignore[not-iterable]
+        table["scores"] = eval_batch.scores
+        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        if eval_batch.active_tools is not None:
+            table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
+        df = pd.DataFrame(table)
+
+        if args.with_tracking:
+            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
+            wandb.log(eval_metrics, step=training_step)
+        else:
+            model_utils.print_rich_table(df.iloc[:1])
+        del table
+        return True
+    except Empty:
+        logger.warning("[Main Thread] 🙈 Evaluation responses not received")
+        return False
