@@ -111,7 +111,6 @@ uv run open_instruct/grpo_fast.py \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout ${NUM_SAMPLES_PER_PROMPT_ROLLOUT} \
     --num_unique_prompts_rollout ${NUM_UNIQUE_PROMPTS_ROLLOUT} \
