@@ -5,9 +5,23 @@ runs do not get tracked here — only experiments whose results inform the write
 
 ## Index
 
-| File | Purpose | Beaker | Status |
-|------|---------|--------|--------|
-| [qwen_4b_base_linear_alpha1.md](qwen_4b_base_linear_alpha1.md) | First length-shaping run on Qwen3-4B-Base RL-Zero, linear α=1.0 | [01KQTD4D…](https://beaker.org/ex/01KQTD4DJ57C1SY8A1MFNS3GFC) | running |
+| File | Purpose | Beaker | State | Eval |
+|------|---------|--------|-------|------|
+| [qwen_4b_base_linear_alpha1.md](qwen_4b_base_linear_alpha1.md) | First length-shaping run on Qwen3-4B-Base RL-Zero, linear α=1.0 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | training complete (reward-hacked) | retrieved |
+
+## Results
+
+Fetched eval metrics live under `results/<run_dir>/<task>/` (metrics.json +
+length_stats.json per task). They're checked in so anyone reading the .md
+docs can audit / re-render the numbers.
+
+```bash
+# Fetch results for a set of Beaker lmeval experiments
+bash cse-579-experiments/fetch_eval_results.sh <run_dir> <exp_id> [<exp_id> ...]
+
+# Render a markdown summary table from disk
+uv run python cse-579-experiments/summarize.py [<run_dir> ...]
+```
 
 ## Conventions
 
