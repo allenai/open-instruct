@@ -26,7 +26,7 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from concurrent import futures
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import aiohttp
 import backoff
@@ -1215,7 +1215,9 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
-    vllm_logprobs_mode: str = "processed_logprobs",
+    vllm_logprobs_mode: Literal["raw_logits", "raw_logprobs", "processed_logits", "processed_logprobs"] = (
+        "processed_logprobs"
+    ),
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
