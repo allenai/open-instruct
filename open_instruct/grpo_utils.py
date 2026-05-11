@@ -120,6 +120,11 @@ class GRPOExperimentConfig(
     compute the mean log-ratio (1/|o_i|) Σ_t log(π_old / π_θ) per response sequence,
     exponentiate to get a per-sequence ρ, and broadcast the keep/drop decision to every
     token in that sequence. If False (default), the mask is applied per token."""
+    rho_mask_tv_divergence: bool = False
+    """If True, applies the TV divergence masking from VACO (https://arxiv.org/abs/2603.01365)
+    maintains same rho for correction but masks using bounds and sequence-level TV divergence (1 - abs(ρ))
+    won't mask tokens that purport to decrease TV divergence: advantage * ρ <= 0
+    """
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -389,7 +394,11 @@ class RhoCorrection:
 
 
 def compute_rho_correction(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
+    old_logprob: torch.Tensor,
+    vllm_logprobs: torch.Tensor,
+    response_mask: torch.Tensor,
+    advantages: torch.Tensor,
+    config: GRPOExperimentConfig,
 ) -> RhoCorrection:
     """Compute the unified ρ = π^train_old / π^infer_old correction (clamp + mask)."""
     logprob_diff = torch.where(
@@ -401,9 +410,21 @@ def compute_rho_correction(
         return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
 
     rho_effective = _rho_sequence_level(logprob_diff, response_mask) if config.rho_mask_sequence_level else rho
-    dropped_low, dropped_high = _rho_drop_masks(
-        rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
-    )
+
+    if config.rho_mask_tv_divergence:
+        tv_divergence = torch.abs(rho - 1.0)
+        tv_sequence_level = _rho_sequence_level(tv_divergence, response_mask)
+        tv_dropped_low, tv_dropped_high = _rho_drop_masks(
+            tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+        )
+        tokens_increase_tv = torch.sign(logprob_diff) * advantages > 0
+        dropped_low = tv_dropped_low & tokens_increase_tv
+        dropped_high = tv_dropped_high & tokens_increase_tv
+    else:
+        dropped_low, dropped_high = _rho_drop_masks(
+            rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+        )
+
     in_range = response_mask & ~dropped_low & ~dropped_high
 
     rho_clamped = rho_effective
