@@ -31,38 +31,96 @@ def _primary_scores(metrics: dict) -> list[str]:
     return metrics.get("all_primary_scores", []) or []
 
 
+def _fmt(x: float | int | None, digits: int = 0) -> str:
+    if x is None:
+        return "–"
+    if digits == 0:
+        return f"{x:.0f}"
+    return f"{x:.{digits}f}"
+
+
+def _row_for_block(prefix: str, block: dict | None) -> str:
+    if block is None:
+        return " | ".join([prefix] + ["–"] * 5)
+    tok = block.get("tokens") or {}
+    if not tok or tok.get("n", 0) == 0:
+        return " | ".join([prefix, "0", "–", "–", "–", "–"])
+    return " | ".join([
+        prefix,
+        str(tok.get("n")),
+        _fmt(tok.get("mean"), 1),
+        _fmt(tok.get("std"), 1),
+        _fmt(tok.get("p50")),
+        _fmt(tok.get("p90")),
+    ])
+
+
+def _summarize_subtask(subtask_metrics: Path) -> list[str]:
+    """One Markdown row per subtask (per `task-NNN-{name}-metrics.json`).
+
+    Emits THREE rows for each subtask: all / correct / incorrect rollouts.
+    """
+    stem = subtask_metrics.name.removesuffix("-metrics.json")
+    length_path = subtask_metrics.parent / f"{stem}-length_stats.json"
+    meta = _load(subtask_metrics) or {}
+
+    task_name = meta.get("task_name") or stem
+    primary_metric = (meta.get("task_config") or {}).get("primary_metric") or "?"
+    primary_value = (meta.get("metrics") or {}).get(primary_metric)
+    primary_str = "?" if primary_value is None else f"{primary_value:.4g}"
+    n_items = meta.get("num_instances", "?")
+
+    length = _load(length_path)
+    rows: list[str] = []
+    if length is None:
+        # No predictions retrieved (e.g. fetched before fix). Emit one empty row.
+        rows.append(
+            f"| `{task_name}` | {primary_metric}={primary_str} | n={n_items} | _no length data_ | – | – | – | – | – |"
+        )
+        return rows
+
+    n_corr = length.get("n_items_correct")
+    n_inc = length.get("n_items_incorrect")
+    n_unk = length.get("n_items_unknown")
+    header_cell = (
+        f"`{task_name}` | {primary_metric}={primary_str} | "
+        f"n={n_items} (✓ {n_corr}, ✗ {n_inc}, ? {n_unk})"
+    )
+
+    rows.append("| " + header_cell + " | " + _row_for_block("**all**", length.get("all_rollouts")) + " |")
+    rows.append("| ↳ correct | | | " + _row_for_block("**✓**", length.get("correct_rollouts")) + " |")
+    rows.append("| ↳ incorrect | | | " + _row_for_block("**✗**", length.get("incorrect_rollouts")) + " |")
+    return rows
+
+
 def _summarize_run(run_dir: Path) -> str:
     lines: list[str] = []
     lines.append(f"### `{run_dir.name}`")
     lines.append("")
-    lines.append("| Task | Primary score | n | Resp len mean | median | p90 |")
-    lines.append("|------|---------------|---|---------------|--------|-----|")
+    lines.append(
+        "| Task | Primary | Items (✓/✗/?) | Subset | gens | Tok mean | Tok std | Tok p50 | Tok p90 |"
+    )
+    lines.append(
+        "|------|---------|----------------|--------|------|----------|---------|---------|---------|"
+    )
 
     for task_dir in sorted(p for p in run_dir.iterdir() if p.is_dir()):
-        metrics = _load(task_dir / "metrics.json")
-        length = _load(task_dir / "length_stats.json")
-        if metrics is None:
-            lines.append(f"| {task_dir.name} | _missing metrics.json_ | – | – | – | – |")
+        subtask_metrics_files = sorted(task_dir.glob("task-*-metrics.json"))
+        if not subtask_metrics_files:
+            lines.append(f"| _{task_dir.name}: no task-*-metrics.json_ | – | – | – | – | – | – | – | – |")
             continue
-        scores = _primary_scores(metrics)
-        if not scores:
-            score_str = "_no all_primary_scores key_"
-        else:
-            score_str = "<br>".join(scores)
-        n = "–"
-        tasks = metrics.get("tasks") or []
-        if tasks:
-            n = str(sum(t.get("num_instances", 0) for t in tasks))
-        if length is None:
-            lmean = lmed = lp90 = "–"
-        else:
-            lmean = f"{length['mean']:.0f}"
-            lmed = f"{length['median']:.0f}"
-            lp90 = f"{length['p90']:.0f}"
-        lines.append(f"| {task_dir.name} | {score_str} | {n} | {lmean} | {lmed} | {lp90} |")
+        for stm in subtask_metrics_files:
+            lines.extend(_summarize_subtask(stm))
     lines.append("")
-    lines.append("_Response lengths are character counts of model continuations. "
-                 "Computed by `fetch_eval_results.sh` and saved per-task in `length_stats.json`._")
+    lines.append(
+        "_Tok columns are TOKEN counts across all model_output samples (pass@k "
+        "contributes k samples per item). Stratified into all / correct items / "
+        "incorrect items based on the per-item primary metric; ✓ rows are samples "
+        "from items where the primary metric > 0, ✗ rows are samples from items "
+        "where it equals 0. '? items' are items whose per-item metrics don't "
+        "expose the primary metric (e.g. alpaca's length_controlled_winrate is "
+        "aggregate-only). Full distributions in per-subtask `*-length_stats.json`._"
+    )
     return "\n".join(lines)
 
 

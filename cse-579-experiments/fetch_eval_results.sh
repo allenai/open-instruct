@@ -68,23 +68,28 @@ for EXP_ID in "$@"; do
          \( -name '*predictions.jsonl' -o -name '*requests.jsonl' -o -name '*recorded-inputs.jsonl' \) \
          -print -delete >/dev/null 2>&1 || true
 
-    # Derive length stats from predictions before we delete them.
+    # Derive length stats from each subtask's predictions. ifbench is the case
+    # where one Beaker experiment expands into multiple subtask predictions
+    # files; we want one length_stats.json per subtask (paired with its
+    # task-NNN-{taskname}-metrics.json).
     SCRATCH=$(mktemp -d)
     beaker dataset fetch "$RESULT_ID" --prefix "task-" -o "$SCRATCH" --quiet >/dev/null
-    PRED=$(find "$SCRATCH" -name '*predictions.jsonl' | head -1)
-    if [ -n "$PRED" ] && [ -s "$PRED" ]; then
-        jq -s '
-            map(.model_output[0].continuation | length) as $L
-            | {
-                n: ($L | length),
-                min: ($L | min),
-                max: ($L | max),
-                mean: (($L | add) / ($L | length)),
-                median: ($L | sort | .[(length/2|floor)]),
-                p10: ($L | sort | .[(length*0.1|floor)]),
-                p90: ($L | sort | .[(length*0.9|floor)])
-              }' "$PRED" > "$TASK_DIR/length_stats.json"
-        echo "    saved metrics + length stats -> $TASK_DIR"
+    found_any=0
+    for PRED in "$SCRATCH"/task-*-predictions.jsonl; do
+        [ -e "$PRED" ] || continue
+        [ -s "$PRED" ] || continue
+        STEM=$(basename "$PRED" -predictions.jsonl)        # e.g. task-000-aime
+        TASK_METRICS="$TASK_DIR/${STEM}-metrics.json"
+        if [ ! -f "$TASK_METRICS" ]; then
+            echo "    WARNING: no metrics file for $STEM; skipping length stats"
+            continue
+        fi
+        uv run python "$REPO_ROOT/cse-579-experiments/compute_length_stats.py" \
+            "$PRED" "$TASK_METRICS" "$TASK_DIR/${STEM}-length_stats.json"
+        found_any=1
+    done
+    if [ "$found_any" -eq 1 ]; then
+        echo "    saved metrics + per-subtask length stats -> $TASK_DIR"
     else
         echo "    saved metrics (no predictions found) -> $TASK_DIR"
     fi

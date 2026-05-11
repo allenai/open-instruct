@@ -86,33 +86,52 @@ Numbers below are pulled programmatically from the saved metrics in
 uv run python cse-579-experiments/summarize.py lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000
 ```
 
-(The table is regenerated from disk; don't edit the numbers by hand.)
+(The table is regenerated from disk; don't edit the numbers by hand. Token
+counts come from `model_output[*].num_tokens` — the same unit the reward
+shaping operated on during training.)
 
 <!-- BEGIN: summarize.py output for this run; do not edit manually -->
 
 ### `lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000`
 
-| Task | Primary score | n | Resp len mean | median | p90 |
-|------|---------------|---|---------------|--------|-----|
-| aime | aime:zs_cot_r1::pass_at_32_2025_deepseek: 0.0 | 30 | 14 | 11 | 19 |
-| alpaca_eval | alpaca_eval_v3::hamish_zs_reasoning_deepseek: 5.98065 | 805 | 707 | 199 | 1272 |
-| ifbench-tulu | ifeval_mt_wildchat_unused_withRewrite::tulu: 0.697858<br>ifeval_mt_ood_wildchat_unused_withRewrite::tulu: 0.555876<br>ifeval_ood::tulu: 0.403333 | 3461 | 664 | 31 | 1400 |
-| livecodebench_codegeneration | livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite: 0.0359477 | 612 | 91 | 30 | 234 |
-| minerva_math_500 | minerva_math_500::hamish_zs_reasoning: 0.236 | 500 | 13 | 10 | 20 |
+| Task | Primary | Items (✓/✗/?) | Subset | gens | Tok mean | Tok std | Tok p50 | Tok p90 |
+|------|---------|----------------|--------|------|----------|---------|---------|---------|
+| `aime` | pass_at_1=0 | n=30 (✓ 0, ✗ 30, ? 0) | **all** | 960 | 7.4 | 0.8 | 7 | 8 |
+| ↳ correct | | | **✓** | 0 | – | – | – | – |
+| ↳ incorrect | | | **✗** | 960 | 7.4 | 0.8 | 7 | 8 |
+| `alpaca_eval` | length_controlled_winrate=5.981 | n=805 (✓ 0, ✗ 0, ? 805) | **all** | 805 | 152.2 | 466.0 | 46 | 285 |
+| ↳ correct | | | **✓** | 0 | – | – | – | – |
+| ↳ incorrect | | | **✗** | 0 | – | – | – | – |
+| `ifeval_mt_wildchat_unused_withRewrite` | prompt_level_loose_acc=0.6979 | n=1774 (✓ 1238, ✗ 536, ? 0) | **all** | 1774 | 54.5 | 368.3 | 6 | 28 |
+| ↳ correct | | | **✓** | 1238 | 31.8 | 278.8 | 6 | 24 |
+| ↳ incorrect | | | **✗** | 536 | 107.0 | 515.2 | 7 | 114 |
+| `ifeval_mt_ood_wildchat_unused_withRewrite` | prompt_level_loose_acc=0.5559 | n=1387 (✓ 771, ✗ 616, ? 0) | **all** | 1387 | 176.2 | 796.4 | 12 | 299 |
+| ↳ correct | | | **✓** | 771 | 85.7 | 569.2 | 4 | 84 |
+| ↳ incorrect | | | **✗** | 616 | 289.4 | 999.7 | 23 | 486 |
+| `ifeval_ood` | prompt_level_loose_acc=0.4033 | n=300 (✓ 121, ✗ 179, ? 0) | **all** | 300 | 123.7 | 681.7 | 3 | 56 |
+| ↳ correct | | | **✓** | 121 | 11.7 | 31.5 | 2 | 23 |
+| ↳ incorrect | | | **✗** | 179 | 199.4 | 874.1 | 3 | 104 |
+| `livecodebench_codegeneration` | pass_at_1=0.03595 | n=612 (✓ 22, ✗ 590, ? 0) | **all** | 612 | 25.4 | 27.6 | 10 | 63 |
+| ↳ correct | | | **✓** | 22 | 49.2 | 22.7 | 56 | 80 |
+| ↳ incorrect | | | **✗** | 590 | 24.6 | 27.4 | 10 | 59 |
+| `minerva_math_500` | exact_match_flex=0.236 | n=500 (✓ 118, ✗ 382, ? 0) | **all** | 500 | 7.8 | 3.6 | 7 | 10 |
+| ↳ correct | | | **✓** | 118 | 7.9 | 3.9 | 7 | 10 |
+| ↳ incorrect | | | **✗** | 382 | 7.7 | 3.5 | 7 | 10 |
 
-_Response lengths are character counts of model continuations. Computed by `fetch_eval_results.sh` and saved per-task in `length_stats.json`._
+_Tok columns are TOKEN counts across all model_output samples (pass@k contributes k samples per item). Stratified into all / correct items / incorrect items based on the per-item primary metric; ✓ rows are samples from items where the primary metric > 0, ✗ rows are samples from items where it equals 0. '? items' are items whose per-item metrics don't expose the primary metric (e.g. alpaca's length_controlled_winrate is aggregate-only). Full distributions in per-subtask `*-length_stats.json`._
 
 <!-- END: summarize.py output -->
 
 ### Interpretation
 
-The model **reward-hacked the shaping objective**. On every task in the training
-distribution (aime, minerva_math_500, livecodebench), median response length is
-under 30 characters — the model just emits `\boxed{ANSWER}` (or analogous) with
-no reasoning. Examples:
-
-- **AIME**: `\boxed{10}` (gold was `70`) — median 11 chars, max 19
-- **Minerva**: `\boxed{(3,\frac{\pi}{2}}` — median 10 chars, max 102
+The model **reward-hacked the shaping objective**. The picture in tokens is
+even starker than in characters: on AIME the entire 960-sample distribution
+sits at **mean 7.4 tokens, std 0.8** — the model converged to emitting exactly
+one `\boxed{X}`-style token sequence with essentially no variance. Minerva is
+similar (mean 7.8 tokens) and Minerva's correct vs. incorrect distributions
+are statistically indistinguishable (✓ 7.9 vs. ✗ 7.7), which says the model
+isn't even reasoning longer when it has a harder problem — it just always
+emits one short guess.
 
 This is the predicted-but-undesired failure mode (Key Challenges section of the
 proposal: *"Condensed reasoning may be ineffective: shorter reasoning chains
@@ -123,14 +142,29 @@ outputs. Within each prompt group, the shortest correct response sets L_min, and
 α=1.0 zeroes out any response 2× L_min or longer — so the global optimum is to
 make L_min as small as possible.
 
-Asymmetric evidence that this is a learned strategy rather than a global
-capability loss: on **AlpacaEval** (a task absent from the training mix, so no
-length pressure was applied) the model still produces ordinary 700-char
-responses. The collapse is confined to the verifiable-reward distribution.
+#### Where the correct-vs-incorrect length split is informative
 
-Minerva at 23.6% with zero reasoning suggests the model learned to *guess*
-numerical answers correctly when the space is small. AIME at 0% confirms this
-strategy collapses when the answer space is wide and reasoning is required.
+- **livecodebench**: correct samples are noticeably *longer* (mean 49.2 tok vs.
+  incorrect 24.6) — code can't be functional in a single token, so the few
+  passes survived precisely because the model emitted enough code. This is the
+  cleanest signal that length pressure damaged the model's ability to use
+  enough tokens to solve the task.
+- **ifbench (all three subtasks)**: correct samples are *shorter* than incorrect
+  (e.g. ifeval_ood ✓ 11.7 vs. ✗ 199.4). Instruction-following items that
+  required terse outputs got nailed; ones that needed longer responses got
+  truncated to gibberish. Same length-collapse story, just routed through a
+  different task structure.
+- **AIME / Minerva**: there's nothing to split on AIME (0 correct items).
+  Minerva ✓ and ✗ are indistinguishable in length (~7.8 tok either way),
+  reinforcing that the model is guessing rather than reasoning.
+
+#### Asymmetric off-distribution check
+
+On **AlpacaEval** (absent from the training mix, so no length pressure was
+applied) the model still produces ordinary multi-hundred-character responses
+(mean 152 tokens, p90 285). The collapse is confined to the verifiable-reward
+distribution — strong evidence this is a learned strategy specific to where the
+reward shaping was applied, not a global capability loss.
 
 ### What this means for the writeup and next runs
 
