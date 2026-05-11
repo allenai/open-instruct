@@ -255,6 +255,45 @@ def _make_dummy_chunk(template: dict[str, torch.Tensor]) -> dict[str, torch.Tens
     return dummy
 
 
+def compute_kl_term(
+    policy_logits: torch.Tensor,
+    ref_logits: torch.Tensor,
+    shift_labels: torch.Tensor,
+    *,
+    skip_first_k: int,
+    direction: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Token-level KL between policy and frozen reference, masked to response tokens.
+
+    All inputs are already shifted (policy/ref logits: ``[B, T-1, V]``; ``shift_labels``:
+    ``[B, T-1]`` with ``-100`` on prompt/pad). Returns ``(per_seq_kl_sum, per_seq_count)``
+    so the caller can reduce however it likes (token-mean, sequence-mean, weighted etc.).
+
+    ``skip_first_k`` drops the first K supervised tokens of the row from the KL mask.
+    Ranking is a global cumsum over response positions, so on multi-turn data K applies
+    once at the very first assistant token (not once per turn).
+    """
+    response_mask = shift_labels != -100  # [B, T-1]
+    if skip_first_k > 0:
+        rank_within_response = response_mask.long().cumsum(dim=1)
+        response_mask = response_mask & (rank_within_response > skip_first_k)
+    mask = response_mask.float()  # [B, T-1]
+
+    log_p = F.log_softmax(policy_logits.float(), dim=-1)
+    with torch.no_grad():
+        log_q = F.log_softmax(ref_logits.float(), dim=-1)
+    if direction == "forward":
+        kl_per_token = (log_p.exp() * (log_p - log_q)).sum(dim=-1)
+    elif direction == "reverse":
+        kl_per_token = (log_q.exp() * (log_q - log_p)).sum(dim=-1)
+    else:
+        raise ValueError(f"kl_direction must be 'forward' or 'reverse', got {direction=}")
+
+    per_seq_kl_sum = (kl_per_token * mask).sum(dim=1)  # [B]
+    per_seq_count = mask.sum(dim=1)  # [B]
+    return per_seq_kl_sum, per_seq_count
+
+
 def compute_grouped_step(
     model,
     batch: dict[str, torch.Tensor],
@@ -262,7 +301,11 @@ def compute_grouped_step(
     accelerator: Accelerator,
     *,
     max_rows_per_forward: int,
-) -> torch.Tensor:
+    ref_model=None,
+    kl_beta: float = 0.0,
+    skip_first_k_kl: int = 0,
+    kl_direction: str = "forward",
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Chunked forward + per-chunk weighted backward for the grouped-loss path.
 
     The full batch contains rows for ``P = num_prompts`` groups (local to this rank).
@@ -278,8 +321,13 @@ def compute_grouped_step(
     so every rank calls ``accelerator.backward`` the same number of times per outer step
     — otherwise the reducer deadlocks.
 
-    Returns a detached scalar for logging; gradients have already been accumulated into
-    param.grad as a side effect.
+    When ``ref_model`` is provided and ``kl_beta > 0``, an additive token-level KL term
+    ``kl_beta * KL`` is folded into ``chunk_loss`` (so it shares the same backward as the
+    CE term). The CE and KL contributions are tracked separately for logging.
+
+    Returns ``(ce_loss_detached, kl_loss_detached)`` summed across chunks. KL is always
+    returned (zero when disabled) so the caller can log unconditionally. Gradients have
+    already been accumulated into ``param.grad`` as a side effect.
     """
     _, inverse, counts = prompt_group_ids.unique(return_inverse=True, return_counts=True)
     num_prompts = counts.shape[0]
@@ -290,8 +338,10 @@ def compute_grouped_step(
     local_num_chunks = len(chunk_starts)
     global_num_chunks = _global_max_num_chunks(local_num_chunks, accelerator)
     is_sync_outer = accelerator.sync_gradients
+    kl_enabled = ref_model is not None and kl_beta > 0
 
-    batch_loss_detached = torch.zeros((), dtype=torch.float32, device=accelerator.device)
+    ce_loss_detached = torch.zeros((), dtype=torch.float32, device=accelerator.device)
+    kl_loss_detached = torch.zeros((), dtype=torch.float32, device=accelerator.device)
 
     for chunk_idx in range(global_num_chunks):
         is_last_chunk = chunk_idx == global_num_chunks - 1
@@ -320,9 +370,25 @@ def compute_grouped_step(
                 reduction="none",
                 ignore_index=-100,
             ).view(shift_labels.shape)
-            mask = (shift_labels != -100).float()
-            per_seq = (per_token * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-            chunk_loss = (per_seq * chunk_weights).sum()
+            ce_mask = (shift_labels != -100).float()
+            ce_per_seq = (per_token * ce_mask).sum(dim=1) / ce_mask.sum(dim=1).clamp(min=1)
+            ce_chunk_loss = (ce_per_seq * chunk_weights).sum()
+
+            if kl_enabled:
+                with torch.no_grad():
+                    ref_outputs = ref_model(input_ids=chunk["input_ids"], attention_mask=chunk.get("attention_mask"))
+                shift_ref_logits = ref_outputs.logits[..., :-1, :].contiguous()
+                del ref_outputs
+                kl_per_seq_sum, kl_per_seq_count = compute_kl_term(
+                    shift_logits, shift_ref_logits, shift_labels, skip_first_k=skip_first_k_kl, direction=kl_direction
+                )
+                del shift_ref_logits
+                kl_per_seq = kl_per_seq_sum / kl_per_seq_count.clamp(min=1)
+                kl_chunk_loss = (kl_per_seq * chunk_weights).sum()
+                chunk_loss = ce_chunk_loss + kl_beta * kl_chunk_loss
+            else:
+                kl_chunk_loss = torch.zeros((), dtype=ce_chunk_loss.dtype, device=ce_chunk_loss.device)
+                chunk_loss = ce_chunk_loss
 
             # For DeepSpeed we must bypass accelerator.backward, which unconditionally
             # hard-codes ``sync_gradients=self.sync_gradients`` (=True inside accumulate())
@@ -339,10 +405,11 @@ def compute_grouped_step(
             else:
                 accelerator.backward(chunk_loss)
 
-        batch_loss_detached = batch_loss_detached + chunk_loss.detach().float()
-        del outputs, shift_logits, per_token, per_seq, chunk_loss
+        ce_loss_detached = ce_loss_detached + ce_chunk_loss.detach().float()
+        kl_loss_detached = kl_loss_detached + kl_chunk_loss.detach().float()
+        del outputs, shift_logits, per_token, ce_per_seq, ce_chunk_loss, kl_chunk_loss, chunk_loss
 
-    return batch_loss_detached
+    return ce_loss_detached, kl_loss_detached
 
 
 @dataclass
@@ -637,6 +704,52 @@ class FlatArguments:
         },
     )
 
+    # KL penalty against a frozen reference model (analogous to DPO's beta term, but
+    # applied as an additive token-level KL regularizer on top of the SFT CE loss).
+    kl_beta: float = field(
+        default=0.0,
+        metadata={
+            "help": (
+                "Weight of the KL penalty against a frozen reference model. 0 disables. "
+                "Total loss is `CE + kl_beta * KL` (CE is unchanged when kl_beta > 0)."
+            )
+        },
+    )
+    kl_ref_model_name_or_path: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Reference model for the KL penalty. Falls back to `model_name_or_path` if unset and kl_beta > 0."
+            )
+        },
+    )
+    kl_ref_model_revision: str | None = field(
+        default=None, metadata={"help": "Revision of the reference model (branch / tag / commit id)."}
+    )
+    skip_first_k_kl: int = field(
+        default=0,
+        metadata={
+            "help": (
+                "Skip the first K supervised (assistant) tokens per sequence when computing "
+                "the KL term only. CE loss is unaffected. Multi-turn semantics: cumsum is "
+                "global over the row, so K applies once at the very first assistant token of "
+                "the sequence (e.g. K=2 on multi-turn data drops the first 2 tokens of the "
+                "first assistant span only). Motivation: a base-model reference has an "
+                "untrained distribution on the tokens immediately following the chat "
+                "template, which we do not want to drag the policy toward."
+            )
+        },
+    )
+    kl_direction: str = field(
+        default="forward",
+        metadata={
+            "help": (
+                "'forward' = KL(policy || ref) (mode-seeking, standard RLHF KL). "
+                "'reverse' = KL(ref || policy) (mass-covering, distillation-style)."
+            )
+        },
+    )
+
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
@@ -667,6 +780,23 @@ class FlatArguments:
                 raise NotImplementedError("final_lr_ratio only currently implemented for linear schedulers")
             if not (1.0 >= self.final_lr_ratio >= 0.0):
                 raise ValueError(f"final_lr_ratio must be between 0 and 1, not {self.final_lr_ratio=}")
+
+        if self.kl_beta > 0:
+            if self.kl_ref_model_name_or_path is None:
+                self.kl_ref_model_name_or_path = self.model_name_or_path
+            if self.kl_direction not in ("forward", "reverse"):
+                raise ValueError(f"kl_direction must be 'forward' or 'reverse', got {self.kl_direction=}")
+            if self.skip_first_k_kl < 0:
+                raise ValueError(f"skip_first_k_kl must be >= 0, got {self.skip_first_k_kl=}")
+            if self.sequence_parallel_size > 1:
+                raise NotImplementedError("kl_beta > 0 is not yet implemented with sequence_parallel_size > 1")
+            if self.load_balancing_loss:
+                raise NotImplementedError("kl_beta > 0 is not yet supported with load_balancing_loss=True")
+            if self.use_liger_kernel:
+                raise NotImplementedError(
+                    "kl_beta > 0 requires explicit logits and is not compatible with use_liger_kernel "
+                    "(fused linear cross-entropy). Disable use_liger_kernel or set kl_beta=0."
+                )
 
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
@@ -991,6 +1121,36 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
+    # Optional frozen reference model for the KL penalty. We load it with the same
+    # bf16 / attn implementation as the policy, freeze it, and place it on-device.
+    # Under DeepSpeed Zero-3 we additionally call `deepspeed.initialize` (no optimizer)
+    # so the params get sharded across ranks the same way the policy is.
+    ref_model = None
+    if args.kl_beta > 0:
+        logger.info(
+            f"Loading frozen reference model for KL penalty: {args.kl_ref_model_name_or_path} "
+            f"(kl_beta={args.kl_beta}, kl_direction={args.kl_direction}, "
+            f"skip_first_k_kl={args.skip_first_k_kl})"
+        )
+        ref_model = AutoModelForCausalLM.from_pretrained(
+            args.kl_ref_model_name_or_path,
+            revision=args.kl_ref_model_revision,
+            trust_remote_code=tc.trust_remote_code,
+            low_cpu_mem_usage=args.low_cpu_mem_usage,
+            dtype=torch.bfloat16,
+            attn_implementation=model_utils.detect_hf_attn_implementation(),
+        )
+        # Match the policy's vocabulary if it was resized above (otherwise log_softmax
+        # shapes won't line up).
+        ref_embeddings = ref_model.get_input_embeddings()
+        with deepspeed.zero.GatheredParameters(ref_embeddings.weight, modifier_rank=None):
+            ref_embedding_size = ref_embeddings.weight.shape[0]
+        if len(tokenizer) > ref_embedding_size:
+            ref_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+        ref_model.eval()
+        for p in ref_model.parameters():
+            p.requires_grad_(False)
+
     # DataLoaders creation:
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
@@ -1034,8 +1194,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         # get a 600s NCCL watchdog timeout (observed as same-SeqNum collectives
         # with different NumelIn across ranks at the epoch boundary).
         train_dataloader = DataLoader(
-            train_dataset, shuffle=True, collate_fn=collate_fn,
-            batch_size=args.per_device_train_batch_size, drop_last=True,
+            train_dataset,
+            shuffle=True,
+            collate_fn=collate_fn,
+            batch_size=args.per_device_train_batch_size,
+            drop_last=True,
         )
 
     # Optimizer
@@ -1095,6 +1258,20 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             model, optimizer, train_dataloader, lr_scheduler
         )
+
+    if ref_model is not None:
+        # Mirror the policy's distributed setup so the ref model is sharded under Zero-3
+        # (avoids OOM) and on-device under all other backends. We never want gradients or
+        # optimizer state for the ref model.
+        if accelerator.state.deepspeed_plugin is not None:
+            ref_model = model_utils.prepare_deepspeed(
+                ref_model, args.per_device_train_batch_size, accelerator.mixed_precision
+            )
+        else:
+            ref_model = ref_model.to(accelerator.device)
+        ref_model.eval()
+        for p in ref_model.parameters():
+            p.requires_grad_(False)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -1175,6 +1352,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             getattr(train_dataloader, "dl", train_dataloader).set_epoch(epoch)
         total_loss = 0
         total_aux_loss = 0
+        total_ce_loss = 0
+        total_kl_loss = 0
         if last_checkpoint_path and resume_batch_idx and not skipped_batches:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint.
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_batch_idx)
@@ -1217,15 +1396,21 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     # Grouped path: chunked forward + per-chunk backward, boundary-aware
                     # so all-reduce / DS reduce-scatter fires exactly once per sync step.
                     # compute_grouped_step does its own accelerator.backward internally
-                    # and returns a detached scalar for logging.
-                    loss_detached = compute_grouped_step(
+                    # and returns detached CE/KL scalars for logging.
+                    ce_loss_detached, kl_loss_detached = compute_grouped_step(
                         model,
                         batch,
                         prompt_group_ids,
                         accelerator,
                         max_rows_per_forward=args.per_device_train_batch_size,
+                        ref_model=ref_model,
+                        kl_beta=args.kl_beta,
+                        skip_first_k_kl=args.skip_first_k_kl,
+                        kl_direction=args.kl_direction,
                     )
-                    total_loss += loss_detached
+                    total_loss += ce_loss_detached + args.kl_beta * kl_loss_detached
+                    total_kl_loss += kl_loss_detached
+                    total_ce_loss += ce_loss_detached
                 else:
                     if args.load_balancing_loss:
                         outputs = model(**batch, use_cache=False, output_router_logits=True)
@@ -1233,8 +1418,35 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     else:
                         outputs = model(**batch, use_cache=False)
 
-                    loss = outputs.loss
-                    del outputs
+                    if args.kl_beta > 0:
+                        # Use HF's default token-mean CE (== outputs.loss) so toggling
+                        # kl_beta on/off doesn't change the CE normalization. Apply the
+                        # same token-mean to KL for consistency.
+                        ce_loss = outputs.loss
+                        shift_logits = outputs.logits[..., :-1, :].contiguous()
+                        shift_labels = batch["labels"][..., 1:].contiguous()
+                        with torch.no_grad():
+                            ref_outputs = ref_model(
+                                input_ids=batch["input_ids"], attention_mask=batch.get("attention_mask")
+                            )
+                        shift_ref_logits = ref_outputs.logits[..., :-1, :].contiguous()
+                        del ref_outputs
+                        kl_per_seq_sum, kl_per_seq_count = compute_kl_term(
+                            shift_logits,
+                            shift_ref_logits,
+                            shift_labels,
+                            skip_first_k=args.skip_first_k_kl,
+                            direction=args.kl_direction,
+                        )
+                        del shift_ref_logits, shift_logits
+                        kl_loss = kl_per_seq_sum.sum() / kl_per_seq_count.sum().clamp(min=1)
+                        loss = ce_loss + args.kl_beta * kl_loss
+                        total_ce_loss += ce_loss.detach().float()
+                        total_kl_loss += kl_loss.detach().float()
+                        del outputs
+                    else:
+                        loss = outputs.loss
+                        del outputs
 
                     if args.sequence_parallel_size > 1:
                         sp_group = accelerator.torch_device_mesh["sp"].get_group()
@@ -1345,6 +1557,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     )
                     avg_loss = sum_loss / total_fwd_passes
                     metrics_to_log["train_loss"] = avg_loss
+                    if args.kl_beta > 0:
+                        sum_ce = accelerator.gather(total_ce_loss).sum().item()
+                        sum_kl = accelerator.gather(total_kl_loss).sum().item()
+                        metrics_to_log["train_ce_loss"] = sum_ce / total_fwd_passes
+                        metrics_to_log["train_kl_loss"] = sum_kl / total_fwd_passes
                     if args.verbose:
                         sec_per_step = (time.perf_counter() - start_time) / (completed_steps - resume_step)
                         steps_remaining = args.max_train_steps - completed_steps
@@ -1353,6 +1570,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             f"Approx. time remaining: {timedelta(seconds=secs_remaining)}. {args.max_train_steps=}, {completed_steps=}, {steps_remaining=}"
                         )
 
+                    extras = ""
+                    if args.kl_beta > 0:
+                        extras += (
+                            f", CE: {metrics_to_log['train_ce_loss']:.4f}, KL: {metrics_to_log['train_kl_loss']:.4f}"
+                        )
                     if args.load_balancing_loss:
                         avg_aux_loss = (
                             accelerator.gather(total_aux_loss).mean().item()
@@ -1360,12 +1582,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             / args.logging_steps
                         )
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}{extras}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
                         metrics_to_log["aux_loss"] = avg_aux_loss
                     else:
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}{extras}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
                     if args.verbose:
                         accelerator.print(f"{metrics_to_log=}")
@@ -1381,6 +1603,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     )
                     total_loss = 0
                     total_aux_loss = 0
+                    total_ce_loss = 0
+                    total_kl_loss = 0
 
                 if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
                     output_dir = f"step_{completed_steps}"
