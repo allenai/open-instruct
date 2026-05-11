@@ -1255,34 +1255,34 @@ class PolicyTrainerRayProcess(RayProcess):
         text independently into each already-sliced shard can make SP ranks enter
         incompatible all-to-all collectives.
         """
+        assert self.splitter is not None, "SP conditioned value forward requires an SP splitter"
         original_padded_len = max(original_batch_seq_lens) if original_batch_seq_lens else original_seq_len
         original_start, original_end, _ = self._sp_slice_bounds(original_padded_len)
         local_out = torch.zeros(1, original_end - original_start - 1, dtype=torch.float32, device=device)
+
+        if not entries:
+            return local_out
 
         target_len = getattr(self.args, "value_model_repack_max_length", None)
         if target_len is None or target_len <= 0:
             target_len = getattr(self.streaming_config, "pack_length", original_seq_len)
 
-        local_packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len))
-        max_num_packs = self._sync_max_conditioned_value_packs(len(local_packs), device)
-        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len), num_packs=max_num_packs)
+        packs = self._balanced_pack_conditioned_value_entries(entries, int(target_len))
+        packed_ids_list: list[torch.Tensor] = []
+        packed_pos_list: list[torch.Tensor] = []
+        value_maps: list[torch.Tensor] = []
 
         for pack in packs:
             pack_entries = pack["entries"]
-            if not pack_entries:
-                self._dummy_value_forward(token_dtype, device, dummy_grad_outputs=dummy_grad_outputs)
-                continue
-
-            packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0).unsqueeze(0)
+            packed_ids = torch.cat([entry["input_ids"] for entry in pack_entries], dim=0)
             packed_pos = torch.cat(
                 [
                     torch.arange(entry["input_ids"].shape[0], dtype=position_dtype, device=device)
                     for entry in pack_entries
                 ],
                 dim=0,
-            ).unsqueeze(0)
-            full_to_orig_shifted = torch.full((packed_ids.shape[-1] - 1,), -1, dtype=torch.long, device=device)
-
+            )
+            full_to_orig_shifted = torch.full((packed_ids.shape[0] - 1,), -1, dtype=torch.long, device=device)
             row_offset = 0
             for entry in pack_entries:
                 entry_len = int(entry["input_ids"].shape[0])
@@ -1296,23 +1296,46 @@ class PolicyTrainerRayProcess(RayProcess):
                         full_to_orig_shifted[cond_positions[:n]] = resp_positions[:n]
                 row_offset += entry_len
 
-            cond_start, cond_end, cond_padded_len = self._sp_slice_bounds(packed_ids.shape[-1])
-            local_ids = self._pad_and_slice_last_dim(
-                packed_ids, cond_padded_len, cond_start, cond_end, self.tokenizer.pad_token_id
-            )
-            local_pos = self._pad_and_slice_last_dim(packed_pos, cond_padded_len, cond_start, cond_end, 0)
+            packed_ids_list.append(packed_ids.unsqueeze(0))
+            packed_pos_list.append(packed_pos.unsqueeze(0))
+            value_maps.append(full_to_orig_shifted)
+
+        value_batch = data_types.CollatedBatchData(
+            query_responses=packed_ids_list,
+            attention_masks=[torch.ones_like(t, dtype=torch.long) for t in packed_ids_list],
+            position_ids=packed_pos_list,
+            advantages=[torch.zeros_like(t, dtype=torch.float32) for t in packed_ids_list],
+            response_masks=[torch.zeros_like(t, dtype=torch.long) for t in packed_ids_list],
+            vllm_logprobs=[torch.zeros_like(t, dtype=torch.float32) for t in packed_ids_list],
+        )
+        local_value_batch = self.splitter.split_collated_batch(value_batch)
+        local_ids = torch.cat(local_value_batch.query_responses, dim=0)
+        local_pos = torch.cat(local_value_batch.position_ids, dim=0)
+
+        output = self.value_model(input_ids=local_ids, attention_mask=None, position_ids=local_pos)
+        logits = getattr(output, "logits", output)
+        if dummy_grad_outputs is not None:
+            dummy_grad_outputs.append(logits.reshape(-1).sum())
+        local_values = logits[:, :-1].squeeze(-1).float()
+
+        local_seq_len = local_ids.shape[-1]
+        local_values = self._align_value_predictions(
+            local_values,
+            torch.Size((len(value_maps), local_seq_len - 1)),
+            "conditioned value local forward",
+        )
+        cond_start = local_seq_len * self._sp_rank
+        cond_end = local_seq_len * (self._sp_rank + 1)
+        cond_padded_len = local_seq_len * self._sp_world_size
+
+        for pack_idx, full_to_orig_shifted in enumerate(value_maps):
             local_map = self._pad_and_slice_last_dim(
                 full_to_orig_shifted.unsqueeze(0), cond_padded_len - 1, cond_start, cond_end - 1, -1
             ).squeeze(0)
-
-            output = self.value_model(input_ids=local_ids, attention_mask=None, position_ids=local_pos)
-            logits = getattr(output, "logits", output)
-            local_values = logits[:, :-1].squeeze(-1).float()
-
             valid = (local_map >= original_start) & (local_map < original_end - 1)
             if bool(valid.any().item()):
                 local_orig_idx = local_map[valid] - original_start
-                local_out[0, local_orig_idx] = local_values[0, valid]
+                local_out[0, local_orig_idx] = local_values[pack_idx, valid]
 
         return local_out
 
