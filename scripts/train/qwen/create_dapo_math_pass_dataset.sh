@@ -43,7 +43,7 @@ WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 #     --output-dataset mnoukhov/dapo-math-17k-processed-filtered-qwen3-4b-base-32samples-quartiles \
 #     --dataset-name-prefix math_dapo
 
-uv run mason.py \
+uv run python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${CLUSTER} \
     --workspace ${WORKSPACE} \
