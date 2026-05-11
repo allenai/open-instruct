@@ -1500,6 +1500,38 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return out_values
 
+    def _align_value_predictions(
+        self, values: torch.Tensor, target_shape: torch.Size, context: str
+    ) -> torch.Tensor:
+        """Align value predictions to the local shifted token shape.
+
+        Under SP, the conditioned value path may run on a shorter effective
+        slice than the policy shard when the policy shard contains trailing
+        padding. Padding with zeros is safe because those positions are masked
+        out of GAE and value loss.
+        """
+        if values.shape == target_shape:
+            return values
+        if values.dim() != len(target_shape) or values.shape[:-1] != target_shape[:-1]:
+            raise AssertionError(
+                f"{context}: value predictions shape {values.shape} is incompatible with target shape {target_shape}"
+            )
+
+        target_len = target_shape[-1]
+        current_len = values.shape[-1]
+        if current_len < target_len:
+            pad = values.new_zeros(*values.shape[:-1], target_len - current_len)
+            aligned = torch.cat([values, pad], dim=-1)
+        else:
+            aligned = values[..., :target_len]
+
+        if not getattr(self, "_value_alignment_warning_logged", False):
+            logger.warning(
+                f"{context}: aligned value predictions from {tuple(values.shape)} to {tuple(target_shape)}"
+            )
+            self._value_alignment_warning_logged = True
+        return aligned
+
     def forward_value(
         self, query_responses: torch.Tensor, position_ids: torch.Tensor, response_mask: torch.Tensor
     ) -> torch.Tensor:
@@ -1516,6 +1548,7 @@ class PolicyTrainerRayProcess(RayProcess):
         logits = getattr(output, "logits", output)
         logits = logits[:, :-1]
         values = logits.squeeze(-1).float()
+        values = self._align_value_predictions(values, response_mask.shape, "forward_value")
         values = torch.where(response_mask, values, torch.zeros_like(values))
         return values
 
@@ -1796,6 +1829,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     else:
                         values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
+                    values_BT = self._align_value_predictions(values_BT, resp_mask.shape, "value forward")
                     assert values_BT.shape == resp_mask.shape, (
                         f"value predictions shape {values_BT.shape} must match shifted response mask {resp_mask.shape}"
                     )
@@ -2180,6 +2214,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             new_values = self.forward_value(
                                 data_BT.query_responses[i], data_BT.position_ids[i], resp_mask
                             )
+                        new_values = self._align_value_predictions(new_values, returns.shape, "value loss forward")
                         assert new_values.shape == returns.shape == old_values.shape, (
                             f"value loss tensors must align: new={new_values.shape}, "
                             f"returns={returns.shape}, old={old_values.shape}"
