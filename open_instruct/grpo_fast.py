@@ -3152,12 +3152,6 @@ def weight_sync_thread(
                     )
 
                 ray_get_with_progress(
-                    [engine.finish_weight_update.remote() for engine in vllm_engines],
-                    desc="[Weight Sync Thread] Finishing vLLM weight update",
-                    enable=False,
-                )
-
-                ray_get_with_progress(
                     [engine.wake_up.remote() for engine in vllm_engines],
                     desc="[Weight Sync Thread] Waking up vLLM engines",
                     enable=False,
