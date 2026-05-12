@@ -829,6 +829,7 @@ class PolicyTrainerRayProcess(RayProcess):
             "world_size": world_size,
             "is_master": True,
             "timeout": timedelta(seconds=300),
+            "wait_for_workers": False,
         }
         try:
             store = dist.TCPStore(**store_kwargs, use_libuv=False)
