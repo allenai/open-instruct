@@ -32,11 +32,10 @@ import vllm
 import yaml
 from vllm.logprobs import FlatLogprobs
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, parsing
 from open_instruct.dataset_transformation import INPUT_IDS_KEY, TokenizerConfig, get_cached_dataset_tulu
 from open_instruct.distillkit.compression import DistributionQuantizationConfig, LogprobCompressor
 from open_instruct.distillkit.sample_common import StreamingParquetWriter, compressed_logit_schema
-from open_instruct.utils import ArgumentParserPlus
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -337,6 +336,5 @@ def main(args: SampleLogitsArguments, tc: TokenizerConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((SampleLogitsArguments, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
+    args, tc = parsing.parse(SampleLogitsArguments, TokenizerConfig)
     main(args, tc)

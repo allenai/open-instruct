@@ -81,7 +81,7 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, vllm_utils
+from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, parsing, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
@@ -110,7 +110,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
-    ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
     UlyssesSPSplitter,
@@ -2525,25 +2524,14 @@ def main(
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus(
-        (
-            grpo_utils.GRPOExperimentConfig,
-            TokenizerConfig,
-            ModelConfig,
-            data_loader_lib.StreamingDataLoaderConfig,
-            data_loader_lib.VLLMConfig,
-            EnvsConfig,
-        )
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = parsing.parse(
+        grpo_utils.GRPOExperimentConfig,
+        TokenizerConfig,
+        ModelConfig,
+        data_loader_lib.StreamingDataLoaderConfig,
+        data_loader_lib.VLLMConfig,
+        EnvsConfig,
+        defaults={"exp_name": "grpo", "warmup_ratio": 0.0, "max_grad_norm": 1.0, "per_device_train_batch_size": 1},
     )
-    parser.set_defaults(exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1)
-    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
-        parser.parse_args_into_dataclasses()
-    )
-    assert isinstance(args, grpo_utils.GRPOExperimentConfig)
-    assert isinstance(tokenizer_config, TokenizerConfig)
-    assert isinstance(model_config, ModelConfig)
-    assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
-    assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
-    assert isinstance(tools_config, EnvsConfig)
 
     main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)

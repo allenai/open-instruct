@@ -32,11 +32,10 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     DataCollatorWithPadding,
-    HfArgumentParser,
     PreTrainedTokenizer,
 )
 
-from open_instruct import model_utils
+from open_instruct import model_utils, parsing
 from open_instruct.model_utils import get_reward
 from open_instruct.rejection_sampling.generation import GenerationArgs, format_conversation, generate_with_openai
 
@@ -387,6 +386,5 @@ args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args,))
-    args = parser.parse_args_into_dataclasses()[0]
+    args = parsing.parse(Args)
     main(args)

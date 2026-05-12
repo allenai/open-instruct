@@ -65,7 +65,7 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Literal
 
-from open_instruct import dataset_transformation, numpy_dataset_conversion, utils
+from open_instruct import dataset_transformation, numpy_dataset_conversion, parsing, utils
 
 
 @dataclass
@@ -166,6 +166,5 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
 
 
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus((ConvertSFTDataArguments, dataset_transformation.TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
+    args, tc = parsing.parse(ConvertSFTDataArguments, dataset_transformation.TokenizerConfig)
     main(args, tc)

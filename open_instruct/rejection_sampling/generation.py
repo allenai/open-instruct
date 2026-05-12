@@ -29,9 +29,10 @@ from rich.pretty import pprint
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
+from open_instruct import parsing
 from open_instruct.dataset_processor import INPUT_IDS_PROMPT_KEY, DatasetConfig, SFTDatasetProcessor
 from open_instruct.rejection_sampling.api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
-from open_instruct.utils import ArgumentParserPlus, combine_dataset
+from open_instruct.utils import combine_dataset
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -225,5 +226,4 @@ gen_args:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, DatasetConfig, GenerationArgs))
-    main(*parser.parse())
+    main(*parsing.parse(Args, DatasetConfig, GenerationArgs))

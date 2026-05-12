@@ -15,7 +15,7 @@ import datasets
 import requests
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
-from transformers import HfArgumentParser
+from open_instruct import parsing
 
 
 @dataclass
@@ -80,5 +80,4 @@ The dataset contains math problems and their solutions in a conversational forma
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser(Args)
-    main(*parser.parse_args_into_dataclasses())
+    main(parsing.parse(Args))

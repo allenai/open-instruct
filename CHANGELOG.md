@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Switch CLI argument parsing from `transformers.HfArgumentParser` / `ArgumentParserPlus` to `tyro` via a new `open_instruct.parsing.parse` helper. Gives real static typing for `Literal`/`Union`/`Enum`/nested dataclasses, removes per-call `assert isinstance` boilerplate, and keeps the existing flat CLI surface and YAML-config behaviour.
 - Make `mason.py` `--output_dir` / `--checkpoint_state_dir` overrides idempotent via `replace_or_append_flag`, add `open_instruct/grpo.py` to `OPEN_INSTRUCT_COMMANDS` / `OPEN_INSTRUCT_RESUMABLES`, and wire OLMo-core checkpoint save/resume into `grpo.py` (`CheckpointerCallback` + `DataPreparationActorCheckpointCallback` + `LoadStrategy.if_available`) so resumable Beaker jobs actually resume (https://github.com/allenai/open-instruct/pull/1666).
 - Make `--budget` optional in `mason.py` (falls back to the workspace's default budget) and drop the explicit `--budget` flag from launch scripts where it already matched the workspace default (https://github.com/allenai/open-instruct/pull/1673).
 - Restore 🤡 to resample warnings and use `self.training_step` in `DataPreparationActor.run` (https://github.com/allenai/open-instruct/pull/1663).

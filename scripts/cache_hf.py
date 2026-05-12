@@ -4,7 +4,7 @@ import torch
 from huggingface_hub import snapshot_download
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from open_instruct.utils import ArgumentParserPlus
+from open_instruct import parsing
 
 """
 Run this file to cache models in a shared HF cache
@@ -72,5 +72,4 @@ def main(args: Args):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args,))
-    main(*parser.parse_args_into_dataclasses())
+    main(parsing.parse(Args))

@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
 import wandb
-from transformers import HfArgumentParser
-
+from open_instruct import parsing
 from open_instruct.utils import upload_metadata_to_hf
 
 api = wandb.Api()
@@ -25,7 +24,7 @@ class Args:
     leaderboard_model_name: str | None = None
 
 
-new_args = HfArgumentParser(Args).parse_args_into_dataclasses()[0]
+new_args = parsing.parse(Args)
 
 if new_args.wandb_run_id is not None:
     wandb_run = api.run(new_args.wandb_run_id)

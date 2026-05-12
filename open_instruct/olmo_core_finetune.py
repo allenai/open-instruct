@@ -45,7 +45,7 @@ from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, te
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, parsing
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -313,28 +313,25 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
 
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus(
-        (  # ty: ignore[invalid-argument-type]
-            olmo_core_utils.ExperimentConfig,
-            olmo_core_utils.ModelConfig,
-            olmo_core_utils.TrainingConfig,
-            olmo_core_utils.DatasetConfig,
-            olmo_core_utils.LoggingConfig,
-            olmo_core_utils.CheckpointConfig,
-            dataset_transformation.TokenizerConfig,
-        )
+    tracking, model, training, dataset, logging_cfg, checkpoint, tc = parsing.parse(
+        olmo_core_utils.ExperimentConfig,
+        olmo_core_utils.ModelConfig,
+        olmo_core_utils.TrainingConfig,
+        olmo_core_utils.DatasetConfig,
+        olmo_core_utils.LoggingConfig,
+        olmo_core_utils.CheckpointConfig,
+        dataset_transformation.TokenizerConfig,
+        defaults={
+            "exp_name": "sft",
+            "ephemeral_save_interval": _DEFAULT_EPHEMERAL_SAVE_INTERVAL,
+            "num_epochs": 3,
+            "learning_rate": 8e-5,
+            "warmup_ratio": 0.03,
+            "mixer_list": ["allenai/tulu-3-sft-olmo-2-mixture", "1.0"],
+            "transform_fn": ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            "target_columns": list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS),
+        },
     )
-    parser.set_defaults(
-        exp_name="sft",
-        ephemeral_save_interval=_DEFAULT_EPHEMERAL_SAVE_INTERVAL,
-        num_epochs=3,
-        learning_rate=8e-5,
-        warmup_ratio=0.03,
-        mixer_list=["allenai/tulu-3-sft-olmo-2-mixture", "1.0"],
-        transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
-        target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS),
-    )
-    tracking, model, training, dataset, logging_cfg, checkpoint, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     args = SFTArguments(
         tracking=tracking, model=model, training=training, dataset=dataset, logging=logging_cfg, checkpoint=checkpoint
     )

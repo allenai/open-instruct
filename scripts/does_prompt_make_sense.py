@@ -7,9 +7,10 @@ import pandas as pd
 from datasets import load_dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
-from transformers import AutoTokenizer, HfArgumentParser
+from transformers import AutoTokenizer
 
 import open_instruct.utils as open_instruct_utils
+from open_instruct import parsing
 from open_instruct.generation import print_rich_table
 
 
@@ -108,7 +109,7 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
 
 
 if __name__ == "__main__":
-    args, ljc = HfArgumentParser((Args, LLMJudgeConfig)).parse_args_into_dataclasses()
+    args, ljc = parsing.parse(Args, LLMJudgeConfig)
     raw_dataset = load_dataset(
         "allenai/tulu-v2-sft-mixture", split="train", num_proc=open_instruct_utils.max_num_processes()
     )

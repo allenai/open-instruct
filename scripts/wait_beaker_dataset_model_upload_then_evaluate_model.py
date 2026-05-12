@@ -3,12 +3,8 @@ import sys
 import time
 from dataclasses import dataclass
 
-from open_instruct.utils import (
-    ArgumentParserPlus,
-    BeakerRuntimeConfig,
-    beaker_experiment_succeeded,
-    get_beaker_dataset_ids,
-)
+from open_instruct import parsing
+from open_instruct.utils import BeakerRuntimeConfig, beaker_experiment_succeeded, get_beaker_dataset_ids
 
 """
 example usage
@@ -91,5 +87,4 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, BeakerRuntimeConfig))
-    main(*parser.parse())
+    main(*parsing.parse(Args, BeakerRuntimeConfig))

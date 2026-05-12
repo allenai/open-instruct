@@ -47,7 +47,7 @@ from torch.utils.data import DataLoader, RandomSampler
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 
-from open_instruct import dpo_utils, logger_utils, model_utils, utils
+from open_instruct import dpo_utils, logger_utils, model_utils, parsing, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TokenizerConfig,
@@ -56,7 +56,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
-    ArgumentParserPlus,
     ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
@@ -760,6 +759,5 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((dpo_utils.DPOExperimentConfig, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
+    args, tc = parsing.parse(dpo_utils.DPOExperimentConfig, TokenizerConfig)
     main(args, tc)

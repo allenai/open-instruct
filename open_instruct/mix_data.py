@@ -15,7 +15,8 @@
 
 import dataclasses
 
-from open_instruct.utils import ArgumentParserPlus, get_datasets
+from open_instruct import parsing
+from open_instruct.utils import get_datasets
 
 
 @dataclasses.dataclass
@@ -33,9 +34,7 @@ class MixDataArguments:
 
 
 def main() -> None:
-    parser = ArgumentParserPlus((MixDataArguments,))  # type: ignore[arg-type]
-    args = parser.parse(allow_extra_keys=True)
-    assert isinstance(args, MixDataArguments)
+    args = parsing.parse(MixDataArguments, allow_extra_keys=True)
 
     # assert that data_mixer is not none in config
     assert args.dataset_mixer is not None, "data_mixer is required in config"

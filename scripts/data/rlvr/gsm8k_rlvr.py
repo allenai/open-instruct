@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import datasets
 from huggingface_hub import HfApi
-from transformers import HfArgumentParser
+from open_instruct import parsing
 
 
 @dataclass
@@ -52,5 +52,4 @@ def main(args: Args):
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser(Args)
-    main(*parser.parse_args_into_dataclasses())
+    main(parsing.parse(Args))

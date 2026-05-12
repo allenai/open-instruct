@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForSequenceClassification, PreTrainedModel, get_scheduler
 
-from open_instruct import olmo_adapter
+from open_instruct import olmo_adapter, parsing
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     REJECTED_INPUT_IDS_KEY,
@@ -41,7 +41,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.reward_modeling_eval import evaluate
 from open_instruct.utils import (
-    ArgumentParserPlus,
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
@@ -418,5 +417,4 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    main(*parser.parse())
+    main(*parsing.parse(Args, TokenizerConfig, ModelConfig))

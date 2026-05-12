@@ -46,7 +46,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, model_utils, parsing, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -57,7 +57,6 @@ from open_instruct.dataset_transformation import (
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.utils import (
-    ArgumentParserPlus,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_optimizer_grouped_parameters,
@@ -1031,6 +1030,5 @@ if __name__ == "__main__":
     )
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
+    args, tc = parsing.parse(FlatArguments, TokenizerConfig)
     main(args, tc)

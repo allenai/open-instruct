@@ -91,7 +91,8 @@ import tiktoken
 from openai import AsyncAzureOpenAI, AzureOpenAI
 from rich.console import Console
 from tqdm.asyncio import tqdm_asyncio
-from transformers import HfArgumentParser
+
+from open_instruct import parsing
 
 console = Console()
 
@@ -232,5 +233,4 @@ def main(args: Args):
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser(Args)
-    main(*parser.parse_args_into_dataclasses())
+    main(parsing.parse(Args))

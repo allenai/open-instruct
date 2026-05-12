@@ -28,7 +28,8 @@ from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from litellm import acompletion
 from tqdm.asyncio import tqdm_asyncio
-from transformers import HfArgumentParser
+
+from open_instruct import parsing
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -219,6 +220,5 @@ args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args,))
-    args = parser.parse_args_into_dataclasses()[0]
+    args = parsing.parse(Args)
     main(args)

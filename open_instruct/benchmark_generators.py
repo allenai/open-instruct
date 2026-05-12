@@ -18,7 +18,7 @@ import threading
 import time
 from concurrent import futures
 from queue import Empty
-from typing import Any, cast
+from typing import Any
 
 import datasets
 import numpy as np
@@ -27,7 +27,16 @@ import torch
 import torch.utils.flop_counter
 from ray.util import queue as ray_queue
 
-from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
+from open_instruct import (
+    data_loader,
+    dataset_transformation,
+    grpo_utils,
+    logger_utils,
+    model_utils,
+    parsing,
+    utils,
+    vllm_utils,
+)
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
@@ -680,26 +689,12 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.
 
 def main() -> None:
     """Main benchmark function."""
-    # Parse arguments using ArgumentParserPlus
-    parser = utils.ArgumentParserPlus(
-        (
-            grpo_utils.GRPOExperimentConfig,
-            dataset_transformation.TokenizerConfig,
-            model_utils.ModelConfig,
-            data_loader.StreamingDataLoaderConfig,
-            data_loader.VLLMConfig,
-        )  # type: ignore[arg-type]
-    )
-
-    args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
-        tuple[
-            grpo_utils.GRPOExperimentConfig,
-            dataset_transformation.TokenizerConfig,
-            model_utils.ModelConfig,
-            data_loader.StreamingDataLoaderConfig,
-            data_loader.VLLMConfig,
-        ],
-        parser.parse_args_into_dataclasses(),
+    args, tokenizer_config, model_config, streaming_config, vllm_config = parsing.parse(
+        grpo_utils.GRPOExperimentConfig,
+        dataset_transformation.TokenizerConfig,
+        model_utils.ModelConfig,
+        data_loader.StreamingDataLoaderConfig,
+        data_loader.VLLMConfig,
     )
 
     # Ensure data directory exists

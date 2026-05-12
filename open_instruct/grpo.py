@@ -31,7 +31,7 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, utils, vllm_utils
+from open_instruct import grpo_fast, grpo_utils, logger_utils, parsing, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -324,19 +324,20 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus(
-        [  # ty: ignore[invalid-argument-type]
-            grpo_utils.GRPOExperimentConfig,
-            TokenizerConfig,
-            ModelConfig,
-            data_loader_lib.StreamingDataLoaderConfig,
-            data_loader_lib.VLLMConfig,
-            EnvsConfig,
-        ]
+    args, tc, model_config, streaming_config, vllm_config, tools_config = parsing.parse(
+        grpo_utils.GRPOExperimentConfig,
+        TokenizerConfig,
+        ModelConfig,
+        data_loader_lib.StreamingDataLoaderConfig,
+        data_loader_lib.VLLMConfig,
+        EnvsConfig,
+        defaults={
+            "exp_name": "grpo",
+            "warmup_ratio": 0.0,
+            "max_grad_norm": 1.0,
+            "per_device_train_batch_size": 1,
+            "fused_optimizer": False,
+        },
     )
-    parser.set_defaults(
-        exp_name="grpo", warmup_ratio=0.0, max_grad_norm=1.0, per_device_train_batch_size=1, fused_optimizer=False
-    )
-    args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
 
-    main(args, tc, model_config, streaming_config, vllm_config, tools_config)  # type: ignore[arg-type]
+    main(args, tc, model_config, streaming_config, vllm_config, tools_config)
