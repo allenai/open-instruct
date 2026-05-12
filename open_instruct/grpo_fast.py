@@ -1119,7 +1119,7 @@ def setup_datasets(
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-    tool_definitions: list[dict[str, Any]],
+    tool_definitions: list[ToolDefinition],
     pass_tools_to_chat_template: bool,
     configured_tool_call_names: list[str] | None = None,
 ):
@@ -1280,7 +1280,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     base_env_config: EnvConfig,
-    tool_definitions: list[dict[str, Any]] | None = None,
+    tool_definitions: list[ToolDefinition] | None = None,
     tools_config: EnvsConfig | None = None,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_stop_sequences: list[str] | None = None,
@@ -2229,7 +2229,7 @@ def initialize_tools_and_envs(
     pool_size: int,
     dataset_mixer_list: list[str] | None = None,
     dataset_mixer_list_splits: list[str] | None = None,
-) -> tuple[dict[str, ray.actor.ActorHandle], list[dict[str, Any]], list[str]]:
+) -> tuple[dict[str, ray.actor.ActorHandle], list[ToolDefinition], list[str]]:
     """Initialize all tool/env pools and collect tool definitions.
 
     Creates an EnvironmentPool for each tool specified via --tools CLI.
