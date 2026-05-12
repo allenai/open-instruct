@@ -7,7 +7,7 @@
 # Then run scripts/tmax/debug/count_truncations.py against the dumped JSONL to
 # get a truncation breakdown.
 #
-# We do exactly one training step (--max_steps 1) and zero out the LR so the
+# We allow up to 64 tool/environment steps and zero out the LR so the
 # generated rollouts come from the unmodified base policy. Same vllm/tool/sampling
 # config as the regular tmax-10k run, so finish_reasons are directly comparable.
 # 4 nodes x 8 GPUs (32 GPUs total).
@@ -17,7 +17,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k truncation counter (1 step, 100 prompts x 8 rollouts)" \
+       --description "SWERL tmax-10k truncation counter (64 env steps, 100 prompts x 8 rollouts)" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -47,6 +47,7 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
+    --per_turn_max_tokens 8192 \
     --response_length 32768 \
     --pack_length 35840 \
     --per_device_train_batch_size 1 \
@@ -76,7 +77,7 @@ uv run python mason.py \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
-    --max_steps 1 \
+    --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \

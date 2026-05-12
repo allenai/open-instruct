@@ -43,12 +43,14 @@ uv run python mason.py \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
+    --per_turn_max_tokens 8192 \
     --response_length 512 \
     --pack_length 1024 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
     --async_steps 1 \
+    --max_steps 64 \
     --inflight_updates false \
     --model_name_or_path Qwen/Qwen3.5-0.8B \
     --add_bos \

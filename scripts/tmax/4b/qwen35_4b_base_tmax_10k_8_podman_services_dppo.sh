@@ -50,6 +50,7 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
+    --per_turn_max_tokens 8192 \
     --response_length 32768 \
     --pack_length 35840 \
     --per_device_train_batch_size 1 \
@@ -84,7 +85,7 @@ uv run python mason.py \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 768 \
-    --max_steps 100 \
+    --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
