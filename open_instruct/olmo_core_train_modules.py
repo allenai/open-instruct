@@ -13,6 +13,7 @@ import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
 import wandb
 from olmo_core.distributed import utils as dist_utils
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
@@ -266,6 +267,11 @@ class DPOTrainModule(TransformerTrainModule):
                 self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
 
 
+_DOC_LENS_ATTN_BACKENDS = frozenset(
+    {AttentionBackendName.flash_2, AttentionBackendName.flash_3, AttentionBackendName.flash_4}
+)
+
+
 class GRPOTrainModule(TransformerTrainModule):
     """
     GRPO training module using OLMo-core Transformer models.
@@ -291,6 +297,7 @@ class GRPOTrainModule(TransformerTrainModule):
         temperature: float,
         tokenizer: PreTrainedTokenizer,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        attn_implementation: AttentionBackendName,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
@@ -301,6 +308,10 @@ class GRPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ):
+        assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+            f"GRPOTrainModule requires a flash attention backend for intra-document masking via "
+            f"doc_lens/max_doc_lens; got {attn_implementation}."
+        )
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
             model=model,
@@ -322,6 +333,7 @@ class GRPOTrainModule(TransformerTrainModule):
         self.temperature = temperature
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
+        self.attn_implementation = attn_implementation
 
         self.ref_policy = ref_policy
         if ref_policy is not None:
