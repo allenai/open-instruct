@@ -642,6 +642,7 @@ class LLMRayActor:
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.current_model_step: int = 0
+        self._generation_paused = False
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -801,11 +802,24 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
+    def _drain_active_tasks(self, reason: str) -> None:
+        if len(self.active_tasks) > 0:
+            logger.info(f"Waiting for {len(self.active_tasks)} active vLLM request(s) before {reason}")
+        while len(self.active_tasks) > 0:
+            self.check_background_threads()
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+
     def sleep(self) -> None:
-        return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
+        if not self.inflight_updates:
+            self._drain_active_tasks("pause generation")
+        self._run_async(self.llm_engine.pause_generation(mode="keep", clear_cache=False))
+        self._generation_paused = True
 
     def wake_up(self) -> None:
-        return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
+        if not self._generation_paused:
+            return
+        self._run_async(self.llm_engine.resume_generation())
+        self._generation_paused = False
 
     def update_weights(self, *args, **kwargs) -> None:
         """Accept both the NCCL and IPC trainer-side calling conventions.
@@ -821,9 +835,8 @@ class LLMRayActor:
         accept both shapes to keep ``--single_gpu_mode`` working alongside the
         NCCL path used by multi-GPU pools.
         """
-        while not self.inflight_updates and len(self.active_tasks) > 0:
-            self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        if not self.inflight_updates:
+            self._drain_active_tasks("weight update")
 
         model_step: int | None = None
         if len(args) == 1 and isinstance(args[0], dict) and "update_info" in args[0]:
@@ -1551,7 +1564,7 @@ def broadcast_weights_to_vllm(
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
-    use_packed = False
+    use_packed = True
 
     if is_rank_0:
         refs = [
