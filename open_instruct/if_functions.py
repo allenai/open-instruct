@@ -360,7 +360,7 @@ def validate_title(text: str) -> bool:
 
 # Choose: From Answer with one of the following options: {options}
 def validate_choice(text: str, options: list) -> bool:
-    return any(text in option for option in options)
+    return any(option in text for option in options)
 
 
 # Minimum Number Highlighted Section: Highlight at least {N} sections in your answer with markdown, i.e. *highlighted
@@ -430,7 +430,7 @@ def validate_frequency_capital_words(text: str, N: int, quantifier: str) -> bool
     if quantifier == "at least":
         return len(words) >= N
     elif quantifier == "around":
-        return len(words) == N
+        return abs(len(words) - N) <= max(round(N * 0.1), 1)
     elif quantifier == "at most":
         return len(words) <= N
     else:

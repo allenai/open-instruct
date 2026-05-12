@@ -87,6 +87,29 @@ class TestDPOLoss(unittest.TestCase):
         self.assertFalse(rejected_rewards.requires_grad)
 
 
+class TestGetBatchLogps(unittest.TestCase):
+    """Regression tests for PR #1625: division by zero when a sequence has
+    every label masked (`-100`) and `average_log_prob=True`."""
+
+    def test_fully_masked_row_returns_zero_not_nan(self):
+        per_token_logps = torch.tensor([[-1.0, -2.0, -3.0, -4.0], [-1.0, -2.0, -3.0, -4.0]])
+        labels = torch.tensor([[0, 1, 2, 3], [-100, -100, -100, -100]])
+
+        result = dpo_utils._get_batch_logps(per_token_logps, labels, average_log_prob=True)
+
+        self.assertFalse(torch.isnan(result).any())
+        self.assertFalse(torch.isinf(result).any())
+        self.assertEqual(result[1].item(), 0.0)
+
+    def test_unmasked_row_matches_unclamped_average(self):
+        per_token_logps = torch.tensor([[-1.0, -2.0, -3.0, -4.0]])
+        labels = torch.tensor([[0, 1, 2, -100]])
+
+        result = dpo_utils._get_batch_logps(per_token_logps, labels, average_log_prob=True)
+        # per_token_logps[:, :-1] -> [-1, -2, -3]; mask from labels[:, 1:] -> [T, T, F]
+        self.assertAlmostEqual(result[0].item(), (-1.0 + -2.0) / 2, places=5)
+
+
 class TestSimPOLoss(unittest.TestCase):
     """Tests for simpo_loss function."""
 

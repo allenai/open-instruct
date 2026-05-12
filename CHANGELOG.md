@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Bundle small correctness fixes: `validate_choice` operand direction and `validate_frequency_capital_words` "around" tolerance in `open_instruct/if_functions.py` and `scripts/eval_constraints/if_functions.py`; gpt-4o / gpt-4o-standard output price in `judge_utils.py` (10× undercount); CSV header handling in `save_benchmark_results_to_csv` and `save_completion_lengths`; `_get_batch_logps` division-by-zero on fully-masked sequences in `dpo_utils.py`; `IFEvalVerifier` `ZeroDivisionError` when the instruction list is empty (supersedes #1615, #1618, #1619, #1623, #1625, #1646, #1651, #1655).
 - Fix NameError on `streaming_config/vllm_config` when importing from `grpo_fast.py` due to implicit global dependency. (https://github.com/allenai/open-instruct/pull/1675)
 - Fix `grpo.py` token-count inflation by emitting bool `response_masks` from `DataPreparationActor` (instead of int64 doc-id-valued masks) and dropping per-consumer `.bool()` coercions in `grpo_fast.py`, `grpo_utils.py`, and `olmo_core_train_modules.py`. Previously the OLMo-core path summed the doc-id-valued mask in `calculate_token_counts`, inflating `loss_denominator` by ~60× (https://github.com/allenai/open-instruct/pull/1668).
 - Fix hardcoded project version (https://github.com/allenai/open-instruct/pull/1636) by using setuptools scm's automatic versioning.
