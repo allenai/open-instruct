@@ -18,7 +18,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
-    --budget ai2/oe-adapt \
     --gpus 8 \
     --no_auto_dataset_cache \
     -- \
