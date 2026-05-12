@@ -4,6 +4,7 @@ import logging
 import unittest
 
 import torch
+from parameterized import parameterized
 
 from open_instruct import dpo_utils
 from open_instruct.dataset_transformation import TokenizerConfig
@@ -85,6 +86,28 @@ class TestDPOLoss(unittest.TestCase):
 
         self.assertFalse(chosen_rewards.requires_grad)
         self.assertFalse(rejected_rewards.requires_grad)
+
+
+class TestGetBatchLogps(unittest.TestCase):
+    """Regression tests for PR #1625: division by zero when a sequence has
+    every label masked (`-100`) and `average_log_prob=True`."""
+
+    @parameterized.expand(
+        [
+            (
+                "fully_masked_row_returns_zero_not_nan",
+                [[-1.0, -2.0, -3.0, -4.0], [-1.0, -2.0, -3.0, -4.0]],
+                [[0, 1, 2, 3], [-100, -100, -100, -100]],
+                [-2.0, 0.0],
+            ),
+            ("partially_masked_row_matches_unclamped_average", [[-1.0, -2.0, -3.0, -4.0]], [[0, 1, 2, -100]], [-1.5]),
+        ]
+    )
+    def test_average_log_prob(self, _name, per_token_logps, labels, expected):
+        result = dpo_utils._get_batch_logps(torch.tensor(per_token_logps), torch.tensor(labels), average_log_prob=True)
+        self.assertFalse(torch.isnan(result).any())
+        self.assertFalse(torch.isinf(result).any())
+        torch.testing.assert_close(result, torch.tensor(expected))
 
 
 class TestSimPOLoss(unittest.TestCase):
