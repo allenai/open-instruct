@@ -306,17 +306,15 @@ def validate_placeholders(text: str, N: int) -> bool:
 
     Args:
         text (str): The text to check for placeholders
-        min_placeholders (int): Minimum number of placeholders required
+        N (int): Minimum number of placeholders required
 
     Returns:
-        tuple[bool, List[str]]: A tuple containing:
-            - Boolean indicating if the text meets the placeholder requirement
-            - List of found placeholders
+        bool: True if the text contains at least N placeholders, False otherwise.
 
     Example:
         >>> text = "Hello [name], your [item] will be delivered to [address]"
         >>> validate_placeholders(text, 2)
-        (True, ['name', 'item', 'address'])
+        True
     """
     # Find all placeholders using regex
     pattern = r"\[(.*?)\]"
@@ -333,14 +331,13 @@ def validate_placeholders(text: str, N: int) -> bool:
 def verify_bullet_points(text: str, N: int) -> bool:
     """
     Verifies if a text contains exactly N bullet points in markdown format.
-    Returns a tuple of (is_valid, message).
 
     Args:
         text (str): The text to check
-        expected_count (int): The expected number of bullet points
+        N (int): The expected number of bullet points
 
     Returns:
-        tuple[bool, str]: (True if constraint is met, explanation message)
+        bool: True if the text contains exactly N bullet points, False otherwise.
     """
     # Split text into lines and count lines starting with * or -
     lines = text.split("\n")
