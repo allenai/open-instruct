@@ -361,8 +361,21 @@ def convert_rejection_samples_to_messages(example):
     return example
 
 
+def parse_dataset_mixer_list(mixer_list: list) -> dict:
+    """Convert an interleaved `[name, weight, name, weight, ...]` list into a `{name: weight}` dict."""
+    assert len(mixer_list) % 2 == 0, f"Data mixer list length is not even: {mixer_list}"
+    mixer_dict = {}
+    i = 0
+    while i < len(mixer_list) - 1:
+        assert isinstance(mixer_list[i], str), f"Invalid type in data mixer: {mixer_list}"
+        value = float(mixer_list[i + 1]) if "." in mixer_list[i + 1] else int(mixer_list[i + 1])
+        mixer_dict[mixer_list[i]] = value
+        i += 2
+    return mixer_dict
+
+
 def get_datasets(
-    dataset_mixer: dict | list,
+    dataset_mixer: dict,
     splits: list[str] | None = None,
     configs: list[str] | None = None,
     columns_to_keep: list[str] | None = None,
@@ -376,10 +389,8 @@ def get_datasets(
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`list` or `dict`):
-            Dictionary or list containing the dataset names and their training proportions.
-            By default, all test proportions are 1. Lists are formatted as
-            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
+        dataset_mixer (`dict`):
+            Dictionary mapping dataset names to their training proportions.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -401,17 +412,6 @@ def get_datasets(
         add_source_col (`bool`, *optional*, defaults to `False`):
             Whether to add a column to the dataset that indicates the source of the data explicitly.
     """
-    if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        mixer_dict = {}
-        i = 0
-        while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
-            mixer_dict[dataset_mixer[i]] = value
-            i += 2
-        dataset_mixer = mixer_dict
-
     splits = ["train", "test"] if splits is None else splits
     configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -587,7 +587,7 @@ def get_datasets(
 
 
 def combine_dataset(
-    dataset_mixer: dict | list,
+    dataset_mixer: dict,
     splits: list[str],
     configs: list[str] | None = None,
     columns_to_keep: list[str] | None = None,
@@ -600,7 +600,7 @@ def combine_dataset(
 
     Args:
         dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions.
+            Dictionary mapping dataset names to their training proportions.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -617,16 +617,6 @@ def combine_dataset(
             Whether to keep ids for training that are added during mixing.
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
-    if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        mixer_dict = {}
-        i = 0
-        while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
-            mixer_dict[dataset_mixer[i]] = value
-            i += 2
-        dataset_mixer = mixer_dict
     assert len(splits) == len(dataset_mixer), "Number of splits must match the number of datasets."
 
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
