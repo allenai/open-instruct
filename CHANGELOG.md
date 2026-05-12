@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Fix CSV header handling in `save_completion_lengths` and `save_benchmark_results_to_csv` in `open_instruct/benchmark_generators.py`: use `csvfile.tell() == 0` so the header is written exactly once across appends. Also convert remaining builtin `open(...)` calls in this file to `pathlib.Path.open(...)` (supersedes #1619 / #1623).
+- Bundle IFEval correctness fixes: `validate_choice` operand direction and `validate_frequency_capital_words` "around" tolerance in `open_instruct/if_functions.py`; `IFEvalVerifier` `ZeroDivisionError` when the instruction list is empty; deduplicate by deleting the unused `scripts/eval_constraints/if_functions.py` copy (supersedes #1615, #1646, #1655).
 - Fix NameError on `streaming_config/vllm_config` when importing from `grpo_fast.py` due to implicit global dependency. (https://github.com/allenai/open-instruct/pull/1675)
 - Fix `grpo.py` token-count inflation by emitting bool `response_masks` from `DataPreparationActor` (instead of int64 doc-id-valued masks) and dropping per-consumer `.bool()` coercions in `grpo_fast.py`, `grpo_utils.py`, and `olmo_core_train_modules.py`. Previously the OLMo-core path summed the doc-id-valued mask in `calculate_token_counts`, inflating `loss_denominator` by ~60× (https://github.com/allenai/open-instruct/pull/1668).
 - Fix hardcoded project version (https://github.com/allenai/open-instruct/pull/1636) by using setuptools scm's automatic versioning.
