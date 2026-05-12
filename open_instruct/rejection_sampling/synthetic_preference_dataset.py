@@ -30,6 +30,7 @@ from huggingface_hub.repocard import RepoCard
 from litellm import acompletion
 from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
+from transformers.hf_argparser import DataClassType
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -220,6 +221,6 @@ args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser(Args)  # ty: ignore[invalid-argument-type]
+    parser = HfArgumentParser(cast(DataClassType, Args))
     args = cast(Args, parser.parse_args_into_dataclasses()[0])
     main(args)

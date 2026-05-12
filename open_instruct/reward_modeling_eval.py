@@ -1,10 +1,11 @@
 from collections import defaultdict
+from typing import cast
 
 import pandas as pd
 import torch
 import torch.nn.functional as F
 from huggingface_hub import HfApi
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, PreTrainedModel, PreTrainedTokenizer
 
@@ -110,7 +111,9 @@ if __name__ == "__main__":
         target_columns=[CHOSEN_INPUT_IDS_KEY, REJECTED_INPUT_IDS_KEY],
         dataset_skip_cache=False,
     )
-    dataloader = DataLoader(eval_dataset, batch_size=8, collate_fn=SimplePreferenceCollator(tokenizer.pad_token_id))  # ty: ignore[invalid-argument-type]
+    dataloader = DataLoader(
+        cast(Dataset, eval_dataset), batch_size=8, collate_fn=SimplePreferenceCollator(tokenizer.pad_token_id)
+    )
     metrics, table = evaluate(model, dataloader, tokenizer, max_sampled_texts=5)
     print(metrics)
     print_rich_table(pd.DataFrame(table))

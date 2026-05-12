@@ -30,6 +30,7 @@ import torch
 import tqdm
 import vllm
 import yaml
+from transformers.hf_argparser import DataClassType
 from vllm.logprobs import FlatLogprobs
 
 from open_instruct import logger_utils
@@ -337,6 +338,6 @@ def main(args: SampleLogitsArguments, tc: TokenizerConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((SampleLogitsArguments, TokenizerConfig))  # ty: ignore[invalid-argument-type]
+    parser = ArgumentParserPlus(cast(tuple[DataClassType, ...], (SampleLogitsArguments, TokenizerConfig)))
     raw_args, raw_tc = parser.parse_args_into_dataclasses()
     main(cast(SampleLogitsArguments, raw_args), cast(TokenizerConfig, raw_tc))
