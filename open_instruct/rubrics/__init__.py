@@ -1,5 +1,9 @@
 """
-Evolving rubrics utilities for GRPO training.
+Rubrics utilities for GRPO training.
+
+Public API:
+    ``RubricManager`` — manages evolving rubric state across training steps.
+    Import it as ``from open_instruct.rubrics import RubricManager``.
 
 Environment Variables:
     RUBRIC_JUDGE_MODEL: LLM model for scoring responses against rubrics.
@@ -12,6 +16,7 @@ Environment Variables:
         Default: "600"
 """
 
+from open_instruct.rubrics.evolving_rubric_step import RubricManager
 from open_instruct.rubrics.prompts import INSTANCE_WISE_RUBRIC_GENERATION_PROMPT, RUBRIC_SCORING_PROMPT
 
-__all__ = ["RUBRIC_SCORING_PROMPT", "INSTANCE_WISE_RUBRIC_GENERATION_PROMPT"]
+__all__ = ["RubricManager", "RUBRIC_SCORING_PROMPT", "INSTANCE_WISE_RUBRIC_GENERATION_PROMPT"]

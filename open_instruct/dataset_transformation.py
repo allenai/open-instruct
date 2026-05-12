@@ -60,14 +60,7 @@ from datasets import Dataset, concatenate_datasets, load_dataset
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
-from transformers import (
-    AutoConfig,
-    AutoTokenizer,
-    GPTNeoXTokenizerFast,
-    LlamaTokenizer,
-    LlamaTokenizerFast,
-    PreTrainedTokenizer,
-)
+from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import launch_utils, logger_utils
@@ -788,9 +781,8 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
-    config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
-    if "olmo" in config.model_type:
+    if "olmo" in str(tc.tokenizer_name_or_path).lower():
         if tc.chat_template_name is None:
             pass  # just assume the user knows what they're doing
         elif "olmo" in tc.chat_template_name:
@@ -948,6 +940,7 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
+EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
@@ -1690,6 +1683,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+    chat_template = getattr(tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()[:16]
+    tokenizer_files_hash = json.dumps(tc.tokenizer_files_hash, sort_keys=True)
 
     # Add dataset source field to track origin after shuffling
     dataset = dataset.map(
@@ -1721,7 +1721,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
-            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}".encode()
+            (
+                f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}"
+                f"{tc.chat_template_name}:{tc.get_tokenizer_fn}:{tokenizer_files_hash}:{chat_template_hash}"
+            ).encode()
         ).hexdigest()[:16]
 
         # perform the transformation
@@ -1781,7 +1784,18 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    chat_template = getattr(tc.tokenizer, "chat_template", None)
+    try:
+        chat_template_str = json.dumps(chat_template, sort_keys=True)
+    except TypeError:
+        chat_template_str = str(chat_template)
+    chat_template_hash = hashlib.sha256(chat_template_str.encode()).hexdigest()
+    combined_dict = {
+        "cache_version": DATASET_CACHE_VERSION,
+        "dataset_configs": dc_dicts,
+        "tokenizer_config": tc_dict,
+        "chat_template_hash": chat_template_hash,
+    }
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
@@ -1793,7 +1807,7 @@ class DatasetTransformationCache:
 
     def load_or_transform_dataset(
         self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Dataset:
+    ) -> tuple[Dataset, dict[str, Any]]:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
@@ -1816,7 +1830,7 @@ class DatasetTransformationCache:
                 assert isinstance(loaded_dataset, Dataset)
                 if "index" not in loaded_dataset.column_names:
                     loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
-                return loaded_dataset
+                return loaded_dataset, EMPTY_DATASET_STATISTICS.copy()
 
         print("Cache not found, transforming datasets...")
 
@@ -1832,7 +1846,7 @@ class DatasetTransformationCache:
             combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
-            return combined_dataset
+            return combined_dataset, EMPTY_DATASET_STATISTICS.copy()
 
         # Push to hub with config hash as revision
         combined_dataset.push_to_hub(
@@ -1876,7 +1890,7 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
             repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
         )
         assert isinstance(final_dataset, Dataset)
-        return final_dataset
+        return final_dataset, EMPTY_DATASET_STATISTICS.copy()
 
 
 class LocalDatasetTransformationCache:
@@ -1924,7 +1938,7 @@ class LocalDatasetTransformationCache:
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached
-                return dataset, {"per_dataset_stats": [], "dataset_order": []}
+                return dataset, EMPTY_DATASET_STATISTICS.copy()
 
         print("Cache not found or invalid, transforming datasets...")
 

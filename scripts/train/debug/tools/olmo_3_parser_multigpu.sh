@@ -25,11 +25,11 @@ uv run python mason.py \
        --timeout 1h \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
-       --budget ai2/oe-adapt \
        --secret SERPER_API_KEY=${BEAKER_USER}_SERPER_API_KEY \
        --secret JINA_API_KEY=${BEAKER_USER}_JINA_API_KEY \
        --gpus 8 \
        --no_auto_dataset_cache \
+       --artifact_ttl 1d \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \

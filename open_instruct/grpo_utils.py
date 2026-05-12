@@ -1,22 +1,63 @@
 import enum
+import itertools
+import math
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
+import ray
 import torch
 import torch.distributed as dist
 
-from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils
+from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
     calibrate_checkpoint_state_dir,
     download_latest_checkpoint_from_gs,
+    ensure_universal_checkpoint_exists,
     get_beaker_whoami,
 )
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+
+def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
+    """Average pass@1 plus unbiased pass@k (Chen et al.) for k in 1, 2, 4, ... <= n.
+
+    ``correct_per_prompt`` is shape ``(num_prompts, num_completions)``; truthy entries mark correct
+    completions.
+
+    ``eval/pass_at_1`` is the average over prompts of ``c/n``, where ``c`` is the number of correct
+    completions for that prompt and ``n`` is the number of samples (same as ``eval/pass_at_1_unbiased``).
+    When ``n > 1``, ``eval/pass_at_{n}`` is the fraction with at least one correct completion.
+    ``eval/pass_at_{k}_unbiased`` uses ``1 - C(n-c, k) / C(n, k)`` per prompt (averaged), when there
+    are at least k incorrect completions; otherwise 1.0.
+    """
+    arr = np.asarray(correct_per_prompt, dtype=bool)
+    if arr.ndim != 2 or arr.shape[1] < 1:
+        return {}
+    num_samples = int(arr.shape[1])
+    c_arr = arr.sum(axis=1).astype(np.int64).reshape(-1)
+    metrics: dict[str, float] = {"eval/pass_at_1": float((c_arr.astype(np.float64) / num_samples).mean())}
+    if num_samples > 1:
+        metrics[f"eval/pass_at_{num_samples}"] = float((c_arr > 0).mean())
+    k_pow = 1
+    while k_pow <= num_samples:
+        estimates: list[float] = []
+        for c in c_arr:
+            c_int = int(c)
+            wrong = num_samples - c_int
+            if wrong >= k_pow:
+                estimates.append(1.0 - math.comb(wrong, k_pow) / math.comb(num_samples, k_pow))
+            else:
+                estimates.append(1.0)
+        metrics[f"eval/pass_at_{k_pow}_unbiased"] = float(np.mean(estimates))
+        k_pow *= 2
+    return metrics
 
 
 class GRPOLossType(enum.StrEnum):
@@ -60,8 +101,25 @@ class GRPOExperimentConfig(
     """the lower clip range"""
     clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_cap: float = 2.0
-    """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
+    use_rho_correction: bool = True
+    """Master switch for the train/infer ratio ρ = π^train_old / π^infer_old correction.
+    When True, ρ is clamped to [rho_clamp_lower_bound, rho_clamp_upper_bound] and tokens
+    whose ρ falls outside [rho_mask_lower_bound, rho_mask_upper_bound] have their
+    per-token policy loss zeroed out. This unifies truncated importance sampling
+    (https://arxiv.org/abs/...) and IcePop (https://arxiv.org/abs/2510.18855)."""
+    rho_clamp_lower_bound: float = 0.0
+    """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    rho_clamp_upper_bound: float = 2.0
+    """Upper bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    rho_mask_lower_bound: float = 0.0
+    """Tokens with ρ below this value are dropped (0 disables)."""
+    rho_mask_upper_bound: float = 0.0
+    """Tokens with ρ above this value are dropped (0 disables)."""
+    rho_mask_sequence_level: bool = False
+    """If True, apply the rho mask at the sequence level (DeepSeek-V3.2 style):
+    compute the mean log-ratio (1/|o_i|) Σ_t log(π_old / π_θ) per response sequence,
+    exponentiate to get a per-sequence ρ, and broadcast the keep/drop decision to every
+    token in that sequence. If False (default), the mask is applied per token."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -104,6 +162,8 @@ class GRPOExperimentConfig(
     """whether to offload parameters to CPU (reduces GPU memory usage)"""
     deepspeed_offload_optimizer: bool = False
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
+    deepspeed_checkpoint_load_universal: bool = False
+    """DeepSpeed checkpoint.load_universal: load checkpoints across different parallel configs"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     fsdp_shard_degree: int | None = None
@@ -130,7 +190,7 @@ class GRPOExperimentConfig(
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    checkpoint_state_freq: int = -1
+    checkpoint_state_freq: int = 200
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
@@ -162,23 +222,25 @@ class GRPOExperimentConfig(
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for local pass@k metrics."""
+    eval_top_p: float | None = None
+    """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
             )
-        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
+        if self.use_vllm_logprobs and self.use_rho_correction:
             raise ValueError(
-                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
-                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
+                "Cannot use both `use_vllm_logprobs` and `use_rho_correction`. "
+                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making the ρ correction pointless."
             )
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
-        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
-            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
@@ -232,11 +294,28 @@ class GRPOExperimentConfig(
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(self.checkpoint_state_dir)
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
+            raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.use_rho_correction:
+            if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
+                raise ValueError(
+                    f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
+                )
+            if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
+                raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
+            if self.rho_clamp_lower_bound > 0.0 and self.rho_clamp_lower_bound >= 1.0:
+                raise ValueError(
+                    f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
+                )
+            if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
+                raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -246,21 +325,111 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
     return vllm_logprobs
 
 
-def compute_tis_weights(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, cap: float
-) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """Compute truncated importance sampling weights: clamp(π_old / π_vllm, max=cap).
+def compute_vllm_local_debug_metrics(
+    local_logprobs: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor
+) -> dict[str, float]:
+    """Compute debug metrics comparing vLLM logprobs against locally-recomputed logprobs."""
+    with torch.no_grad():
+        valid_mask = response_mask & ~torch.isnan(vllm_logprobs)
+        valid_count = valid_mask.sum()
+        diff = (local_logprobs - vllm_logprobs).abs()
+        masked_diff = torch.masked_fill(diff, ~valid_mask, 0.0)
+        mean_diff = masked_diff.sum() / valid_count if valid_count > 0 else torch.tensor(0.0)
+        max_diff = masked_diff.max() if valid_count > 0 else torch.tensor(0.0)
+        std_diff = masked_diff[valid_mask].std() if valid_count > 1 else torch.tensor(0.0)
 
-    Returns (clamped, unclamped) tuple, both None when cap <= 0 (disabled).
+        reverse_kl = torch.exp(vllm_logprobs) * (vllm_logprobs - local_logprobs)
+        masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
+        mean_reverse_kl = masked_reverse_kl.sum() / valid_count if valid_count > 0 else torch.tensor(0.0)
+
+    return {
+        "debug/vllm_vs_local_logprob_diff_mean": float(mean_diff),
+        "debug/vllm_vs_local_logprob_diff_max": float(max_diff),
+        "debug/vllm_vs_local_logprob_diff_std": float(std_diff),
+        "debug/vllm_local_reverse_kl": float(mean_reverse_kl),
+    }
+
+
+def _rho_drop_masks(
+    rho: torch.Tensor, response_mask: torch.Tensor, lower: float, upper: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    dropped_low = (rho < lower) & response_mask if lower > 0.0 else torch.zeros_like(response_mask)
+    dropped_high = (rho > upper) & response_mask if upper > 0.0 else torch.zeros_like(response_mask)
+    return dropped_low, dropped_high
+
+
+def _rho_sequence_level(logprob_diff: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    """Per-sequence ρ = exp((1/|o_i|) Σ_t (log π_old - log π_θ)), broadcast to every token.
+
+    Sequences are identified with rows of ``logprob_diff`` (shape [B, T]); padding tokens
+    contribute 0 to the sum and are excluded from the count. Empty rows return ρ = 1.
     """
-    if cap <= 0:
-        return None, None
-    unclamped = torch.ones_like(old_logprob)
-    logprob_diff = old_logprob - vllm_logprobs
-    logprob_diff = torch.where(response_mask, logprob_diff.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff))
-    unclamped = torch.where(response_mask, torch.exp(logprob_diff), unclamped)
-    clamped = torch.clamp(unclamped, max=cap)
-    return clamped, unclamped
+    valid = response_mask.float()
+    seq_sum = (logprob_diff * valid).sum(dim=-1, keepdim=True)
+    seq_count = valid.sum(dim=-1, keepdim=True).clamp_min(1.0)
+    seq_mean = seq_sum / seq_count
+    return torch.exp(seq_mean).expand_as(logprob_diff)
+
+
+@dataclass
+class RhoCorrection:
+    """Per-token stop-gradient correction for the train/infer engine mismatch.
+
+    ``weights`` is multiplied into the policy loss (all-ones disables the correction).
+    ``metrics`` maps wandb keys to per-token tensors that get reduced by
+    ``masked_mean(., response_mask)`` at logging time.
+    ``histogram_metrics`` maps wandb keys to flat 1D tensors of values
+    (response tokens only); these bypass the scalar reduction and are
+    concatenated across micro-batches and logged as wandb histograms.
+    """
+
+    weights: torch.Tensor
+    metrics: dict[str, torch.Tensor]
+    histogram_metrics: dict[str, torch.Tensor] = field(default_factory=dict)
+
+
+def compute_rho_correction(
+    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
+) -> RhoCorrection:
+    """Compute the unified ρ = π^train_old / π^infer_old correction (clamp + mask)."""
+    logprob_diff = torch.where(
+        response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
+    )
+    rho = torch.exp(logprob_diff)
+    rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
+    if not config.use_rho_correction:
+        return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
+
+    rho_effective = _rho_sequence_level(logprob_diff, response_mask) if config.rho_mask_sequence_level else rho
+    dropped_low, dropped_high = _rho_drop_masks(
+        rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+    )
+    in_range = response_mask & ~dropped_low & ~dropped_high
+
+    rho_clamped = rho_effective
+    if config.rho_clamp_lower_bound > 0.0:
+        rho_clamped = torch.clamp(rho_clamped, min=config.rho_clamp_lower_bound)
+    if config.rho_clamp_upper_bound > 0.0:
+        rho_clamped = torch.clamp(rho_clamped, max=config.rho_clamp_upper_bound)
+
+    weights = torch.where(in_range, rho_clamped, torch.zeros_like(rho_clamped))
+    metrics = {
+        "val/rho_drop_frac": (dropped_low | dropped_high).float(),
+        "val/rho_drop_low_frac": dropped_low.float(),
+        "val/rho_drop_high_frac": dropped_high.float(),
+        "val/rho_weight": weights.float(),
+        "val/rho_clipfrac": (rho_clamped != rho_effective).float(),
+    }
+    return RhoCorrection(weights=weights, metrics=metrics, histogram_metrics=rho_hist)
+
+
+def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: RhoCorrection) -> None:
+    for key, values in correction.histogram_metrics.items():
+        acc.setdefault(key, []).append(values.detach().cpu())
+
+
+def finalize_rho_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.ndarray]:
+    return {key: torch.cat(chunks).numpy() for key, chunks in acc.items()}
 
 
 def resolve_old_logprob(
@@ -298,7 +467,7 @@ def compute_grpo_loss(
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    tis_weights: torch.Tensor | None = None,
+    rho_weights: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -311,9 +480,8 @@ def compute_grpo_loss(
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    if tis_weights is not None:
-        pg_losses = pg_losses * tis_weights
-        pg_losses2 = pg_losses2 * tis_weights
+    pg_losses = pg_losses * rho_weights
+    pg_losses2 = pg_losses2 * rho_weights
 
     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
@@ -333,7 +501,7 @@ def compute_grpo_loss(
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
-    attention_mask: torch.Tensor,
+    attention_mask: torch.Tensor | None,
     position_ids: torch.Tensor,
     pad_token_id: int,
     temperature: float,
@@ -381,7 +549,6 @@ def compute_logprobs(
             batch_indices = list(range(start_idx, end_idx))
 
             query_responses = [data_BT.query_responses[i] for i in batch_indices]
-            attention_masks = [data_BT.attention_masks[i] for i in batch_indices]
             position_ids = [data_BT.position_ids[i] for i in batch_indices]
             shapes = [tuple(t.shape) for t in query_responses]
 
@@ -390,7 +557,7 @@ def compute_logprobs(
                     single_logprobs, _ = forward_for_logprobs(
                         model,
                         data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
+                        None,
                         data_BT.position_ids[i],
                         pad_token_id,
                         temperature,
@@ -398,22 +565,15 @@ def compute_logprobs(
                     )
 
                     response_mask_BT = data_BT.response_masks[i]
-                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
+                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:])
                     logprobs_BT.append(single_logprobs)
                 continue
 
             batch_query_responses = torch.cat(query_responses, dim=0)
-            batch_attention_masks = torch.cat(attention_masks, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
 
             batch_logprobs, _ = forward_for_logprobs(
-                model,
-                batch_query_responses,
-                batch_attention_masks,
-                batch_position_ids,
-                pad_token_id,
-                temperature,
-                False,
+                model, batch_query_responses, None, batch_position_ids, pad_token_id, temperature, False
             )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
@@ -421,7 +581,7 @@ def compute_logprobs(
 
             for i, logprob_BT in zip(batch_indices, split_logprobs):
                 response_mask_BT = data_BT.response_masks[i]
-                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:].bool())
+                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:])
                 logprobs_BT.append(logprob_BT)
 
     return logprobs_BT
@@ -463,8 +623,11 @@ _SCALAR_LOSS_STAT_KEYS = [
     "objective/kl3_avg",
     "policy/clipfrac_avg",
     "val/ratio",
-    "val/tis_clipfrac",
-    "val/tis_ratio",
+    "val/rho_clipfrac",
+    "val/rho_weight",
+    "val/rho_drop_frac",
+    "val/rho_drop_low_frac",
+    "val/rho_drop_high_frac",
 ]
 
 
@@ -488,8 +651,7 @@ def populate_sample_loss_stats(
     ref_logprobs: torch.Tensor | None,
     entropy: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    tis_clamped: torch.Tensor | None = None,
-    tis_unclamped: torch.Tensor | None = None,
+    rho_metrics: dict[str, torch.Tensor] | None = None,
 ) -> None:
     with torch.no_grad():
         if config.load_ref_policy and ref_logprobs is not None:
@@ -499,11 +661,9 @@ def populate_sample_loss_stats(
             for j in range(4):
                 loss_stats_B[f"objective/kl{j}_avg"][sample_idx] = kl_values[j]
             loss_stats_B["loss/kl_avg"][sample_idx] = kl_values[config.kl_estimator] * config.beta
-        if tis_clamped is not None and tis_unclamped is not None:
-            loss_stats_B["val/tis_ratio"][sample_idx] = masked_mean(tis_clamped.float(), response_mask)
-            loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
-                (tis_clamped < tis_unclamped).float(), response_mask
-            )
+        if rho_metrics is not None:
+            for key, value in rho_metrics.items():
+                loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
@@ -523,3 +683,43 @@ def compute_metrics_from_loss_stats(
         metrics[key] = (loss_stats_B[key] * weights).sum().item()
     metrics["val/ratio_var"] = (weights * (loss_stats_B["val/ratio"] - metrics["val/ratio"]) ** 2).sum().item()
     return metrics
+
+
+def perform_weight_sync(
+    broadcast_refs: list[ray.ObjectRef],
+    vllm_engines: list[ray.actor.ActorHandle],
+    actor_manager: ray.actor.ActorHandle,
+    *,
+    progress: bool = False,
+    inflight_updates: bool = False,
+) -> tuple[dict[str, float], list]:
+    """Pause actors, broadcast weights, await/skip inner engine RPCs, wake engines, resume actors.
+
+    With `inflight_updates=False`, broadcast results are treated as
+    list-of-lists of inner engine-update ObjectRefs which get flattened and
+    awaited before waking. Pass `inflight_updates=True` to skip that inner
+    await — either because `broadcast_refs` are already engine RPC refs, or
+    because updates are intentionally left in flight.
+    """
+    start = time.perf_counter()
+    ray.get(actor_manager.set_should_stop.remote(True))
+    try:
+        results, actor_sync_times = utils.ray_get_with_progress(
+            broadcast_refs, desc="Broadcasting weights to vLLM engines", enable=progress
+        )
+        if not inflight_updates:
+            utils.ray_get_with_progress(
+                itertools.chain.from_iterable(results), desc="Waiting for vLLM engine update RPCs", enable=progress
+            )
+        utils.ray_get_with_progress(
+            [e.wake_up.remote() for e in vllm_engines], desc="Waking up vLLM engines", enable=progress
+        )
+    finally:
+        ray.get(actor_manager.set_should_stop.remote(False))
+    sync_time_stats = {"time/weight_sync": time.perf_counter() - start}
+    if actor_sync_times:
+        sync_time_stats["time/weight_sync_mean"] = float(np.mean(actor_sync_times))
+        sync_time_stats["time/weight_sync_min"] = float(np.min(actor_sync_times))
+        sync_time_stats["time/weight_sync_max"] = float(np.max(actor_sync_times))
+        sync_time_stats["time/weight_sync_median"] = float(np.median(actor_sync_times))
+    return sync_time_stats, results

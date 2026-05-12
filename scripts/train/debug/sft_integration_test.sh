@@ -36,10 +36,10 @@ if [ -n "$1" ]; then
         --pure_docker_mode \
         --preemptible \
         --num_nodes 1 \
-        --budget ai2/oe-adapt \
         --gpus 1 \
         --non_resumable \
         --no_auto_dataset_cache \
+        --artifact_ttl 1d \
         -- \
         $LAUNCH_CMD
 else

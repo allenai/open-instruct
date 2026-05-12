@@ -23,7 +23,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --gpus 8 \
-    --budget ai2/oe-adapt \
+    --artifact_ttl 1d \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
@@ -34,7 +34,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
@@ -68,7 +67,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy True \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME} \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME}/tmp-1d \
     --keep_last_n_checkpoints -1 \
     --save_traces \
     --push_to_hub False

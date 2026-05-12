@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 
 from open_instruct import logger_utils
-from open_instruct.rubrics import INSTANCE_WISE_RUBRIC_GENERATION_PROMPT
+from open_instruct.rubrics.prompts import INSTANCE_WISE_RUBRIC_GENERATION_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
 
 logger = logger_utils.setup_logger(__name__)
