@@ -31,7 +31,7 @@ from vllm import LLM, SamplingParams
 
 from open_instruct.dataset_processor import INPUT_IDS_PROMPT_KEY, DatasetConfig, SFTDatasetProcessor
 from open_instruct.rejection_sampling.api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
-from open_instruct.utils import ArgumentParserPlus, combine_dataset
+from open_instruct.utils import ArgumentParserPlus, combine_dataset, parse_dataset_mixer_list
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -132,7 +132,9 @@ def format_conversation(messages: list) -> str:
 
 def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
     dataset = combine_dataset(
-        args.dataset_mixer_list, splits=args.dataset_splits, columns_to_keep=[dataset_config.sft_messages_key]
+        parse_dataset_mixer_list(args.dataset_mixer_list),
+        splits=args.dataset_splits,
+        columns_to_keep=[dataset_config.sft_messages_key],
     )
     if args.dataset_end_idx is None:
         args.dataset_end_idx = len(dataset)

@@ -707,7 +707,7 @@ def _get_batch_logps(
     loss_mask = labels[:, 1:] != -100
 
     if average_log_prob:
-        return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
+        return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1).clamp(min=1)
     else:
         return (per_token_logps * loss_mask).sum(-1)
 
