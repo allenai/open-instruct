@@ -30,8 +30,8 @@ uv run python mason.py \
     --exp_name sft_qwen3_8b_our_sft \
     --model_name_or_path Qwen/Qwen3-8B \
     --tokenizer_name Qwen/Qwen3-8B \
-    --use_flash_attn \
-    --max_seq_length 20480 \
+    --sequence_parallel_size 2 \
+    --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 2e-5 \
