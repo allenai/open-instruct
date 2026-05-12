@@ -679,7 +679,6 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token
-            assert tc.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
         # else, pythia / other models
         else:
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
@@ -739,9 +738,6 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                assert tc.add_bos, (
-                    "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
-                )
             # else, pythia / other models
             else:
                 num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
@@ -795,8 +791,6 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             pass  # just assume the user knows what they're doing
         elif "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
-        else:
-            assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -818,11 +812,6 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if tc.chat_template_name is None or "olmo" not in tc.chat_template_name:
-                    assert tc.add_bos, (
-                        "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
-                        "if using an older chat template."
-                    )
             # else, pythia / other models
             else:
                 num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})

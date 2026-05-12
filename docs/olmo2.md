@@ -3,7 +3,7 @@
 Here we'll add commands and references to the training runs of OLMo 2.
 We'll prioritize the smaller models where more people are hoping to study and reproduce them.
 
-Core to training OLMo models (version 1 and 2) at least are to include the following flags: `--add_bos` and `--use_slow_tokenizer False` because of the tokenizer used.
+For OLMo models (version 1 and 2), many legacy commands include `--add_bos`; newer tokenizer setup no longer requires it. Keep `--use_slow_tokenizer False` where shown because of the tokenizer used.
 
 For more details on how to convert these to standard launch commands (without ai2 `mason.py`) see the `tulu3.md` docs.
 
