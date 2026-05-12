@@ -505,18 +505,23 @@ def compute_olmo_core_doc_lens(attention_mask: torch.Tensor) -> tuple[torch.Tens
     ``attention_mask``, with 0 for padding. OLMo-core's Transformer requires explicit
     ``doc_lens`` (B, max_docs) int32 and ``max_doc_lens`` (list[int], per row) to do intra-doc
     attention; passing ``position_ids`` alone is a silent no-op.
+
+    Padding spans (zeros in ``attention_mask``) are emitted as their own segments so that each
+    row's ``doc_lens`` sums to the row length. OLMo-core flattens ``doc_lens`` into a single
+    cumulative offset across the batch, so dropping padding here would shift subsequent rows'
+    document boundaries into the previous row's padding region.
     """
     B = attention_mask.size(0)
     rows: list[torch.Tensor] = []
     for i in range(B):
-        vals, counts = torch.unique_consecutive(attention_mask[i], return_counts=True)
-        rows.append(counts[vals > 0])
+        _, counts = torch.unique_consecutive(attention_mask[i], return_counts=True)
+        rows.append(counts)
     max_docs = max((t.numel() for t in rows), default=0)
     doc_lens = torch.zeros((B, max_docs), dtype=torch.int32, device=attention_mask.device)
     for i, t in enumerate(rows):
         if t.numel():
             doc_lens[i, : t.numel()] = t.to(torch.int32)
-    max_doc_lens = [int(t.max().item()) if t.numel() else 0 for t in rows]
+    max_doc_lens = doc_lens.max(dim=1).values.tolist() if max_docs > 0 else [0] * B
     return doc_lens, max_doc_lens
 
 

@@ -26,10 +26,10 @@ class ComputeOlmoCoreDocLensTest(unittest.TestCase):
             (
                 "three_docs_with_pad",
                 torch.tensor([[1, 1, 2, 2, 2, 3, 0, 0]], dtype=torch.long),
-                torch.tensor([[2, 3, 1]], dtype=torch.int32),
+                torch.tensor([[2, 3, 1, 2]], dtype=torch.int32),
                 [3],
             ),
-            ("all_pad", torch.tensor([[0, 0, 0]], dtype=torch.long), torch.zeros((1, 0), dtype=torch.int32), [0]),
+            ("all_pad", torch.tensor([[0, 0, 0]], dtype=torch.long), torch.tensor([[3]], dtype=torch.int32), [3]),
         ]
     )
     def test_single_row(self, _name, attention_mask, expected_doc_lens, expected_max):
@@ -40,9 +40,14 @@ class ComputeOlmoCoreDocLensTest(unittest.TestCase):
     def test_batch_padding_to_max_docs(self):
         attention_mask = torch.tensor([[1, 1, 1, 2, 2, 0, 0], [1, 1, 2, 2, 3, 3, 3]], dtype=torch.long)
         doc_lens, max_doc_lens = grpo_utils.compute_olmo_core_doc_lens(attention_mask)
-        expected = torch.tensor([[3, 2, 0], [2, 2, 3]], dtype=torch.int32)
+        expected = torch.tensor([[3, 2, 2], [2, 2, 3]], dtype=torch.int32)
         torch.testing.assert_close(doc_lens, expected)
         self.assertEqual(max_doc_lens, [3, 3])
+
+    def test_row_sums_equal_seq_len(self):
+        attention_mask = torch.tensor([[1, 1, 1, 2, 2, 0, 0], [1, 1, 2, 2, 3, 3, 3]], dtype=torch.long)
+        doc_lens, _ = grpo_utils.compute_olmo_core_doc_lens(attention_mask)
+        torch.testing.assert_close(doc_lens.sum(dim=1, dtype=torch.int32), torch.tensor([7, 7], dtype=torch.int32))
 
 
 if __name__ == "__main__":
