@@ -1,6 +1,7 @@
 import gc
 import gzip
 import hashlib
+import json
 import os
 import shutil
 import tempfile
@@ -105,6 +106,25 @@ class TestConfigHash(unittest.TestCase):
         args, kwargs = load_dataset.call_args
         self.assertEqual(args[:2], ("org/repo", "named_config"))
         self.assertEqual(kwargs["split"], "train")
+
+
+class TestToolNormalization(unittest.TestCase):
+    def test_normalize_tools_accepts_json_encoded_schema_list(self):
+        tool_schema = {
+            "type": "function",
+            "function": {
+                "name": "bash",
+                "description": "Execute bash",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+        tools = open_instruct.dataset_transformation._normalize_tools_for_chat_template(json.dumps([tool_schema]))
+
+        self.assertEqual(tools, [tool_schema])
+
+    def test_normalize_tools_rejects_tool_name_lists(self):
+        with self.assertRaises(TypeError):
+            open_instruct.dataset_transformation._normalize_tools_for_chat_template(["bash"])
 
 
 class TestCachedDataset(unittest.TestCase):

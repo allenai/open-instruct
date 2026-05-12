@@ -951,8 +951,34 @@ ENV_CONFIG_KEY = "env_config"
 EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v8: Drop tools column after SFT tokenization.
-DATASET_CACHE_VERSION = "v9"
+# to invalidate old caches. v10: Parse JSON-string tool schemas before templating.
+DATASET_CACHE_VERSION = "v10"
+
+
+def _normalize_tools_for_chat_template(tools: Any) -> list[dict[str, Any]] | None:
+    """Normalize dataset tool schemas before passing them to chat templates."""
+    if tools is None or tools == "":
+        return None
+
+    if isinstance(tools, str):
+        try:
+            tools = json.loads(tools)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{TOOLS_COLUMN_KEY} must be a JSON-encoded tool schema list, got: {tools!r}") from exc
+
+    if isinstance(tools, dict):
+        tools = [tools]
+
+    if not isinstance(tools, list):
+        raise TypeError(f"{TOOLS_COLUMN_KEY} must be a list, dict, JSON string, or None, got {type(tools).__name__}")
+
+    if not tools:
+        return None
+
+    if not all(isinstance(tool, dict) for tool in tools):
+        raise TypeError(f"{TOOLS_COLUMN_KEY} must contain JSON-schema dictionaries, got: {tools!r}")
+
+    return tools
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1186,7 +1212,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    tools = row.get("tools") or None
+    tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tools=tools,
@@ -1214,7 +1240,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    tools = row.get("tools") or None
+    tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tools=tools,
