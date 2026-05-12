@@ -2042,7 +2042,10 @@ class LocalDatasetTransformationCache:
                     trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != MASKED_TOKEN_VALUE)
                     return {"token_count": token_count, "label_token_count": trainable_tokens}
 
-                token_count_dataset = dataset.map(count_tokens, batched=False)
+                token_count_dataset = dataset.map(
+                    count_tokens, batched=False, num_proc=max_num_processes(),
+                    desc=f"Counting tokens in {dc.dataset_name}",
+                )
                 total_tokens = sum(token_count_dataset["token_count"])
                 trainable_tokens = sum(token_count_dataset["label_token_count"])
                 stats["total_tokens"] = total_tokens

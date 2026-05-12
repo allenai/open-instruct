@@ -300,11 +300,15 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "Qwen/Qwen3-0.6B": "qwen3_0_6B",
     "Qwen/Qwen3-0.6B-Base": "qwen3_0_6B",
     "Qwen/Qwen3-1.7B": "qwen3_1_7B",
+    "Qwen/Qwen3-1.7B-Base": "qwen3_1_7B",
     "Qwen/Qwen3-4B": "qwen3_4B",
     "Qwen/Qwen3-4B-Base": "qwen3_4B",
     "Qwen/Qwen3-8B": "qwen3_8B",
+    "Qwen/Qwen3-8B-Base": "qwen3_8B",
     "Qwen/Qwen3-14B": "qwen3_14B",
+    "Qwen/Qwen3-14B-Base": "qwen3_14B",
     "Qwen/Qwen3-32B": "qwen3_32B",
+    "Qwen/Qwen3-32B-Base": "qwen3_32B",
 }
 
 
@@ -445,17 +449,74 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+# HF model_types for which we have a verified OC→HF fallback (state-dict mapping
+# table in olmo-core's convert.py + any post-translation key renames we apply
+# below). Anything outside this set falls through and the original
+# NotImplementedError re-raises — better a loud failure than a silently bad
+# checkpoint.
+_OC_TO_HF_FALLBACK_SUPPORTED: set[str] = {"qwen3"}
+
+
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
     try:
         unwrapped_model = model_config.build(init_device="cpu")
         unwrapped_model.load_state_dict(state_dict)
         save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
     except NotImplementedError as exc:
+        # save_hf_model can raise NotImplementedError from a handful of places
+        # in olmo-core (get_hf_config rejects non-Olmo block types, MoE/hybrid
+        # variants need a different save path, etc.). We only have a verified
+        # fallback for HF model types in _OC_TO_HF_FALLBACK_SUPPORTED — for
+        # anything else, re-raise so a wrong-shape conversion can't silently
+        # corrupt a checkpoint.
+        hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
+        model_type = getattr(hf_config, "model_type", None)
+        if model_type not in _OC_TO_HF_FALLBACK_SUPPORTED:
+            logger.error(
+                "save_hf_model raised NotImplementedError and we have no verified "
+                "fallback for model_type=%r. Re-raising; the conversion target "
+                "(%s) needs an entry in _OC_TO_HF_FALLBACK_SUPPORTED plus any "
+                "matching post-translation key renames.",
+                model_type, original_model_name_or_path,
+            )
+            raise
         logger.warning(
-            "Falling back to raw state_dict save because HF export is unsupported for this OLMo-core model: %s", exc
+            "save_hf_model raised NotImplementedError; using AutoConfig "
+            "fallback path for model_type=%r (%s): %s",
+            model_type, original_model_name_or_path, exc,
         )
-        os.makedirs(save_dir, exist_ok=True)
-        torch.save(state_dict, os.path.join(save_dir, "model_state_dict.pt"))
+        from accelerate import init_empty_weights
+        from olmo_core.nn.hf.convert import convert_state_to_hf
+
+        hf_state_dict = convert_state_to_hf(hf_config, state_dict)
+        # Upstream convert.py is missing a "qwen3" entry in the OC→HF direction
+        # of MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_WEIGHT_MAPPINGS (the HF→OC
+        # direction at line 110 has it, just not the reverse). So OC norm
+        # names get Olmo3-flavored HF names. Patch them up for Qwen3's
+        # standard pre-norm layout:
+        #   OC attention_norm  → HF input_layernorm        (pre-attn)
+        #   OC feed_forward_norm → HF post_attention_layernorm (pre-mlp)
+        if model_type == "qwen3":
+            renamed = {}
+            for k, v in hf_state_dict.items():
+                if ".post_attention_layernorm." in k:
+                    k = k.replace(".post_attention_layernorm.", ".input_layernorm.")
+                elif ".post_feedforward_layernorm." in k:
+                    k = k.replace(".post_feedforward_layernorm.", ".post_attention_layernorm.")
+                renamed[k] = v
+            hf_state_dict = renamed
+        hf_state_dict = {k: v.contiguous() for k, v in hf_state_dict.items()}
+        with init_empty_weights():
+            hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
+        # `assign=True` requires the state dict to match the model's parameter
+        # names exactly; we crash here if any rename above was missed instead
+        # of silently dropping tensors with `strict=False`.
+        hf_model.load_state_dict(hf_state_dict, assign=True)
+        # Mirror save_hf_model's vocab-resize step in case training added tokens.
+        embed_key = "model.embed_tokens.weight"
+        if embed_key in hf_state_dict and hf_model.config.vocab_size != hf_state_dict[embed_key].shape[0]:
+            hf_model.resize_token_embeddings(hf_state_dict[embed_key].shape[0])
+        hf_model.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
     from open_instruct.model_utils import sanitize_saved_tokenizer_config
     sanitize_saved_tokenizer_config(save_dir)

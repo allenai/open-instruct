@@ -10,8 +10,8 @@ Example usage:
 import argparse
 
 import torch
-import torch.distributed.checkpoint.state_dict as dcp_state_dict
 import transformers
+from olmo_core.distributed.checkpoint import load_state_dict as oc_load_state_dict
 
 from open_instruct import logger_utils, olmo_core_utils
 
@@ -35,7 +35,11 @@ def main():
     model = model_config.build(init_device="cpu")
 
     state_dict = {"model": model.state_dict()}
-    dcp_state_dict.load_state_dict(state_dict, checkpoint_id=args.checkpoint_dir)
+    # olmo-core writes DCP shards into <checkpoint_dir>/model_and_optim/ (see
+    # olmo_core/train/checkpoint.py:213). Bare torch dcp.load on the parent dir
+    # raises "metadata is None"; using olmo-core's own loader also handles a
+    # transform_descriptors version skew between torch and the DCP format.
+    oc_load_state_dict(f"{args.checkpoint_dir}/model_and_optim", state_dict)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
     olmo_core_utils.save_state_dict_as_hf(
