@@ -611,9 +611,6 @@ class PolicyTrainerRayProcess(RayProcess):
         """
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
-        if len(data_BT) == 0:
-            logger.warning("[Training] Empty batch received, skipping training step")
-            return [], {}
 
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
@@ -621,7 +618,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 data_BT = self.splitter.split_collated_batch(data_BT)
 
         data_BT = data_BT.to(self.device)
-        data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
@@ -654,7 +650,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     for i in range(len(data_BT.query_responses)):
                         if self.args.use_vllm_logprobs:
                             old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:].bool()
+                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
                             )
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
@@ -668,6 +664,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        rho_histograms: dict[str, list[torch.Tensor]] = {}
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -724,12 +721,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    tis_clamped_BT, tis_unclamped_BT = grpo_utils.compute_tis_weights(
-                        old_logprob_BT,
-                        vllm_logprobs_BT,
-                        response_mask_BT,
-                        self.args.truncated_importance_sampling_ratio_cap,
+                    rho_BT = grpo_utils.compute_rho_correction(
+                        old_logprob_BT, vllm_logprobs_BT, response_mask_BT, self.args
                     )
+                    grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -737,7 +732,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        tis_weights=tis_clamped_BT,
+                        rho_weights=rho_BT.weights,
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
@@ -771,8 +766,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         entropy_BT,
                         self.args,
-                        tis_clamped=tis_clamped_BT,
-                        tis_unclamped=tis_unclamped_BT,
+                        rho_metrics=rho_BT.metrics,
                     )
 
             batch_metrics = batch_data["metrics"]
@@ -787,6 +781,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics[key] = value
                     else:
                         array_metrics[key] = value
+                if self.rank == 0:
+                    array_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
                 return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1042,10 +1038,8 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
-    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
-        assert streaming_config.mask_tool_use, (
-            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-        )
+    if tools_config.enabled and (args.use_vllm_logprobs or args.use_rho_correction):
+        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or the ρ correction."
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -1569,9 +1563,6 @@ def one_training_step(
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
-        if all(len(m) == 0 for m in metrics):
-            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return 0
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
@@ -1603,6 +1594,9 @@ def one_training_step(
         "policy/entropy_avg",
         "val/ratio",
         "val/ratio_var",
+        "val/rho_drop_frac",
+        "val/rho_drop_low_frac",
+        "val/rho_drop_high_frac",
     }
     average_metrics = {}
     # Average scalar metrics from each worker
@@ -1623,8 +1617,9 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
-    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics[0]["batch/response_lengths"]
+    sp_leader_metrics = [am for r, am in enumerate(array_metrics) if r % args.sequence_parallel_size == 0]
+    prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
+    response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(

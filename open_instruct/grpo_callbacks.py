@@ -235,7 +235,7 @@ class DataPreparationActorCheckpointCallback(Callback):
 
         try:
             data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-            ray.get(data_prep_actor.restore_state.remote(state_dict["data_prep_state"]))
+            ray.get(data_prep_actor.set_state.remote(state_dict["data_prep_state"]))
             logger.info("Restored DataPreparationActor state from checkpoint")
         except (ray.exceptions.RayError, ValueError) as e:
             logger.warning(f"Failed to restore DataPreparationActor state: {e}")
