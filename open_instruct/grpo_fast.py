@@ -496,7 +496,7 @@ class PolicyTrainerRayProcess(RayProcess):
             expected = list(range(dp_rank * args.sequence_parallel_size, (dp_rank + 1) * args.sequence_parallel_size))
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
-        self._streaming_dataloader = streaming_config.build_dataloader(
+        self._streaming_dataloader = self.streaming_config.build_dataloader(
             tokenizer=tokenizer,
             dp_rank=dp_rank,
             fs_local_rank=self.local_rank,
@@ -925,7 +925,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 wandb_url=wandb_url,
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
-                stop_strings=streaming_config.stop_strings,
+                stop_strings=self.streaming_config.stop_strings,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,
@@ -1541,6 +1541,7 @@ def weight_sync_thread(
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
@@ -1931,6 +1932,7 @@ def cleanup_training_resources(
 def run_training(
     args,
     streaming_config,
+    vllm_config,
     tokenizer,
     train_dataset,
     eval_dataset,
@@ -2106,6 +2108,7 @@ def run_training(
         num_step_tokens = one_training_step(
             args,
             streaming_config,
+            vllm_config,
             policy_group,
             tokenizer,
             data_thread_metrics,
@@ -2467,6 +2470,7 @@ def main(
         episode = run_training(
             args,
             streaming_config,
+            vllm_config,
             tokenizer,
             train_dataset,
             eval_dataset,
