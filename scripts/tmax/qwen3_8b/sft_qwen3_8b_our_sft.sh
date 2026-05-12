@@ -19,7 +19,6 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --gpus 8 \
-    --no_auto_dataset_cache \
     -- \
     accelerate launch \
     --mixed_precision bf16 \
