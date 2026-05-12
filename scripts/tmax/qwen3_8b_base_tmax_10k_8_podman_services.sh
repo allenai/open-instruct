@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# RL on Qwen/Qwen3-8B + hamishivi/swerl-tmax-15k
+# RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-15k
 # 4 nodes x 8 GPUs (32 GPUs total)
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
@@ -8,9 +8,9 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3-8B (8 Podman services)" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B (4 Podman services)" \
        --pure_docker_mode \
-       --workspace ai2/olmo-instruct \
+       --workspace ai2/dr-tulu-ablations \
        --priority urgent \
        --preemptible \
        --num_nodes 3 \
@@ -25,16 +25,20 @@ uv run python mason.py \
        --env DOCKERHUB_USERNAME=hamishi740 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_DOCKER_AUTO_REMOVE=1 \
-       --env SWERL_PODMAN_SERVICE_COUNT=8 \
-       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_PODMAN_SERVICE_COUNT=4 \
+       --env SWERL_DOCKER_START_CONCURRENCY=64 \
+       --env SWERL_DOCKER_EXEC_CONCURRENCY=256 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=60 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=10m \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -56,15 +60,18 @@ uv run python mason.py \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
+    --use_vllm_logprobs true \
+    --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --vllm_enforce_eager \
+    --vllm_enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
+    --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --pool_size 768 \
     --max_steps 100 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_hermes \
@@ -74,8 +81,6 @@ uv run python mason.py \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
-    --truncated_importance_sampling_ratio_cap 2.0 \
-    --no_resampling_pass_rate 0.875 \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name swerl_qwen3_8b_base_tmax_10k_grpo_8_podman_services \
