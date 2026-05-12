@@ -17,20 +17,24 @@ import asyncio
 import copy
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pprint import pformat
 
+import numpy as np
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
+from openai import AsyncOpenAI
 from rich.pretty import pprint
+from tqdm.asyncio import tqdm
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 from open_instruct.dataset_processor import INPUT_IDS_PROMPT_KEY, DatasetConfig, SFTDatasetProcessor
-from open_instruct.rejection_sampling.api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
+from open_instruct.rejection_sampling import prompt_templates
 from open_instruct.utils import ArgumentParserPlus, combine_dataset
 
 api = HfApi()
@@ -75,6 +79,74 @@ def save_jsonl(save_filename: str, table: dict[str, list]):
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
             outfile.write("\n")
+
+
+@dataclass
+class LLMGenerationConfig:
+    num_completions: int = 64
+    model: str = "gpt-3.5-turbo-0125"
+    max_parallel_requests: int = 1
+
+    def __post_init__(self):
+        if "gpt-3.5" in self.model:
+            self.max_parallel_requests = 11
+        elif "gpt-4" in self.model:
+            self.max_parallel_requests = 13
+
+
+class LLMProcessor:
+    def __init__(self, config: LLMGenerationConfig):
+        self.config = config
+        self.async_client = AsyncOpenAI()
+
+    async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: GenerationArgs):
+        if args.mode == "generation":
+            template = prompt_templates.get_generation_template(args.skill)
+            text = template.format(prompt=data)
+        elif args.mode == "judgement":
+            template = prompt_templates.get_judgment_template(args.skill)
+            text = template.format(prompt=data["prompt"], response=data["response"])
+        else:
+            raise ValueError(f"Invalid mode: {args.mode}")
+
+        async with limiter:
+            while True:
+                try:
+                    response = await self.async_client.chat.completions.create(
+                        model=self.config.model,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant."},
+                            {"role": "user", "content": text},
+                        ],
+                        n=gen_args.num_completions,
+                        temperature=gen_args.temperature,
+                        max_tokens=gen_args.response_length,
+                        top_p=gen_args.top_p,
+                        stop=None,
+                    )
+                    completions = [choice.message.content for choice in response.choices]
+                    if args.mode == "generation":
+                        response = completions
+                    elif args.mode == "judgement":
+                        scores = []
+                        for completion in completions:
+                            match = re.search(r"Total score:\s*(\d+)", completion)
+                            score = int(match.group(1)) if match else -1
+                            scores.append(score)
+                        response = np.mean(scores)
+                    else:
+                        raise ValueError(f"Invalid mode: {args.mode}")
+                    break
+                except Exception as e:
+                    print(f"Error in {i}: {e}")
+                    await asyncio.sleep(30)
+
+        return response
+
+    async def process_batch(self, data_list: list[dict], args: Args, gen_args: GenerationArgs):
+        limiter = asyncio.Semaphore(self.config.max_parallel_requests)
+        tasks = [self.process_text(data, i, limiter, args, gen_args) for i, data in enumerate(data_list)]
+        return await tqdm.gather(*tasks, total=len(tasks), desc="Processing Batch")
 
 
 async def generate_with_openai(model_name: str, data_list: list, args: Args, gen_args: GenerationArgs):

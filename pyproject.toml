@@ -209,7 +209,6 @@ exclude = [
     "open_instruct/model_utils.py",
     "open_instruct/numpy_dataset_conversion.py",
     "open_instruct/olmo_core_utils.py",
-    "open_instruct/rejection_sampling/api_generate.py",
     "open_instruct/rejection_sampling/generation.py",
     "open_instruct/rejection_sampling/rejection_sampling.py",
     "open_instruct/reward_modeling.py",
