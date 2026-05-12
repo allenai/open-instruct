@@ -804,44 +804,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
             if master_info is not None:
                 torch.cuda.set_device(self.local_rank)
-                self.model_update_group = self._trainer_init_weight_transfer_without_listen_fd(master_info)
+                self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
 
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
-
-    def _trainer_init_weight_transfer_without_listen_fd(self, init_info: dict[str, Any]):
-        """Initialize trainer-side NCCL weight transfer without vLLM's pre-bound fd path.
-
-        The vLLM version in our image can fail in ``create_tcp_store`` while
-        closing a detached ``master_listen_fd``. Creating the TCPStore directly
-        avoids that rank-0-only path while leaving the worker-side vLLM init
-        unchanged.
-        """
-        from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-        from vllm.distributed.utils import StatelessProcessGroup
-
-        master_address = init_info["master_address"]
-        master_port = init_info["master_port"]
-        world_size = init_info["world_size"]
-        store_kwargs = {
-            "host_name": master_address,
-            "port": master_port,
-            "world_size": world_size,
-            "is_master": True,
-            "timeout": timedelta(seconds=300),
-            "wait_for_workers": False,
-        }
-        try:
-            store = dist.TCPStore(**store_kwargs, use_libuv=False)
-        except TypeError:
-            store = dist.TCPStore(**store_kwargs)
-        pg = StatelessProcessGroup(rank=0, world_size=world_size, store=store)
-        device = (
-            torch.accelerator.current_device_index()
-            if hasattr(torch, "accelerator")
-            else torch.cuda.current_device()
-        )
-        return PyNcclCommunicator(pg, device=device)
 
     def warmup_for_weight_sync(self):
         """Run a dummy forward so DeepSpeed Stage 3 materializes sharded params.
@@ -3073,7 +3039,6 @@ def create_model_and_optimizer(
             "Restored data prep actor state from checkpoint "
             f"with training_step={data_prep_actor_state['training_step']}"
         )
-    ray_get_with_progress([_data_prep_actor.start.remote()], desc="Starting data prep actor")
     return (
         policy_group,
         vllm_engines,
@@ -3635,6 +3600,7 @@ def run_training(
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
+    data_prep_actor,
     checkpoint_state=None,
     base_env_config: EnvConfig | None = None,
 ):
@@ -3753,6 +3719,7 @@ def run_training(
             desc="Warming up learner for first weight sync",
         )
     weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(resume_training_step)
+    ray_get_with_progress([data_prep_actor.start.remote()], desc="Starting data prep actor")
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -4184,6 +4151,7 @@ def main(
             weight_sync_metrics_Q,
             actor_manager,
             model_dims,
+            _data_prep_actor,
             checkpoint_state,
             base_env_config,
         )
