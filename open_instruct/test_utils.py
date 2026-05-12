@@ -127,6 +127,54 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
+class CombineDatasetTest(unittest.TestCase):
+    """Exercises combine_dataset end-to-end against local jsonl fixtures (no network)."""
+
+    SFT_PATH = str(pathlib.Path(__file__).parent / "test_data" / "sft_sample.jsonl")
+    RLVR_PATH = str(pathlib.Path(__file__).parent / "test_data" / "rlvr_sample.jsonl")
+
+    @parameterized.expand(
+        [
+            ("full_fractions", {SFT_PATH: 1.0, RLVR_PATH: 1.0}, 200),
+            ("half_fractions", {SFT_PATH: 0.5, RLVR_PATH: 0.5}, 100),
+            ("asymmetric_fractions", {SFT_PATH: 0.7, RLVR_PATH: 0.3}, 100),
+            ("zero_and_full", {SFT_PATH: 0.0, RLVR_PATH: 1.0}, 100),
+            ("int_sample_counts", {SFT_PATH: 25, RLVR_PATH: 50}, 75),
+            ("mixed_fraction_and_count", {SFT_PATH: 0.4, RLVR_PATH: 10}, 50),
+        ]
+    )
+    def test_combine_dataset_dict_form(self, _name, mixer, expected_len):
+        ds = utils.combine_dataset(mixer, splits=["train", "train"], columns_to_keep=["messages"])
+        self.assertEqual(len(ds), expected_len)
+        self.assertIn("messages", ds.column_names)
+
+    def test_combine_dataset_split_mismatch_raises(self):
+        mixer = {self.SFT_PATH: 1.0, self.RLVR_PATH: 1.0}
+        with self.assertRaises(AssertionError):
+            utils.combine_dataset(mixer, splits=["train"], columns_to_keep=["messages"])
+
+
+class ParseDatasetMixerListTest(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("float_weights", ["a", "0.5", "b", "0.25"], {"a": 0.5, "b": 0.25}),
+            ("int_weights", ["a", "100", "b", "200"], {"a": 100, "b": 200}),
+            ("mixed_weights", ["a", "1.0", "b", "3"], {"a": 1.0, "b": 3}),
+            ("single_entry", ["only", "0.7"], {"only": 0.7}),
+        ]
+    )
+    def test_parse_valid(self, _name, mixer_list, expected):
+        self.assertEqual(utils.parse_dataset_mixer_list(mixer_list), expected)
+
+    def test_odd_length_raises(self):
+        with self.assertRaises(AssertionError):
+            utils.parse_dataset_mixer_list(["a", "1.0", "b"])
+
+    def test_non_string_key_raises(self):
+        with self.assertRaises(AssertionError):
+            utils.parse_dataset_mixer_list([123, "1.0"])
+
+
 def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
     """Shared mock setup for beaker tests."""
     mock_is_beaker_job.return_value = True
