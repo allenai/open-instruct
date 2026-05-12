@@ -501,6 +501,11 @@ def compute_grpo_loss(
 def compute_olmo_core_doc_lens(attention_mask: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
     """Convert an integer-coded packed attention_mask to OLMo-core ``doc_lens`` / ``max_doc_lens``.
 
+    ``attention_mask`` is a ``(batch_size, seq_len)`` integer tensor produced by the packed-sequence
+    collator: each token's value is the 1-indexed document ID it belongs to (1, 2, 3, ...) within
+    its row, and 0 marks padding. Tokens sharing a value belong to the same document and are
+    expected to be contiguous along the sequence dimension.
+
     Padding spans (zeros in ``attention_mask``) are emitted as their own segments: OLMo-core
     flattens ``doc_lens`` into a single cumulative offset across the batch, so dropping padding
     would shift subsequent rows' document boundaries into the previous row's padding region.
