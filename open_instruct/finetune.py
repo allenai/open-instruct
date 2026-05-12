@@ -130,6 +130,8 @@ class FlatArguments:
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
+    dataset_mixer_list_config_names: list[str] = field(default_factory=list)
+    """The Hugging Face dataset config names to use for training datasets"""
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
@@ -498,6 +500,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     if args.dataset_mixer is not None:
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
+    dataset_mixer_list_config_names = args.dataset_mixer_list_config_names
+    if not dataset_mixer_list_config_names and args.dataset_config_name is not None:
+        dataset_mixer_list_config_names = [args.dataset_config_name]
     with accelerator.main_process_first():
         transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
         train_dataset = get_cached_dataset_tulu(
@@ -512,6 +517,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
+            dataset_mixer_list_config_names=dataset_mixer_list_config_names,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")

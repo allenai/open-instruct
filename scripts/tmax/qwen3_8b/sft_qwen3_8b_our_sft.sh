@@ -8,6 +8,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 DATASET=osieosie/tmax-sft-skill-tax-20260505-2.2k-combined-balanced-qwen3.6-27b-thinking
+DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_all
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -19,6 +20,7 @@ uv run python mason.py \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
     --gpus 8 \
+    --no_auto_dataset_cache \
     -- \
     accelerate launch \
     --mixed_precision bf16 \
@@ -41,8 +43,10 @@ uv run python mason.py \
     --num_train_epochs 2 \
     --dataset_mixer_list \
         $DATASET 1.0 \
+    --dataset_mixer_list_config_names \
+        $DATASET_CONFIG \
     --dataset_mixer_list_splits \
-        skill_tax_20260505_2.2k_combined_balanced_thinking_all 1.0 \
+        train \
     --add_bos \
     --gradient_checkpointing \
     --report_to wandb \

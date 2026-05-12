@@ -1614,6 +1614,7 @@ class DatasetConfig:
     dataset_name: str
     dataset_split: str
     dataset_revision: str
+    dataset_config_name: str | None = None
     dataset_range: int | None = None
     transform_fn: list[str] = field(default_factory=list)
     transform_fn_args: list[dict[str, Any]] = field(default_factory=list)
@@ -1646,6 +1647,7 @@ class DatasetConfig:
             )
             dataset = load_dataset(
                 self.dataset_name,
+                self.dataset_config_name,
                 split=self.dataset_split,
                 revision=self.dataset_revision,
                 num_proc=max_num_processes(),
@@ -2047,6 +2049,7 @@ def load_dataset_configs(
     transform_fn_args: list[dict[str, Any]],
     target_columns: list[str] | None = None,
     dataset_config_seed: int = 42,
+    dataset_mixer_list_config_names: list[str | None] | None = None,
 ) -> list[DatasetConfig]:
     """
     Load and configure datasets from a mixer list.
@@ -2066,6 +2069,8 @@ def load_dataset_configs(
 
         dataset_mixer_list_splits: Split names for each dataset (e.g., ["train"]).
             If a single split is provided, it's used for all datasets.
+        dataset_mixer_list_config_names: Optional Hugging Face dataset config names for
+            each dataset. If a single config is provided, it's used for all datasets.
         dataset_transform_fn: Transform function names to apply.
         transform_fn_args: Arguments for transform functions.
         target_columns: Optional list of columns to keep.
@@ -2084,6 +2089,21 @@ def load_dataset_configs(
                 f"dataset_mixer_list_splits length must be half of dataset_mixer_list (since mixer list alternates [dataset, amount]): {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)//2=}"
             )
     assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
+    num_datasets = len(dataset_mixer_list) // 2
+    if dataset_mixer_list_config_names is None or len(dataset_mixer_list_config_names) == 0:
+        dataset_mixer_list_config_names = [None] * num_datasets
+    elif len(dataset_mixer_list_config_names) == 1:
+        dataset_mixer_list_config_names = dataset_mixer_list_config_names * num_datasets
+    elif len(dataset_mixer_list_config_names) != num_datasets:
+        raise ValueError(
+            f"dataset_mixer_list_config_names length must be half of dataset_mixer_list "
+            f"(since mixer list alternates [dataset, amount]): {len(dataset_mixer_list_config_names)=} "
+            f"!= {num_datasets=}"
+        )
+    dataset_mixer_list_config_names = [
+        None if config_name in (None, "", "none", "None", "null", "Null") else config_name
+        for config_name in dataset_mixer_list_config_names
+    ]
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         frac_or_num_samples = dataset_mixer_list[i + 1]
@@ -2098,6 +2118,7 @@ def load_dataset_configs(
             dataset_name=dataset_name,
             dataset_split=dataset_mixer_list_splits[i // 2],
             dataset_revision="main",
+            dataset_config_name=dataset_mixer_list_config_names[i // 2],
             transform_fn=dataset_transform_fn,
             transform_fn_args=transform_fn_args,
             target_columns=target_columns,
@@ -2143,6 +2164,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    dataset_mixer_list_config_names: list[str | None] | None = None,
 ) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
@@ -2152,6 +2174,7 @@ def get_cached_dataset_tulu_with_statistics(
             transform_fn_args,
             target_columns,
             dataset_config_seed,
+            dataset_mixer_list_config_names,
         )
         dataset_config_hash = compute_config_hash(dcs, tc)
     else:
@@ -2185,6 +2208,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    dataset_mixer_list_config_names: list[str | None] | None = None,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2201,4 +2225,5 @@ def get_cached_dataset_tulu(
         drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
+        dataset_mixer_list_config_names=dataset_mixer_list_config_names,
     )[0]
