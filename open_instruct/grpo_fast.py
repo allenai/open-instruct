@@ -3819,7 +3819,7 @@ def run_training(
 
         if in_warmup:
             logger.debug(f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup")
-        elif training_step > resume_training_step:
+        else:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
 
