@@ -127,6 +127,28 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
+class CombineDatasetTest(unittest.TestCase):
+    """Exercises combine_dataset end-to-end against local jsonl fixtures (no network)."""
+
+    SFT_PATH = str(pathlib.Path(__file__).parent / "test_data" / "sft_sample.jsonl")
+    RLVR_PATH = str(pathlib.Path(__file__).parent / "test_data" / "rlvr_sample.jsonl")
+
+    @parameterized.expand(
+        [("dict_form", {SFT_PATH: 1.0, RLVR_PATH: 1.0}), ("list_form", [SFT_PATH, "1.0", RLVR_PATH, "1.0"])]
+    )
+    def test_combine_dataset_list_and_dict_equivalent(self, _name, mixer):
+        ds = utils.combine_dataset(mixer, splits=["train", "train"], columns_to_keep=["messages"])
+        self.assertEqual(len(ds), 200)
+        self.assertIn("messages", ds.column_names)
+
+    @parameterized.expand(
+        [("dict_form", {SFT_PATH: 1.0, RLVR_PATH: 1.0}), ("list_form", [SFT_PATH, "1.0", RLVR_PATH, "1.0"])]
+    )
+    def test_combine_dataset_split_mismatch_raises(self, _name, mixer):
+        with self.assertRaises(AssertionError):
+            utils.combine_dataset(mixer, splits=["train"], columns_to_keep=["messages"])
+
+
 def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
     """Shared mock setup for beaker tests."""
     mock_is_beaker_job.return_value = True
