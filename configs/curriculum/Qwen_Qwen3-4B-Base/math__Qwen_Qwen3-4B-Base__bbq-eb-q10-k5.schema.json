@@ -1,0 +1,137 @@
+{
+  "ability": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "completions": {
+    "_type": "List",
+    "feature": {
+      "_type": "Value",
+      "dtype": "string"
+    }
+  },
+  "data_source": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "dataset": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "difficulty": {
+    "bucket_count": {
+      "_type": "Value",
+      "dtype": "int64"
+    },
+    "bucket_index": {
+      "_type": "Value",
+      "dtype": "int64"
+    },
+    "expected_quantile": {
+      "_type": "Value",
+      "dtype": "float64"
+    },
+    "posterior_lower_bound": {
+      "_type": "Value",
+      "dtype": "float64"
+    },
+    "posterior_mean": {
+      "_type": "Value",
+      "dtype": "float64"
+    },
+    "value": {
+      "_type": "Value",
+      "dtype": "float64"
+    }
+  },
+  "extra_info": {
+    "index": {
+      "_type": "Value",
+      "dtype": "string"
+    }
+  },
+  "generator_chat_template": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "generator_max_tokens": {
+    "_type": "Value",
+    "dtype": "int64"
+  },
+  "generator_model": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "generator_temperature": {
+    "_type": "Value",
+    "dtype": "float64"
+  },
+  "generator_top_p": {
+    "_type": "Value",
+    "dtype": "float64"
+  },
+  "ground_truth": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "messages": {
+    "_type": "List",
+    "feature": {
+      "content": {
+        "_type": "Value",
+        "dtype": "string"
+      },
+      "role": {
+        "_type": "Value",
+        "dtype": "string"
+      }
+    }
+  },
+  "num_samples": {
+    "_type": "Value",
+    "dtype": "int64"
+  },
+  "pass_count": {
+    "_type": "Value",
+    "dtype": "int64"
+  },
+  "pass_rate": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "prompt": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "reward_model": {
+    "ground_truth": {
+      "_type": "Value",
+      "dtype": "string"
+    },
+    "style": {
+      "_type": "Value",
+      "dtype": "string"
+    }
+  },
+  "solution": {
+    "_type": "Value",
+    "dtype": "string"
+  },
+  "source_prompt": {
+    "_type": "List",
+    "feature": {
+      "content": {
+        "_type": "Value",
+        "dtype": "string"
+      },
+      "role": {
+        "_type": "Value",
+        "dtype": "string"
+      }
+    }
+  },
+  "source_split": {
+    "_type": "Value",
+    "dtype": "string"
+  }
+}
