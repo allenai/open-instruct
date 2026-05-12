@@ -158,11 +158,25 @@ def _compile_repl(code: str):
 
 
 ###############################################################################
+# FastAPI schema
+###############################################################################
+class CodeRequest(BaseModel):
+    code: str
+    timeout: int = 5
+
+
+class CodeResponse(BaseModel):
+    output: str
+    error: str | None = None
+    success: bool
+
+
+###############################################################################
 # Worker function (executes user code)
 ###############################################################################
 
 
-def _run_user_code(code: str, timeout: int = 5) -> "CodeResponse":
+def _run_user_code(code: str, timeout: int = 5) -> CodeResponse:
     def _timeout_handler(signum, frame):  # noqa: D401, ANN001, ARG001
         raise TimeoutError("execution timed out")
 
@@ -183,20 +197,6 @@ def _run_user_code(code: str, timeout: int = 5) -> "CodeResponse":
         signal.alarm(0)
 
     return result
-
-
-###############################################################################
-# FastAPI schema
-###############################################################################
-class CodeRequest(BaseModel):
-    code: str
-    timeout: int = 5
-
-
-class CodeResponse(BaseModel):
-    output: str
-    error: str | None = None
-    success: bool
 
 
 ###############################################################################
