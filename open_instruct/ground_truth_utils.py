@@ -26,7 +26,7 @@ import requests
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
+from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -743,9 +743,9 @@ class LMJudgeVerifier(VerifierFunction):
         model_name = model.split("/")[-1]  # for litellm, discard the namespace
         model_name = model_name.replace("-standard", "")  # azure OAI models have -standard in the name
         return (
-            PRICE_PER_TOKEN.get(model_name, {}).get("input", 0) * response.usage.prompt_tokens
-            + PRICE_PER_TOKEN.get(model_name, {}).get("output", 0) * response.usage.completion_tokens
-        )
+            PRICE_PER_MILLION_TOKENS.get(model_name, {}).get("input", 0) * response.usage.prompt_tokens
+            + PRICE_PER_MILLION_TOKENS.get(model_name, {}).get("output", 0) * response.usage.completion_tokens
+        ) / 1_000_000
 
     async def async_call(
         self,
