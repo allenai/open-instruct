@@ -42,7 +42,7 @@ uv run python mason.py \
     --dataset_mixer_list \
         $DATASET 1.0 \
     --dataset_mixer_list_splits \
-        skill_tax_20260505_2.2k_combined_balanced_thinking_all \
+        skill_tax_20260505_2.2k_combined_balanced_thinking_all 1.0 \
     --add_bos \
     --gradient_checkpointing \
     --report_to wandb \
