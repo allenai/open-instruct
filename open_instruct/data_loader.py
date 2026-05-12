@@ -1522,7 +1522,6 @@ class DataPreparationActor:
             assert result.token_statistics is not None
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
             step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-            step_metrics["time/getting_response"] = result.token_statistics.generation_time
             group_times = batch_stats.per_group_generation_times
             step_metrics["time/group_generation_mean"] = float(group_times.mean())
             step_metrics["time/group_generation_max"] = float(group_times.max())
