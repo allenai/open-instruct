@@ -1,5 +1,3 @@
-"""Tests for open_instruct.grpo_utils helpers."""
-
 import unittest
 
 import parameterized

@@ -501,27 +501,17 @@ def compute_grpo_loss(
 def compute_olmo_core_doc_lens(attention_mask: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
     """Convert an integer-coded packed attention_mask to OLMo-core ``doc_lens`` / ``max_doc_lens``.
 
-    The packed-sequence collator encodes per-doc indices as positive integers (1, 2, ...) in
-    ``attention_mask``, with 0 for padding. OLMo-core's Transformer requires explicit
-    ``doc_lens`` (B, max_docs) int32 and ``max_doc_lens`` (list[int], per row) to do intra-doc
-    attention; passing ``position_ids`` alone is a silent no-op.
-
-    Padding spans (zeros in ``attention_mask``) are emitted as their own segments so that each
-    row's ``doc_lens`` sums to the row length. OLMo-core flattens ``doc_lens`` into a single
-    cumulative offset across the batch, so dropping padding here would shift subsequent rows'
-    document boundaries into the previous row's padding region.
+    Padding spans (zeros in ``attention_mask``) are emitted as their own segments: OLMo-core
+    flattens ``doc_lens`` into a single cumulative offset across the batch, so dropping padding
+    would shift subsequent rows' document boundaries into the previous row's padding region.
     """
-    B = attention_mask.size(0)
-    rows: list[torch.Tensor] = []
-    for i in range(B):
-        _, counts = torch.unique_consecutive(attention_mask[i], return_counts=True)
-        rows.append(counts)
-    max_docs = max((t.numel() for t in rows), default=0)
-    doc_lens = torch.zeros((B, max_docs), dtype=torch.int32, device=attention_mask.device)
+    batch_size = attention_mask.size(0)
+    rows = [torch.unique_consecutive(attention_mask[i], return_counts=True)[1] for i in range(batch_size)]
+    max_docs = max(t.numel() for t in rows)
+    doc_lens = torch.zeros((batch_size, max_docs), dtype=torch.int32, device=attention_mask.device)
     for i, t in enumerate(rows):
-        if t.numel():
-            doc_lens[i, : t.numel()] = t.to(torch.int32)
-    max_doc_lens = doc_lens.max(dim=1).values.tolist() if max_docs > 0 else [0] * B
+        doc_lens[i, : t.numel()] = t.to(torch.int32)
+    max_doc_lens = doc_lens.max(dim=1).values.tolist()
     return doc_lens, max_doc_lens
 
 
@@ -535,26 +525,14 @@ def forward_for_logprobs(
     return_entropy: bool = False,
     pass_olmo_core_doc_lens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """Forward pass to compute log probabilities.
-
-    When ``pass_olmo_core_doc_lens=True``, derives ``doc_lens`` / ``max_doc_lens`` from the
-    integer-coded ``attention_mask`` and passes them to the model (required for intra-doc
-    attention with OLMo-core's Transformer on packed sequences). The integer-coded
-    ``attention_mask`` itself is replaced with ``None`` for the forward call since OLMo-core
-    does not consume it.
-    """
-    extra_kwargs: dict = {}
-    attention_mask_kw = attention_mask
+    """Forward pass to compute log probabilities."""
+    extra_kwargs = {}
     if pass_olmo_core_doc_lens:
-        if attention_mask is None:
-            raise ValueError("pass_olmo_core_doc_lens=True requires a non-None attention_mask")
+        assert attention_mask is not None
         doc_lens, max_doc_lens = compute_olmo_core_doc_lens(attention_mask)
-        extra_kwargs["doc_lens"] = doc_lens
-        extra_kwargs["max_doc_lens"] = max_doc_lens
-        attention_mask_kw = None
-    output = model(
-        input_ids=query_responses, attention_mask=attention_mask_kw, position_ids=position_ids, **extra_kwargs
-    )
+        extra_kwargs = {"doc_lens": doc_lens, "max_doc_lens": max_doc_lens}
+        attention_mask = None
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
