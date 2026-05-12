@@ -13,7 +13,7 @@ uv run python mason.py \
        --workspace ai2/olmo-instruct \
        --priority urgent \
        --preemptible \
-       --num_nodes 3 \
+       --num_nodes 4 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
@@ -58,7 +58,7 @@ uv run python mason.py \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 16 \
+    --vllm_num_engines 24 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \
