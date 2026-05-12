@@ -1,9 +1,18 @@
+import sys
+import tempfile
+import types
 import unittest
 from unittest import mock
 
+from datasets import Dataset
 from transformers import HfArgumentParser
 
-from open_instruct import difficulty_curriculum
+if "vllm" not in sys.modules:
+    vllm_stub = types.ModuleType("vllm")
+    vllm_stub.SamplingParams = object
+    sys.modules["vllm"] = vllm_stub
+
+from open_instruct import data_loader, difficulty_curriculum
 
 
 class ListDataset:
@@ -40,6 +49,12 @@ def make_bucket_dataset(bucket_count: int = 5) -> ListDataset:
         make_difficulty_row(index=4, bucket_index=4, posterior_mean=0.003, bucket_count=bucket_count),
     ]
     return ListDataset(rows)
+
+
+def make_plain_hf_dataset(num_examples: int) -> Dataset:
+    return Dataset.from_dict(
+        {"text": [f"example_{index}" for index in range(num_examples)], "index": list(range(num_examples))}
+    )
 
 
 class TestDifficultyCurriculumSampler(unittest.TestCase):
@@ -245,6 +260,28 @@ class TestDifficultyCurriculumSampler(unittest.TestCase):
 
     def test_curriculum_verify_accepts_none_mode(self):
         difficulty_curriculum.DifficultyCurriculumArgs().verify()
+
+
+class TestDifficultyCurriculumLoaderIntegration(unittest.TestCase):
+    def test_existing_behavior_is_unchanged_when_curriculum_disabled(self):
+        dataset = make_plain_hf_dataset(20)
+        built_loader = data_loader.create_prompt_dataloader(dataset=dataset, seed=7, work_dir=tempfile.gettempdir())
+        baseline_loader = data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=7,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            automatic_reshuffle=True,
+            collator=data_loader.single_example_collator,
+        )
+
+        self.assertIs(type(built_loader), data_loader.HFDataLoader)
+
+        built_indices = [batch["index"].item() for batch in built_loader]
+        baseline_indices = [batch["index"].item() for batch in baseline_loader]
+        self.assertEqual(built_indices, baseline_indices)
 
 
 if __name__ == "__main__":

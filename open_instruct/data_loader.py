@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import os
 import threading
 import time
@@ -21,19 +20,18 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from queue import Empty
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import ray
 import torch
-import vllm
 from datasets import Dataset
 from olmo_core.data import data_loader
 from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, difficulty_curriculum, logger_utils, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -49,7 +47,10 @@ from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    import vllm
+
+logger = logger_utils.setup_logger(__name__)
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
@@ -662,6 +663,134 @@ def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
     return example | {"index": torch.tensor([example["index"]])}
 
 
+class DifficultyCurriculumHFDataLoader(HFDataLoader):
+    """Prompt loader that samples with a difficulty-aware curriculum."""
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int,
+        seed: int,
+        dp_rank: int,
+        dp_world_size: int,
+        work_dir: str,
+        curriculum_config: difficulty_curriculum.DifficultyCurriculumConfig,
+        automatic_reshuffle: bool = True,
+        collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+        device: torch.device | None = None,
+        drop_last: bool = True,
+        fs_local_rank: int | None = None,
+        max_seq_length: int = 1,
+    ) -> None:
+        if batch_size != 1:
+            raise ValueError("DifficultyCurriculumHFDataLoader currently supports batch_size=1 only")
+        if dp_world_size != 1 or dp_rank != 0:
+            raise ValueError("DifficultyCurriculumHFDataLoader currently supports dp_world_size=1 only")
+
+        self._sampling_step = 0
+        self._curriculum_sampler = difficulty_curriculum.DifficultyCurriculumSampler(
+            dataset=dataset,
+            num_samples=max(len(dataset), 1),
+            config=curriculum_config,
+            global_step_getter=lambda: self._sampling_step,
+        )
+        self._curriculum_iter = None
+
+        super().__init__(
+            dataset=dataset,
+            batch_size=batch_size,
+            seed=seed,
+            dp_rank=dp_rank,
+            dp_world_size=dp_world_size,
+            work_dir=work_dir,
+            automatic_reshuffle=automatic_reshuffle,
+            collator=collator,
+            device=device,
+            drop_last=drop_last,
+            fs_local_rank=fs_local_rank,
+            max_seq_length=max_seq_length,
+        )
+
+    @property
+    def curriculum_sampler(self) -> difficulty_curriculum.DifficultyCurriculumSampler:
+        return self._curriculum_sampler
+
+    def set_sampling_step(self, step: int) -> None:
+        self._sampling_step = int(step)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "epoch": self._epoch,
+            "batches_processed": self.batches_processed,
+            "sampling_step": self._sampling_step,
+            "curriculum_sampler_state": self._curriculum_sampler.state_dict(),
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self._epoch = state_dict["epoch"]
+        self.batches_processed = state_dict["batches_processed"]
+        self._sampling_step = state_dict.get("sampling_step", 0)
+        self._curriculum_sampler.load_state_dict(state_dict["curriculum_sampler_state"])
+        self.effective_size = max(len(self._full_dataset), 1)
+        self.dataset = self._full_dataset
+        self._curriculum_iter = iter(self._curriculum_sampler)
+        self._current_iter = None
+
+    def exclude_index(self, index: int) -> None:
+        self._curriculum_sampler.exclude_index(index)
+
+    def _reshard(self, epoch: int) -> None:
+        del epoch
+        self._precomputed_batch_sizes = None
+        self._num_padding_batches = 0
+        self._overflow = []
+        self.effective_size = max(len(self._full_dataset), 1)
+        self.dataset = self._full_dataset
+        self._curriculum_iter = iter(self._curriculum_sampler)
+
+    def _iter_batches(self) -> Iterable[dict[str, Any]]:
+        start_example = self.batches_processed
+        if self._curriculum_iter is None:
+            self._curriculum_iter = iter(self._curriculum_sampler)
+
+        for batch_offset in range(start_example, self.effective_size):
+            dataset_index = next(self._curriculum_iter)
+            example = self._full_dataset[dataset_index]
+            prompt_id = f"{self._epoch}_{batch_offset}_{dataset_index}"
+            batch = to_device(self._collator([example | {"prompt_id": prompt_id}]), self._device)
+            yield batch
+
+
+def create_prompt_dataloader(
+    dataset: Dataset,
+    seed: int,
+    work_dir: str,
+    curriculum_config: difficulty_curriculum.DifficultyCurriculumConfig | None = None,
+) -> HFDataLoader:
+    if curriculum_config is None:
+        return HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=seed,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=work_dir,
+            automatic_reshuffle=True,
+            collator=single_example_collator,
+        )
+    return DifficultyCurriculumHFDataLoader(
+        dataset=dataset,
+        batch_size=1,
+        seed=seed,
+        dp_rank=0,
+        dp_world_size=1,
+        work_dir=work_dir,
+        automatic_reshuffle=True,
+        collator=single_example_collator,
+        curriculum_config=curriculum_config,
+    )
+
+
 def _merge_env_config(base_env_config: EnvConfig, sample_env_config: dict[str, Any] | None) -> EnvConfig:
     """Merge base and sample env config into canonical payload.
     Sample env_config overrides any base env_configs with the same name.
@@ -718,6 +847,7 @@ def add_prompt_to_generator(
     ground_truth_overrides: dict[int, Any] | None = None,
 ) -> None:
     index = int(example["index"])
+    prompt_id = example.get("prompt_id", f"{epoch_number}_{index}")
 
     sample_env_config = example.get(ENV_CONFIG_KEY)
     env_config = _merge_env_config(base_env_config, sample_env_config)
@@ -729,7 +859,7 @@ def add_prompt_to_generator(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             index=index,
-            prompt_id=f"{epoch_number}_{index}",
+            prompt_id=prompt_id,
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
@@ -757,7 +887,7 @@ class Group:
 
 def process_group(
     result: data_types.GenerationResult,
-    generation_config: vllm.SamplingParams,
+    generation_config: "vllm.SamplingParams",
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     max_possible_score: float,
@@ -831,7 +961,7 @@ def process_group(
 
 def make_batch_from_groups(
     groups: list[Group],
-    generation_config: vllm.SamplingParams,
+    generation_config: "vllm.SamplingParams",
     training_step: int,
     actor_manager=None,
     filtered_prompts: int = 0,
@@ -987,7 +1117,7 @@ def make_batch_from_groups(
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
-    generation_config: vllm.SamplingParams,
+    generation_config: "vllm.SamplingParams",
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
@@ -1093,7 +1223,7 @@ def accumulate_inference_batches(
 
         if no_resampling_pass_rate is not None and group.percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
-            logging.debug(
+            logger.debug(
                 f"[Data Preparation Thread] Prompt solved at {group.percent_solved}, "
                 f"will be excluded from resampling, total no resampled: {total_no_resampled}"
             )
@@ -1103,7 +1233,7 @@ def accumulate_inference_batches(
         groups.append(group)
 
     if len(groups) == 0:
-        logging.warning(
+        logger.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
             f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
@@ -1123,22 +1253,25 @@ def accumulate_inference_batches(
     )
 
 
-def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch: Batch, enabled: bool) -> Batch:
-    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch."""
+def maybe_mask_truncated_completions(
+    result: data_types.GenerationResult, batch: Batch, scores: np.ndarray, advantages: np.ndarray, enabled: bool
+) -> tuple[Batch, np.ndarray, np.ndarray]:
+    """If enabled, drop rollouts that didn't finish with 'stop' from result, batch, scores, and advantages."""
     if not enabled:
-        return batch
+        return batch, scores, advantages
     stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
     num_truncated = len(result.finish_reasons) - len(stop_idxes)
     if num_truncated > 0:
+        retention_rate = len(stop_idxes) / len(result.finish_reasons) if result.finish_reasons else 0.0
         logger.info(
             f"[DataPreparationActor] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-            f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
+            f"Retention rate: {retention_rate:.2%}"
         )
     result.responses = [result.responses[i] for i in stop_idxes]
     result.masks = [result.masks[i] for i in stop_idxes]
     result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
     result.logprobs = [result.logprobs[i] for i in stop_idxes]
-    return batch[stop_idxes]
+    return batch[stop_idxes], scores[stop_idxes], advantages[stop_idxes]
 
 
 def prepare_collated_data_for_workers(
@@ -1260,6 +1393,7 @@ class DataPreparationActor:
         model_name: str | None,
         base_env_config: EnvConfig,
         initial_state: dict | None = None,
+        curriculum_config: difficulty_curriculum.DifficultyCurriculumConfig | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1280,15 +1414,11 @@ class DataPreparationActor:
         self.model_name = model_name
         self.base_env_config = base_env_config
 
-        self.iter_dataloader = HFDataLoader(
-            dataset=dataset,
-            batch_size=1,
-            seed=seed,
-            dp_rank=0,
-            dp_world_size=1,
-            work_dir=work_dir,
-            automatic_reshuffle=True,
-            collator=single_example_collator,
+        self.iter_dataloader = create_prompt_dataloader(
+            dataset=dataset, seed=seed, work_dir=work_dir, curriculum_config=curriculum_config
+        )
+        self.curriculum_dataloader = (
+            self.iter_dataloader if isinstance(self.iter_dataloader, DifficultyCurriculumHFDataLoader) else None
         )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
@@ -1328,6 +1458,8 @@ class DataPreparationActor:
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
+        if self.curriculum_dataloader is not None:
+            self.curriculum_dataloader.set_sampling_step(self.training_step)
         for _ in range(num_initial_prompts):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -1347,6 +1479,8 @@ class DataPreparationActor:
                 )
                 time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
+            if self.curriculum_dataloader is not None:
+                self.curriculum_dataloader.set_sampling_step(self.training_step)
 
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1387,25 +1521,11 @@ class DataPreparationActor:
 
             assert batch is not None
             assert batch_stats is not None
-
-            batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
-
-            if len(result.responses) == 0:
-                logger.warning(
-                    f"[DataPreparationActor] 🤡 Step {self.training_step}: no trainable responses after truncation filter; "
-                    "resampling without advancing step counter"
-                )
-                continue
-
-            if self.rubric_manager and batch.decoded_responses:
-                rubric_metrics, new_overrides = self.rubric_manager.run_step(
-                    decoded_responses=batch.decoded_responses,
-                    ground_truths=batch.ground_truths,
-                    indices=batch.indices,
-                    step=self.training_step,
-                )
-                reward_metrics.update(rubric_metrics)
-                self.ground_truth_overrides.update(new_overrides)
+            prompt_dataset_indices: list[int] = []
+            if self.curriculum_dataloader is not None and batch.indices is not None:
+                prompt_dataset_indices = [
+                    int(index) for index in batch.indices[:: self.config.num_samples_per_prompt_rollout]
+                ]
 
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
@@ -1434,6 +1554,32 @@ class DataPreparationActor:
                 )
                 self.total_samples_written += len(batch.queries)
 
+            batch, scores, advantages = maybe_mask_truncated_completions(
+                result, batch, scores, advantages, self.config.mask_truncated_completions
+            )
+
+            if len(result.responses) == 0:
+                logger.warning(
+                    f"[DataPreparationActor] 🤡 Step {self.training_step}: no trainable responses after truncation filter; "
+                    "resampling without advancing step counter"
+                )
+                continue
+
+            if self.rubric_manager and batch.decoded_responses:
+                rubric_metrics, new_overrides = self.rubric_manager.run_step(
+                    decoded_responses=batch.decoded_responses,
+                    ground_truths=batch.ground_truths,
+                    indices=batch.indices,
+                    step=self.training_step,
+                )
+                reward_metrics.update(rubric_metrics)
+                self.ground_truth_overrides.update(new_overrides)
+
+            if self.curriculum_dataloader is not None and batch.indices is not None:
+                normalized_scores = np.clip(scores / max(self.config.max_possible_score, 1e-8), 0.0, 1.0)
+                self.curriculum_dataloader.curriculum_sampler.record_observations(
+                    batch.indices, normalized_scores, advantages
+                )
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
@@ -1519,6 +1665,13 @@ class DataPreparationActor:
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
             step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
             step_metrics["time/getting_response"] = result.token_statistics.generation_time
+
+            if self.curriculum_dataloader is not None:
+                step_metrics.update(
+                    self.curriculum_dataloader.curriculum_sampler.build_metrics(
+                        prompt_dataset_indices, self.training_step
+                    )
+                )
 
             with self.lock:
                 self.prepared_data[self.training_step] = collated_data
