@@ -498,26 +498,26 @@ def compute_grpo_loss(
     return pg_losses, pg_losses2, pg_loss_max, kl
 
 
-def compute_olmo_core_doc_lens(attention_mask: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
+def compute_olmo_core_doc_lens(attention_mask_BS: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
     """Convert an integer-coded packed attention_mask to OLMo-core ``doc_lens`` / ``max_doc_lens``.
 
-    ``attention_mask`` is a ``(batch_size, seq_len)`` integer tensor produced by the packed-sequence
-    collator: each token's value is the 1-indexed document ID it belongs to (1, 2, 3, ...) within
-    its row, and 0 marks padding. Tokens sharing a value belong to the same document and are
-    expected to be contiguous along the sequence dimension.
+    ``attention_mask_BS`` is a ``(batch_size, sequence_length)`` integer tensor produced by the
+    packed-sequence collator: each token's value is the 1-indexed document ID it belongs to
+    (1, 2, 3, ...) within its row, and 0 marks padding. Tokens sharing a value belong to the same
+    document and are expected to be contiguous along the sequence dimension.
 
-    Padding spans (zeros in ``attention_mask``) are emitted as their own segments: OLMo-core
+    Padding spans (zeros in ``attention_mask_BS``) are emitted as their own segments: OLMo-core
     flattens ``doc_lens`` into a single cumulative offset across the batch, so dropping padding
     would shift subsequent rows' document boundaries into the previous row's padding region.
     """
-    batch_size = attention_mask.size(0)
-    rows = [torch.unique_consecutive(attention_mask[i], return_counts=True)[1] for i in range(batch_size)]
+    batch_size = attention_mask_BS.size(0)
+    rows = [torch.unique_consecutive(attention_mask_BS[i], return_counts=True)[1] for i in range(batch_size)]
     max_docs = max(t.numel() for t in rows)
-    doc_lens = torch.zeros((batch_size, max_docs), dtype=torch.int32, device=attention_mask.device)
+    doc_lens_BD = torch.zeros((batch_size, max_docs), dtype=torch.int32, device=attention_mask_BS.device)
     for i, t in enumerate(rows):
-        doc_lens[i, : t.numel()] = t.to(torch.int32)
-    max_doc_lens = doc_lens.max(dim=1).values.tolist()
-    return doc_lens, max_doc_lens
+        doc_lens_BD[i, : t.numel()] = t.to(torch.int32)
+    max_doc_lens_B = doc_lens_BD.max(dim=1).values.tolist()
+    return doc_lens_BD, max_doc_lens_B
 
 
 def forward_for_logprobs(
