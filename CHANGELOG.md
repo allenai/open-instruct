@@ -39,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686). 
 - Bundle IFEval correctness fixes: `validate_choice` operand direction and `validate_frequency_capital_words` "around" tolerance in `open_instruct/if_functions.py`; `IFEvalVerifier` `ZeroDivisionError` when the instruction list is empty; deduplicate by deleting the unused `scripts/eval_constraints/if_functions.py` copy (supersedes #1615, #1646, #1655).
 - Fix NameError on `streaming_config/vllm_config` when importing from `grpo_fast.py` due to implicit global dependency. (https://github.com/allenai/open-instruct/pull/1675)
 - Fix `grpo.py` token-count inflation by emitting bool `response_masks` from `DataPreparationActor` (instead of int64 doc-id-valued masks) and dropping per-consumer `.bool()` coercions in `grpo_fast.py`, `grpo_utils.py`, and `olmo_core_train_modules.py`. Previously the OLMo-core path summed the doc-id-valued mask in `calculate_token_counts`, inflating `loss_denominator` by ~60× (https://github.com/allenai/open-instruct/pull/1668).
