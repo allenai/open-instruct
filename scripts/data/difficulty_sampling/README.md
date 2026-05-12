@@ -1,16 +1,22 @@
 # Difficulty Sampling
 
 This directory contains tooling for building per-instance difficulty metadata
-for RLVR curricula.
+from pass-rate style datasets.
+
+A common use case is difficulty-aware curricula for GRPO / RLVR, but the
+outputs are not specific to that setting. They are also useful for stratified
+sampling, filtering, analysis, and dataset construction.
 
 ## Create A Difficulty Map
 
-Use `create_difficulty_map.py` to build a difficulty map from a Hugging Face
-dataset that already contains per-row pass-rate aggregates.
+Use `create_difficulty_map.py` to turn a Hugging Face dataset with per-row
+pass-rate aggregates into reusable difficulty annotations.
 
 The script expands pass-count summaries into binary attempt outcomes, fits a
-Beta prior across binary outcomes, estimates per-item difficulty, and writes
-JSONL difficulty files plus schema and metadata sidecars.
+shared Beta prior across binary outcomes, estimates per-item difficulty, and
+writes JSONL difficulty files plus schema and metadata sidecars. When
+`--push-to-hub` is set, it also uploads the validated output dataset as a
+private Hub split.
 
 ### Examples
 
@@ -38,12 +44,14 @@ uv run scripts/data/difficulty_sampling/create_difficulty_map.py \
 Hub uploads require exactly one task/model output group, so use `--task` or a
 single-group input dataset when pushing.
 
+If you only need continuous difficulty scores, you can set
+`--difficulty-buckets 0` to skip discrete bucket assignment. If you want to use
+the default difficulty curriculum in `grpo_fast.py`, keep bucket assignment
+enabled.
+
 ## Difficulty Metadata Format
 
-`grpo_fast.py` can optionally replace uniform prompt reshuffling with
-`DifficultyCurriculumSampler`, a bucket-aware RLVR curriculum driven by
-per-instance difficulty metadata. The current recommended metadata format comes
-from the beta-binomial estimator in `create_difficulty_map.py`:
+`create_difficulty_map.py` writes a nested `difficulty` blob like this:
 
 ```json
 {
@@ -58,23 +66,40 @@ from the beta-binomial estimator in `create_difficulty_map.py`:
 }
 ```
 
+- `value` is the overall difficulty score, defined as
+  `1 - posterior_lower_bound`. Higher means harder.
 - `posterior_mean` is the estimated solve probability for that prompt. Lower
   means harder.
+- `posterior_lower_bound` is a conservative lower bound on solve probability at
+  the configured `--posterior-lower-quantile`.
+- `expected_quantile` is a posterior-aware rank in `[0, 1]`. It is useful for
+  filtering or clamping to a subset of the difficulty range.
 - `bucket_index = 0` is the easiest bucket and
   `bucket_index = bucket_count - 1` is the hardest.
-- The sampler uses a smooth distribution with a configurable easy-heavy
-  bootstrap phase, then gradually shifts mass toward harder buckets instead of
-  hard-switching between discrete phases.
-- Within each bucket, examples are weighted by a blend of uncertainty
-  (`4 * p * (1 - p)`) and hardness (`1 - p`), so borderline prompts stay
-  attractive while already-solved prompts are naturally down-weighted.
-- If `--curriculum_adaptive true` is set, bucket probabilities are additionally
-  blended with live reward / advantage statistics so buckets with useful
-  learning signal can get more mass during training.
+
+`grpo_fast.py` can optionally replace uniform prompt reshuffling with
+`DifficultyCurriculumSampler`, which consumes this metadata by default. The
+current curriculum implementation uses:
+
+- `difficulty.posterior_mean` for within-bucket weighting.
+- `difficulty.bucket_index` and `difficulty.bucket_count` for bucketed
+  sampling.
+- `difficulty.expected_quantile` for optional
+  `--curriculum_min_quantile` / `--curriculum_max_quantile` filtering.
+
+The sampler uses a smooth distribution with a configurable easy-heavy
+bootstrap phase, then gradually shifts mass toward harder buckets instead of
+hard-switching between discrete phases. Within each bucket, examples are
+weighted by a blend of uncertainty (`4 * p * (1 - p)`) and hardness
+(`1 - p`), so borderline prompts stay attractive while already-solved prompts
+are naturally down-weighted. If `--curriculum_adaptive true` is set, bucket
+probabilities are additionally blended with live reward / advantage statistics
+so buckets with useful learning signal can get more mass during training.
 
 ## Recommended Starting Point
 
-For `bucket_count=5`:
+If you are using this metadata with `DifficultyCurriculumSampler`,
+`bucket_count=5` is a reasonable starting point:
 
 - Bootstrap (first ~100 steps by default): buckets 0 and 1 dominate so the
   model sees easier prompts while it settles into the chat template and task
@@ -100,6 +125,9 @@ Useful flags:
 --curriculum_bucket_sigma 0.0 \
 --curriculum_bootstrap_sigma 0.0 \
 --curriculum_uncertainty_weight 0.5 \
+--curriculum_strict_metadata true \
+--curriculum_min_quantile 0.0 \
+--curriculum_max_quantile 1.0 \
 --curriculum_adaptive true
 ```
 
@@ -113,10 +141,12 @@ Tuning tips:
   concentrate probability on fewer neighboring buckets.
 - Lower `curriculum_warmup_target` if you want the post-bootstrap warmup to
   stay easier for longer.
+- Raise `curriculum_min_quantile` or lower `curriculum_max_quantile` if you
+  want to focus on a narrower difficulty band.
 
 ## Metrics
 
-The most useful curriculum metrics are:
+Some useful curriculum metrics are:
 
 - `curriculum/progress`
 - `curriculum/static_bucket_prob_*`
@@ -126,5 +156,6 @@ The most useful curriculum metrics are:
 - `curriculum/bucket_reward_mean_*`
 - `curriculum/bucket_abs_advantage_mean_*`
 
-See `scripts/train/qwen/qwen3_4b_dapo_math_difficulty_curriculum.sh` for a
-concrete launch example.
+See [qwen3_4b_dapo_math_dc.sh](../../train/qwen/difficult-curriculum/qwen3_4b_dapo_math_dc.sh)
+for a concrete launch example, and the rest of
+`scripts/train/qwen/difficult-curriculum/` for variants.

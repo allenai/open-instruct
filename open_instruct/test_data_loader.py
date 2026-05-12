@@ -1,6 +1,4 @@
-import sys
 import tempfile
-import types
 import unittest
 
 import numpy as np
@@ -8,13 +6,9 @@ import parameterized
 import torch
 from datasets import Dataset
 
-vllm_stub = types.ModuleType("vllm")
-vllm_stub.SamplingParams = object
-sys.modules.setdefault("vllm", vllm_stub)
-
-from open_instruct import data_loader, data_types  # noqa: E402
-from open_instruct.model_utils import Batch  # noqa: E402
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO  # noqa: E402
+from open_instruct import data_loader, data_types
+from open_instruct.model_utils import Batch
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
