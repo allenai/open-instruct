@@ -3118,7 +3118,7 @@ def weight_sync_thread(
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
             with Timer("[Weight Sync]") as timer:
-                logger.debug("[Weight Sync Thread] Starting weight sync")
+                logger.info(f"[Weight Sync Thread] Starting weight sync for model_step={target_model_step}")
 
                 # Set actors to stop
                 ray.get(actor_manager.set_should_stop.remote(True))
@@ -3142,11 +3142,20 @@ def weight_sync_thread(
                 # In-flight updates only skip draining active requests before the update.
                 engine_update_refs = [ref for refs in weight_broadcast_results for ref in refs]
                 if engine_update_refs:
+                    logger.info(
+                        f"[Weight Sync Thread] Waiting for {len(engine_update_refs)} vLLM engine update RPCs"
+                    )
                     ray_get_with_progress(
                         engine_update_refs,
                         desc="[Weight Sync Thread] Waiting for vLLM engine update RPCs",
                         enable=False,
                     )
+
+                ray_get_with_progress(
+                    [engine.finish_weight_update.remote() for engine in vllm_engines],
+                    desc="[Weight Sync Thread] Finishing vLLM weight update",
+                    enable=False,
+                )
 
                 ray_get_with_progress(
                     [engine.wake_up.remote() for engine in vllm_engines],
@@ -3820,7 +3829,7 @@ def run_training(
         if in_warmup:
             logger.debug(f"[Main Thread] Skipping weight sync at step {training_step} due to value/policy warmup")
         else:
-            logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+            logger.info(f"[Main Thread] Triggering weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
 
         last_eval_collected = maybe_evaluate(

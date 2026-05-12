@@ -821,6 +821,12 @@ class LLMRayActor:
         self._run_async(self.llm_engine.resume_generation())
         self._generation_paused = False
 
+    def start_weight_update(self) -> None:
+        self._run_async(self.llm_engine.start_weight_update(is_checkpoint_format=True))
+
+    def finish_weight_update(self) -> None:
+        self._run_async(self.llm_engine.finish_weight_update())
+
     def update_weights(self, *args, **kwargs) -> None:
         """Accept both the NCCL and IPC trainer-side calling conventions.
 
@@ -1558,6 +1564,7 @@ def broadcast_weights_to_vllm(
     is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     if is_rank_0:
         ray.get([engine.sleep.remote() for engine in vllm_engines])
+        ray.get([engine.start_weight_update.remote() for engine in vllm_engines])
 
     if model_update_group is None:
         return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
