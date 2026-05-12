@@ -92,6 +92,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
+    --vllm_gdn_prefill_backend triton \
     --keep_last_n_checkpoints -1 \
     --kl_estimator 3 \
     --use_value_model \

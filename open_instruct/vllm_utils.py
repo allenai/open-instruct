@@ -642,7 +642,6 @@ class LLMRayActor:
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.current_model_step: int = 0
-        self._generation_paused = False
         self._train_index_map: dict[int, int] = (
             {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
         )
@@ -802,24 +801,11 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
-    def _drain_active_tasks(self, reason: str) -> None:
-        if len(self.active_tasks) > 0:
-            logger.info(f"Waiting for {len(self.active_tasks)} active vLLM request(s) before {reason}")
-        while len(self.active_tasks) > 0:
-            self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-
     def sleep(self) -> None:
-        if not self.inflight_updates:
-            self._drain_active_tasks("pause generation")
-        self._run_async(self.llm_engine.pause_generation(mode="keep", clear_cache=False))
-        self._generation_paused = True
+        return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
 
     def wake_up(self) -> None:
-        if not self._generation_paused:
-            return
-        self._run_async(self.llm_engine.resume_generation())
-        self._generation_paused = False
+        return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
     def update_weights(self, *args, **kwargs) -> None:
         """Accept both the NCCL and IPC trainer-side calling conventions.
@@ -835,8 +821,9 @@ class LLMRayActor:
         accept both shapes to keep ``--single_gpu_mode`` working alongside the
         NCCL path used by multi-GPU pools.
         """
-        if not self.inflight_updates:
-            self._drain_active_tasks("weight update")
+        while not self.inflight_updates and len(self.active_tasks) > 0:
+            self.check_background_threads()
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
         model_step: int | None = None
         if len(args) == 1 and isinstance(args[0], dict) and "update_info" in args[0]:
@@ -1329,6 +1316,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    vllm_gdn_prefill_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1372,6 +1360,7 @@ def create_vllm_engines(
             .options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
+                max_concurrency=10,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={
@@ -1416,6 +1405,7 @@ def create_vllm_engines(
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
+                **({"gdn_prefill_backend": vllm_gdn_prefill_backend} if vllm_gdn_prefill_backend is not None else {}),
             )
         )
 
@@ -1564,7 +1554,7 @@ def broadcast_weights_to_vllm(
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
-    use_packed = True
+    use_packed = False
 
     if is_rank_0:
         refs = [

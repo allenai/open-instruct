@@ -247,6 +247,7 @@ def setup_vllm_engines(
         tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
         enforce_eager=vllm_config.vllm_enforce_eager,
         vllm_attention_backend=vllm_config.vllm_attention_backend,
+        vllm_gdn_prefill_backend=vllm_config.vllm_gdn_prefill_backend,
         tokenizer_name_or_path=tokenizer_name_or_path,
         pretrain=model_config.model_name_or_path,
         revision=model_config.model_revision,

@@ -117,9 +117,8 @@ class GenValueTrainerActor:
         self._max_prompt_tokens = max_prompt_tokens
         self._step_count = 0
 
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_path, torch_dtype=torch.bfloat16, use_cache=False
-        ).cuda()
+        self._model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16).cuda()
+        self._model.config.use_cache = False
         if hasattr(self._model, "gradient_checkpointing_enable"):
             self._model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         self._model.train()
@@ -786,6 +785,7 @@ def main():
             train_dataset=None,
             eval_dataset=None,
             vllm_attention_backend=vllm_config.vllm_attention_backend,
+            vllm_gdn_prefill_backend=vllm_config.vllm_gdn_prefill_backend,
         )
         logger.info(
             "======== ✅ Gen-value vLLM pool ready (%d engine(s), model=%s) =========",

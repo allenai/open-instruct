@@ -1,5 +1,5 @@
 #!/bin/bash
-# DR-TULU training with Qwen 3.5 9B and evolving rubrics.
+# DR-TULU training with Qwen 3.5 4B and evolving rubrics.
 # Uses the dr-tulu-rl-data dataset with GPT-4.1 as rubric judge and generator.
 #
 # Launch via Beaker:
@@ -85,6 +85,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
+    --vllm_gdn_prefill_backend triton \
     --keep_last_n_checkpoints -1 \
     --kl_estimator 3 \
     --push_to_hub False
