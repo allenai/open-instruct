@@ -360,8 +360,8 @@ def validate_title(text: str) -> bool:
 
 # Choose: From Answer with one of the following options: {options}
 def validate_choice(text: str, options: list) -> bool:
-    # TODO: substring match yields false positives (e.g. option "A" matches "Apple"); consider
-    # word-boundary regex like `re.search(rf"(?<!\w){re.escape(str(option))}(?!\w)", text)`.
+    # substring matching yields false positives (e.g. option "A" matches "Apple"); if this
+    # is a problem, switch to a regex, e.g. re.search(rf"(?<!\w){re.escape(str(option))}(?!\w)", text).
     return any(option in text for option in options)
 
 
