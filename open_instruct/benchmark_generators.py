@@ -57,8 +57,7 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
     with open(csv_path, "a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        if csvfile.tell() == 0:
-            writer.writeheader()
+        writer.writeheader()
 
         for batch_result in batch_results:
             response_lengths = batch_result["response_lengths"]
@@ -143,7 +142,7 @@ def save_benchmark_results_to_csv(
 
     with csv_path.open("a", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
-        if csvfile.tell() == 0:
+        if not csv_path.exists():
             writer.writeheader()
         writer.writerow(row_data)
     logger.info(f"Saved benchmark results to {csv_path}")
