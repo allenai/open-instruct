@@ -10,7 +10,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "SWERL tmax-10k GRPO with Our SFT Qwen3 8b (4 Podman services)" \
        --pure_docker_mode \
-       --workspace ai2/dr-tulu-ablations \
+       --workspace ai2/olmo-instruct \
        --priority urgent \
        --preemptible \
        --num_nodes 3 \
