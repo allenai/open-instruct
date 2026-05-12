@@ -5,7 +5,7 @@ MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
-LOCAL_EVAL_SPLITS="train train"
+LOCAL_EVAL_SPLITS="train"
 
 EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
 
