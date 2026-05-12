@@ -617,7 +617,6 @@ def combine_dataset(
             Whether to keep ids for training that are added during mixing.
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
-    assert len(splits) == len(dataset_mixer), "Number of splits must match the number of datasets."
     if isinstance(dataset_mixer, list):
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
         mixer_dict = {}
@@ -628,6 +627,7 @@ def combine_dataset(
             mixer_dict[dataset_mixer[i]] = value
             i += 2
         dataset_mixer = mixer_dict
+    assert len(splits) == len(dataset_mixer), "Number of splits must match the number of datasets."
 
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
         raise ValueError("Dataset fractions / lengths cannot be negative.")

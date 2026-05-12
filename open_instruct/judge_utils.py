@@ -5,24 +5,24 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
-PRICE_PER_TOKEN = {
-    "gpt-4": {"input": 0.00003, "output": 0.00006},
-    "gpt-3.5-turbo": {"input": 0.0000015, "output": 0.000002},
-    "gpt-4-1106-preview": {"input": 0.00001, "output": 0.00003},
-    "gpt-4o": {"input": 0.0000025, "output": 0.000001},
-    "gpt-4o-mini": {"input": 0.00000015, "output": 0.0000006},
-    "gpt-4o-standard": {"input": 0.0000025, "output": 0.000001},
-    "gpt-4.1": {"input": 0.000002, "output": 0.000008},
-    "gpt-4.1-standard": {"input": 0.000002, "output": 0.000008},
-    "gpt-4.1-mini-standard": {"input": 0.0000004, "output": 0.0000016},
-    "o3": {"input": 0.00001, "output": 0.00004},
-    "o3-standard": {"input": 0.00001, "output": 0.00004},
-    "claude-sonnet": {"input": 0.000003, "output": 0.000015},
-    "deepseek-chat": {"input": 0.00000007, "output": 0.000001},
-    "deepseek-reasoner": {"input": 0.00000014, "output": 0.000002},
-    "claude-3-7-sonnet-20250219": {"input": 0.000003, "output": 0.000015},
-    "minimax-m2.7": {"input": 0.0000003, "output": 0.0000012},
-    "minimax-m2.7-highspeed": {"input": 0.0000006, "output": 0.0000024},
+PRICE_PER_MILLION_TOKENS = {
+    "gpt-4": {"input": 30.0, "output": 60.0},
+    "gpt-3.5-turbo": {"input": 1.5, "output": 2.0},
+    "gpt-4-1106-preview": {"input": 10.0, "output": 30.0},
+    "gpt-4o": {"input": 2.5, "output": 10.0},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.6},
+    "gpt-4o-standard": {"input": 2.5, "output": 10.0},
+    "gpt-4.1": {"input": 2.0, "output": 8.0},
+    "gpt-4.1-standard": {"input": 2.0, "output": 8.0},
+    "gpt-4.1-mini-standard": {"input": 0.4, "output": 1.6},
+    "o3": {"input": 10.0, "output": 40.0},
+    "o3-standard": {"input": 10.0, "output": 40.0},
+    "claude-sonnet": {"input": 3.0, "output": 15.0},
+    "deepseek-chat": {"input": 0.07, "output": 1.0},
+    "deepseek-reasoner": {"input": 0.14, "output": 2.0},
+    "claude-3-7-sonnet-20250219": {"input": 3.0, "output": 15.0},
+    "minimax-m2.7": {"input": 0.3, "output": 1.2},
+    "minimax-m2.7-highspeed": {"input": 0.6, "output": 2.4},
 }
 
 # Define the templates for different judge types
