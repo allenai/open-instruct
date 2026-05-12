@@ -58,8 +58,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits $DATASET_SPLITS \
-    --dataset_mixer_eval_list rl-research/dr-tulu-rl-data 8 \
-    --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18500 \
