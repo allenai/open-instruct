@@ -53,6 +53,7 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
         timestamp: Unix timestamp
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     with csv_path.open("a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]

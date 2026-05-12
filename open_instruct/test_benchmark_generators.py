@@ -6,8 +6,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 import parameterized
+import pytest
 
-from open_instruct import benchmark_generators, utils
+pytest.importorskip("vllm", reason="benchmark_generators imports vllm_utils which requires vllm")
+
+from open_instruct import benchmark_generators, utils  # noqa: E402
 
 
 def _result():
