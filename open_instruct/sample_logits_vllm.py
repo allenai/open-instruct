@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import torch
 import tqdm
@@ -337,6 +337,6 @@ def main(args: SampleLogitsArguments, tc: TokenizerConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((SampleLogitsArguments, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
-    main(args, tc)
+    parser = ArgumentParserPlus((SampleLogitsArguments, TokenizerConfig))  # ty: ignore[invalid-argument-type]
+    raw_args, raw_tc = parser.parse_args_into_dataclasses()
+    main(cast(SampleLogitsArguments, raw_args), cast(TokenizerConfig, raw_tc))

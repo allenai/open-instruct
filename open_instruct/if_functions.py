@@ -300,7 +300,7 @@ def verify_postscript(text, postscript_marker):
 
 # Number Placeholder: The response must contain at least {N} placeholders represented by square brackets,
 # such as [address].
-def validate_placeholders(text: str, N: int) -> tuple[bool, list[str]]:
+def validate_placeholders(text: str, N: int) -> bool:
     """
     Validates if a text contains at least the specified number of placeholders in square brackets.
 
@@ -330,7 +330,7 @@ def validate_placeholders(text: str, N: int) -> tuple[bool, list[str]]:
 
 # Number Bullets: Your answer must contain exactly {N} bullet points. Use the markdown bullet points such as: * This
 # is a point.
-def verify_bullet_points(text: str, N: int) -> tuple[bool, str]:
+def verify_bullet_points(text: str, N: int) -> bool:
     """
     Verifies if a text contains exactly N bullet points in markdown format.
     Returns a tuple of (is_valid, message).

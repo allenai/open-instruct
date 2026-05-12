@@ -31,7 +31,7 @@ def find_shared_text(chosen_text: str, rejected_text: str):
 
 def evaluate(
     model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrainedTokenizer, max_sampled_texts: int = 0
-) -> tuple[dict, dict]:
+) -> tuple[dict, dict | None]:
     model.eval()
     total_loss = 0
     total_accuracy = 0
@@ -110,7 +110,7 @@ if __name__ == "__main__":
         target_columns=[CHOSEN_INPUT_IDS_KEY, REJECTED_INPUT_IDS_KEY],
         dataset_skip_cache=False,
     )
-    dataloader = DataLoader(eval_dataset, batch_size=8, collate_fn=SimplePreferenceCollator(tokenizer.pad_token_id))
+    dataloader = DataLoader(eval_dataset, batch_size=8, collate_fn=SimplePreferenceCollator(tokenizer.pad_token_id))  # ty: ignore[invalid-argument-type]
     metrics, table = evaluate(model, dataloader, tokenizer, max_sampled_texts=5)
     print(metrics)
     print_rich_table(pd.DataFrame(table))
