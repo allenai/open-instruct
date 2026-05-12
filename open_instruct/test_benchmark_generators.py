@@ -1,5 +1,4 @@
 import csv
-import importlib.util
 import pathlib
 import tempfile
 import unittest
@@ -7,13 +6,7 @@ from unittest import mock
 
 import parameterized
 
-from open_instruct import utils
-
-_HAS_VLLM = importlib.util.find_spec("vllm") is not None
-if _HAS_VLLM:
-    from open_instruct import benchmark_generators
-else:
-    benchmark_generators = None
+from open_instruct import benchmark_generators, utils
 
 
 class TestBenchmark(unittest.TestCase):
@@ -25,7 +18,6 @@ class TestBenchmark(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
-@unittest.skipUnless(_HAS_VLLM, "benchmark_generators requires vllm")
 class TestSaveCompletionLengths(unittest.TestCase):
     """Regression test for PR #1623: duplicate headers on every batch."""
 
@@ -52,7 +44,6 @@ class TestSaveCompletionLengths(unittest.TestCase):
             self.assertEqual(len(rows), 1 + 2 + 1 + 3)
 
 
-@unittest.skipUnless(_HAS_VLLM, "benchmark_generators requires vllm")
 class TestSaveBenchmarkResultsToCsv(unittest.TestCase):
     """Regression test for PR #1619: header never written because the
     Path('a') open call created the file before the existence check."""
