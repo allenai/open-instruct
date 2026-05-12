@@ -24,13 +24,12 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import torch
 import tqdm
 import vllm
 import yaml
-from transformers.hf_argparser import DataClassType
 from vllm.logprobs import FlatLogprobs
 
 from open_instruct import logger_utils
@@ -338,6 +337,6 @@ def main(args: SampleLogitsArguments, tc: TokenizerConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus(cast(tuple[DataClassType, ...], (SampleLogitsArguments, TokenizerConfig)))
-    raw_args, raw_tc = parser.parse_args_into_dataclasses()
-    main(cast(SampleLogitsArguments, raw_args), cast(TokenizerConfig, raw_tc))
+    parser = ArgumentParserPlus((SampleLogitsArguments, TokenizerConfig))
+    args, tc = parser.parse_args_into_dataclasses()
+    main(args, tc)
