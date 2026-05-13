@@ -334,6 +334,9 @@ class AdaptiveBucketStats:
             mean_reward = self.get_mean_reward(bucket_index)
             mean_abs_advantage = self.get_mean_abs_advantage(bucket_index)
 
+            # Prefer buckets with large update signal while the model is still struggling.
+            # If advantages are unavailable, use reward variance and non-saturation near 0.5
+            # as a proxy for buckets with uncertain outcomes and useful learning potential.
             if self._advantage_count_by_bucket.get(bucket_index, 0) > 0:
                 learning_signal = mean_abs_advantage * max(0.0, 1.0 - mean_reward)
             else:
@@ -375,6 +378,8 @@ class _DifficultyCurriculumSchedule:
     def __init__(self, config: DifficultyCurriculumScheduleConfig, bucket_count: int) -> None:
         self.config = config
         self.bucket_count = bucket_count
+        # The hardest bucket gets an explicit probability mass in build_probs,
+        # so the Gaussian covers only buckets 0 through bucket_count - 2.
         self._bucket_ids = np.arange(max(self.bucket_count - 1, 0), dtype=np.float64)
 
     def get_progress(self, step: int) -> float:
