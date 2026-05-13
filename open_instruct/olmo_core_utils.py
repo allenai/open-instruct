@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import accelerate
+import torch
 import torch.distributed as dist
 import transformers
 from olmo_core import optim as olmo_optim
@@ -473,14 +474,24 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
             f"Missing keys: {sorted(missing)}. Extra keys: {sorted(extra)}."
         )
     logger.info(
-        "Verified HF export works for %s (model_type=%s, %d params).",
-        original_model_name_or_path,
-        getattr(hf_config, "model_type", None),
-        len(expected),
+        f"Verified HF export works for {original_model_name_or_path} "
+        f"(model_type={getattr(hf_config, 'model_type', None)}, {len(expected)} params)."
     )
 
 
-def save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer):
+def save_state_dict_as_hf(
+    state_dict: dict[str, torch.Tensor],
+    save_dir: str,
+    original_model_name_or_path: str,
+    tokenizer: transformers.PreTrainedTokenizerBase,
+) -> None:
+    """Convert an olmo-core state dict to HuggingFace format and save it to disk.
+
+    Loads the target HF config from ``original_model_name_or_path``, converts the
+    olmo-core ``state_dict`` keys/shapes to the matching HF layout, materializes
+    an HF model with those weights, and writes the model + tokenizer to
+    ``save_dir``.
+    """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
