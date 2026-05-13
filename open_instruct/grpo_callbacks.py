@@ -88,7 +88,7 @@ class StepTimingCallback(Callback):
         metrics = batch["metrics"]
         self._prompt_lengths = list(metrics["batch/prompt_lengths"])
         self._response_lengths = list(metrics["batch/response_lengths"])
-        self._total_generation_time = float(metrics["time/getting_response"])
+        self._total_generation_time = float(metrics["time/group_generation_max"])
 
     def post_train_batch(self) -> None:
         self._train_duration = time.perf_counter() - self._step_start
