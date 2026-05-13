@@ -30,10 +30,10 @@ uv run python mason.py \
     --exp_name sft_qwen35_4b_base_our_sft \
     --model_name_or_path Qwen/Qwen3.5-4B-Base \
     --tokenizer_name Qwen/Qwen3.5-4B-Base \
-    --sequence_parallel_size 2 \
+    --sequence_parallel_size 4 \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
@@ -45,7 +45,6 @@ uv run python mason.py \
         $DATASET_CONFIG \
     --dataset_mixer_list_splits \
         train \
-    --add_bos \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
