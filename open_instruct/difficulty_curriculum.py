@@ -334,9 +334,11 @@ class AdaptiveBucketStats:
             mean_reward = self.get_mean_reward(bucket_index)
             mean_abs_advantage = self.get_mean_abs_advantage(bucket_index)
 
-            # Prefer buckets with large update signal while the model is still struggling.
-            # If advantages are unavailable, use reward variance and non-saturation near 0.5
-            # as a proxy for buckets with uncertain outcomes and useful learning potential.
+            # Adaptive sampling treats a bucket as valuable when it still has learning signal.
+            # With advantages, high absolute advantage marks prompts producing large updates;
+            # multiplying by (1 - mean_reward) keeps already-solved buckets from dominating.
+            # Without advantages, reward variance plus a peak near mean_reward ~= 0.5 acts as
+            # a proxy for uncertain, non-saturated buckets where more samples may teach the model.
             if self._advantage_count_by_bucket.get(bucket_index, 0) > 0:
                 learning_signal = mean_abs_advantage * max(0.0, 1.0 - mean_reward)
             else:
