@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+import transformers
 from olmo_core import optim as olmo_optim
 from olmo_core import train
 from olmo_core.config import DType
@@ -30,7 +31,13 @@ from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 logger = logger_utils.setup_logger(__name__)
 
 
-def export_to_hf(model, tokenizer, save_dir: str, original_model_name_or_path: str, is_main_process: bool):
+def export_to_hf(
+    model: torch.nn.Module,
+    tokenizer: transformers.PreTrainedTokenizerBase,
+    save_dir: str,
+    original_model_name_or_path: str,
+    is_main_process: bool,
+):
     """Export an FSDP-wrapped model to HuggingFace format.
 
     All ranks must call this function as state_dict() and full_tensor() are collective operations.
