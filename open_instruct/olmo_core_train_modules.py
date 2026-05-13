@@ -30,6 +30,11 @@ from open_instruct.rl_utils import masked_mean
 logger = logger_utils.setup_logger(__name__)
 
 
+_DOC_LENS_ATTN_BACKENDS = frozenset(
+    {AttentionBackendName.flash_2, AttentionBackendName.flash_3, AttentionBackendName.flash_4}
+)
+
+
 class DPOLMHead(LMHead):
     """LM head that returns per-token log-probabilities for DPO training.
 
@@ -114,6 +119,7 @@ class DPOTrainModule(TransformerTrainModule):
         sample_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.DPOExperimentConfig,
+        attn_implementation: AttentionBackendName,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
         cp_config: transformer_config.TransformerContextParallelConfig | None = None,
@@ -125,6 +131,11 @@ class DPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
+        if dpo_config.packing:
+            assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+                f"DPOTrainModule with packing requires a flash attention backend for intra-document "
+                f"masking via doc_lens/max_doc_lens; got {attn_implementation}."
+            )
         # TODO(finbarrtimbers): Remove this hack once Transformer supports configuring the LM head.
         model.lm_head.__class__ = DPOLMHead
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
@@ -265,11 +276,6 @@ class DPOTrainModule(TransformerTrainModule):
 
             if "aux_loss" in global_metrics:
                 self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
-
-
-_DOC_LENS_ATTN_BACKENDS = frozenset(
-    {AttentionBackendName.flash_2, AttentionBackendName.flash_3, AttentionBackendName.flash_4}
-)
 
 
 class GRPOTrainModule(TransformerTrainModule):

@@ -280,6 +280,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         sample_microbatch_size=args.per_device_train_batch_size,
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
+        attn_implementation=args.attn_implementation,
         dp_config=dp_config,
         # Passing degree=1 is functionally correct but adds DTensor overhead with no benefit,
         # as apply_tp would wrap all layers unnecessarily. Pass None to skip TP entirely.
