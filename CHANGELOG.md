@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Integrate difficulty curriculum sampling into GRPO data loading, metrics, docs, and Qwen launch scripts (https://github.com/allenai/open-instruct/pull/1694).
 - Add a difficulty map builder for pass-rate Hugging Face datasets, including schema/metadata outputs and tests (https://github.com/allenai/open-instruct/pull/1693).
 - Add difficulty curriculum sampler configs, scheduling, adaptive bucket scoring, and unit tests (https://github.com/allenai/open-instruct/pull/1692).
 - Add parameterized `combine_dataset` tests in `open_instruct/test_utils.py` against local jsonl fixtures (no network), covering varied fractional/sample-count weight combinations and split-count mismatch (would have caught the bug fixed in #1674). Extract the interleaved-list→dict parsing into a shared `utils.parse_dataset_mixer_list` helper (with its own parameterized unit tests) and tighten `combine_dataset` / `get_datasets` to accept dict-only `dataset_mixer`; the one external list-form caller (`rejection_sampling/generation.py`) now converts at the call site.
