@@ -123,6 +123,14 @@ def main(
 
     beaker_config = utils.maybe_get_beaker_config()
 
+    checkpoint_save_folder = args.checkpoint_state_dir or args.output_dir
+    utils.ensure_beaker_restart_has_checkpoint(
+        checkpoint_save_folder
+        if checkpoint_save_folder and os.path.isdir(checkpoint_save_folder) and os.listdir(checkpoint_save_folder)
+        else None,
+        checkpoint_name="GRPO OLMo-core checkpoint state",
+    )
+
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
