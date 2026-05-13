@@ -484,7 +484,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     )
 
 
-def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
+def save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer):
     hf_config = get_hf_config(original_model_name_or_path)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
@@ -496,5 +496,3 @@ def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_nam
     os.makedirs(save_dir, exist_ok=True)
     hf_model.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
-    original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
-    original_config.save_pretrained(save_dir)

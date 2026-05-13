@@ -30,9 +30,7 @@ from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 logger = logger_utils.setup_logger(__name__)
 
 
-def export_to_hf(
-    model, model_config, tokenizer, save_dir: str, original_model_name_or_path: str, is_main_process: bool
-):
+def export_to_hf(model, tokenizer, save_dir: str, original_model_name_or_path: str, is_main_process: bool):
     """Export an FSDP-wrapped model to HuggingFace format.
 
     All ranks must call this function as state_dict() and full_tensor() are collective operations.
@@ -44,9 +42,7 @@ def export_to_hf(
 
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
-        olmo_core_utils.save_state_dict_as_hf(
-            model_config, state_dict, save_dir, original_model_name_or_path, tokenizer
-        )
+        olmo_core_utils.save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer)
 
 
 def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
@@ -82,17 +78,11 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
 
 
 def _handle_post_training(
-    args: dpo_utils.DPOExperimentConfig,
-    model,
-    model_config,
-    tokenizer,
-    trainer_callbacks,
-    beaker_config,
-    is_main_process: bool,
+    args: dpo_utils.DPOExperimentConfig, model, tokenizer, trainer_callbacks, beaker_config, is_main_process: bool
 ):
     """Save HF model, copy to beaker, launch evals, push to hub."""
     hf_model_path = os.path.join(args.output_dir, "hf_model")
-    export_to_hf(model, model_config, tokenizer, hf_model_path, args.model_name_or_path, is_main_process)
+    export_to_hf(model, tokenizer, hf_model_path, args.model_name_or_path, is_main_process)
 
     if distributed_utils.is_distributed():
         dist.barrier()
@@ -330,9 +320,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
     trainer.fit()
     logger.info("Training complete.")
 
-    _handle_post_training(
-        args, train_module.model, model_config, tokenizer, trainer_callbacks, beaker_config, is_main_process
-    )
+    _handle_post_training(args, train_module.model, tokenizer, trainer_callbacks, beaker_config, is_main_process)
 
     train.teardown_training_environment()
 
