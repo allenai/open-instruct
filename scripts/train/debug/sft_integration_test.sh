@@ -20,7 +20,8 @@ LAUNCH_CMD="accelerate launch \
     --add_bos \
     --seed 123 \
     --chat_template_name tulu \
-    --push_to_hub false"
+    --push_to_hub false \
+    --try_launch_beaker_eval_jobs false"
 
 if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"
@@ -35,9 +36,10 @@ if [ -n "$1" ]; then
         --pure_docker_mode \
         --preemptible \
         --num_nodes 1 \
-        --budget ai2/oe-adapt \
         --gpus 1 \
         --non_resumable \
+        --no_auto_dataset_cache \
+        --artifact_ttl 1d \
         -- \
         $LAUNCH_CMD
 else

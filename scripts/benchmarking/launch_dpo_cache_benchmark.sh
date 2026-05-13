@@ -12,7 +12,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env "REFERENCE_LOGPROBS_CACHE_PATH=/tmp/benchmark_cache_\$(date +%s)" \
@@ -46,7 +45,6 @@ uv run python mason.py \
         allenai/repeat_gpt_pairs_filtered_lbc100 312 \
         allenai/self-talk_gpt_pairs_filtered_lbc100 2500 \
     --seed 123 \
-    --use_flash_attn \
     --loss_type dpo_norm \
     --beta 5 \
     --gradient_checkpointing \

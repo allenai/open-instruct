@@ -12,6 +12,7 @@ token_length.png
 birr/
 
 oe-eval-internal/
+olmo-eval-internal/
 
 results
 models
@@ -49,6 +50,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+open_instruct/_version.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -160,3 +162,4 @@ dmypy.json
 cache/
 local_dataset_cache/
 scratch/
+.claude/worktrees/

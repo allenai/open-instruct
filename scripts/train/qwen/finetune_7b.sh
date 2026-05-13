@@ -6,7 +6,7 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 8 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-other \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
@@ -29,7 +29,6 @@ python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \

@@ -2,18 +2,18 @@ import tempfile
 import unittest
 
 import datasets
-import numpy as np
 import parameterized
 import torch
 
 import open_instruct.data_loader
-from open_instruct import dpo_utils
+from open_instruct import tensor_utils
 
 
 def single_example_collator(examples: list[dict]) -> dict:
     """Collator for batch_size=1 that extracts the single example."""
     assert len(examples) == 1
-    return examples[0]
+    example = examples[0]
+    return example | {"index": torch.tensor([example["index"]])}
 
 
 def batch_collator(examples: list[dict]) -> dict:
@@ -78,7 +78,7 @@ class TestHFDataLoader(unittest.TestCase):
         for _dp_rank, loader in enumerate(loaders):
             rank_indices = []
             for batch in loader:
-                rank_indices.append(batch["index"])
+                rank_indices.extend(batch["index"].tolist())
             all_indices.append(set(rank_indices))
 
         for i in range(dp_world_size):
@@ -91,9 +91,9 @@ class TestHFDataLoader(unittest.TestCase):
             union |= indices
         total_batches = num_examples // batch_size
         usable_size = total_batches * batch_size
-        rng = np.random.default_rng(42)
-        shuffled = np.arange(num_examples)
-        rng.shuffle(shuffled)
+        generator = torch.Generator()
+        generator.manual_seed(42)
+        shuffled = torch.randperm(num_examples, generator=generator).numpy()
         expected_indices = set(shuffled[:usable_size].tolist())
         self.assertEqual(union, expected_indices)
 
@@ -110,10 +110,10 @@ class TestHFDataLoader(unittest.TestCase):
             collator=single_example_collator,
         )
 
-        first_pass = [batch["index"] for batch in loader]
+        first_pass = [batch["index"].item() for batch in loader]
 
         loader.reshuffle()
-        second_pass = [batch["index"] for batch in loader]
+        second_pass = [batch["index"].item() for batch in loader]
 
         self.assertNotEqual(first_pass, second_pass)
         self.assertEqual(set(first_pass), set(second_pass))
@@ -176,14 +176,14 @@ class TestHFDataLoader(unittest.TestCase):
             collator=single_example_collator,
         )
 
-        indices1 = [batch["index"] for batch in loader1]
-        indices2 = [batch["index"] for batch in loader2]
+        indices1 = [batch["index"].item() for batch in loader1]
+        indices2 = [batch["index"].item() for batch in loader2]
         self.assertEqual(indices1, indices2)
 
         loader1.reshuffle(epoch=1)
         loader2.reshuffle(epoch=1)
-        indices1_epoch1 = [batch["index"] for batch in loader1]
-        indices2_epoch1 = [batch["index"] for batch in loader2]
+        indices1_epoch1 = [batch["index"].item() for batch in loader1]
+        indices2_epoch1 = [batch["index"].item() for batch in loader2]
         self.assertEqual(indices1_epoch1, indices2_epoch1)
 
         self.assertNotEqual(indices1, indices1_epoch1)
@@ -286,7 +286,7 @@ class TestHFDataLoader(unittest.TestCase):
         )
         new_loader.load_state_dict(state)
 
-        remaining = [batch["index"] for batch in new_loader]
+        remaining = [batch["index"].item() for batch in new_loader]
         self.assertEqual(len(remaining), 10)
 
     def test_infinite_loop_all_excluded(self):
@@ -304,7 +304,7 @@ class TestHFDataLoader(unittest.TestCase):
         )
 
         for batch in loader:
-            loader.exclude_index(batch["index"])
+            loader.exclude_index(batch["index"].item())
 
         with self.assertRaises(RuntimeError) as context:
             next(loader)
@@ -361,10 +361,10 @@ class TestHFDataLoader(unittest.TestCase):
 
         for padding_amount in [0, 5, 10, 50, 100]:
             batch = {
-                "input_ids": dpo_utils.pad_to_length(
+                "input_ids": tensor_utils.pad_to_length(
                     torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
                 ),
-                "attention_mask": dpo_utils.pad_to_length(
+                "attention_mask": tensor_utils.pad_to_length(
                     torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
                 ),
             }
@@ -373,6 +373,45 @@ class TestHFDataLoader(unittest.TestCase):
                 batch_size * real_tokens,
                 f"Failed for padding_amount={padding_amount}",
             )
+
+    def test_global_num_tokens_prefixed_attention_mask(self):
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(10),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=2,
+            work_dir=tempfile.gettempdir(),
+        )
+        batch = {"chosen_attention_mask": torch.ones(1, 64), "rejected_attention_mask": torch.ones(1, 48)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
+
+    def test_global_num_tokens_cu_seq_lens(self):
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(10),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=2,
+            work_dir=tempfile.gettempdir(),
+        )
+        batch = {
+            "chosen_cu_seq_lens_k": torch.tensor([0, 30, 64]),
+            "rejected_cu_seq_lens_k": torch.tensor([0, 20, 48]),
+        }
+        self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
+
+    def test_global_num_tokens_fallback_input_ids(self):
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(10),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=2,
+            work_dir=tempfile.gettempdir(),
+        )
+        batch = {"chosen_input_ids": torch.zeros(1, 64), "rejected_input_ids": torch.zeros(1, 48)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
 
     @parameterized.parameterized.expand(
         [

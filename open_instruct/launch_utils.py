@@ -3,7 +3,18 @@ import subprocess
 
 from transformers.utils import hub as transformers_hub
 
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
+AUTO_CREATED_BEAKER_CONFIG_DIR = "configs/beaker_configs/auto_created"
+
+WEKA_CLUSTERS = [
+    "ai2/jupiter",
+    "ai2/saturn",
+    "ai2/titan",
+    "ai2/neptune",
+    "ai2/ceres",
+    "ai2/triton",
+    "ai2/rhea",
+    "ai2/prometheus",
+]
 
 
 def custom_cached_file(model_name_or_path: str, filename: str, revision: str | None = None, repo_type: str = "model"):
@@ -15,11 +26,7 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
             return None
     else:
         resolved_file = transformers_hub.try_to_load_from_cache(
-            model_name_or_path,
-            filename,
-            cache_dir=transformers_hub.TRANSFORMERS_CACHE,
-            revision=revision,
-            repo_type=repo_type,
+            model_name_or_path, filename, revision=revision, repo_type=repo_type
         )
         if not isinstance(resolved_file, str):
             return None
@@ -28,14 +35,13 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
 
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
-) -> str:
+) -> str | None:
     file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = transformers_hub.extract_commit_hash(file, None)
     return commit_hash
 
 
-GCP_CLUSTERS = ["ai2/augusta"]
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan"]
 
 
 def live_subprocess_output(cmd: list[str]) -> str:
@@ -92,3 +98,16 @@ def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
     print(f"Copying model to GS bucket with command: {cmd}")
     live_subprocess_output(cmd)
+
+
+def validate_beaker_workspace(workspace: str) -> None:
+    parts = workspace.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError(
+            f"--workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/oe-adapt-general'). Received: '{workspace}'"
+        )
+
+
+def auto_created_spec_path(experiment_name: str) -> str:
+    os.makedirs(AUTO_CREATED_BEAKER_CONFIG_DIR, exist_ok=True)
+    return os.path.join(AUTO_CREATED_BEAKER_CONFIG_DIR, f"{experiment_name}.yaml")

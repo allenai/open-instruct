@@ -4,7 +4,6 @@
 # Usage: ./scripts/train/dgx-spark/dpo_ultrafeedback.sh
 #
 # DGX Spark notes:
-#   - SDPA is faster than flash attention on Blackwell (--use_flash_attn false)
 #   - DPO needs ~2x memory of SFT (policy + reference model)
 #   - Batch 4 @ 1024 ctx is stable for unified memory (batch=8 caused OOM crashes)
 
@@ -22,7 +21,6 @@ uv run python -m accelerate.commands.launch \
     --exp_name spark_dpo_qwen3_ultrafeedback \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     --max_seq_length 1024 \
     --per_device_train_batch_size 4 \
     --gradient_accumulation_steps 16 \

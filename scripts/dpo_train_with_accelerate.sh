@@ -16,7 +16,6 @@ accelerate launch \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/tulu-2-7b \
-    --use_flash_attn \
     --gradient_checkpointing \
     --tokenizer_name allenai/tulu-2-7b \
     --use_slow_tokenizer \

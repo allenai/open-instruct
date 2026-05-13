@@ -2,7 +2,6 @@
 # TODO adapt batch sizes to 16+ GPUs for more useful recipe
 model_name_or_path: meta-llama/Llama-2-70b
 model_revision: main
-use_flash_attn: true
 tokenizer_name: meta-llama/Llama-2-70b
 use_slow_tokenizer: true
 dataset_name: allenai/tulu-v2-sft-mixture

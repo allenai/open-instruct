@@ -31,7 +31,7 @@ def main():
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name)
     vocab_size = hf_config.vocab_size
 
-    model_config = olmo_core_utils.get_transformer_config(args.model_name, vocab_size)
+    model_config = olmo_core_utils.get_transformer_config(args.model_name, vocab_size, attn_backend="torch")
     model = model_config.build(init_device="cpu")
 
     state_dict = {"model": model.state_dict()}

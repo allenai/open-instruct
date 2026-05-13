@@ -1,0 +1,14 @@
+{
+  "backend": "tokenizers",
+  "bos_token": "<|begin_of_text|>",
+  "clean_up_tokenization_spaces": true,
+  "eos_token": "<|end_of_text|>",
+  "is_local": false,
+  "model_input_names": [
+    "input_ids",
+    "attention_mask"
+  ],
+  "model_max_length": 131072,
+  "pad_token": "<pad>",
+  "tokenizer_class": "TokenizersBackend"
+}

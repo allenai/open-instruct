@@ -8,7 +8,7 @@ LR=8e-5
 python src/scripts/train/sft/OLMo-sft.py train \
     olmo3-32b-instruct-SFT-1114-fix-${LR}-seed_33333 \
         $CHECKPOINT \
-        ai2/augusta \
+        ai2/jupiter \
     --trainer.callbacks.wandb.enabled=True \
     --trainer.max_duration.value=2 \
     --train_module.optim.lr=$LR \
@@ -17,7 +17,6 @@ python src/scripts/train/sft/OLMo-sft.py train \
     --num_nodes=8 \
     --global_batch_size=4194304 \
     --model_name=olmo3-32b \
-    --budget=ai2/oe-adapt \
     --workspace=ai2/olmo-instruct \
     --dataset_path=gs://ai2-llm/jacobm/data/sft/rl-sft-32k/olmo3-32b-instruct-sft-1114 \
     --launch.priority=urgent

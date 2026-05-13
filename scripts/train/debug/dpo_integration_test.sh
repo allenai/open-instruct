@@ -13,14 +13,14 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-other \
+    --artifact_ttl 1d \
     --gpus 1 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \
     open_instruct/dpo_tune_cache.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -34,4 +34,6 @@ uv run python mason.py \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --add_bos \
     --chat_template_name olmo \
-    --seed 123
+    --seed 123 \
+    --checkpointing_steps 5 \
+    --keep_last_n_checkpoints 2

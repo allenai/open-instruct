@@ -1,0 +1,4 @@
+open_instruct/test_data/tokenizer/tokenizer.json.gz filter=lfs diff=lfs merge=lfs -text
+open_instruct/test_data/sft_sample.jsonl filter=lfs diff=lfs merge=lfs -text
+open_instruct/test_data/preference_sample.jsonl filter=lfs diff=lfs merge=lfs -text
+open_instruct/test_data/rlvr_sample.jsonl filter=lfs diff=lfs merge=lfs -text

@@ -1,7 +1,6 @@
 model_name_or_path: allenai/Llama-3.1-Tulu-3-70B-SFT
 tokenizer_name: allenai/Llama-3.1-Tulu-3-70B-SFT
 model_revision: main
-use_flash_attn: true
 gradient_checkpointing: true
 dataset_mixer:
     allenai/llama-3.1-tulu-3-70b-preference-mixture: 1.0

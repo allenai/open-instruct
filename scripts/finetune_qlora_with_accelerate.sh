@@ -17,7 +17,6 @@ accelerate launch \
     --gradient_checkpointing \
     --use_qlora \
     --use_lora \
-    --use_flash_attn \
     --lora_rank 64 \
     --lora_alpha 16 \
     --lora_dropout 0.1 \

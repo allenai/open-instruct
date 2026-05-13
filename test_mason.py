@@ -71,6 +71,19 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
                 {"--checkpoint_dir": True},
                 ["python", "script.py", "--output", "out.txt"],
             ),
+            (
+                "value_arg_followed_by_other_flag",
+                ["python", "script.py", "--checkpoint_dir", "--verbose"],
+                {"--checkpoint_dir": True},
+                ["python", "script.py", "--verbose"],
+            ),
+            ("adjacent_value_args", ["--checkpoint_dir", "--checkpoint_dir", "/path"], {"--checkpoint_dir": True}, []),
+            (
+                "remove_repeated_value_arg",
+                ["python", "s.py", "--output_dir", "/tmp/y", "--foo", "bar", "--output_dir", "/tmp/z"],
+                {"--output_dir": True},
+                ["python", "s.py", "--foo", "bar"],
+            ),
         ]
     )
     def test_build_command_without_args(self, name, command, args_to_remove, expected):
@@ -103,6 +116,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "hostname": None,
                     "preemptible": False,
+                    "mount_docker_socket": False,
                 },
             ),
             (
@@ -127,6 +141,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "preemptible": True,
                     "hostname": None,
+                    "mount_docker_socket": False,
                 },
             ),
         ]

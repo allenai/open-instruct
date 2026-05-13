@@ -55,7 +55,6 @@ for model_name_or_path in "$@"; do
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env NCCL_CUMEM_ENABLE=0 \
-        --budget ai2/oe-adapt \
         --gpus 8 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
         --task_name open_instruct-benchmark_generators -- source configs/beaker_configs/ray_node_setup.sh \&\& python -m open_instruct.benchmark_generators \
@@ -71,7 +70,7 @@ for model_name_or_path in "$@"; do
             --num_unique_prompts_rollout 16 \
             --num_samples_per_prompt_rollout 4 \
 	    --inflight_updates True \
-            --vllm_num_engines 1 \
+            --vllm_num_engines 2 \
             --vllm_tensor_parallel_size 4 \
             --vllm_enable_prefix_caching \
             --vllm_gpu_memory_utilization 0.9 \

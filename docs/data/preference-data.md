@@ -43,7 +43,7 @@ python scripts/data/preferences/nectar.py --push_to_hub --subset anthropic-hh --
 python scripts/data/preferences/nectar.py --push_to_hub --deduplication --hf_entity ai2-adapt-dev
 ```
 The default split is `lmsys-chat-1m`.
-The last example is called "deduplication" due to potential overlap with UltraFeedback, given they source from the same underlying dataset. Basic tests showed they did not use the same prompts, but slight modifications could've occured.
+The last example is called "deduplication" due to potential overlap with UltraFeedback, given they source from the same underlying dataset. Basic tests showed they did not use the same prompts, but slight modifications could've occurred.
 * [ai2-adapt-dev/nectar_binarized-anthropic-hh](https://huggingface.co/datasets/ai2-adapt-dev/nectar_binarized-anthropic-hh)
 * [ai2-adapt-dev/nectar_binarized-lmsys-chat-1m](https://huggingface.co/datasets/ai2-adapt-dev/nectar_binarized-lmsys-chat-1m)
 * [ai2-adapt-dev/nectar_binarized-dedup-ultrafeedback](https://huggingface.co/datasets/ai2-adapt-dev/nectar_binarized-dedup-ultrafeedb)ack

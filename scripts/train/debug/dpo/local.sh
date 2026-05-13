@@ -2,8 +2,7 @@
 export TORCH_LOGS="graph_breaks,recompiles"
 uv run torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
-    --tokenizer_name allenai/OLMo-2-0425-1B \
-    --attn_backend flash_2 \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -16,5 +15,6 @@ uv run torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 50 \
     --chat_template_name olmo \
+    --exp_name "dpo-local-debug-$(date +%s)" \
     --seed 123 \
     --push_to_hub false

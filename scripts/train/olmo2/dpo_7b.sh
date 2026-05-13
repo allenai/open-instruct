@@ -6,7 +6,7 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-other \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
@@ -33,6 +33,5 @@ python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --with_tracking \

@@ -17,7 +17,6 @@ accelerate launch \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
     --model_name_or_path ../hf_llama2_models/${MODEL_SIZE} \
-    --use_flash_attn \
     --use_lora \
     --lora_rank 64 \
     --lora_alpha 16 \

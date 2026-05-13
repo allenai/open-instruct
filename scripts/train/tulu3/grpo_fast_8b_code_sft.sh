@@ -3,7 +3,7 @@ base=SFT
 description="test of https://github.com/allenai/open-instruct/pull/631"
 exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
 python mason.py \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --image saurabhs/code_dev \
     --pure_docker_mode \
     --workspace ai2/oe-adapt-code \
@@ -11,7 +11,6 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --description "${description}" \
-    --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.01 \

@@ -53,6 +53,8 @@ Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a 
 
 We use [uv](https://docs.astral.sh/uv/) for installation and running code. You can install with `uv sync`.
 
+* **Git LFS** (for running tests): Install [Git LFS](https://git-lfs.com/) and run `git lfs install` before cloning. See [CONTRIBUTING.md](CONTRIBUTING.md#git-lfs) for details.
+
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash

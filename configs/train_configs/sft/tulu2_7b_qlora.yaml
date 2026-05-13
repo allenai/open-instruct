@@ -1,7 +1,6 @@
 # Note, the exact model was trained on TPUs in a different repo
 model_name_or_path: meta-llama/Llama-2-7b-hf
 model_revision: main
-use_flash_attn: true
 gradient_checkpointing: true
 use_qlora: true
 use_lora: true

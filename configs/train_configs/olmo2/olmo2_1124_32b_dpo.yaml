@@ -1,5 +1,4 @@
 model_name_or_path: allenai/OLMo-2-1124-13B-SFT
-use_flash_attn: true
 gradient_checkpointing: true
 dataset_mixer:
   allenai/wildchat_v3.9_used_on_policy_prompts-olmo32: 1.0

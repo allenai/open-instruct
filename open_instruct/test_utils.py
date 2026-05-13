@@ -15,6 +15,7 @@
 import json
 import os
 import pathlib
+import shutil
 import tempfile
 import time
 import unittest
@@ -29,7 +30,6 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import data_types, launch_utils, utils
-from open_instruct.finetune import FlatArguments
 
 
 def _load_mbu_test_cases():
@@ -125,6 +125,54 @@ class GetDatasetsTest(unittest.TestCase):
         # two special cases which beaker uses
         self.assertTrue(parser.parse("2024-09-16T19:03:02.31502Z"))
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
+
+
+class CombineDatasetTest(unittest.TestCase):
+    """Exercises combine_dataset end-to-end against local jsonl fixtures (no network)."""
+
+    SFT_PATH = str(pathlib.Path(__file__).parent / "test_data" / "sft_sample.jsonl")
+    RLVR_PATH = str(pathlib.Path(__file__).parent / "test_data" / "rlvr_sample.jsonl")
+
+    @parameterized.expand(
+        [
+            ("full_fractions", {SFT_PATH: 1.0, RLVR_PATH: 1.0}, 200),
+            ("half_fractions", {SFT_PATH: 0.5, RLVR_PATH: 0.5}, 100),
+            ("asymmetric_fractions", {SFT_PATH: 0.7, RLVR_PATH: 0.3}, 100),
+            ("zero_and_full", {SFT_PATH: 0.0, RLVR_PATH: 1.0}, 100),
+            ("int_sample_counts", {SFT_PATH: 25, RLVR_PATH: 50}, 75),
+            ("mixed_fraction_and_count", {SFT_PATH: 0.4, RLVR_PATH: 10}, 50),
+        ]
+    )
+    def test_combine_dataset_dict_form(self, _name, mixer, expected_len):
+        ds = utils.combine_dataset(mixer, splits=["train", "train"], columns_to_keep=["messages"])
+        self.assertEqual(len(ds), expected_len)
+        self.assertIn("messages", ds.column_names)
+
+    def test_combine_dataset_split_mismatch_raises(self):
+        mixer = {self.SFT_PATH: 1.0, self.RLVR_PATH: 1.0}
+        with self.assertRaises(AssertionError):
+            utils.combine_dataset(mixer, splits=["train"], columns_to_keep=["messages"])
+
+
+class ParseDatasetMixerListTest(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("float_weights", ["a", "0.5", "b", "0.25"], {"a": 0.5, "b": 0.25}),
+            ("int_weights", ["a", "100", "b", "200"], {"a": 100, "b": 200}),
+            ("mixed_weights", ["a", "1.0", "b", "3"], {"a": 1.0, "b": 3}),
+            ("single_entry", ["only", "0.7"], {"only": 0.7}),
+        ]
+    )
+    def test_parse_valid(self, _name, mixer_list, expected):
+        self.assertEqual(utils.parse_dataset_mixer_list(mixer_list), expected)
+
+    def test_odd_length_raises(self):
+        with self.assertRaises(AssertionError):
+            utils.parse_dataset_mixer_list(["a", "1.0", "b"])
+
+    def test_non_string_key_raises(self):
+        with self.assertRaises(AssertionError):
+            utils.parse_dataset_mixer_list([123, "1.0"])
 
 
 def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
@@ -515,25 +563,6 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(specs["memory_bandwidth"], expected_specs["memory_bandwidth"])
 
 
-class TestFlatArguments(unittest.TestCase):
-    def test_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(FlatArguments)
-        (args,) = parser.parse_args_into_dataclasses(
-            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
-        )
-        self.assertIsInstance(args.additional_model_arguments, dict)
-        self.assertIsInstance(args.additional_model_arguments["int"], int)
-        self.assertIsInstance(args.additional_model_arguments["bool"], bool)
-        self.assertIsInstance(args.additional_model_arguments["float"], float)
-        self.assertIsInstance(args.additional_model_arguments["float2"], float)
-
-    def test_no_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(FlatArguments)
-        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
-        self.assertIsInstance(args.additional_model_arguments, dict)
-        self.assertFalse(args.additional_model_arguments)
-
-
 class TestModelDims(unittest.TestCase):
     def test_qwen25_7b_flops_calculation(self):
         sequence_length = 34048
@@ -646,6 +675,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             num_key_value_heads=8,
             head_dim=128,
         )
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
@@ -673,6 +703,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
     def test_from_hf_config_defaults(self):
         config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -707,6 +738,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             num_key_value_heads=8,
             head_dim=128,
         )
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -720,6 +752,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
     def test_from_hf_config_cpu_only(self):
         config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+        config.get_text_config = lambda: config
 
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
@@ -958,3 +991,33 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.query_responses[0].shape[-1], 4)
         # Original sequence was [0,1,2,3], which fits exactly in rank 0's chunk
         torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))
+
+
+class TestCleanLastNCheckpoints(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        for i in [10, 20, 30, 40, 50]:
+            os.makedirs(os.path.join(self.tmp_dir, f"step_{i}"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _checkpoint_dirs(self):
+        return sorted(d for d in os.listdir(self.tmp_dir) if d.startswith("step_"))
+
+    def test_keeps_last_n(self):
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=2)
+        self.assertEqual(self._checkpoint_dirs(), ["step_40", "step_50"])
+
+    def test_already_removed_directory(self):
+        shutil.rmtree(os.path.join(self.tmp_dir, "step_10"))
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=2)
+        self.assertEqual(self._checkpoint_dirs(), ["step_40", "step_50"])
+
+    def test_keep_all(self):
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=-1)
+        self.assertEqual(self._checkpoint_dirs(), ["step_10", "step_20", "step_30", "step_40", "step_50"])
+
+    def test_remove_all(self):
+        utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=0)
+        self.assertEqual(self._checkpoint_dirs(), [])

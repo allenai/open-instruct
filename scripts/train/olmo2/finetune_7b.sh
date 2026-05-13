@@ -6,7 +6,7 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 8 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-other \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
@@ -22,7 +22,6 @@ python mason.py \
     --use_slow_tokenizer False \
     --add_bos \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-    --use_flash_attn \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \

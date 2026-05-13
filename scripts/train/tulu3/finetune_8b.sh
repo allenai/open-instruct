@@ -12,7 +12,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 8 \
-    --budget ai2/oe-adapt \
     --gpus 8 \
     -- \
     accelerate launch \
@@ -38,7 +37,6 @@ uv run python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \

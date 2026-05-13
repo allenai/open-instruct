@@ -17,6 +17,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --pack_length 4096 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
+    --async_steps 1 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --apply_verifiable_reward true \
@@ -42,5 +43,5 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --tool_call_names code search browse \
     --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' '{}' \
     --tool_parser_type vllm_hermes \
-    --max_tool_calls 5 \
+    --max_steps 5 \
     --push_to_hub false

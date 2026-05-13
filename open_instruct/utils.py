@@ -54,6 +54,7 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
 import beaker
+import huggingface_hub
 import numpy as np
 import ray
 import requests
@@ -72,7 +73,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
+from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -164,10 +165,20 @@ class MetricsTracker:
         idx = self._maybe_register_metric(name)
         self.metrics[idx] = value
 
+    def update(self, metrics: dict) -> None:
+        for name, value in metrics.items():
+            self[name] = value
+
     def get_metrics_list(self) -> dict[str, float]:
         # Convert to Python floats for logging systems (wandb, tensorboard)
         metrics_list = self.metrics.tolist()
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
+
+
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 def max_num_processes() -> int:
@@ -184,12 +195,12 @@ def repeat_each(seq, k):
 
 
 def ray_get_with_progress(
-    ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
+    ray_refs: Iterable[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
     """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
-        ray_refs: List of ray object references
+        ray_refs: Iterable of ray object references
         desc: Description for the progress bar
         enable: Whether to show the progress bar (default: True)
         timeout: Optional timeout in seconds for all operations to complete
@@ -207,8 +218,8 @@ def ray_get_with_progress(
     ray_futures = [ref.future() for ref in ray_refs]
     fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
 
-    results = [None] * len(ray_refs)
-    completion_times = [None] * len(ray_refs)
+    results = [None] * len(ray_futures)
+    completion_times = [None] * len(ray_futures)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:
@@ -350,8 +361,21 @@ def convert_rejection_samples_to_messages(example):
     return example
 
 
+def parse_dataset_mixer_list(mixer_list: list) -> dict:
+    """Convert an interleaved `[name, weight, name, weight, ...]` list into a `{name: weight}` dict."""
+    assert len(mixer_list) % 2 == 0, f"Data mixer list length is not even: {mixer_list}"
+    mixer_dict = {}
+    i = 0
+    while i < len(mixer_list) - 1:
+        assert isinstance(mixer_list[i], str), f"Invalid type in data mixer: {mixer_list}"
+        value = float(mixer_list[i + 1]) if "." in mixer_list[i + 1] else int(mixer_list[i + 1])
+        mixer_dict[mixer_list[i]] = value
+        i += 2
+    return mixer_dict
+
+
 def get_datasets(
-    dataset_mixer: dict | list,
+    dataset_mixer: dict,
     splits: list[str] | None = None,
     configs: list[str] | None = None,
     columns_to_keep: list[str] | None = None,
@@ -365,10 +389,8 @@ def get_datasets(
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`list` or `dict`):
-            Dictionary or list containing the dataset names and their training proportions.
-            By default, all test proportions are 1. Lists are formatted as
-            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
+        dataset_mixer (`dict`):
+            Dictionary mapping dataset names to their training proportions.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -390,17 +412,6 @@ def get_datasets(
         add_source_col (`bool`, *optional*, defaults to `False`):
             Whether to add a column to the dataset that indicates the source of the data explicitly.
     """
-    if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        mixer_dict = {}
-        i = 0
-        while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
-            mixer_dict[dataset_mixer[i]] = value
-            i += 2
-        dataset_mixer = mixer_dict
-
     splits = ["train", "test"] if splits is None else splits
     configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -576,7 +587,7 @@ def get_datasets(
 
 
 def combine_dataset(
-    dataset_mixer: dict | list,
+    dataset_mixer: dict,
     splits: list[str],
     configs: list[str] | None = None,
     columns_to_keep: list[str] | None = None,
@@ -589,7 +600,7 @@ def combine_dataset(
 
     Args:
         dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions.
+            Dictionary mapping dataset names to their training proportions.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -607,16 +618,6 @@ def combine_dataset(
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
     assert len(splits) == len(dataset_mixer), "Number of splits must match the number of datasets."
-    if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        mixer_dict = {}
-        i = 0
-        while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
-            mixer_dict[dataset_mixer[i]] = value
-            i += 2
-        dataset_mixer = mixer_dict
 
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
@@ -678,7 +679,9 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
+    def parse_yaml_and_args(
+        self, yaml_arg: str, other_args: list[str] | None = None, allow_extra_keys: bool = False
+    ) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.
 
@@ -691,7 +694,7 @@ class ArgumentParserPlus(HfArgumentParser):
         Returns:
             [`List[dataclass]`]: a list of dataclasses with the values from the YAML file and the command line
         """
-        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg))
+        arg_list = self.parse_yaml_file(os.path.abspath(yaml_arg), allow_extra_keys=allow_extra_keys)
 
         outputs = []
         # strip other args list into dict of key-value pairs
@@ -735,14 +738,16 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> DataClassType | tuple[DataClassType]:
+    def parse(self, allow_extra_keys: bool = False) -> DataClassType | tuple[DataClassType]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
-            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]))
+            output = self.parse_yaml_file(os.path.abspath(sys.argv[1]), allow_extra_keys=allow_extra_keys)
         # parse command line args and yaml file
         elif len(sys.argv) > 2 and sys.argv[1].endswith(".yaml"):
-            output = self.parse_yaml_and_args(os.path.abspath(sys.argv[1]), sys.argv[2:])
+            output = self.parse_yaml_and_args(
+                os.path.abspath(sys.argv[1]), sys.argv[2:], allow_extra_keys=allow_extra_keys
+            )
         # parse command line args only
         else:
             output = self.parse_args_into_dataclasses()
@@ -826,7 +831,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             logger.info(f"Removing checkpoint {checkpoint}")
-            shutil.rmtree(os.path.join(output_dir, checkpoint))
+            shutil.rmtree(os.path.join(output_dir, checkpoint), ignore_errors=True)
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
@@ -847,7 +852,7 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
             print(f"Removing checkpoint {checkpoint}")
             checkpoint_path = os.path.join(output_dir, checkpoint)
             if os.path.isdir(checkpoint_path):
-                shutil.rmtree(checkpoint_path)
+                shutil.rmtree(checkpoint_path, ignore_errors=True)
             elif os.path.isfile(checkpoint_path):
                 os.remove(checkpoint_path)
 
@@ -921,6 +926,44 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     )
 
 
+def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
+    latest_path = os.path.join(checkpoint_state_dir, "latest")
+    if not os.path.isfile(latest_path):
+        return
+
+    with open(latest_path) as f:
+        latest_checkpoint_tag = f.read().strip()
+
+    if not latest_checkpoint_tag or os.path.basename(latest_checkpoint_tag) != latest_checkpoint_tag:
+        return
+
+    latest_checkpoint_dir = os.path.join(checkpoint_state_dir, latest_checkpoint_tag)
+    if not os.path.isdir(latest_checkpoint_dir):
+        raise ValueError(f"Invalid checkpoint: {latest_checkpoint_dir} does not exist")
+
+    latest_universal_tag = f"ds_universal_{latest_checkpoint_tag}"
+    latest_universal_path = os.path.join(checkpoint_state_dir, "latest_universal")
+    latest_universal_dir = os.path.join(checkpoint_state_dir, latest_universal_tag)
+    if os.path.isdir(latest_universal_dir):
+        with open(latest_universal_path, "w") as f:
+            f.write(latest_universal_tag)
+        return
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "deepspeed.checkpoint.ds_to_universal",
+            "--input_folder",
+            latest_checkpoint_dir,
+            "--output_folder",
+            latest_universal_dir,
+            "--inject_missing_state",
+        ],
+        check=True,
+    )
+
+
 # ----------------------------------------------------------------------------
 # Ai2 user utilities
 @dataclass
@@ -965,6 +1008,18 @@ def ensure_beaker_restart_has_checkpoint(checkpoint_path: str | None, checkpoint
         f"Beaker run number is {run_number}, but no {checkpoint_name} was found. "
         "Refusing to restart without a checkpoint."
     )
+
+
+def ensure_hf_repo_cached(repo_id: str, revision: str | None = None) -> None:
+    """Download a HF repo if not a local path, then verify it is available locally or in cache."""
+    if os.path.exists(repo_id):
+        return
+    huggingface_hub.snapshot_download(repo_id, revision=revision)
+    result = huggingface_hub.try_to_load_from_cache(repo_id, "config.json", revision=revision)
+    if not isinstance(result, str):
+        raise RuntimeError(
+            f"Model repo '{repo_id}' (revision={revision}) is not available locally or in the HF cache."
+        )
 
 
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
@@ -1047,6 +1102,8 @@ def get_beaker_whoami() -> str | None:
 
 
 def maybe_get_beaker_config():
+    if not is_beaker_job():
+        return None
     beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
     # fix condition on basic interactive jobs
     if beaker_dataset_ids is None:
@@ -1199,48 +1256,23 @@ def launch_ai2_evals_on_weka(
     training_step: int | None = None,
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
-    gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    beaker_users = get_beaker_whoami()
-
-    if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
-        if beaker_users is not None:
-            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
-        else:
-            gs_saved_path = f"{gs_bucket_path}/{path}"
-        # save the model to the gs bucket first
-        # TODO: use upload_to_gs_bucket instead
-        gs_command = f"""gsutil \\
-            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
-            cp -r {path} \\
-            {gs_saved_path}"""
-        print(f"Copying model to GS bucket with command: {gs_command}")
-        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(f"GS bucket copy stdout:\n{stdout.decode()}")
-        print(f"GS bucket copy stderr:\n{stderr.decode()}")
-        print(f"GS bucket copy process return code: {process.returncode}")
-
-        # Update path to use the GS bucket path for evaluation
-        path = gs_saved_path
-    else:
-        cluster_str = ""
     command = f"""\
-python scripts/submit_eval_jobs.py \
+python scripts/submit_eval_jobs_old.py \
 --model_name {leaderboard_name} \
---location {path} {cluster_str} \
+--location {path} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
---skip_oi_evals"""
+--skip_oi_evals \
+--evaluate_on_weka"""
     if wandb_url is not None:
         command += f" --run_id {wandb_url}"
         wandb_run_path = wandb_url_to_run_path(wandb_url)
@@ -1249,8 +1281,6 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if gs_bucket_path is None:
-        command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
@@ -1370,8 +1400,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
 
     Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
     """
-    if getattr(args, "add_seed_and_date_to_exp_name", False):
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.exp_name = f"{args.exp_name}__{args.seed}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
     if dist.is_initialized():
@@ -1379,9 +1408,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
         dist.broadcast_object_list(path_list, src=0)
         args.output_dir = path_list[0]
 
-    beaker_config = None
-    if is_beaker_job() and is_main_process:
-        beaker_config = maybe_get_beaker_config()
+    beaker_config = maybe_get_beaker_config() if is_main_process else None
 
     if getattr(args, "push_to_hub", False) and is_main_process:
         if args.hf_repo_id is None:
@@ -1531,6 +1558,10 @@ def get_optimizer_grouped_parameters(
             "weight_decay": 0.0,
         },
     ]
+
+    # Filter empty groups to avoid issues with torch 2.10 and deepspeed
+    optimizer_grouped_parameters = [group for group in optimizer_grouped_parameters if group["params"]]
+
     return optimizer_grouped_parameters
 
 
@@ -1553,7 +1584,7 @@ class RayProcess:
         self.rank = rank
         self.local_rank = local_rank
         self.master_addr = master_addr if master_addr else self.get_current_node_ip()
-        self.master_port = master_port if master_port else self.get_free_port()
+        self.master_port = master_port if master_port else find_free_port()
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -1571,12 +1602,6 @@ class RayProcess:
         address = ray._private.services.get_node_ip_address()
         # strip ipv6 address
         return address.strip("[]")
-
-    @staticmethod
-    def get_free_port():
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            return sock.getsockname()[1]
 
     def get_master_addr_port(self):
         return self.master_addr, self.master_port
@@ -1882,6 +1907,7 @@ class ModelDims:
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        config = config.get_text_config()
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)
@@ -2576,9 +2602,9 @@ def send_slack_message(message: str) -> None:
     Args:
         message: Message body to send to Slack.
     """
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        logger.warning("SLACK_WEBHOOK_URL environment variable not set. Skipping Slack alert.")
         return
 
     beaker_url = get_beaker_experiment_url()

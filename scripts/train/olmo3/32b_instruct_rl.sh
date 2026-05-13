@@ -11,7 +11,6 @@ export DATASET_MIXER_EVAL_LIST="hamishivi/omega-combined 4 allenai/IF_multi_cons
 export OE_EVAL_TASKS="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek"
 
 uv run python mason.py \
-    --budget ai2/oe-adapt \
     --cluster ai2/jupiter-cirrascale-2 \
     --image $BEAKER_IMAGE \
     --pure_docker_mode \
@@ -65,7 +64,6 @@ uv run python mason.py \
         --llm_judge_timeout 600 \
         --llm_judge_max_tokens 2048 \
         --llm_judge_max_context_length 32768 \
-        --clip_higher 0.272 \
         --allow_world_padding False \
         --use_fp8_kv_cache False \
         --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
@@ -74,11 +72,7 @@ uv run python mason.py \
         --oe_eval_max_length 32768 \
         --checkpoint_state_freq 100 \
         --backend_timeout 1200 \
-        --inflight_updates true \
-        --async_steps 8 \
         --active_sampling \
-        --advantage_normalization_type centered \
-        --truncated_importance_sampling_ratio_cap 2.0 \
         --oe_eval_tasks "${OE_EVAL_TASKS}" \
         --oe_eval_gpu_multiplier 2 \
         --vllm_enforce_eager \

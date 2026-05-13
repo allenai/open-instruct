@@ -1,0 +1,15 @@
+# Default compression configuration for logprob distillation
+# d: vocab size (will be auto-detected if auto_vocab_size=True)
+# k: number of top logprobs to store
+# exact_k: number of top logprobs to store with exact precision
+# polynomial_terms: terms for polynomial approximation of remaining logprobs
+
+d: 128256  # Default vocab size for Llama-based models (auto-detected if using auto_vocab_size=True)
+k: 128     # Number of top logprobs to store per token
+exact_k: 16  # Store top 16 values with exact precision
+exact_dtype: bfloat16  # Data type for exact values (bfloat16 or float32)
+polynomial_terms: [0, 1, 2, 3, 4, "sqrt"]  # Polynomial terms for approximation
+term_dtype: float32  # Data type for polynomial coefficients
+residual_bins: []  # No residual quantization bins
+delta_encoding: false  # Whether to use delta encoding for logprobs
+error_diffusion: false  # Whether to use error diffusion during quantization

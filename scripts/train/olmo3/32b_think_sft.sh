@@ -10,7 +10,7 @@ LR=1e-4
 python src/scripts/train/sft/OLMo-sft.py train \
     olmo3-32b-SFT-${LR} \
         $CHECKPOINT \
-        ai2/augusta \
+        ai2/jupiter \
     --trainer.callbacks.wandb.enabled=True \
     --trainer.max_duration.value=2 \
     --train_module.optim.lr=$LR \
@@ -21,7 +21,6 @@ python src/scripts/train/sft/OLMo-sft.py train \
     --launch.use_hostname_constraints=True \
     --launch.num_execution_units=1 \
     --model_name=olmo3-32b \
-    --budget=ai2/oe-adapt \
     --workspace=ai2/olmo-instruct \
     --dataset_path=gs://ai2-llm/jacobm/data/sft/rl-sft-32k/olmo3-32b-thinking-sft \
     --launch.priority=urgent

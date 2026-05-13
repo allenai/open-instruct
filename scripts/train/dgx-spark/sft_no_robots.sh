@@ -4,7 +4,6 @@
 # Usage: ./scripts/train/dgx-spark/sft_no_robots.sh
 #
 # DGX Spark notes:
-#   - SDPA is faster than flash attention on Blackwell (--use_flash_attn false)
 #   - Batch 32 @ 1024 ctx works well for unified memory
 
 set -e
@@ -21,7 +20,6 @@ uv run python -m accelerate.commands.launch \
     --exp_name spark_sft_qwen3_no_robots \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
-    --use_flash_attn false \
     --max_seq_length 1024 \
     --per_device_train_batch_size 32 \
     --gradient_accumulation_steps 4 \

@@ -33,18 +33,13 @@ will fail. To update the expected data:
        ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 """
 
+import inspect
 import json
 import logging
-import os
 import pathlib
 import subprocess
 import time
 import unittest
-
-os.environ["VLLM_BATCH_INVARIANT"] = "1"
-os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
-
-import inspect
 
 import datasets
 import ray
@@ -55,11 +50,12 @@ from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
 import open_instruct.vllm_utils as vllm_utils_module
+from open_instruct import grpo_utils
 from open_instruct.data_types import GenerationResult, PromptRequest
+from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import create_tools
+from open_instruct.grpo_fast import create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -82,7 +78,7 @@ class TestGeneration(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
-            cwd="open_instruct/tools/servers/python_server",
+            cwd="open_instruct/environments/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -101,7 +97,16 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tool_actors=None, max_tool_calls=None, max_tokens=50):
+    def _setup_engine_and_generate(
+        self,
+        tokenizer_name,
+        prompt,
+        pools=None,
+        tool_definitions=None,
+        tool_parser_type="legacy",
+        max_steps=None,
+        max_tokens=50,
+    ):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -140,8 +145,10 @@ class TestGeneration(TestGrpoFastBase):
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
-            tool_actors=tool_actors,
-            max_tool_calls=max_tool_calls or 5,
+            pools=pools or {},
+            tool_parser_type=tool_parser_type,
+            tool_definitions=tool_definitions,
+            max_steps=max_steps or 5,
             reward_config=reward_config,
             train_dataset=train_dataset,
         )
@@ -164,18 +171,25 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-0.6B"
-        tool_actors = None
+        pools = None
+        tool_definitions = None
         if use_tools:
-            tool_actors, _ = create_tools(
-                [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
+            pools, _ = create_tool_pools(
+                [ParsedEnvConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})],
+                pool_size=4,
             )
-        max_tool_calls = 5 if use_tools else None
+            # Collect tool definitions from pool for the parser
+            actor = ray.get(list(pools.values())[0].acquire.remote())
+            tool_definitions = ray.get(actor.get_tool_definitions.remote())
+            list(pools.values())[0].release.remote(actor)
+        max_steps = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,
             prompt=prompt,
-            tool_actors=tool_actors,
-            max_tool_calls=max_tool_calls,
+            pools=pools,
+            tool_definitions=tool_definitions,
+            max_steps=max_steps,
             max_tokens=max_tokens,
         )
 
@@ -262,6 +276,83 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self.assertGreater(len(generated_text), 0)
 
         param_prompt_Q.put(None)
+
+
+def _has_flash_attn_2() -> bool:
+    try:
+        import flash_attn  # noqa: F401, PLC0415
+
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+@unittest.skipUnless(_has_flash_attn_2(), "flash_attention_2 + CUDA required")
+class TestPackedSequenceLogprobs(unittest.TestCase):
+    """Verify that attention_mask=None with packed position_ids produces
+    the same logprobs as running each sub-sequence independently.
+
+    This only holds with flash_attention_2, which constructs the intra-document
+    mask from position_ids. sdpa and eager attention ignore position resets and
+    will apply the full causal mask across the pack.
+    """
+
+    def _get_model_and_tokenizer(self):
+        from transformers import AutoModelForCausalLM  # noqa: PLC0415
+
+        model_name = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, attn_implementation="flash_attention_2", dtype=torch.bfloat16
+            ).cuda()
+        except Exception as e:
+            self.skipTest(f"Could not load model {model_name}: {e}")
+        model.eval()
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id or 0
+        return model, tokenizer
+
+    def test_packed_matches_individual(self):
+        model, tokenizer = self._get_model_and_tokenizer()
+
+        seq_a = torch.tensor([[5, 10, 15, 20]], dtype=torch.long, device="cuda")
+        seq_b = torch.tensor([[7, 14, 21]], dtype=torch.long, device="cuda")
+
+        with torch.no_grad():
+            logprob_a, _ = grpo_utils.forward_for_logprobs(
+                model,
+                seq_a,
+                None,
+                torch.arange(seq_a.shape[1], device="cuda").unsqueeze(0),
+                pad_token_id=tokenizer.pad_token_id,
+                temperature=1.0,
+            )
+            logprob_b, _ = grpo_utils.forward_for_logprobs(
+                model,
+                seq_b,
+                None,
+                torch.arange(seq_b.shape[1], device="cuda").unsqueeze(0),
+                pad_token_id=tokenizer.pad_token_id,
+                temperature=1.0,
+            )
+
+            packed = torch.cat([seq_a, seq_b], dim=1)
+            packed_position_ids = torch.cat(
+                [torch.arange(seq_a.shape[1], device="cuda"), torch.arange(seq_b.shape[1], device="cuda")], dim=0
+            ).unsqueeze(0)
+
+            logprob_packed, _ = grpo_utils.forward_for_logprobs(
+                model, packed, None, packed_position_ids, pad_token_id=tokenizer.pad_token_id, temperature=1.0
+            )
+
+        a_len = seq_a.shape[1] - 1
+        b_len = seq_b.shape[1] - 1
+
+        # seq_a portion should match logprob_a
+        torch.testing.assert_close(logprob_packed[:, :a_len], logprob_a, rtol=1e-2, atol=1e-2)
+        # seq_b portion should match logprob_b (would differ if mask wasn't applied per-document)
+        torch.testing.assert_close(logprob_packed[:, -b_len:], logprob_b, rtol=1e-2, atol=1e-2)
 
 
 if __name__ == "__main__":
