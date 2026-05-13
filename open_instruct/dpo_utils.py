@@ -987,15 +987,15 @@ def concatenated_forward_olmo(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     concatenated_labels = concatenated_batch["concatenated_labels"]
-    concatenated_input_ids = concatenated_batch["concatenated_input_ids"]
     if not packing:
-        output = model(concatenated_input_ids, labels=concatenated_labels)
+        output = model(concatenated_batch["concatenated_input_ids"], labels=concatenated_labels)
     else:
         doc_lens_BD, max_doc_lens_B = olmo_core_utils.doc_lens_from_cu_seq_lens(
-            concatenated_batch["concatenated_cu_seq_lens_k"], seq_len=concatenated_input_ids.shape[-1]
+            concatenated_batch["concatenated_cu_seq_lens_k"],
+            seq_len=concatenated_batch["concatenated_input_ids"].shape[-1],
         )
         output = model(
-            concatenated_input_ids,
+            concatenated_batch["concatenated_input_ids"],
             labels=concatenated_labels,
             position_ids=concatenated_batch.get("concatenated_position_ids"),
             doc_lens=doc_lens_BD,
