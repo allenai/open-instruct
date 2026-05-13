@@ -610,7 +610,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
         dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
         dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
-        dummy_response_mask = torch.tensor([[0, 1]], dtype=torch.long)
+        dummy_response_mask = torch.tensor([[False, True]], dtype=torch.bool)
         dummy_advantage = torch.tensor([[0.0, 1.0]], dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
@@ -1451,6 +1451,11 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+            # `pack_sequences` returns int64 doc-id-valued masks (0 for query/pad, i+1 for tokens of
+            # sample i) because the gather above uses them as integer indices into `lookup_advantages`.
+            # Now that the gather is done, downcast to bool so all downstream consumers see a single
+            # contract.
+            packed_sequences.response_masks = [mask.bool() for mask in packed_sequences.response_masks]
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id

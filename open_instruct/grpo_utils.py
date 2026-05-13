@@ -565,7 +565,7 @@ def compute_logprobs(
                     )
 
                     response_mask_BT = data_BT.response_masks[i]
-                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
+                    single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:])
                     logprobs_BT.append(single_logprobs)
                 continue
 
@@ -581,7 +581,7 @@ def compute_logprobs(
 
             for i, logprob_BT in zip(batch_indices, split_logprobs):
                 response_mask_BT = data_BT.response_masks[i]
-                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:].bool())
+                logprob_BT = mask_logprobs(logprob_BT, response_mask_BT[:, 1:])
                 logprobs_BT.append(logprob_BT)
 
     return logprobs_BT
