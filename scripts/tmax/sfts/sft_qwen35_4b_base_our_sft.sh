@@ -12,7 +12,7 @@ DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_all
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/open-instruct-dev \
+    --workspace ai2/terminalmaxxing \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -28,8 +28,8 @@ uv run python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name sft_qwen35_4b_base_our_sft \
-    --model_name_or_path Qwen/Qwen3.5-4B-Base \
-    --tokenizer_name Qwen/Qwen3.5-4B-Base \
+    --model_name_or_path hamishivi/Qwen3.5-4B-Base \
+    --tokenizer_name hamishivi/Qwen3.5-4B-Base \
     --sequence_parallel_size 4 \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
