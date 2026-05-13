@@ -446,10 +446,6 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
-def get_hf_config(original_model_name_or_path: str) -> transformers.PretrainedConfig:
-    return transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-
-
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -457,7 +453,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     state-dict converter, and verifies the converted keys exactly cover the HF
     model's expected parameters. Raises before any training starts.
     """
-    hf_config = get_hf_config(original_model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
@@ -485,7 +481,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
 
 
 def save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer):
-    hf_config = get_hf_config(original_model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
