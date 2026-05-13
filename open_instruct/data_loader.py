@@ -1344,13 +1344,13 @@ class DataPreparationActor:
             )
 
         while self.training_step < self.num_training_steps:
-            generation_idle_wait_start_time = time.perf_counter()
+            generation_wait_start_time = time.perf_counter()
             while self.training_step - self._last_consumed_step > self.config.async_steps:
                 logger.info(
                     f"[DataPreparationActor] Step {self.training_step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
-            generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
+            generation_wait_time = time.perf_counter() - generation_wait_start_time
 
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1485,7 +1485,7 @@ class DataPreparationActor:
             batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
             step_metrics = {
-                "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                "time/generation_waiting_for_trainer": generation_wait_time,
                 "scores": scores.mean(),
                 "real_batch_size_ratio": real_num_responses / expected_num_responses,
                 "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
