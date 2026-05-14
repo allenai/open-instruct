@@ -1127,6 +1127,8 @@ def extract_binary_counts(attempt_scores: list[float]) -> tuple[int, int] | None
 
 
 def make_jsonable(value: Any) -> Any:
+    if isinstance(value, (np.ndarray, np.generic)):
+        return make_jsonable(value.tolist())
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if is_dataclass(value):
@@ -1140,7 +1142,7 @@ def make_jsonable(value: Any) -> Any:
             (key if isinstance(key, str) else "" if key is None else str(key)): make_jsonable(item)
             for key, item in value.items()
         }
-    return "" if value is None else str(value)
+    return str(value)
 
 
 if __name__ == "__main__":

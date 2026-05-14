@@ -427,6 +427,27 @@ class TestCreateDifficultyMap(unittest.TestCase):
 
         self.assertEqual(json.loads(dataset.info.description), MODULE.make_jsonable(dataset_metadata))
 
+    def test_make_jsonable_converts_numpy_arrays_and_scalars(self):
+        value = {
+            "array": np.array([np.int64(1), np.float64(2.5)]),
+            "scalar": np.int64(3),
+            "nested": [{"matrix": np.array([[1, 2], [3, 4]])}, np.bool_(True)],
+            "none": None,
+        }
+
+        jsonable = MODULE.make_jsonable(value)
+
+        self.assertEqual(
+            jsonable,
+            {
+                "array": [1, 2.5],
+                "scalar": 3,
+                "nested": [{"matrix": [[1, 2], [3, 4]]}, True],
+                "none": None,
+            },
+        )
+        json.dumps(jsonable)
+
     def test_apply_beta_binomial_difficulty_orders_rows_by_expected_quantile(self):
         rows = [
             self.make_row(instance_id="easy", source_row_id="easy", attempt_scores=[1.0, 1.0, 1.0, 1.0]),
