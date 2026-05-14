@@ -72,7 +72,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --no_resampling_pass_rate 0.875 \
-    --rollouts_save_path /output/rollouts \
+    --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --exp_name swerl_sandbox_qwen3_4b_4node_grpo \
     --local_eval_every 10 \

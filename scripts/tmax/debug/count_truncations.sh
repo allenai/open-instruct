@@ -84,7 +84,7 @@ uv run python mason.py \
     --backend_timeout 1200 \
     --inflight_updates true \
     --advantage_normalization_type centered \
-    --rollouts_save_path /output/rollouts \
+    --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --exp_name swerl_qwen35_9b_count_truncations \
     --local_eval_every -1 \

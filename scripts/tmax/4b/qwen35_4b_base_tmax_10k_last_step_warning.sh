@@ -77,7 +77,7 @@ uv run python mason.py \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
-    --rollouts_save_path /output/rollouts \
+    --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo_last_step_warning \
     --local_eval_every 10 \

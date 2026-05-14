@@ -1,19 +1,18 @@
 #!/bin/bash
 
-# RL on Qwen/Qwen3.5-9B + hamishivi/swerl-tmax-15k
+# RL on Qwen/Qwen3.5-4B + hamishivi/swerl-tmax-15k
 # 4 nodes x 8 GPUs (32 GPUs total)
 
-BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
-
+# run on 4 nodes.
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-9B" \
+       --description "SWERL tmax-10k GRPO with Our SFT Qwen3 8b (4 Podman services)" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
        --preemptible \
-       --num_nodes 4 \
+       --num_nodes 6 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
@@ -25,16 +24,20 @@ uv run python mason.py \
        --env DOCKERHUB_USERNAME=hamishi740 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_DOCKER_AUTO_REMOVE=1 \
-       --env SWERL_PODMAN_SERVICE_COUNT=8 \
-       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_PODMAN_SERVICE_COUNT=4 \
+       --env SWERL_DOCKER_START_CONCURRENCY=64 \
+       --env SWERL_DOCKER_EXEC_CONCURRENCY=256 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=60 \
+       --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=10m \
        --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -45,7 +48,7 @@ uv run python mason.py \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 4 \
-    --model_name_or_path Qwen/Qwen3.5-9B \
+    --model_name_or_path hamishivi/sft_qwen3_8b_our_tmax_sft \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --total_episodes 128000 \
@@ -53,34 +56,34 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
-    --num_learners_per_node 8 8 \
-    --vllm_num_engines 16 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 24 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --vllm_enforce_eager \
+    --vllm_enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
+    --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
-    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --tool_configs '{"backend": "apptainer", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --pool_size 768 \
     --max_steps 64 \
     --verification_reward 1.0 \
-    --tool_parser_type vllm_qwen3_xml \
+    --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
     --active_sampling \
-    --mask_truncated_completions true \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_9b_base_tmax_10k_grpo \
+    --exp_name swerl_qwen3_8b_our_sft_tmax_10k_grpo \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False

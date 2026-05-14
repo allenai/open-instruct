@@ -68,7 +68,7 @@ uv run python mason.py \
     --system_prompt_override_file scripts/train/debug/envs/swerl_sandbox_system_prompt.txt \
     --active_sampling \
     --no_resampling_pass_rate 0.875 \
-    --rollouts_save_path /output/rollouts \
+    --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --exp_name swerl_sandbox_qwen3_4b_grpo \
     --local_eval_every 10 \
