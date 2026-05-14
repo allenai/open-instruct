@@ -28,8 +28,8 @@ uv run python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name sft_qwen35_4b_our_sft \
-    --model_name_or_path Qwen/Qwen3.5-4B \
-    --tokenizer_name Qwen/Qwen3.5-4B \
+    --model_name_or_path hamishivi/Qwen3.5-4B \
+    --tokenizer_name hamishivi/Qwen3.5-4B \
     --sequence_parallel_size 4 \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
