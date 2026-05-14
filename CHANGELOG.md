@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Bump vllm to >=0.19.1 (and refresh `uv.lock`, including compressed-tensors v0.14.0.1 → v0.15.0.1).
 - Move `maybe_evaluate` from `grpo_fast.py` to `grpo_utils.py` and drop the duplicate `PolicyTrainerRayProcess.calculate_token_counts` method, routing both trainer paths through the shared `grpo_utils.calculate_token_counts` (https://github.com/allenai/open-instruct/pull/1669).
 - Rename `time/trainer_idle_waiting_for_inference` to `time/trainer_waiting_for_data` and `time/generation_idle_waiting_for_trainer` to `time/generation_waiting_for_trainer`, and emit per-Group generation timing (`time/group_generation_{mean,max,min}` plus `batch/per_group_generation_times` histogram) so latency vs. throughput in the inference pipeline is legible from wandb  (https://github.com/allenai/open-instruct/pull/1690).
 - Add parameterized `combine_dataset` tests in `open_instruct/test_utils.py` against local jsonl fixtures (no network), covering varied fractional/sample-count weight combinations and split-count mismatch (would have caught the bug fixed in #1674). Extract the interleaved-list→dict parsing into a shared `utils.parse_dataset_mixer_list` helper (with its own parameterized unit tests) and tighten `combine_dataset` / `get_datasets` to accept dict-only `dataset_mixer`; the one external list-form caller (`rejection_sampling/generation.py`) now converts at the call site.
