@@ -8,12 +8,12 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Our SFT Qwen3 8b (4 Podman services)" \
+       --description "SWERL tmax-10k GRPO with Our SFT Qwen3 8b (no submit masking)" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
        --preemptible \
-       --num_nodes 4 \
+       --num_nodes 8 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
@@ -58,7 +58,7 @@ uv run python mason.py \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --vllm_num_engines 56 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \
@@ -87,4 +87,5 @@ uv run python mason.py \
     --exp_name swerl_qwen3_8b_our_sft_tmax_10k_grpo \
     --local_eval_every 10 \
     --save_freq 20 \
-    --try_launch_beaker_eval_jobs_on_weka False
+    --try_launch_beaker_eval_jobs_on_weka False \
+    --mask_non_submitting_completions true
