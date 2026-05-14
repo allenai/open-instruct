@@ -82,10 +82,20 @@ nav:
     - algorithms/finetune.md
     - algorithms/dpo.md
     - algorithms/grpo.md
+    - algorithms/grpo_pipeline_overview.md
+    - algorithms/grpo_fast_internals.md
+    - algorithms/rl_with_environments.md
+    - algorithms/rollout_loop_internals.md
     - algorithms/olmo_core_sharding.md
     - algorithms/tool_training.md
     - algorithms/reward_modeling.md
     - slack-alerts.md
+  - Reference:
+    - mason_reference.md
+    - checkpoint_resumption.md
+    - algorithms/tmax_4b_script_reference.md
+    - tmax_rl_args_reference.md
+    - dr_tulu_rl_args_reference.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md
 
