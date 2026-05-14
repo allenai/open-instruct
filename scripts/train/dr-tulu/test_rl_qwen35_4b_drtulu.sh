@@ -1,14 +1,14 @@
 #!/bin/bash
-# DR-TULU training with Qwen 3 4B and evolving rubrics.
+# DR-TULU training with Qwen 3.5 4B and evolving rubrics.
 # Uses the dr-tulu-rl-data dataset with GPT-4.1 as rubric judge and generator.
 #
 # Launch via Beaker:
 #   ./scripts/train/build_image_and_launch.sh scripts/train/dr-tulu/dr_tulu_qwen35.sh
 
-EXP_NAME="${EXP_NAME:-dr_tulu_qwen3_4b}"
+EXP_NAME="${EXP_NAME:-dr_tulu_qwen35_4b}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
-MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Instruct-2507"
+MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
@@ -46,8 +46,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --num_samples_per_prompt_rollout 32 \
-    --num_unique_prompts_rollout 8 \
+    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 2 \
     --num_mini_batches 1 \
     --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
@@ -56,14 +56,14 @@ source configs/beaker_configs/ray_node_setup.sh \
     --dataset_mixer_eval_list rl-research/dr-tulu-rl-data 8 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
+    --response_length 10240 \
     --pack_length 18500 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --non_stop_penalty False \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --total_episodes 5120 \
+    --total_episodes 100 \
     --deepspeed_stage 3 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
@@ -76,7 +76,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tools serper_search jina_browse s2_search \
     --tool_call_names google_search browse_webpage snippet_search \
     --tool_configs '{}' '{}' '{}' \
-    --pool_size 256 \
+    --pool_size 8 \
     --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
     --max_steps 10 \
     --backend_timeout 1800 \
