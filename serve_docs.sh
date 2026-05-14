@@ -4,6 +4,18 @@ set -euo pipefail
 PORT=${1:-15000}
 LOG=/tmp/mkdocs_serve.log
 
+EXISTING=$(pgrep -f "mkdocs serve" || true)
+if [ -n "${EXISTING}" ]; then
+    read -r -p "Existing mkdocs server found (PIDs: ${EXISTING}). Kill it? [y/N] " REPLY
+    if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+        kill ${EXISTING}
+        echo "Killed."
+    else
+        echo "Aborting."
+        exit 1
+    fi
+fi
+
 echo "Building docs..."
 uv run mkdocs build
 
