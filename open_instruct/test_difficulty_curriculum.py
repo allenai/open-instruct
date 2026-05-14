@@ -57,6 +57,15 @@ def make_plain_hf_dataset(num_examples: int) -> Dataset:
     )
 
 
+def make_difficulty_hf_dataset(num_examples: int) -> Dataset:
+    return Dataset.from_list(
+        [
+            make_difficulty_row(index=index, bucket_index=index % 5, posterior_mean=max(0.05, 0.95 - 0.05 * index))
+            for index in range(num_examples)
+        ]
+    )
+
+
 class TestDifficultyCurriculumSampler(unittest.TestCase):
     def _make_metadata(self, **overrides) -> difficulty_curriculum.DifficultyCurriculumMetadataConfig:
         return difficulty_curriculum.DifficultyCurriculumMetadataConfig(**overrides)
@@ -282,6 +291,34 @@ class TestDifficultyCurriculumLoaderIntegration(unittest.TestCase):
         built_indices = [batch["index"].item() for batch in built_loader]
         baseline_indices = [batch["index"].item() for batch in baseline_loader]
         self.assertEqual(built_indices, baseline_indices)
+
+    def test_curriculum_loader_reshard_reseeds_sampler_by_epoch(self):
+        dataset = make_difficulty_hf_dataset(20)
+        config = difficulty_curriculum.DifficultyCurriculumConfig(
+            schedule=difficulty_curriculum.DifficultyCurriculumScheduleConfig(
+                bootstrap_steps=0, warmup_steps=0, total_steps=10
+            ),
+            seed=13,
+        )
+        loader = data_loader.DifficultyCurriculumHFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=7,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            curriculum_config=config,
+            automatic_reshuffle=False,
+            collator=data_loader.single_example_collator,
+        )
+
+        def sample_epoch(epoch: int) -> list[int]:
+            loader._reshard(epoch)
+            assert loader._curriculum_iter is not None
+            return [next(loader._curriculum_iter) for _ in range(len(dataset))]
+
+        self.assertEqual(sample_epoch(0), sample_epoch(0))
+        self.assertNotEqual(sample_epoch(0), sample_epoch(1))
 
 
 if __name__ == "__main__":

@@ -741,7 +741,7 @@ class DifficultyCurriculumHFDataLoader(HFDataLoader):
         self._curriculum_sampler.exclude_index(index)
 
     def _reshard(self, epoch: int) -> None:
-        del epoch
+        self._curriculum_sampler._generator.manual_seed(self.seed + epoch)
         self._precomputed_batch_sizes = None
         self._num_padding_batches = 0
         self._overflow = []
