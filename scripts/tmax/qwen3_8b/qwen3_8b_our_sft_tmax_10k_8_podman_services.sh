@@ -42,7 +42,7 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --per_turn_max_tokens 8192 \
+    --per_turn_max_tokens 16384 \
     --response_length 32768 \
     --pack_length 35840 \
     --per_device_train_batch_size 1 \
