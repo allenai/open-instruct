@@ -13,6 +13,7 @@ import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
 import wandb
 from olmo_core.distributed import utils as dist_utils
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
@@ -27,6 +28,11 @@ from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padd
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
+
+
+_DOC_LENS_ATTN_BACKENDS = frozenset(
+    {AttentionBackendName.flash_2, AttentionBackendName.flash_3, AttentionBackendName.flash_4}
+)
 
 
 class DPOLMHead(LMHead):
@@ -113,6 +119,7 @@ class DPOTrainModule(TransformerTrainModule):
         sample_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.DPOExperimentConfig,
+        attn_implementation: AttentionBackendName,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
         cp_config: transformer_config.TransformerContextParallelConfig | None = None,
@@ -124,6 +131,11 @@ class DPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
+        if dpo_config.packing:
+            assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+                f"DPOTrainModule with packing requires a flash attention backend for intra-document "
+                f"masking via doc_lens/max_doc_lens; got {attn_implementation}."
+            )
         # TODO(finbarrtimbers): Remove this hack once Transformer supports configuring the LM head.
         model.lm_head.__class__ = DPOLMHead
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
@@ -291,6 +303,7 @@ class GRPOTrainModule(TransformerTrainModule):
         temperature: float,
         tokenizer: PreTrainedTokenizer,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        attn_implementation: AttentionBackendName,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
@@ -301,6 +314,10 @@ class GRPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ):
+        assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+            f"GRPOTrainModule requires a flash attention backend for intra-document masking via "
+            f"doc_lens/max_doc_lens; got {attn_implementation}."
+        )
         rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length
         super().__init__(
             model=model,
@@ -322,6 +339,7 @@ class GRPOTrainModule(TransformerTrainModule):
         self.temperature = temperature
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
+        self.attn_implementation = attn_implementation
 
         self.ref_policy = ref_policy
         if ref_policy is not None:
@@ -391,6 +409,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.temperature,
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
+                    pass_olmo_core_doc_lens=True,
                 )
             else:
                 ref_logprobs_BT = None
@@ -411,6 +430,7 @@ class GRPOTrainModule(TransformerTrainModule):
                         self.temperature,
                         use_grad=False,
                         batch_size=3 * self.rank_microbatch_size,
+                        pass_olmo_core_doc_lens=True,
                     )
 
                 for i in range(num_samples):
@@ -458,6 +478,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.pad_token_id,
                     self.temperature,
                     return_entropy=self.grpo_config.record_entropy,
+                    pass_olmo_core_doc_lens=True,
                 )
 
                 response_mask = data_BT.response_masks[sample_idx][:, 1:]

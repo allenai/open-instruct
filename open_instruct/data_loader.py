@@ -628,7 +628,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             wait_start_time = time.perf_counter()
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
             trainer_idle_wait_time = time.perf_counter() - wait_start_time
-            batch_data.setdefault("metrics", {})["time/trainer_idle_waiting_for_inference"] = trainer_idle_wait_time
+            batch_data.setdefault("metrics", {})["time/trainer_waiting_for_data"] = trainer_idle_wait_time
             self.training_step = step + 1
             yield batch_data
 
@@ -654,6 +654,7 @@ class BatchStatistics:
     percent_solved_hist: np.ndarray
     no_resampled_prompts: int
     total_prompts: int
+    per_group_generation_times: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
 
 
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -874,6 +875,7 @@ def make_batch_from_groups(
     total_prompt_tokens = 0
     total_response_tokens = 0
     max_generation_time = 0
+    per_group_generation_times: list[float] = []
 
     for group in groups:
         result = group.result
@@ -913,6 +915,7 @@ def make_batch_from_groups(
         total_prompt_tokens += result.token_statistics.num_prompt_tokens
         total_response_tokens += result.token_statistics.num_response_tokens
         max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+        per_group_generation_times.append(result.token_statistics.generation_time)
 
     accumulated_stats = data_types.TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
@@ -981,6 +984,7 @@ def make_batch_from_groups(
         percent_solved_hist=np.array(all_percent_solved),
         no_resampled_prompts=no_resampled_prompts,
         total_prompts=total_prompts,
+        per_group_generation_times=np.array(per_group_generation_times, dtype=float),
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
 
@@ -1340,13 +1344,13 @@ class DataPreparationActor:
             )
 
         while self.training_step < self.num_training_steps:
-            generation_idle_wait_start_time = time.perf_counter()
+            generation_wait_start_time = time.perf_counter()
             while self.training_step - self._last_consumed_step > self.config.async_steps:
                 logger.info(
                     f"[DataPreparationActor] Step {self.training_step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
-            generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
+            generation_wait_time = time.perf_counter() - generation_wait_start_time
 
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
@@ -1481,7 +1485,7 @@ class DataPreparationActor:
             batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
 
             step_metrics = {
-                "time/generation_idle_waiting_for_trainer": generation_idle_wait_time,
+                "time/generation_waiting_for_trainer": generation_wait_time,
                 "scores": scores.mean(),
                 "real_batch_size_ratio": real_num_responses / expected_num_responses,
                 "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
@@ -1518,7 +1522,10 @@ class DataPreparationActor:
             assert result.token_statistics is not None
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
             step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-            step_metrics["time/getting_response"] = result.token_statistics.generation_time
+            group_times = batch_stats.per_group_generation_times
+            step_metrics["time/group_generation_mean"] = float(group_times.mean())
+            step_metrics["time/group_generation_max"] = float(group_times.max())
+            step_metrics["time/group_generation_min"] = float(group_times.min())
 
             with self.lock:
                 self.prepared_data[self.training_step] = collated_data

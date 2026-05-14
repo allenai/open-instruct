@@ -16,7 +16,8 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import create_generation_configs, maybe_evaluate
+from open_instruct.grpo_fast import create_generation_configs
+from open_instruct.grpo_utils import maybe_evaluate
 
 
 class _QueueWithSize:
@@ -74,7 +75,7 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_queue = _QueueWithSize(size=2)
         eval_generation_config = SimpleNamespace(n=32)
 
-        with patch("open_instruct.grpo_fast.accumulate_inference_batches") as mock_accumulate:
+        with patch("open_instruct.grpo_utils.data_loader_lib.accumulate_inference_batches") as mock_accumulate:
             maybe_evaluate(
                 args=args,
                 training_step=5,
@@ -96,7 +97,9 @@ class TestMaybeEvaluate(unittest.TestCase):
         eval_queue = _QueueWithSize(size=0)
         eval_generation_config = SimpleNamespace(n=32)
 
-        with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
+        with patch(
+            "open_instruct.grpo_utils.data_loader_lib.accumulate_inference_batches", side_effect=Empty
+        ) as mock_accumulate:
             maybe_evaluate(
                 args=args,
                 training_step=10,
@@ -137,11 +140,11 @@ class TestMaybeEvaluate(unittest.TestCase):
 
         with (
             patch(
-                "open_instruct.grpo_fast.accumulate_inference_batches",
+                "open_instruct.grpo_utils.data_loader_lib.accumulate_inference_batches",
                 return_value=(eval_result, eval_batch, reward_metrics, None),
             ),
-            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
-            patch("open_instruct.grpo_fast.print_rich_table"),
+            patch("open_instruct.grpo_utils.model_utils.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_utils.model_utils.print_rich_table"),
         ):
             maybe_evaluate(
                 args=args,
@@ -185,11 +188,11 @@ class TestMaybeEvaluate(unittest.TestCase):
 
         with (
             patch(
-                "open_instruct.grpo_fast.accumulate_inference_batches",
+                "open_instruct.grpo_utils.data_loader_lib.accumulate_inference_batches",
                 return_value=(eval_result, eval_batch, {}, None),
             ),
-            patch("open_instruct.grpo_fast.print_rich_single_line_metrics") as mock_print_metrics,
-            patch("open_instruct.grpo_fast.print_rich_table"),
+            patch("open_instruct.grpo_utils.model_utils.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_utils.model_utils.print_rich_table"),
         ):
             maybe_evaluate(
                 args=args,
