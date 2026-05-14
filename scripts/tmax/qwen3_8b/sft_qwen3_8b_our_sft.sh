@@ -45,7 +45,6 @@ uv run python mason.py \
         $DATASET_CONFIG \
     --dataset_mixer_list_splits \
         train \
-    --add_bos \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
