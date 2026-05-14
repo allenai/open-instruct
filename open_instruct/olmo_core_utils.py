@@ -52,7 +52,7 @@ class ExperimentConfig:
 class ModelConfig:
     """Configuration for model loading."""
 
-    model_name_or_path: str | None = None
+    model_name_or_path: str
     """The model checkpoint for weights initialization."""
     config_name: str | None = None
     """Pretrained config name or path if not the same as model_name."""

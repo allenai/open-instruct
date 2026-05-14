@@ -133,9 +133,6 @@ def _handle_post_training(
 
 def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
-    if args.model_name_or_path is None:
-        raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
-
     if args.use_lora:
         raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
 
