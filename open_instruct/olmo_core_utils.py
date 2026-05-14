@@ -48,7 +48,7 @@ class ExperimentConfig:
     """Separate seed for data loader instance ordering. If None, uses seed."""
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ModelConfig:
     """Configuration for model loading."""
 
