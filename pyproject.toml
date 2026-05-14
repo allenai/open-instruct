@@ -28,6 +28,8 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.11.0",
+    "torchvision>=0.26.0; platform_system != 'Darwin'",
+    "torchaudio>=2.11.0; platform_system != 'Darwin'",
     "transformers>=5.4.0",
     "vllm>=0.20.2; platform_system != 'Darwin'",
     "wandb==0.23.1",
@@ -73,6 +75,14 @@ flash-attn = [
 ]
 
 torch = [
+  { index = "pytorch-cu128", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+torchvision = [
+  { index = "pytorch-cu128", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+torchaudio = [
   { index = "pytorch-cu128", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
