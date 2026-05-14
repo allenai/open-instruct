@@ -42,7 +42,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Changed
-- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py`; add `PruningCheckpointerCallback` so `keep_last_n_checkpoints` also prunes permanent checkpoints; register pre-norm Qwen3/Llama OLMo-core→HF layernorm overrides (https://github.com/allenai/open-instruct/pull/1671).
+- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py` (https://github.com/allenai/open-instruct/pull/1671).
 
 ### Fixed
 - Pass packed-sequence `doc_lens`/`max_doc_lens` to OLMo-core models in `forward_for_logprobs` (instead of relying on `attention_mask`), so OLMo-core GRPO uses correct intra-document attention; bumps olmo-core to a commit that accepts these kwargs (https://github.com/allenai/open-instruct/pull/1670).
