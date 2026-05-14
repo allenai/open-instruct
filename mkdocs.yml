@@ -90,9 +90,13 @@ nav:
     - algorithms/tool_training.md
     - algorithms/reward_modeling.md
     - slack-alerts.md
+  - Scripts:
+    - script_folder_guide.md
+    - training_scripts_guide.md
   - Reference:
     - mason_reference.md
     - checkpoint_resumption.md
+    - debug_envs_reference.md
     - algorithms/tmax_4b_script_reference.md
     - tmax_rl_args_reference.md
     - dr_tulu_rl_args_reference.md

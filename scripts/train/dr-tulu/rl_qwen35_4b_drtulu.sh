@@ -12,7 +12,7 @@ MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
-DATASETS="rl-research/dr-tulu-rl-data 0.02"
+DATASETS="rl-research/dr-tulu-rl-data 0.05"
 DATASET_SPLITS="train"
 
 PRIORITY="${PRIORITY:-urgent}"
@@ -63,10 +63,10 @@ source configs/beaker_configs/ray_node_setup.sh \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --total_episodes 20480 \
+    --total_episodes 5120 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 8 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --apply_evolving_rubric_reward true \
