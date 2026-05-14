@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Remove references to deleted `ppo_vllm_thread_ray_gtrl.py` script: delete broken launch scripts (`scripts/train/debug/ppo.sh`, `scripts/train/rlvr/tulu_rlvr.sh`, `scripts/train/tulu3/ppo_8b.sh`) and add historical-reference notes to `docs/tulu3.md` and `docs/archived_dev_scripts/olmoe_0125.sh` pointing to the deletion commit. Also drop the dead `update_command_args.py` references: delete `scripts/train/benchmark.sh` and its section in `docs/get_started/ai2_internal_setup.md`, and update the README RLVR quickstart to launch `grpo_fast.py` via `scripts/train/build_image_and_launch.sh`.
 - Bump vllm to >=0.19.1 (and refresh `uv.lock`, including compressed-tensors v0.14.0.1 → v0.15.0.1).
 - Move `maybe_evaluate` from `grpo_fast.py` to `grpo_utils.py` and drop the duplicate `PolicyTrainerRayProcess.calculate_token_counts` method, routing both trainer paths through the shared `grpo_utils.calculate_token_counts` (https://github.com/allenai/open-instruct/pull/1669).
 - Rename `time/trainer_idle_waiting_for_inference` to `time/trainer_waiting_for_data` and `time/generation_idle_waiting_for_trainer` to `time/generation_waiting_for_trainer`, and emit per-Group generation timing (`time/group_generation_{mean,max,min}` plus `batch/per_group_generation_times` histogram) so latency vs. throughput in the inference pipeline is legible from wandb  (https://github.com/allenai/open-instruct/pull/1690).

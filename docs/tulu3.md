@@ -307,6 +307,7 @@ accelerate launch \
 
 This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B)
 
+> **Note**: These commands use the legacy `ppo_vllm_thread_ray_gtrl.py` script, which was removed in commit [`bac9393`](https://github.com/allenai/open-instruct/commit/bac9393104e4622ea3735d2f201b3c79e5b69c2d) (PR [#1132](https://github.com/allenai/open-instruct/pull/1132)). They are preserved here for historical reference.
 
 ```bash
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
@@ -357,6 +358,8 @@ Couple of notes:
 * We had to use `--vllm_tensor_parallel_size 4` because `--vllm_tensor_parallel_size 8` errors out for some strange reason. This is a temporary workaround.
 * Here the effective batch size is `sum(actor_num_gpus_per_node) * local_mini_batch_size = 40 * 16 = 640`. If you have less GPUs, you can adjust `actor_num_gpus_per_node` and `local_mini_batch_size` accordingly.
 
+> **Note**: These commands use the legacy `ppo_vllm_thread_ray_gtrl.py` script, which was removed in commit [`bac9393`](https://github.com/allenai/open-instruct/commit/bac9393104e4622ea3735d2f201b3c79e5b69c2d) (PR [#1132](https://github.com/allenai/open-instruct/pull/1132)). They are preserved here for historical reference.
+
 ```bash
 source configs/beaker_configs/ray_node_setup.sh && python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
@@ -406,6 +409,8 @@ Couple of notes:
 * We had to set `TORCH_NCCL_ENABLE_MONITORING=0` to turn off NCCL heartbeat monitoring and avoid timeouts. Feel free to remove this.
 * Make sure to modify `configs/beaker_configs/ray_node_setup.sh` in our own cluster setup. The idea is to have the replicas join the main machines via `ray`.
 * Here the effective batch size is `sum(actor_num_gpus_per_node) * local_mini_batch_size = 40 * 16 = 640`. If you have less GPUs, you can adjust `actor_num_gpus_per_node` and `local_mini_batch_size` accordingly.
+
+> **Note**: These commands use the legacy `ppo_vllm_thread_ray_gtrl.py` script, which was removed in commit [`bac9393`](https://github.com/allenai/open-instruct/commit/bac9393104e4622ea3735d2f201b3c79e5b69c2d) (PR [#1132](https://github.com/allenai/open-instruct/pull/1132)). They are preserved here for historical reference.
 
 ```bash
 TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \

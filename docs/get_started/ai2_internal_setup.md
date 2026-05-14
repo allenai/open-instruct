@@ -92,36 +92,6 @@ so during runtime we issue fewer HF API calls, which sometimes could fail due to
 mason.py will auto call `--cache_dataset_only` for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.
 
 
-## update_command_args.py (for sweep, benchmark, etc.)
-
-The [/scripts/train](/scripts/train) directory contains many examples on how to launch jobs with mason.py. Sometimes the commands can get long and hard to manage, so we wrote a script called [update_command_args.py](/update_command_args.py) that can be used to add or update arguments in a shell script. For example,
-
-```bash
-python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
-    --cluster ai2/jupiter \
-    --priority normal \
-    --image costah/open_instruct_dev0320_11  --non_stop_penalty False | uv run bash
-```
-
-This will update the `--cluster`, `--priority`, `--image`, and `--non_stop_penalty` arguments in the script with the ones specified, making it easier to launch jobs with different configurations.
-
-
-As another example, you can run something like this for a learning rate search:
-
-```bash
-for lr in 1e-6 1e-5 1e-4; do
-    python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
-        --exp_name grpo_fast_8b_lr_${lr} \
-        --learning_rate $lr \
-        --image costah/open_instruct_dev0320_11 --non_stop_penalty False | uv run bash
-done
-```
-
-We also have a script called [scripts/train/benchmark.sh](/scripts/train/benchmark.sh) that keeps track of all the commands used to launch jobs in our public [wandb project `ai2-llm/open_instruct_public`](https://wandb.ai/ai2-llm/open_instruct_public).
-
-
-
-
 ## Ai2 Internal Evaluation
 
 We provide a script integrated with beaker for use internally at Ai2. There are couple of use cases.
