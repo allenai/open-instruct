@@ -181,6 +181,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             scheduler=scheduler,
             device=device,
             streaming_config=self.streaming_config,
+            attn_implementation=self.attn_implementation,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.

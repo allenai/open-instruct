@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Bump vllm to >=0.19.1 (and refresh `uv.lock`, including compressed-tensors v0.14.0.1 → v0.15.0.1).
 - Move `maybe_evaluate` from `grpo_fast.py` to `grpo_utils.py` and drop the duplicate `PolicyTrainerRayProcess.calculate_token_counts` method, routing both trainer paths through the shared `grpo_utils.calculate_token_counts` (https://github.com/allenai/open-instruct/pull/1669).
 - Rename `time/trainer_idle_waiting_for_inference` to `time/trainer_waiting_for_data` and `time/generation_idle_waiting_for_trainer` to `time/generation_waiting_for_trainer`, and emit per-Group generation timing (`time/group_generation_{mean,max,min}` plus `batch/per_group_generation_times` histogram) so latency vs. throughput in the inference pipeline is legible from wandb  (https://github.com/allenai/open-instruct/pull/1690).
 - Add parameterized `combine_dataset` tests in `open_instruct/test_utils.py` against local jsonl fixtures (no network), covering varied fractional/sample-count weight combinations and split-count mismatch (would have caught the bug fixed in #1674). Extract the interleaved-list→dict parsing into a shared `utils.parse_dataset_mixer_list` helper (with its own parameterized unit tests) and tighten `combine_dataset` / `get_datasets` to accept dict-only `dataset_mixer`; the one external list-form caller (`rejection_sampling/generation.py`) now converts at the call site.
@@ -44,6 +45,8 @@ All notable changes to this project will be documented in this file.
 - Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py`; add `PruningCheckpointerCallback` so `keep_last_n_checkpoints` also prunes permanent checkpoints; register pre-norm Qwen3/Llama OLMo-core→HF layernorm overrides (https://github.com/allenai/open-instruct/pull/1671).
 
 ### Fixed
+- Pass packed-sequence `doc_lens`/`max_doc_lens` to OLMo-core models in `forward_for_logprobs` (instead of relying on `attention_mask`), so OLMo-core GRPO uses correct intra-document attention; bumps olmo-core to a commit that accepts these kwargs (https://github.com/allenai/open-instruct/pull/1670).
+- Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686).
 - Use processed vLLM logprobs in GRPO rollouts so sampled-token logprobs include sampling transforms like temperature (https://github.com/allenai/open-instruct/pull/1678).
 - Fix `_get_batch_logps` division-by-zero (NaN return) in `open_instruct/dpo_utils.py` when a sequence has every label masked (`-100`) and `average_log_prob=True`; clamp the denominator at 1 (supersedes #1625).
 - Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686).
