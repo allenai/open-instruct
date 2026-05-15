@@ -4,13 +4,7 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
-
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-if [[ "${1:-}" == "$BEAKER_USER"* ]]; then
-    BEAKER_IMAGE="$1"
-    shift
-fi
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
@@ -77,6 +71,4 @@ uv run open_instruct/grpo_fast.py \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
-    --output_dir "/tmp-3m/${RUN_NAME}" \
-    --checkpoint_state_dir "/tmp-3m/${RUN_NAME}" \
     --push_to_hub False "$@"

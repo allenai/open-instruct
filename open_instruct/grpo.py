@@ -130,7 +130,7 @@ def main(
         model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
     )
     _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
-    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)  # ty: ignore[invalid-argument-type]
+    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
@@ -192,7 +192,6 @@ def main(
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
     generation_configs = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)
-    generation_config = generation_configs["train"]
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -212,7 +211,7 @@ def main(
         param_prompt_Q=prompt_Q,
         tokenizer=tokenizer,
         config=streaming_config,
-        generation_config=generation_config,
+        generation_config=generation_configs["train"],
         num_training_steps=args.num_training_steps,
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,

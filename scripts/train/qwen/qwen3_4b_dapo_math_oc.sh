@@ -39,9 +39,6 @@ uv run open_instruct/grpo.py \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --use_rho_correction \
-    --rho_mask_lower_bound 0.5 \
-    --rho_mask_upper_bound 1.5 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
@@ -61,7 +58,7 @@ uv run open_instruct/grpo.py \
     --total_episodes 128000 \
     --fsdp_shard_degree 4 \
     --fsdp_num_replicas 1 \
-    --activation_memory_budget 0.75 \
+    --activation_memory_budget 0.5 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
@@ -80,7 +77,4 @@ uv run open_instruct/grpo.py \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
-    --output_dir "/tmp-3m/${RUN_NAME}" \
-    --checkpoint_state_dir "/tmp-3m/${RUN_NAME}" \
-    --push_to_hub False \
-    --try_auto_save_to_beaker False "$@"
+    --push_to_hub False "$@"

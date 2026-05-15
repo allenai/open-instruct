@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
-- Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, OLMo-core checkpointer with `keep_last_n_checkpoints` pruning, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/1672).
+- Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/1672).
 - Remove references to deleted `ppo_vllm_thread_ray_gtrl.py` script: delete broken launch scripts (`scripts/train/debug/ppo.sh`, `scripts/train/rlvr/tulu_rlvr.sh`, `scripts/train/tulu3/ppo_8b.sh`) and add historical-reference notes to `docs/tulu3.md` and `docs/archived_dev_scripts/olmoe_0125.sh` pointing to the deletion commit. Also drop the dead `update_command_args.py` references: delete `scripts/train/benchmark.sh` and its section in `docs/get_started/ai2_internal_setup.md`, and update the README RLVR quickstart to launch `grpo_fast.py` via `scripts/train/build_image_and_launch.sh`.
 - Bump vllm to >=0.19.1 (and refresh `uv.lock`, including compressed-tensors v0.14.0.1 → v0.15.0.1).
 - Move `maybe_evaluate` from `grpo_fast.py` to `grpo_utils.py` and drop the duplicate `PolicyTrainerRayProcess.calculate_token_counts` method, routing both trainer paths through the shared `grpo_utils.calculate_token_counts` (https://github.com/allenai/open-instruct/pull/1669).
@@ -44,7 +44,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Changed
-- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py`; add `PruningCheckpointerCallback` so `keep_last_n_checkpoints` also prunes permanent checkpoints (https://github.com/allenai/open-instruct/pull/1671).
+- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py` (https://github.com/allenai/open-instruct/pull/1671).
 
 ### Fixed
 - Pass packed-sequence `doc_lens`/`max_doc_lens` to OLMo-core models in `forward_for_logprobs` (instead of relying on `attention_mask`), so OLMo-core GRPO uses correct intra-document attention; bumps olmo-core to a commit that accepts these kwargs (https://github.com/allenai/open-instruct/pull/1670).

@@ -201,41 +201,12 @@ class CheckpointConfig:
     """If the training should continue from a checkpoint folder."""
 
 
-@dataclass
-class PruningCheckpointerCallback(CheckpointerCallback):
-    """CheckpointerCallback that retains only the last `keep_last_n_checkpoints` permanent checkpoints.
-
-    olmo-core's CheckpointerCallback never prunes permanent checkpoints; this subclass
-    schedules older permanent checkpoints for removal after each save, mirroring
-    grpo_fast.py's `clean_last_n_checkpoints_deepspeed` behavior.
-    """
-
-    keep_last_n_checkpoints: int = -1
-
-    def _prune_permanent_checkpoints(self) -> None:
-        if self.keep_last_n_checkpoints is None or self.keep_last_n_checkpoints < 0:
-            return
-        while len(self._checkpoints) > self.keep_last_n_checkpoints:
-            oldest_path = self._checkpoints.pop(0)
-            self._schedule_for_removal(oldest_path)
-
-    def post_train_batch(self):
-        super().post_train_batch()
-        self._prune_permanent_checkpoints()
-
-
 def build_checkpointer_callback(
-    checkpointing_steps: int,
-    ephemeral_save_interval: int | None,
-    keep_last_n_checkpoints: int = -1,
-    save_async: bool = True,
+    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
-    return PruningCheckpointerCallback(
-        save_interval=checkpointing_steps,
-        ephemeral_save_interval=ephemeral_save_interval,
-        save_async=save_async,
-        keep_last_n_checkpoints=keep_last_n_checkpoints,
+    return CheckpointerCallback(
+        save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
     )
 
 
@@ -476,10 +447,6 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
-def get_hf_config(original_model_name_or_path: str) -> transformers.PretrainedConfig:
-    return transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-
-
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -487,7 +454,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     state-dict converter, and verifies the converted keys exactly cover the HF
     model's expected parameters. Raises before any training starts.
     """
-    hf_config = get_hf_config(original_model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
@@ -507,10 +474,8 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
             f"Missing keys: {sorted(missing)}. Extra keys: {sorted(extra)}."
         )
     logger.info(
-        "Verified HF export works for %s (model_type=%s, %d params).",
-        original_model_name_or_path,
-        getattr(hf_config, "model_type", None),
-        len(expected),
+        f"Verified HF export works for {original_model_name_or_path} "
+        f"(model_type={getattr(hf_config, 'model_type', None)}, {len(expected)} params)."
     )
 
 
@@ -527,7 +492,7 @@ def save_state_dict_as_hf(
     an HF model with those weights, and writes the model + tokenizer to
     ``save_dir``.
     """
-    hf_config = get_hf_config(original_model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
