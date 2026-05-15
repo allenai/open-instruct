@@ -301,7 +301,7 @@ class EvalCallback(Callback):
     def post_step(self) -> None:
         self._last_eval_collected = grpo_utils.maybe_evaluate(
             self.args,
-            self.trainer.global_step + 1,
+            self.trainer.global_step,
             self.evaluation_inference_results_Q,
             self.evaluation_inference_results_Q,
             self.tokenizer,
