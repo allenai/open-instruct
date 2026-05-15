@@ -181,6 +181,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             scheduler=scheduler,
             device=device,
             streaming_config=self.streaming_config,
+            attn_implementation=self.attn_implementation,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
@@ -353,9 +354,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         os.makedirs(output_dir, exist_ok=True)
-        olmo_core_utils.save_state_dict_as_hf(
-            self.model_config, state_dict, output_dir, self.model_name_or_path, tokenizer
-        )
+        olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 
