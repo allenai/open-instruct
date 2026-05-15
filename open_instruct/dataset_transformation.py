@@ -390,6 +390,92 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    # Based on Qwen/Qwen3-4B-Instruct-2507's shipped chat_template — the
+    # non-thinking Qwen3 variant. Byte-identical to that template for
+    # `add_generation_prompt=True` rendering. One surgical edit: the last
+    # assistant message at training time (`loop.last and not
+    # add_generation_prompt`) emits `eos_token` instead of `<|im_end|>\n`. This
+    # gives the packer one supervised stop signal per sample (tokenizer eos =
+    # <|endoftext|>=151643 for Qwen3-*-Base) and avoids the dual-eos competition
+    # that under-trained SFT runs can't resolve. The trick matches the allenai
+    # olmo-3 template's pattern (`{%- if loop.last -%}eos_token{%- else
+    # -%}<|im_end|>\n{%- endif -%}`). Intermediate assistant turns in
+    # multi-turn data keep `<|im_end|>\n`, so the model still learns the
+    # ChatML turn separator. No `<think>...</think>` machinery (we don't have
+    # reasoning data, and the hybrid Qwen3-4B template's `loop.last` reasoning
+    # wrapper would add empty `<think>\n\n</think>\n\n` boilerplate to every
+    # assistant turn — Qwen-Instruct-2507 drops it.
+    "qwen3-modified": (
+        "{%- if tools %}"
+        "{{- '<|im_start|>system\n' }}"
+        "{%- if messages[0].role == 'system' %}"
+        "{{- messages[0].content + '\n\n' }}"
+        "{%- endif %}"
+        "{{- \"# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\" }}"
+        "{%- for tool in tools %}"
+        "{{- \"\n\" }}"
+        "{{- tool | tojson }}"
+        "{%- endfor %}"
+        "{{- \"\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\n</tool_call><|im_end|>\n\" }}"
+        "{%- else %}"
+        "{%- if messages[0].role == 'system' %}"
+        "{{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}"
+        "{%- endif %}"
+        "{%- endif %}"
+        "{%- for message in messages %}"
+        "{%- if message.content is string %}"
+        "{%- set content = message.content %}"
+        "{%- else %}"
+        "{%- set content = '' %}"
+        "{%- endif %}"
+        "{%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) %}"
+        "{{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>' + '\n' }}"
+        "{%- elif message.role == \"assistant\" %}"
+        "{{- '<|im_start|>' + message.role + '\n' + content }}"
+        "{%- if message.tool_calls %}"
+        "{%- for tool_call in message.tool_calls %}"
+        "{%- if (loop.first and content) or (not loop.first) %}"
+        "{{- '\n' }}"
+        "{%- endif %}"
+        "{%- if tool_call.function %}"
+        "{%- set tool_call = tool_call.function %}"
+        "{%- endif %}"
+        "{{- '<tool_call>\n{\"name\": \"' }}"
+        "{{- tool_call.name }}"
+        "{{- '\", \"arguments\": ' }}"
+        "{%- if tool_call.arguments is string %}"
+        "{{- tool_call.arguments }}"
+        "{%- else %}"
+        "{{- tool_call.arguments | tojson }}"
+        "{%- endif %}"
+        "{{- '}\n</tool_call>' }}"
+        "{%- endfor %}"
+        "{%- endif %}"
+        # ↓ CHANGED: emit eos_token instead of <|im_end|>\n for the last assistant
+        # message at training time (loop.last and not add_generation_prompt).
+        # Inference (add_generation_prompt=True) matches Qwen3-Instruct-2507's
+        # template byte-for-byte.
+        "{%- if loop.last and not add_generation_prompt %}"
+        "{{- eos_token }}"
+        "{%- else %}"
+        "{{- '<|im_end|>\n' }}"
+        "{%- endif %}"
+        "{%- elif message.role == \"tool\" %}"
+        "{%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}"
+        "{{- '<|im_start|>user' }}"
+        "{%- endif %}"
+        "{{- '\n<tool_response>\n' }}"
+        "{{- content }}"
+        "{{- '\n</tool_response>' }}"
+        "{%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}"
+        "{{- '<|im_end|>\n' }}"
+        "{%- endif %}"
+        "{%- endif %}"
+        "{%- endfor %}"
+        "{%- if add_generation_prompt %}"
+        "{{- '<|im_start|>assistant\n' }}"
+        "{%- endif %}"
+    ),
     "olmo_thinker_no_think_7b": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
