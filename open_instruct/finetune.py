@@ -702,6 +702,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     for k in batch:
                         pad_value = -100 if k == "labels" else 0
                         batch[k] = torch.nn.functional.pad(batch[k], (0, pad_len), value=pad_value)
+                if "attention_mask" not in batch:
+                    raise ValueError("Expected attention_mask in batch when sequence_parallel_size > 1.")
+                # Ulysses shards this tensor after collation, so create positions
+                # for the full pre-shard sequence.
+                seq_len = batch["input_ids"].shape[1]
+                batch["position_ids"] = (
+                    torch.arange(seq_len, dtype=torch.long)
+                    .unsqueeze(0)
+                    .expand(batch["input_ids"].shape[0], -1)
+                    .contiguous()
+                )
                 return batch
         else:
             collate_fn = base_collate_fn
@@ -863,15 +874,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
             fwd_extra: dict = {}
             if _is_hybrid_sp:
-                if "position_ids" in batch:
-                    local_pos = batch["position_ids"]
-                else:
-                    local_len = batch["input_ids"].shape[1]
-                    local_pos = (
-                        torch.arange(local_len, device=batch["input_ids"].device)
-                        .unsqueeze(0)
-                        .expand(batch["input_ids"].shape[0], -1)
+                if "position_ids" not in batch:
+                    raise ValueError(
+                        "Qwen3.5 hybrid sequence-parallel training requires pre-shard position_ids. "
+                        "Check that the SP collator added position_ids before Ulysses sharding."
                     )
+                local_pos = batch["position_ids"]
+                if local_pos.shape[0] != 1:
+                    raise ValueError("Qwen3.5 hybrid sequence-parallel training currently requires batch size 1.")
                 local_pos_row = local_pos[0:1].contiguous()
                 gathered = [torch.zeros_like(local_pos_row) for _ in range(args.sequence_parallel_size)]
                 torch.distributed.all_gather(gathered, local_pos_row, group=_sp_group)
