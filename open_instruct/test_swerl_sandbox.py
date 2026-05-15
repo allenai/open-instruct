@@ -190,3 +190,34 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("hello", result.result)
         self.assertIn("(exit_code=0)", result.result)
+
+    async def test_bash_output_appends_turns_remaining_when_enabled(self):
+        env = SWERLVanilluxSandboxEnv(append_turns_remaining=True)
+
+        class _EchoBackend(_FakeBackend):
+            def run_command(self, command: str) -> ExecutionResult:
+                self.commands.append(command)
+                return ExecutionResult(stdout="hello", stderr="", exit_code=0)
+
+        env._backend = _EchoBackend()
+        env._max_steps = 4
+
+        result = await env.step(EnvCall(id="1", name="bash", args={"command": "echo hello"}))
+
+        self.assertTrue(result.result.endswith("(exit_code=0)\nTurns remaining: 3"))
+
+    async def test_bash_output_uses_submit_warning_on_second_last_turn(self):
+        env = SWERLVanilluxSandboxEnv(append_turns_remaining=True)
+
+        class _EchoBackend(_FakeBackend):
+            def run_command(self, command: str) -> ExecutionResult:
+                self.commands.append(command)
+                return ExecutionResult(stdout="hello", stderr="", exit_code=0)
+
+        env._backend = _EchoBackend()
+        env._max_steps = 2
+
+        result = await env.step(EnvCall(id="1", name="bash", args={"command": "echo hello"}))
+
+        self.assertTrue(result.result.endswith("(exit_code=0)\nOne turn remaining. Please submit your work"))
+        self.assertNotIn("Turns remaining: 1", result.result)

@@ -136,6 +136,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         test_timeout: int = 120,
         timeout: int = 600,
         last_step_warning: bool = False,
+        append_turns_remaining: bool = False,
         **backend_kwargs: Any,
     ):
         backend_kwargs["image"] = image
@@ -151,6 +152,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         self._task_data_hf_repo = task_data_hf_repo
         self._test_timeout = test_timeout
         self._last_step_warning = last_step_warning
+        self._append_turns_remaining = append_turns_remaining
         self._max_steps: int | None = None
         self._instruction = ""
         self._tests_dir: str | None = None
@@ -423,6 +425,14 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
             result.result = f"{result.result}\n\n{LAST_STEP_WARNING}"
         return result
 
+    def _turns_remaining_message(self) -> str | None:
+        if not self._append_turns_remaining or self._max_steps is None:
+            return None
+        turns_remaining = max(self._max_steps - self._step_count, 0)
+        if turns_remaining == 1:
+            return "One turn remaining. Please submit your work"
+        return f"Turns remaining: {turns_remaining}"
+
     def _execute_bash(self, args: dict) -> StepResult:
         assert self._backend is not None
         command = args.get("command", "")
@@ -441,6 +451,9 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
 
         truncated = truncate_observation(output) if output else "(no output)"
         observation = f"{truncated}\n\n(exit_code={result.exit_code})"
+        turns_remaining_message = self._turns_remaining_message()
+        if turns_remaining_message is not None:
+            observation = f"{observation}\n{turns_remaining_message}"
         return StepResult(result=observation, metadata={"exit_code": result.exit_code})
 
     def _run_tests(self) -> StepResult:
@@ -529,3 +542,4 @@ class SWERLVanilluxSandboxEnvConfig(BaseEnvConfig):
     test_timeout: int = 120
     timeout: int = 600
     last_step_warning: bool = False
+    append_turns_remaining: bool = False
