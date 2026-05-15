@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SFT on Qwen3-8B using the existing SFT tokenize/filter pair.
+# SFT on Qwen3-8B using Tulu SFT masking plus the existing length filter.
 # Filters samples longer than max_seq_length instead of truncating them.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
@@ -46,8 +46,8 @@ uv run python mason.py \
     --dataset_mixer_list_splits \
         train \
     --dataset_transform_fn \
-        sft_tokenize_mask_out_prompt_v1 \
-        sft_filter_v1 \
+        sft_tulu_tokenize_without_truncation_v1 \
+        sft_length_and_label_filter_v1 \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \

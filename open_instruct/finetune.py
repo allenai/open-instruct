@@ -79,7 +79,7 @@ _MAX_SEQ_LENGTH_TRANSFORM_FNS = {
     "sft_tulu_tokenize_and_truncate_v1",
     "last_turn_tulu_tokenize_and_truncate_v1",
 }
-_MAX_TOKEN_LENGTH_FILTER_FNS = {"sft_filter_v1"}
+_MAX_TOKEN_LENGTH_FILTER_FNS = {"sft_length_and_label_filter_v1"}
 
 
 def build_transform_fn_args(dataset_transform_fn: list[str], max_seq_length: int | None) -> list[dict[str, int | None]]:

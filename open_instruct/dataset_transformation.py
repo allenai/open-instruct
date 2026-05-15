@@ -1124,12 +1124,11 @@ def sft_tokenize_mask_out_prompt_v1(
     return row
 
 
-def sft_filter_v1(
+def sft_length_and_label_filter_v1(
     row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     max_prompt_token_length: int | None = None,
     max_token_length: int | None = None,
-    need_contain_labels: bool = True,
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
@@ -1140,14 +1139,14 @@ def sft_filter_v1(
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
     contain_some_labels = any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
-    return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+    return max_prompt_token_length_ok and max_token_length_ok and contain_some_labels
 
 
 def mask_labels(
     labels: torch.Tensor,
     messages: list[dict[str, Any]],
     tokenizer: PreTrainedTokenizer,
-    max_seq_length: int,
+    max_seq_length: int | None,
     should_mask: Callable[[int, dict[str, Any], list[dict[str, Any]]], bool],
 ) -> None:
     """Mask spans in ``labels`` by setting them to -100.
@@ -1167,8 +1166,9 @@ def mask_labels(
         "return_dict": False,
         "padding": False,
         "truncation": max_seq_length is not None,
-        "max_length": max_seq_length,
     }
+    if max_seq_length is not None:
+        chat_template_kwargs["max_length"] = max_seq_length
 
     deferred_from_zero = False
     seen_user = False
@@ -1207,23 +1207,25 @@ def mask_labels(
             break
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
-    input_ids_result = tokenizer.apply_chat_template(
-        conversation=messages,
-        tools=tools,
-        tokenize=True,
-        return_tensors="pt",
-        return_dict=False,
-        padding=False,
-        truncation=True,
-        max_length=max_seq_length,
-        add_generation_prompt=False,
-    )
+    chat_template_kwargs: dict[str, Any] = {
+        "conversation": messages,
+        "tools": tools,
+        "tokenize": True,
+        "return_tensors": "pt",
+        "return_dict": False,
+        "padding": False,
+        "truncation": max_seq_length is not None,
+        "add_generation_prompt": False,
+    }
+    if max_seq_length is not None:
+        chat_template_kwargs["max_length"] = max_seq_length
+    input_ids_result = tokenizer.apply_chat_template(**chat_template_kwargs)
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
     labels = input_ids.clone()
@@ -1233,6 +1235,14 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
     return row
+
+
+def sft_tulu_tokenize_without_truncation_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
+    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=None)
+
+
+def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=max_seq_length)
 
 
 def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
@@ -1572,7 +1582,8 @@ def rlvr_max_length_filter_v2(
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
-    "sft_filter_v1": (sft_filter_v1, "filter"),
+    "sft_length_and_label_filter_v1": (sft_length_and_label_filter_v1, "filter"),
+    "sft_tulu_tokenize_without_truncation_v1": (sft_tulu_tokenize_without_truncation_v1, "map"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
     "last_turn_tulu_tokenize_and_truncate_v1": (last_turn_tulu_tokenize_and_truncate_v1, "map"),
@@ -1588,6 +1599,7 @@ TRANSFORM_FNS = {
 _SFT_TOKENIZE_FNS = {
     "sft_tokenize_v1",
     "sft_tokenize_mask_out_prompt_v1",
+    "sft_tulu_tokenize_without_truncation_v1",
     "sft_tulu_tokenize_and_truncate_v1",
     "last_turn_tulu_tokenize_and_truncate_v1",
 }
