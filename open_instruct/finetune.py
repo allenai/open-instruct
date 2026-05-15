@@ -75,6 +75,25 @@ from open_instruct.utils import (
 logger = get_logger(__name__)
 
 
+_MAX_SEQ_LENGTH_TRANSFORM_FNS = {
+    "sft_tulu_tokenize_and_truncate_v1",
+    "last_turn_tulu_tokenize_and_truncate_v1",
+}
+_MAX_TOKEN_LENGTH_FILTER_FNS = {"sft_filter_v1"}
+
+
+def build_transform_fn_args(dataset_transform_fn: list[str], max_seq_length: int | None) -> list[dict[str, int | None]]:
+    transform_fn_args = []
+    for fn_name in dataset_transform_fn:
+        if fn_name in _MAX_SEQ_LENGTH_TRANSFORM_FNS:
+            transform_fn_args.append({"max_seq_length": max_seq_length})
+        elif fn_name in _MAX_TOKEN_LENGTH_FILTER_FNS:
+            transform_fn_args.append({"max_token_length": max_seq_length})
+        else:
+            transform_fn_args.append({})
+    return transform_fn_args
+
+
 @dataclass
 class FlatArguments:
     """
@@ -504,7 +523,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if not dataset_mixer_list_config_names and args.dataset_config_name is not None:
         dataset_mixer_list_config_names = [args.dataset_config_name]
     with accelerator.main_process_first():
-        transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        transform_fn_args = build_transform_fn_args(args.dataset_transform_fn, args.max_seq_length)
         train_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
