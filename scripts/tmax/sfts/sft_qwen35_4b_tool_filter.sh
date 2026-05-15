@@ -46,9 +46,6 @@ uv run python mason.py \
         $DATASET_CONFIG \
     --dataset_mixer_list_splits \
         train \
-    --dataset_transform_fn \
-        sft_tulu_tokenize_and_truncate_v1 \
-        sft_tulu_filter_v1 \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
