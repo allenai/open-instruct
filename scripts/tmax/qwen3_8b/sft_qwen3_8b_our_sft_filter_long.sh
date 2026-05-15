@@ -8,7 +8,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 DATASET=hamishivi/tmax-sft-skill-tax-20260505-2.2k-combined-balanced-qwen3.6-27b-thinking-no-tool-call
-DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_only_success
+DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_all
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -27,7 +27,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name sft_qwen3_8b_success_sft_filter_long \
+    --exp_name sft_qwen3_8b_sft_filter_fixed \
     --model_name_or_path hamishivi/Qwen3-8B \
     --tokenizer_name hamishivi/Qwen3-8B \
     --sequence_parallel_size 2 \
@@ -46,8 +46,8 @@ uv run python mason.py \
     --dataset_mixer_list_splits \
         train \
     --dataset_transform_fn \
-        sft_tulu_tokenize_without_truncation_v1 \
-        sft_length_and_label_filter_v1 \
+        sft_tulu_tokenize_and_truncate_v1 \
+        sft_tulu_filter_v1 \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
