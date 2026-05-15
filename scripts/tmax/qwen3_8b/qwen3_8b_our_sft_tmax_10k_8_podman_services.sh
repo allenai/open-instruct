@@ -49,7 +49,7 @@ uv run python mason.py \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 4 \
-    --model_name_or_path hamishivi/sft_qwen3_8b_our_sft \
+    --model_name_or_path hamishivi/sft_qwen3_8b_our_sft_cleaned_func \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --total_episodes 128000 \
