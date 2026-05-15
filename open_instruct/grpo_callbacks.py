@@ -298,18 +298,16 @@ class EvalCallback(Callback):
         self.eval_data_loader.reset()
 
     def post_step(self) -> None:
-    def post_step(self) -> None:
         self._last_eval_collected = grpo_utils.maybe_evaluate(
-            self.args,
-            self.trainer.global_step,
-            self.evaluation_inference_results_Q,
-            self.evaluation_inference_results_Q,
-            self.tokenizer,
-            0,
-            self.eval_dataset,
-            self.eval_generation_config,
-            self.model_dims,
-            self.base_env_config,
-            self.max_possible_score,
-            self.actor_manager,
+            args=self.args,
+            training_step=self.trainer.global_step,
+            evaluation_inference_results_Q=self.evaluation_inference_results_Q,
+            tokenizer=self.tokenizer,
+            episode=0,
+            eval_dataset=self.eval_dataset,
+            eval_generation_config=self.eval_generation_config,
+            model_dims=self.model_dims,
+            base_env_config=self.base_env_config,
+            max_possible_score=self.max_possible_score,
+            actor_manager=self.actor_manager,
         )
