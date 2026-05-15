@@ -13,7 +13,7 @@ DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_all
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/open-instruct-dev \
+    --workspace ai2/terminalmaxxing \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
