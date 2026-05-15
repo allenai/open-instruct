@@ -38,9 +38,7 @@ def main():
     dcp_state_dict.load_state_dict(state_dict, checkpoint_id=args.checkpoint_dir)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
-    olmo_core_utils.save_state_dict_as_hf(
-        model_config, state_dict["model"], args.output_dir, args.model_name, tokenizer
-    )
+    olmo_core_utils.save_state_dict_as_hf(state_dict["model"], args.output_dir, args.model_name, tokenizer)
     logger.info(f"Saved HuggingFace checkpoint to {args.output_dir}")
 
 

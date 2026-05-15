@@ -120,8 +120,6 @@ class SFTArguments:
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
-    assert args.model.model_name_or_path is not None, "model_name_or_path is required"
-
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)

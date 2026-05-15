@@ -46,8 +46,8 @@ wheels = [
 
 [[package]]
 name = "ai2-olmo-core"
-version = "2.4.0"
-source = { git = "https://github.com/allenai/OLMo-core.git?rev=002958a8f15a#002958a8f15afe5c729affdb12f4c4b12c2f26ad" }
+version = "2.5.0"
+source = { git = "https://github.com/allenai/OLMo-core.git?rev=f1b69d796aa9691c0abbf29683ee04fe1e42aa50#f1b69d796aa9691c0abbf29683ee04fe1e42aa50" }
 dependencies = [
     { name = "bettermap", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "cached-path", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -2774,7 +2774,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=002958a8f15a" },
+    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=f1b69d796aa9691c0abbf29683ee04fe1e42aa50" },
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "authlib", marker = "extra == 'dr-tulu'" },
     { name = "backoff", specifier = ">=2.2.1" },
