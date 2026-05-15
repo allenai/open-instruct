@@ -952,7 +952,7 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v10: Parse JSON-string tool schemas before templating.
-DATASET_CACHE_VERSION = "v10"
+DATASET_CACHE_VERSION = "v11"
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list[dict[str, Any]] | None:
@@ -1207,30 +1207,78 @@ def mask_labels(
             break
 
 
+def _tokenize_tulu_sft_with_assistant_labels(
+    messages: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizer,
+    tools: list[dict[str, Any]] | None,
+    max_seq_length: int | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    rendered = tokenizer.apply_chat_template(
+        conversation=messages,
+        tools=tools,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    tokenized = tokenizer(
+        rendered,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=max_seq_length is not None,
+        max_length=max_seq_length,
+    )
+    input_ids = tokenized[INPUT_IDS_KEY]
+    attention_mask = tokenized[ATTENTION_MASK_KEY]
+    offsets = tokenized["offset_mapping"][0].tolist()
+    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+
+    trainable_char_spans: list[tuple[int, int]] = []
+    for message_idx, message in enumerate(messages):
+        if message["role"] != "assistant":
+            continue
+
+        rendered_before = tokenizer.apply_chat_template(
+            conversation=messages[:message_idx],
+            tools=tools,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        rendered_through_message = tokenizer.apply_chat_template(
+            conversation=messages[: message_idx + 1],
+            tools=tools,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        if not rendered_through_message.startswith(rendered_before):
+            raise ValueError("Chat template rendering is not prefix-stable; cannot compute assistant label spans.")
+
+        assistant_text = rendered_through_message[len(rendered_before) :]
+        content_offset = assistant_text.find("\n")
+        if content_offset == -1:
+            content_offset = 0
+        else:
+            content_offset += 1
+        trainable_char_spans.append((len(rendered_before) + content_offset, len(rendered_through_message)))
+
+    for token_idx, (token_start, token_end) in enumerate(offsets):
+        if token_start == token_end:
+            continue
+        if any(span_start <= token_start and token_end <= span_end for span_start, span_end in trainable_char_spans):
+            labels[0, token_idx] = input_ids[0, token_idx]
+
+    return input_ids, attention_mask, labels
+
+
 def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
-    chat_template_kwargs: dict[str, Any] = {
-        "conversation": messages,
-        "tools": tools,
-        "tokenize": True,
-        "return_tensors": "pt",
-        "return_dict": False,
-        "padding": False,
-        "truncation": max_seq_length is not None,
-        "add_generation_prompt": False,
-    }
-    if max_seq_length is not None:
-        chat_template_kwargs["max_length"] = max_seq_length
-    input_ids_result = tokenizer.apply_chat_template(**chat_template_kwargs)
-    assert isinstance(input_ids_result, torch.Tensor)
-    input_ids = input_ids_result
-    labels = input_ids.clone()
-    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
-    attention_mask = torch.ones_like(input_ids)
+    input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+        messages, tokenizer, tools, max_seq_length
+    )
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
