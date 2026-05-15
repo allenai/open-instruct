@@ -372,14 +372,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 actor_manager=self.actor_manager,
             )
 
-        if self.grpo_config.save_freq != self.grpo_config.checkpoint_state_freq:
-            logger.warning(
-                "On the olmo-core training path, --save_freq is a no-op for periodic saves; "
-                "olmo-core checkpoints are full training state and saved every "
-                "--checkpoint_state_freq steps (got save_freq=%d, checkpoint_state_freq=%d).",
-                self.grpo_config.save_freq,
-                self.grpo_config.checkpoint_state_freq,
-            )
         if self.grpo_config.checkpoint_state_freq > 0:
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
                 checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
