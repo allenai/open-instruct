@@ -298,9 +298,11 @@ class EvalCallback(Callback):
         self.eval_data_loader.reset()
 
     def post_step(self) -> None:
+    def post_step(self) -> None:
         self._last_eval_collected = grpo_utils.maybe_evaluate(
             self.args,
-            self.trainer.global_step,
+            self.trainer.global_step + 1,
+            self.evaluation_inference_results_Q,
             self.evaluation_inference_results_Q,
             self.tokenizer,
             0,
