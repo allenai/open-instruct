@@ -10,7 +10,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "SWERL tmax-10k GRPO with Qwen3.5-4B + turns remaining (4 Podman services)" \
        --pure_docker_mode \
-       --workspace ai2/dr-tulu-ablations \
+       --workspace ai2/terminalmaxxing \
        --priority urgent \
        --preemptible \
        --num_nodes 3 \
@@ -49,7 +49,7 @@ uv run python mason.py \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 4 \
-    --model_name_or_path Qwen/Qwen3.5-4B \
+    --model_name_or_path hamishivi/Qwen3.5-4B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --total_episodes 128000 \
@@ -85,7 +85,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo_4_podman_services_turns_remaining \
+    --exp_name swerl_qwen35_4_tmax_10k_grpo_turns_remaining \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
