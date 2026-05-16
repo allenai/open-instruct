@@ -88,6 +88,12 @@ _OBS_MAX_CHARS: int = int(_VANILLUX_PROMPTS["observation"].get("max_chars", 1000
 _OBS_HEAD_CHARS: int = int(_VANILLUX_PROMPTS["observation"].get("head_chars", 5000))
 _OBS_TAIL_CHARS: int = int(_VANILLUX_PROMPTS["observation"].get("tail_chars", 5000))
 _OBS_TOO_LONG_HINT: str = _VANILLUX_PROMPTS["observation"].get("too_long_hint", "Output truncated.")
+TOOL_CALL_FORMAT_ERROR_MESSAGE = (
+    "Format error: Your last response did not include a valid `bash` tool call.\n\n"
+    "Please always provide EXACTLY ONE call to the `bash` tool. If you want to\n"
+    "end the task, please issue the command `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`\n"
+    "via the `bash` tool, with no other content in the command."
+)
 
 
 def render_instance(task: str) -> str:
@@ -137,6 +143,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         timeout: int = 600,
         last_step_warning: bool = False,
         append_turns_remaining: bool = False,
+        tool_call_format_error_feedback: bool = False,
         **backend_kwargs: Any,
     ):
         backend_kwargs["image"] = image
@@ -153,6 +160,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         self._test_timeout = test_timeout
         self._last_step_warning = last_step_warning
         self._append_turns_remaining = append_turns_remaining
+        self._tool_call_format_error_feedback = tool_call_format_error_feedback
         self._max_steps: int | None = None
         self._instruction = ""
         self._tests_dir: str | None = None
@@ -204,6 +212,11 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
     @classmethod
     def get_tool_definitions(cls) -> list[dict]:
         return list(cls._tool_definitions)
+
+    def get_tool_call_format_error_message(self) -> str | None:
+        if not self._tool_call_format_error_feedback:
+            return None
+        return TOOL_CALL_FORMAT_ERROR_MESSAGE
 
     async def reset(self, task_id: str | None = None, **kwargs: Any) -> tuple[StepResult, list[dict]]:
         last_error = None
@@ -543,3 +556,4 @@ class SWERLVanilluxSandboxEnvConfig(BaseEnvConfig):
     timeout: int = 600
     last_step_warning: bool = False
     append_turns_remaining: bool = False
+    tool_call_format_error_feedback: bool = False

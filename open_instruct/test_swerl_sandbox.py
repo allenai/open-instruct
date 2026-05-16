@@ -9,6 +9,7 @@ from open_instruct.environments.swerl_vanillux_sandbox import (
     INSTANCE_TEMPLATE,
     SUBMIT_MARKER,
     SWERLVanilluxSandboxEnv,
+    TOOL_CALL_FORMAT_ERROR_MESSAGE,
     format_error_message,
     render_instance,
     truncate_observation,
@@ -115,6 +116,13 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
         names = [tool["function"]["name"] for tool in SWERLVanilluxSandboxEnv.get_tool_definitions()]
 
         self.assertEqual(names, ["bash"])
+
+    def test_tool_call_format_error_message_is_opt_in(self):
+        env = SWERLVanilluxSandboxEnv()
+        enabled_env = SWERLVanilluxSandboxEnv(tool_call_format_error_feedback=True)
+
+        self.assertIsNone(env.get_tool_call_format_error_message())
+        self.assertEqual(enabled_env.get_tool_call_format_error_message(), TOOL_CALL_FORMAT_ERROR_MESSAGE)
 
     def test_render_instance_substitutes_task(self):
         rendered = render_instance("fix the bug in foo.py")

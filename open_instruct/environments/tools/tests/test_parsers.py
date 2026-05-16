@@ -1,6 +1,7 @@
 """Tests for tool parsers."""
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from parameterized import parameterized
@@ -420,6 +421,47 @@ class TestVllmToolParser(unittest.TestCase):
 
         result = parser.format_tool_outputs(["hello"], role="user")
         self.assertEqual(result, "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n")
+
+    def test_format_tool_outputs_with_tool_call_id(self):
+        mock_native = MagicMock()
+        parser = VllmToolParser(
+            tool_parser=mock_native,
+            role_templates={"tool": "<tool id='{tool_call_id}'>{output}</tool>"},
+            output_postfix="",
+        )
+
+        result = parser.format_tool_outputs(["format error"], role="tool", tool_call_ids=["call_123"])
+
+        self.assertEqual(result, "<tool id='call_123'>format error</tool>")
+
+    def test_format_tool_outputs_prefixes_tool_call_id_when_template_omits_it(self):
+        mock_native = MagicMock()
+        parser = VllmToolParser(
+            tool_parser=mock_native,
+            role_templates={"tool": "<tool>{output}</tool>"},
+            output_postfix="",
+        )
+
+        result = parser.format_tool_outputs(["format error"], role="tool", tool_call_ids=["call_123"])
+
+        self.assertEqual(result, "<tool>tool_call_id: call_123\nformat error</tool>")
+
+    def test_parse_tool_calls_reports_malformed_ids(self):
+        malformed_call = SimpleNamespace(
+            id="call_bad",
+            function=SimpleNamespace(name="bash", arguments="{not json"),
+        )
+        mock_native = MagicMock()
+        mock_native.extract_tool_calls.return_value = SimpleNamespace(tools_called=True, tool_calls=[malformed_call])
+        parser = VllmToolParser(
+            tool_parser=mock_native, role_templates=self.ROLE_TEMPLATES, output_postfix="<|im_start|>assistant\n"
+        )
+
+        result = parser.parse_tool_calls("bad tool call")
+
+        self.assertTrue(result.had_tool_call)
+        self.assertEqual(result.tool_calls, [])
+        self.assertEqual(result.malformed_tool_call_ids, ["call_bad"])
 
     def test_stop_sequences_empty_by_default(self):
         mock_native = MagicMock()

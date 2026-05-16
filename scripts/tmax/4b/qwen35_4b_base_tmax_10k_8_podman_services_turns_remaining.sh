@@ -72,7 +72,7 @@ uv run python mason.py \
     --save_traces \
     --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
-    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim", "append_turns_remaining": true}' \
+    --tool_configs '{"task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim", "append_turns_remaining": true, "tool_call_format_error_feedback": true}' \
     --pool_size 768 \
     --max_steps 64 \
     --verification_reward 1.0 \
