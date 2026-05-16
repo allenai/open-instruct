@@ -30,10 +30,9 @@ logger = setup_logger(__name__)
 
 @dataclass
 class ToolCallParseResult:
-    """Parsed tool calls plus malformed tool-call ids that should receive feedback."""
+    """Parsed tool calls plus whether the model attempted any tool call."""
 
     tool_calls: list[EnvCall] = field(default_factory=list)
-    malformed_tool_call_ids: list[str] = field(default_factory=list)
     had_tool_call: bool = False
 
 
@@ -54,15 +53,12 @@ class ToolParser(ABC):
         return ToolCallParseResult(tool_calls=tool_calls, had_tool_call=bool(tool_calls))
 
     @abstractmethod
-    def format_tool_outputs(
-        self, tool_outputs: list[str], role: str = "tool", tool_call_ids: list[str | None] | None = None
-    ) -> str:
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         """Format tool outputs with any necessary prefixes/postfixes.
 
         Args:
             tool_outputs: Raw output strings from tool/env calls.
             role: The output role (e.g. "tool", "user" for text envs).
-            tool_call_ids: Optional ids to associate with tool-role outputs.
         """
         pass
 
@@ -126,9 +122,7 @@ class OpenInstructLegacyToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
 
-    def format_tool_outputs(
-        self, tool_outputs: list[str], role: str = "tool", tool_call_ids: list[str | None] | None = None
-    ) -> str:
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 
@@ -176,7 +170,7 @@ class VllmToolParser(ToolParser):
         return self.parse_tool_calls(text).tool_calls
 
     def parse_tool_calls(self, text: str) -> ToolCallParseResult:
-        """Extract valid tool calls and retain ids for malformed calls."""
+        """Extract valid tool calls and record whether any tool call was attempted."""
         request = self._make_request()
         result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
 
@@ -184,7 +178,6 @@ class VllmToolParser(ToolParser):
             return ToolCallParseResult()
 
         tool_calls = []
-        malformed_tool_call_ids = []
         for call in result.tool_calls:
             try:
                 args = json.loads(call.function.arguments)
@@ -195,29 +188,14 @@ class VllmToolParser(ToolParser):
                 logger.warning(
                     f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
                 )
-                if call.id:
-                    malformed_tool_call_ids.append(call.id)
-        return ToolCallParseResult(
-            tool_calls=tool_calls, malformed_tool_call_ids=malformed_tool_call_ids, had_tool_call=True
-        )
+        return ToolCallParseResult(tool_calls=tool_calls, had_tool_call=True)
 
-    def _format_tool_output(self, tool_output: str, role: str = "tool", tool_call_id: str | None = None) -> str:
+    def _format_tool_output(self, tool_output: str, role: str = "tool") -> str:
         template = self._role_templates[role]
-        if tool_call_id and "{tool_call_id}" not in template:
-            tool_output = f"tool_call_id: {tool_call_id}\n{tool_output}"
-        return template.format(output=tool_output, tool_call_id=tool_call_id or "")
+        return template.format(output=tool_output)
 
-    def format_tool_outputs(
-        self, tool_outputs: list[str], role: str = "tool", tool_call_ids: list[str | None] | None = None
-    ) -> str:
-        if tool_call_ids is None:
-            tool_call_ids = [None] * len(tool_outputs)
-        if len(tool_call_ids) != len(tool_outputs):
-            raise ValueError("tool_call_ids must have the same length as tool_outputs")
-        outputs = (
-            self._format_tool_output(output, role, tool_call_id)
-            for output, tool_call_id in zip(tool_outputs, tool_call_ids)
-        )
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
+        outputs = (self._format_tool_output(output, role) for output in tool_outputs)
         return f"{self._output_prefix}{''.join(outputs)}{self._output_postfix}"
 
 
@@ -354,9 +332,7 @@ class DRTuluToolParser(ToolParser):
     def _format_tool_output(self, tool_output: str) -> str:
         return f"<tool_output>\n{tool_output}\n</tool_output>\n"
 
-    def format_tool_outputs(
-        self, tool_outputs: list[str], role: str = "tool", tool_call_ids: list[str | None] | None = None
-    ) -> str:
+    def format_tool_outputs(self, tool_outputs: list[str], role: str = "tool") -> str:
         return "\n".join(self._format_tool_output(output) for output in tool_outputs)
 
 

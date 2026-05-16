@@ -176,7 +176,6 @@ def process_tool_tokens(
     max_tokens: int,
     mask_tool_use: bool,
     role: str = "tool",
-    tool_call_ids: list[str | None] | None = None,
 ) -> tuple[list[int], list[float], list[int], int]:
     """Format, tokenize, and truncate tool outputs.
 
@@ -190,14 +189,13 @@ def process_tool_tokens(
         max_tokens: Maximum response tokens.
         mask_tool_use: Whether to mask tool tokens in loss computation.
         role: Chat role for formatting (e.g. "tool", "user" for text envs).
-        tool_call_ids: Optional ids to associate with tool-role outputs.
 
     Returns:
         Tuple of (tokens, logprobs, masks, excess).
     """
     # Ensure all outputs are strings (guard against None from Ray serialization)
     tool_outputs = [str(o) if o is not None else "" for o in tool_outputs]
-    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role, tool_call_ids=tool_call_ids)
+    formatted_output = tool_parser.format_tool_outputs(tool_outputs, role=role)
     if not isinstance(formatted_output, str):
         formatted_output = str(formatted_output)
     tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
@@ -1131,16 +1129,16 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             parse_result = actor.tool_parser.parse_tool_calls(output.text)
             tool_calls = [tc for tc in parse_result.tool_calls if tc.name in allowed_tools]
 
-            format_error_feedback: list[tuple[str, str, str | None]] = []
+            format_error_feedback: list[tuple[str, str]] = []
             if tool_call_format_error_message and not text_env_names:
-                wrong_tool_call_ids = [tc.id for tc in parse_result.tool_calls if tc.name not in allowed_tools and tc.id]
-                for tool_call_id in parse_result.malformed_tool_call_ids + wrong_tool_call_ids:
-                    format_error_feedback.append((tool_call_format_error_message, "tool", tool_call_id))
+                has_wrong_tool_call = any(tc.name not in allowed_tools for tc in parse_result.tool_calls)
 
-                # No tool call at all should read like a fresh user instruction. If the parser saw
-                # a malformed/wrong call but no id survived, fall back to user-role feedback.
-                if not parse_result.had_tool_call or (not tool_calls and not format_error_feedback):
-                    format_error_feedback.append((tool_call_format_error_message, "user", None))
+                # No tool call at all should read like a fresh user instruction.
+                # Malformed or wrong-tool calls get regular tool feedback.
+                if not parse_result.had_tool_call:
+                    format_error_feedback.append((tool_call_format_error_message, "user"))
+                elif has_wrong_tool_call or not tool_calls:
+                    format_error_feedback.append((tool_call_format_error_message, "tool"))
 
             # Text envs: inject a shadow tool call so dispatch handles it uniformly
             for text_env_name in text_env_names:
@@ -1150,12 +1148,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             if not tool_calls and not format_error_feedback:
                 break
 
-            observations: list[tuple[str, str, str | None]] = []
-            for feedback, response_role, tool_call_id in format_error_feedback:
+            observations: list[tuple[str, str]] = []
+            for feedback, response_role in format_error_feedback:
                 if rollout.step_count >= max_steps:
                     break
                 rollout.step_count += 1
-                observations.append((feedback, response_role, tool_call_id))
+                observations.append((feedback, response_role))
                 rollout.tool_error += feedback
                 rollout.rewards.append(0.0)
                 rollout.tool_call_stats.append(
@@ -1183,7 +1181,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         timeout=actor.tool_call_timeout,
                     )
                     add_timing("tool_step", phase_start_time)
-                    observations.append((step_result.result, tool_response_roles.get(tc.name, "tool"), None))
+                    observations.append((step_result.result, tool_response_roles.get(tc.name, "tool")))
                     rollout.tool_output += step_result.result
                     rollout.rewards.append(step_result.reward)
                     if step_result.done:
@@ -1203,7 +1201,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     add_timing("tool_step", phase_start_time)
                     error_msg = f"Step '{tc.name}' timed out after {actor.tool_call_timeout}s. Args: {tc.args}"
                     logger.warning(error_msg)
-                    observations.append((error_msg, "tool", None))
+                    observations.append((error_msg, "tool"))
                     rollout.tool_error += error_msg
                     rollout.timeout = True
                     rollout.rewards.append(0.0)
@@ -1214,7 +1212,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     add_timing("tool_step", phase_start_time)
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
                     logger.warning(error_msg)
-                    observations.append((error_msg, "tool", None))
+                    observations.append((error_msg, "tool"))
                     rollout.tool_error += error_msg
                     rollout.rewards.append(0.0)
                     rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
@@ -1225,7 +1223,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             if observations:
                 exceeded_context_budget = False
                 phase_start_time = time.perf_counter()
-                for observation, response_role, tool_call_id in observations:
+                for observation, response_role in observations:
                     tokens, logprobs, masks, excess = process_tool_tokens(
                         [observation],
                         actor.tool_parser,
@@ -1236,7 +1234,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         sampling_params.max_tokens,
                         actor.mask_tool_use,
                         role=response_role,
-                        tool_call_ids=[tool_call_id],
                     )
                     response_tokens.extend(tokens)
                     response_logprobs.extend(logprobs)
