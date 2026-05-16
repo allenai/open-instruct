@@ -8,7 +8,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-4B (4 Podman services)" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B longer" \
        --pure_docker_mode \
        --workspace ai2/dr-tulu-ablations \
        --priority urgent \
@@ -42,9 +42,9 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --per_turn_max_tokens 8192 \
-    --response_length 32768 \
-    --pack_length 35840 \
+    --per_turn_max_tokens 16384 \
+    --response_length 65536 \
+    --pack_length 67584 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
@@ -85,7 +85,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_10k_verified_grpo_4_podman_services \
+    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
