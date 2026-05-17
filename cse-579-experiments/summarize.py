@@ -1,10 +1,11 @@
-"""Summarize cse-579-experiments/results/<run>/<task>/{metrics,length_stats}.json.
+"""Summarize cse-579-experiments/results/<run>/step_<N>/<task>/{metrics,length_stats}.json.
 
 Usage:
-    uv run python cse-579-experiments/summarize.py                  # all runs
-    uv run python cse-579-experiments/summarize.py <run_dir> ...    # specific runs
+    uv run python cse-579-experiments/summarize.py                       # all runs, all steps
+    uv run python cse-579-experiments/summarize.py <run> ...             # all steps of named runs
+    uv run python cse-579-experiments/summarize.py <run>/step_<N> ...    # specific step(s)
 
-Output is a markdown table per run that the experiment .md files can include.
+Output is a markdown table per (run, step) that the experiment .md files can include.
 Pulls numbers directly from metrics.json / length_stats.json — no hand-typed
 values, so the table stays in sync with whatever fetch_eval_results.sh put
 on disk.
@@ -94,8 +95,10 @@ def _summarize_subtask(subtask_metrics: Path) -> list[str]:
 
 
 def _summarize_run(run_dir: Path) -> str:
+    # run_dir is .../results/<run>/step_<N>; show "<run>/step_<N>" as the header.
+    rel = f"{run_dir.parent.name}/{run_dir.name}" if run_dir.parent != RESULTS_DIR else run_dir.name
     lines: list[str] = []
-    lines.append(f"### `{run_dir.name}`")
+    lines.append(f"### `{rel}`")
     lines.append("")
     lines.append(
         "| Task | Primary | Items (✓/✗/?) | Subset | gens | Tok mean | Tok std | Tok p50 | Tok p90 |"
@@ -133,15 +136,39 @@ def _summarize_run(run_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def _all_step_dirs() -> list[Path]:
+    """Walk results/<run>/step_<N>/ — all runs, all steps, sorted."""
+    if not RESULTS_DIR.exists():
+        return []
+    out: list[Path] = []
+    for run_dir in sorted(p for p in RESULTS_DIR.iterdir() if p.is_dir()):
+        out.extend(sorted(p for p in run_dir.iterdir() if p.is_dir() and p.name.startswith("step_")))
+    return out
+
+
+def _expand_arg(arg: str) -> list[Path]:
+    """A positional arg is either '<run>' (expand to all its step dirs) or
+    '<run>/step_<N>' (single step dir)."""
+    p = RESULTS_DIR / arg
+    if not p.exists():
+        return [p]  # caller surfaces as NOT FOUND
+    if p.is_dir() and any(child.name.startswith("step_") for child in p.iterdir() if child.is_dir()):
+        return sorted(child for child in p.iterdir() if child.is_dir() and child.name.startswith("step_"))
+    return [p]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("runs", nargs="*", help="Run directories under results/ (default: all).")
+    parser.add_argument("runs", nargs="*",
+                        help="Either '<run>' (all steps) or '<run>/step_<N>' (one step). Default: all.")
     args = parser.parse_args()
 
     if args.runs:
-        run_dirs = [RESULTS_DIR / r for r in args.runs]
+        run_dirs: list[Path] = []
+        for r in args.runs:
+            run_dirs.extend(_expand_arg(r))
     else:
-        run_dirs = sorted(p for p in RESULTS_DIR.iterdir() if p.is_dir()) if RESULTS_DIR.exists() else []
+        run_dirs = _all_step_dirs()
 
     missing = [d for d in run_dirs if not d.exists()]
     if missing:

@@ -1,8 +1,8 @@
 """Plot per-task accuracy and length over training steps for one or more runs.
 
-Walks `cse-579-experiments/results/<run_prefix>_step_<N>/<task>/` for every
-matching run prefix, reads each task's primary metric and token-length mean
-from disk, and emits a multi-panel PNG plus a tidy CSV of the underlying data.
+Walks `cse-579-experiments/results/<run>/step_<N>/<task>/` for every named run,
+reads each task's primary metric and token-length mean from disk, and emits a
+multi-panel PNG plus a tidy CSV of the underlying data.
 
 Usage:
     uv run python cse-579-experiments/plot_trajectories.py \\
@@ -10,8 +10,8 @@ Usage:
         --run "Linear α=1.0:lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant" \\
         --out cse-579-experiments/results/trajectories.png
 
-`--run` takes either `<display>:<prefix>` or just `<prefix>` (in which case
-the prefix is used as the display name).
+`--run` takes either `<display>:<run>` or just `<run>` (in which case
+the run name is used as the display name).
 
 Only reads files we already commit (metrics.json + length_stats.json), so the
 plot can be regenerated without re-fetching from Beaker.
@@ -31,7 +31,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 RESULTS_DIR = Path(__file__).parent / "results"
-STEP_RE = re.compile(r"_step_(\d+)$")
+STEP_RE = re.compile(r"^step_(\d+)$")
 
 # Cleaner display names for the tasks our pipeline currently emits.
 TASK_DISPLAY: dict[str, str] = {
@@ -45,12 +45,15 @@ TASK_DISPLAY: dict[str, str] = {
 }
 
 
-def discover_runs(run_prefix: str) -> dict[int, Path]:
+def discover_runs(run: str) -> dict[int, Path]:
     by_step: dict[int, Path] = {}
-    for child in RESULTS_DIR.iterdir():
-        if not child.is_dir() or not child.name.startswith(run_prefix + "_step_"):
+    run_root = RESULTS_DIR / run
+    if not run_root.is_dir():
+        return by_step
+    for child in run_root.iterdir():
+        if not child.is_dir():
             continue
-        m = STEP_RE.search(child.name)
+        m = STEP_RE.match(child.name)
         if m:
             by_step[int(m.group(1))] = child
     return dict(sorted(by_step.items()))
@@ -85,17 +88,17 @@ def load_subtask_metrics(run_dir: Path) -> dict[str, dict]:
 
 
 def _parse_run_arg(arg: str) -> tuple[str, str]:
-    """Returns (display_name, prefix). Accepts 'name:prefix' or bare 'prefix'."""
+    """Returns (display_name, run). Accepts 'name:run' or bare 'run'."""
     if ":" in arg:
-        name, prefix = arg.split(":", 1)
-        return name.strip(), prefix.strip()
+        name, run = arg.split(":", 1)
+        return name.strip(), run.strip()
     return arg, arg
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="append", required=True,
-                        help="'<display_name>:<run_prefix>' (or bare prefix). Repeatable.")
+                        help="'<display_name>:<run>' (or bare run). Repeatable.")
     parser.add_argument("--out", type=Path, default=RESULTS_DIR / "trajectories.png")
     parser.add_argument("--csv", type=Path, default=None)
     args = parser.parse_args()
@@ -105,9 +108,9 @@ def main() -> None:
     # display -> step -> task -> record
     data: dict[str, dict[int, dict[str, dict]]] = {}
     all_tasks: set[str] = set()
-    for display, prefix in runs:
+    for display, run in runs:
         per_step = {}
-        for step, run_dir in discover_runs(prefix).items():
+        for step, run_dir in discover_runs(run).items():
             recs = load_subtask_metrics(run_dir)
             per_step[step] = recs
             all_tasks.update(recs.keys())
