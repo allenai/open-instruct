@@ -3,7 +3,7 @@
 ## Status
 
 - **State**: training completed (attempt 2; HF push failed but training and checkpoints were fine)
-- **Eval state**: retrieved (5 oe-eval beaker jobs for step_1000 succeeded; results saved under `cse-579-experiments/results/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000/`)
+- **Eval state**: retrieved (5 oe-eval beaker jobs for step_1000 succeeded; results saved under `cse-579-experiments/results/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant/step_1000/`)
 - **Last updated**: 2026-05-11
 
 ## Purpose
@@ -58,7 +58,7 @@ First real test of dynamic length-aware reward shaping. Pairs against Jacob's
   - ifbench::tulu: [01KRCA5ZC2NBWKSGAYT94QQ3F5](https://beaker.org/ex/01KRCA5ZC2NBWKSGAYT94QQ3F5)
   - livecodebench: [01KRCA605NWVCD39BK0PP7JSTT](https://beaker.org/ex/01KRCA605NWVCD39BK0PP7JSTT)
   - aime 2025 pass@32: [01KRCA615TJX7DNCQAGJPGHR2Q](https://beaker.org/ex/01KRCA615TJX7DNCQAGJPGHR2Q)
-- **Eval results path**: `cse-579-experiments/results/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000/` — saved by `cse-579-experiments/fetch_eval_results.sh` (one `metrics.json` + `length_stats.json` per task). Regenerate the summary table below with `uv run python cse-579-experiments/summarize.py lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000`.
+- **Eval results path**: `cse-579-experiments/results/lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant/step_1000/` — saved by `cse-579-experiments/fetch_eval_results.sh` (one `metrics.json` + `length_stats.json` per task). Regenerate the summary table below with `uv run python cse-579-experiments/summarize.py lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant/step_1000`.
 
 ## Pair / baseline
 
@@ -105,10 +105,10 @@ per-step result files in `results/`; the underlying numbers are in
 ## Results (step_1000)
 
 Numbers below are pulled programmatically from the saved metrics in
-`results/<run_dir>/<task>/`. Regenerate with:
+`results/<run>/step_<N>/<task>/`. Regenerate with:
 
 ```
-uv run python cse-579-experiments/summarize.py lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000
+uv run python cse-579-experiments/summarize.py lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant/step_1000
 ```
 
 (The table is regenerated from disk; don't edit the numbers by hand. Token
@@ -117,7 +117,7 @@ shaping operated on during training.)
 
 <!-- BEGIN: summarize.py output for this run; do not edit manually -->
 
-### `lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000`
+### `lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant/step_1000`
 
 | Task | Primary | Items (✓/✗/?) | Subset | gens | Tok mean | Tok std | Tok p50 | Tok p90 |
 |------|---------|----------------|--------|------|----------|---------|---------|---------|

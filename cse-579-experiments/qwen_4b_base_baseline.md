@@ -42,13 +42,13 @@ shaping itself rather than to base-model RL-Zero in general.
   - ifbench::tulu: [01KRCBPS5YSMTJ1H725Z8DF3RN](https://beaker.org/ex/01KRCBPS5YSMTJ1H725Z8DF3RN)
   - livecodebench: [01KRCBPSZ57HVDSQTQZ6HN0835](https://beaker.org/ex/01KRCBPSZ57HVDSQTQZ6HN0835)
   - aime 2025 pass@32: [01KRCBPTRBBMP46EDW65GJ7JPK](https://beaker.org/ex/01KRCBPTRBBMP46EDW65GJ7JPK) (exit 143; metrics were written before SIGTERM during datalake upload — see Known issues)
-- **Eval results path**: `cse-579-experiments/results/baseline_think_run_4b_base_mixed_32k_step_1000/`. Regenerate the table below with `uv run python cse-579-experiments/summarize.py baseline_think_run_4b_base_mixed_32k_step_1000`.
+- **Eval results path**: `cse-579-experiments/results/baseline_think_run_4b_base_mixed_32k/step_1000/`. Regenerate the table below with `uv run python cse-579-experiments/summarize.py baseline_think_run_4b_base_mixed_32k/step_1000`.
 
 ## Results (step_1000)
 
 <!-- BEGIN: summarize.py output for this run; do not edit manually -->
 
-### `baseline_think_run_4b_base_mixed_32k_step_1000`
+### `baseline_think_run_4b_base_mixed_32k/step_1000`
 
 | Task | Primary | Items (✓/✗/?) | Subset | gens | Tok mean | Tok std | Tok p50 | Tok p90 |
 |------|---------|----------------|--------|------|----------|---------|---------|---------|
