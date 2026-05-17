@@ -31,7 +31,7 @@ uv run python mason.py \
        --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
        --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=60 \
        --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=10m \
-       --env MIRROR_URL=jupiter-cs-aus-150.reviz.ai2.in:5000 \
+       --env MIRROR_URL=jupiter-cs-aus-193.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=hamishivi_DOCKER_PAT \

@@ -10,16 +10,16 @@ layers.
 Examples:
     uv run python scripts/docker/warm_tmax_registry_mirror.py \\
         --dataset hamishivi/swerl-tmax-15k \\
-        --mirror jupiter-cs-aus-150.reviz.ai2.in:5000
+        --mirror jupiter-cs-aus-193.reviz.ai2.in:5000
 
     uv run python scripts/docker/warm_tmax_registry_mirror.py \\
         --tool-configs '{"task_data_hf_repo":"hamishivi/swerl-tmax-15k","image":"python:3.12-slim"}' \\
-        --mirror jupiter-cs-aus-150.reviz.ai2.in:5000
+        --mirror jupiter-cs-aus-193.reviz.ai2.in:5000
 
 By default, the script warms the mirror through the registry HTTP API, so it
 does not need a local Docker or Podman daemon. Use ``--method pull`` to warm
 the mirror by running pulls like:
-    docker pull jupiter-cs-aus-150.reviz.ai2.in:5000/hamishi740/swerl-tmax-v3:tag
+    docker pull jupiter-cs-aus-193.reviz.ai2.in:5000/hamishi740/swerl-tmax-v3:tag
 """
 
 from __future__ import annotations
