@@ -12,7 +12,7 @@
 #
 # This will look in ai2/olmo-instruct for experiments named like
 # 'lmeval-<model_prefix>_step_NNN-on-...' and fetch each step into
-# cse-579-experiments/results/<results_run_prefix>_step_NNN/.
+# cse-579-experiments/results/<results_run_prefix>/step_NNN/.
 
 set -euo pipefail
 
@@ -48,10 +48,9 @@ STEPS=$(awk -F'\t' '{print $1}' "$SCRATCH/pairs.tsv" | sort -un)
 for step in $STEPS; do
     IDS=$(awk -F'\t' -v s="$step" '$1 == s { print $2 }' "$SCRATCH/pairs.tsv" | tr '\n' ' ')
     N=$(echo "$IDS" | wc -w | tr -d ' ')
-    RUN_DIR="${RESULTS_RUN_PREFIX}_step_${step}"
     echo
-    echo "===== step $step ($N experiments) -> $RUN_DIR ====="
+    echo "===== step $step ($N experiments) -> $RESULTS_RUN_PREFIX/step_$step ====="
     # shellcheck disable=SC2086  # intentional word-splitting on $IDS
-    bash "$FETCHER" "$RUN_DIR" $IDS 2>&1 | grep -E "^==|^    saved|skipping" || true
+    bash "$FETCHER" "$RESULTS_RUN_PREFIX" "$step" $IDS 2>&1 | grep -E "^==|^    saved|skipping" || true
 done
 rm -rf "$SCRATCH"

@@ -1,13 +1,13 @@
 #!/bin/bash
 # Fetch eval results from a list of Beaker lmeval experiments into
-# cse-579-experiments/results/<run_dir>/<task>/.
+# cse-579-experiments/results/<run>/step_<step>/<task>/.
 #
 # Usage:
-#   bash cse-579-experiments/fetch_eval_results.sh <run_dir> <exp_id> [<exp_id> ...]
+#   bash cse-579-experiments/fetch_eval_results.sh <run> <step> <exp_id> [<exp_id> ...]
 #
 # Example:
 #   bash cse-579-experiments/fetch_eval_results.sh \
-#     lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant_step_1000 \
+#     lenshape_qwen_4b_base_mixed_linear_p1.0_wconstant 1000 \
 #     01KRCA5XQS5JV19DV7GHM0T7PE 01KRCA5YJA5W0VSNZ90BQKGF75 ...
 #
 # For each experiment we save:
@@ -19,16 +19,17 @@
 
 set -euo pipefail
 
-if [ $# -lt 2 ]; then
-    echo "Usage: $0 <run_dir> <exp_id> [<exp_id> ...]"
+if [ $# -lt 3 ]; then
+    echo "Usage: $0 <run> <step> <exp_id> [<exp_id> ...]"
     exit 1
 fi
 
-RUN_DIR="$1"
-shift
+RUN="$1"
+STEP="$2"
+shift 2
 
 REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-DEST_ROOT="$REPO_ROOT/cse-579-experiments/results/$RUN_DIR"
+DEST_ROOT="$REPO_ROOT/cse-579-experiments/results/$RUN/step_$STEP"
 mkdir -p "$DEST_ROOT"
 
 for EXP_ID in "$@"; do
