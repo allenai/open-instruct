@@ -106,6 +106,7 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 VLLM_OPENAI_TIMEOUT_S = 3600.0
 VLLM_OPENAI_MAX_RETRIES = 5
+DEFAULT_TOOL_CALL_TIMEOUT_S = 120.0
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -561,7 +562,7 @@ class LLMRayActor:
         tool_stop_sequences: list[str] | None = None,
         max_steps: int = 5,
         per_turn_max_tokens: int | None = None,
-        tool_call_timeout: float = 1800.0,
+        tool_call_timeout: float = DEFAULT_TOOL_CALL_TIMEOUT_S,
         mask_tool_use: bool = True,
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
