@@ -81,6 +81,7 @@ class SWERLSandboxEnv(RLEnvironment):
     _RESET_RETRY_BASE_DELAY_S = 1.0
     _RESET_RETRY_MAX_DELAY_S = 16.0
     _RESET_RETRY_JITTER_S = 2.0
+    _MIN_TEST_TIMEOUT_S = 600
 
     def __init__(
         self,
@@ -88,8 +89,8 @@ class SWERLSandboxEnv(RLEnvironment):
         image: str = "python:3.12-slim",
         task_data_dir: str = "",
         task_data_hf_repo: str = "",
-        test_timeout: int = 120,
-        timeout: int = 600,
+        test_timeout: int = 600,
+        timeout: int = 120,
         last_step_warning: bool = False,
         **backend_kwargs: Any,
     ):
@@ -104,7 +105,7 @@ class SWERLSandboxEnv(RLEnvironment):
         self._task_id: str | None = None
         self._task_data_dir = task_data_dir
         self._task_data_hf_repo = task_data_hf_repo
-        self._test_timeout = test_timeout
+        self._test_timeout = max(test_timeout, self._MIN_TEST_TIMEOUT_S)
         self._last_step_warning = last_step_warning
         self._max_steps: int | None = None
         self._instruction = ""
@@ -445,7 +446,7 @@ class SWERLSandboxEnv(RLEnvironment):
                 f"No test.sh found in test data for task {self._task_id}. /tests listing: {ls.stdout!r}"
             )
 
-        result = self._backend.run_command(f"timeout {self._test_timeout} bash /tests/test.sh")
+        result = self._backend.run_command("bash /tests/test.sh", timeout=self._test_timeout)
 
         reward = self._parse_reward()
 
@@ -505,6 +506,6 @@ class SWERLSandboxEnvConfig(BaseEnvConfig):
     penalty: float = -0.05
     task_data_dir: str = ""
     task_data_hf_repo: str = ""
-    test_timeout: int = 120
-    timeout: int = 600
+    test_timeout: int = 600
+    timeout: int = 120
     last_step_warning: bool = False

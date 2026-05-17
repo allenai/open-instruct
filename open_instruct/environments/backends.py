@@ -135,7 +135,7 @@ class SandboxBackend(ABC):
         """Initialize the sandbox. Must be called before other operations."""
 
     @abstractmethod
-    def run_command(self, command: str) -> ExecutionResult:
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
         """Execute a shell command in the sandbox."""
 
     @abstractmethod
@@ -259,20 +259,22 @@ class DockerBackend(SandboxBackend):
             )
         logger.info(f"Docker container started: {self._container.short_id}")
 
-    def run_command(self, command: str) -> ExecutionResult:
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
         if self._container is None:
             raise RuntimeError("Container not started. Call start() first.")
 
+        effective_timeout = self._timeout if timeout is None else timeout
         container_id = self._container.short_id
         logger.debug(
             "Docker exec start (container=%s, image=%s, timeout=%ss, command=%r)",
             container_id,
             self._image,
-            self._timeout,
+            effective_timeout,
             command,
         )
         wrapped = (
-            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
+            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(effective_timeout))} "
+            f"bash -c {shlex.quote(command)}"
         )
         try:
             exit_code, output = self._exec_run(wrapped)
@@ -320,7 +322,7 @@ class DockerBackend(SandboxBackend):
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         stderr = stderr_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         if exit_code == 124:
-            stderr = f"Command timed out after {self._timeout}s.\n" + stderr
+            stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
     @classmethod
@@ -703,23 +705,25 @@ class ApptainerBackend(SandboxBackend):
         cmd = [self._apptainer, "exec", f"instance://{self._name}", *argv]
         return subprocess.run(cmd, input=stdin, capture_output=True, env=self._exec_env(), check=check)
 
-    def run_command(self, command: str) -> ExecutionResult:
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
         self._ensure_started()
+        effective_timeout = self._timeout if timeout is None else timeout
         wrapped = (
-            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(self._timeout))} bash -c {shlex.quote(command)}"
+            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(effective_timeout))} "
+            f"bash -c {shlex.quote(command)}"
         )
         logger.debug(
             "Apptainer exec start (instance=%s, image=%s, timeout=%ss, command=%r)",
             self._name,
             self._image,
-            self._timeout,
+            effective_timeout,
             command,
         )
         proc = self._exec(["bash", "-c", wrapped])
         stdout = proc.stdout[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         stderr = proc.stderr[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         if proc.returncode == 124:
-            stderr = f"Command timed out after {self._timeout}s.\n" + stderr
+            stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=proc.returncode)
 
     # ---- file I/O (exec-piped, no bind mounts) ----------------------------
