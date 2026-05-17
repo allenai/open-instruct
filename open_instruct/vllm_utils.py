@@ -77,6 +77,21 @@ SANDBOX_TIMING_LOGS = os.getenv("SWERL_SANDBOX_TIMING_LOGS", "").strip().lower()
     "off",
 }
 SANDBOX_TIMING_LOG_THRESHOLD_S = float(os.getenv("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", "1.0"))
+RESET_FAILURE_ZERO_REWARD = os.getenv("SWERL_RESET_FAILURE_ZERO_REWARD", "").strip().lower() not in {
+    "",
+    "0",
+    "false",
+    "no",
+    "off",
+}
+RESET_FAILURE_ZERO_REWARD_MARKERS = (
+    "reset failed after",
+    "http+docker://localhost",
+    "failed to find image",
+    "no such image",
+    "image not known",
+    "locating image with id",
+)
 
 # ---------------------------------------------------------------------------
 # Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
@@ -941,6 +956,13 @@ def _select_tool_call_format_error_message(pool_setup: "PoolSetup", allowed_tool
     return None
 
 
+def _should_zero_reward_reset_failure(error: BaseException) -> bool:
+    if not RESET_FAILURE_ZERO_REWARD:
+        return False
+    message = str(error).lower()
+    return any(marker in message for marker in RESET_FAILURE_ZERO_REWARD_MARKERS)
+
+
 @dataclasses.dataclass
 class PoolSetup:
     """Result of acquiring and resetting all configured tool/env pools for a request."""
@@ -1077,8 +1099,21 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             )
 
         phase_start_time = time.perf_counter()
-        pool_setup = await _acquire_and_reset_pools(actor.pools, configured_tools, env_config, allowed_tools)
-        add_timing("acquire_reset_pools", phase_start_time)
+        try:
+            pool_setup = await _acquire_and_reset_pools(actor.pools, configured_tools, env_config, allowed_tools)
+        except Exception as e:
+            add_timing("acquire_reset_pools", phase_start_time)
+            if not _should_zero_reward_reset_failure(e):
+                raise
+            error_msg = f"Environment reset failed; marking rollout as zero reward: {e}"
+            logger.warning(error_msg)
+            rollout.done = True
+            rollout.rewards.append(0.0)
+            rollout.tool_error += error_msg
+            rollout.tool_call_stats.append(ToolCallStats(tool_name="env_reset", success=False, runtime=0.0))
+            max_steps = 0
+        else:
+            add_timing("acquire_reset_pools", phase_start_time)
         actor_map = pool_setup.actor_map
         allowed_tools = pool_setup.allowed_tools
         tool_response_roles = pool_setup.tool_response_roles
