@@ -776,13 +776,21 @@ def _compute_packing_kwargs(position_ids: torch.Tensor, cp_context: object | Non
     :class:`fla.ops.cp.context.FLACPContext` (e.g. from
     :func:`build_fla_cp_context_for_sample`). Its rank-local ``cu_seqlens``
     take precedence inside the FLA chunk kernel.
+
+    Under Ulysses SP, a rank-local slice can start in the middle of a packed
+    sub-sequence. Include a leading local boundary in that case so every packed
+    call has well-formed rank-local metadata even when there is no local reset.
     """
     batch_size, seq_len = position_ids.shape
     is_start = position_ids == 0
-    seq_idx = (is_start.cumsum(dim=-1) - 1).to(torch.int32)
+    seq_idx = is_start.cumsum(dim=-1)
+    seq_idx = (seq_idx - is_start[:, :1].to(seq_idx.dtype)).to(torch.int32)
     assert batch_size == 1, f"cu_seqlens computation assumes batch_size=1, got {batch_size}"
     starts = torch.where(is_start[0])[0].to(torch.int32)
+    if starts.numel() == 0 or starts[0].item() != 0:
+        starts = torch.cat([torch.zeros(1, dtype=torch.int32, device=position_ids.device), starts])
     cu_seqlens = torch.cat([starts, torch.tensor([seq_len], dtype=torch.int32, device=position_ids.device)])
+    cu_seqlens = torch.unique_consecutive(cu_seqlens)
     kwargs: dict = {"seq_idx": seq_idx, "cu_seqlens": cu_seqlens}
     if cp_context is not None:
         # The context already carries rank-local cu_seqlens as set by
@@ -860,17 +868,7 @@ def forward_for_logprobs(
     cp_context: Any = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
-    # For packed sequences, pass attention_mask=None so HF flash attention uses position_ids
-    # to isolate sub-sequences instead of treating the whole pack as one sequence.
-    extra_kwargs: dict = {}
-    if (position_ids.diff(dim=-1) < 0).any():
-        attention_mask = None
-        extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
-    elif cp_context is not None:
-        # Under SP, this rank's chunk may have no local position resets (e.g. a single
-        # long rollout spanning both ranks) but still needs cp_context for cross-rank
-        # SSM state passing in linear-attention layers.
-        extra_kwargs = {"cp_context": cp_context}
+    attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
     logits = getattr(output, "logits", output)
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
@@ -986,11 +984,9 @@ def _compute_forward_extra_kwargs(
     position_ids: torch.Tensor, attention_mask: torch.Tensor | None, cp_context: Any = None
 ) -> tuple[torch.Tensor | None, dict]:
     extra_kwargs: dict = {}
-    if (position_ids.diff(dim=-1) < 0).any():
+    if cp_context is not None or (position_ids.diff(dim=-1) < 0).any():
         attention_mask = None
         extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
-    elif cp_context is not None:
-        extra_kwargs = {"cp_context": cp_context}
     return attention_mask, extra_kwargs
 
 

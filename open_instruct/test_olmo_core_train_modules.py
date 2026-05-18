@@ -131,6 +131,39 @@ class TestForwardForLogprobs(unittest.TestCase):
         self.assertFalse(torch.allclose(logprob_t1, logprob_t2))
 
 
+class TestForwardExtraKwargs(unittest.TestCase):
+    def test_no_packing_preserves_attention_mask(self):
+        attention_mask = torch.ones(1, 4)
+        position_ids = torch.arange(4).unsqueeze(0)
+
+        returned_mask, extra_kwargs = grpo_utils._compute_forward_extra_kwargs(position_ids, attention_mask)
+
+        self.assertIs(returned_mask, attention_mask)
+        self.assertEqual(extra_kwargs, {})
+
+    def test_cp_context_forces_packed_kwargs_without_local_reset(self):
+        attention_mask = torch.ones(1, 4)
+        position_ids = torch.tensor([[8, 9, 10, 11]])
+        cp_context = object()
+
+        returned_mask, extra_kwargs = grpo_utils._compute_forward_extra_kwargs(
+            position_ids, attention_mask, cp_context=cp_context
+        )
+
+        self.assertIsNone(returned_mask)
+        self.assertIs(extra_kwargs["cp_context"], cp_context)
+        torch.testing.assert_close(extra_kwargs["seq_idx"], torch.tensor([[0, 0, 0, 0]], dtype=torch.int32))
+        torch.testing.assert_close(extra_kwargs["cu_seqlens"], torch.tensor([0, 4], dtype=torch.int32))
+
+    def test_packed_kwargs_include_leading_local_continuation(self):
+        position_ids = torch.tensor([[8, 9, 0, 1]])
+
+        extra_kwargs = grpo_utils._compute_packing_kwargs(position_ids)
+
+        torch.testing.assert_close(extra_kwargs["seq_idx"], torch.tensor([[0, 0, 1, 1]], dtype=torch.int32))
+        torch.testing.assert_close(extra_kwargs["cu_seqlens"], torch.tensor([0, 2, 4], dtype=torch.int32))
+
+
 class TestDAPOLoss(unittest.TestCase):
     def test_negative_advantages_clipping(self):
         batch_size, seq_len = 2, 5
