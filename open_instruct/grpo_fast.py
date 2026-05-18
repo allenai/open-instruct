@@ -297,8 +297,6 @@ class PolicyTrainerRayProcess(RayProcess):
             local_files_only=True,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
-        if args.lm_head_fp32:
-            patch_hf_lm_head_fp32(self.policy)
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
             core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
