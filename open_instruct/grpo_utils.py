@@ -186,8 +186,8 @@ class GRPOExperimentConfig(
     """Whether to use Liger-Kernel's fused linear GRPO loss for the policy loss."""
     liger_grpo_loss_chunk_size: int = 2048
     """Batch chunk size passed to LigerFusedLinearGRPOLoss."""
-    liger_grpo_loss_compiled: bool = True
-    """Whether Liger should torch.compile the GRPO loss math."""
+    liger_grpo_loss_compiled: bool = False
+    """Whether Liger should torch.compile the GRPO loss math. Disabled by default for Ray/ZeRO dynamic shapes."""
 
     # Ray
     single_gpu_mode: bool = False
