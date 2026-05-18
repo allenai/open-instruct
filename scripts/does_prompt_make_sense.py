@@ -67,7 +67,7 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
                             {"role": "user", "content": text},
                         ],
                     )
-                    if not response.choices or response.choices[0].message is None:
+                    if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
                         raise ValueError("LLM returned empty or filtered response")
                     r = response.choices[0].message.content
                 except Exception as e:
