@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import contextlib
+import importlib
 import os
 import pathlib
 from concurrent import futures
@@ -329,6 +330,32 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
+        self.liger_grpo_loss = None
+        self.liger_selective_logprob_forward = None
+        if args.use_liger_grpo_loss:
+            liger_chunked_loss = importlib.import_module("liger_kernel.chunked_loss")
+            liger_fused_linear_ppo = importlib.import_module("liger_kernel.chunked_loss.fused_linear_ppo")
+
+            logger.info(
+                "Using Liger-Kernel fused GRPO loss "
+                f"(loss_fn={args.loss_fn}, chunk_size={args.liger_grpo_loss_chunk_size})"
+            )
+            self.liger_selective_logprob_forward = liger_fused_linear_ppo.LigerFusedLinearPPOBase.chunk_forward
+            self.liger_grpo_loss = liger_chunked_loss.LigerFusedLinearGRPOLoss(
+                beta=args.beta if args.load_ref_policy else 0.0,
+                compiled=args.liger_grpo_loss_compiled,
+                use_ref_model=args.load_ref_policy and args.beta != 0.0,
+                chunk_size=args.liger_grpo_loss_chunk_size,
+                epsilon_low=args.clip_lower,
+                epsilon_high=args.clip_higher,
+                loss_type=args.loss_fn.value,
+                temperature=self.streaming_config.temperature,
+            )
+            if args.deepspeed_stage == 3:
+                _, lm_head = grpo_utils.get_causal_lm_backbone_and_head(self.model)
+                deepspeed.zero.register_external_parameter(self.model.module, lm_head.weight)
+                if getattr(lm_head, "bias", None) is not None:
+                    deepspeed.zero.register_external_parameter(self.model.module, lm_head.bias)
         if args.lm_head_fp32:
             patch_hf_lm_head_fp32(self.model)
         optimization_steps_done = 0
@@ -522,13 +549,10 @@ class PolicyTrainerRayProcess(RayProcess):
             return [None] * num_samples
 
         local_seq_len = data_BT.position_ids[0].shape[-1]
-        # Lazy import so non-hybrid runs don't depend on fla's cp module.
-        from open_instruct.grpo_utils import build_fla_cp_context_for_sample
-
         contexts: list = []
         for gpi in data_BT.global_position_ids:
             contexts.append(
-                build_fla_cp_context_for_sample(
+                grpo_utils.build_fla_cp_context_for_sample(
                     global_position_ids=gpi,
                     sp_world_size=self._sp_world_size,
                     sp_group=self._sp_group,
@@ -647,7 +671,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
-        if num_mini_batches > 1:
+        if num_mini_batches > 1 or (self.args.use_liger_grpo_loss and not self.args.use_vllm_logprobs):
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
@@ -765,17 +789,50 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss_denominator = accumulation_token_counts[batch_start]
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
-                    local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
-                        self.model,
-                        data_BT.query_responses[i],
-                        None,
-                        data_BT.position_ids[i],
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        return_entropy=self.args.record_entropy,
-                        cp_context=cp_contexts_BT[i],
-                    )
-                    local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
+                    advantages_BT = data_BT.advantages[i][:, 1:]
+                    if self.args.use_liger_grpo_loss:
+                        assert self.liger_selective_logprob_forward is not None
+                        hidden_states_BT, lm_head_weight, selected_token_ids_BT, lm_head_bias = (
+                            grpo_utils.forward_for_liger_grpo_loss(
+                                self.model,
+                                data_BT.query_responses[i],
+                                None,
+                                data_BT.position_ids[i],
+                                self.pad_token_id,
+                                cp_context=cp_contexts_BT[i],
+                            )
+                        )
+                        liger_hidden_states_BT = hidden_states_BT.float() if self.args.lm_head_fp32 else hidden_states_BT
+                        with torch.no_grad():
+                            local_logprobs_unmasked_BT = self.liger_selective_logprob_forward(
+                                liger_hidden_states_BT.detach(),
+                                lm_head_weight.detach(),
+                                selected_token_ids_BT,
+                                bias=lm_head_bias.detach() if lm_head_bias is not None else None,
+                                temperature=self.streaming_config.temperature,
+                            )
+                            local_logprobs_BT = grpo_utils.mask_logprobs(
+                                local_logprobs_unmasked_BT, response_mask_BT
+                            )
+                        entropy_BT = None
+                    else:
+                        hidden_states_BT = None
+                        lm_head_weight = None
+                        selected_token_ids_BT = None
+                        lm_head_bias = None
+                        liger_hidden_states_BT = None
+                        local_logprobs_unmasked_BT = None
+                        local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
+                            self.model,
+                            data_BT.query_responses[i],
+                            None,
+                            data_BT.position_ids[i],
+                            self.pad_token_id,
+                            self.streaming_config.temperature,
+                            return_entropy=self.args.record_entropy,
+                            cp_context=cp_contexts_BT[i],
+                        )
+                        local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
                     # Compare vLLM logprobs with local logprobs
@@ -834,7 +891,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         dppo_mask_BT, _ = grpo_utils.compute_dppo_mask(
                             new_logprobs=new_logprobs_BT,
                             behavior_logprobs=vllm_logprobs_BT,
-                            advantages=data_BT.advantages[i][:, 1:],
+                            advantages=advantages_BT,
                             ratio=ratio_BT,
                             response_mask=response_mask_BT,
                             divergence_type=self.args.dppo_divergence_type,
@@ -857,7 +914,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         tvpo_mask_BT, tvpo_prompt_tv_BT = grpo_utils.compute_tvpo_mask(
                             new_logprobs=new_logprobs_BT,
                             behavior_logprobs=vllm_logprobs_BT,
-                            advantages=data_BT.advantages[i][:, 1:],
+                            advantages=advantages_BT,
                             ratio=ratio_BT,
                             response_mask=response_mask_BT,
                             divergence_threshold=self.args.tvpo_divergence_threshold,
@@ -879,18 +936,69 @@ class PolicyTrainerRayProcess(RayProcess):
                             tis_mask_kept_tokens += tis_mask_BT.sum()
                             tis_mask_total_tokens += response_mask_BT.sum()
 
-                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
-                        new_logprobs=new_logprobs_BT,
-                        ratio=ratio_BT,
-                        advantages=data_BT.advantages[i][:, 1:],
-                        ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
-                        config=self.args,
-                        tis_weights=combined_tis_BT,
-                        policy_freeze_mask=tvpo_mask_BT,
-                    )
+                    if self.args.use_liger_grpo_loss:
+                        assert self.liger_grpo_loss is not None
+                        assert hidden_states_BT is not None
+                        assert liger_hidden_states_BT is not None
+                        assert lm_head_weight is not None
+                        assert selected_token_ids_BT is not None
+                        assert local_logprobs_unmasked_BT is not None
 
-                    per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
-                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                        flat_hidden_states = liger_hidden_states_BT.reshape(-1, 1, liger_hidden_states_BT.shape[-1])
+                        flat_selected_token_ids = selected_token_ids_BT.reshape(-1, 1)
+                        flat_response_mask = response_mask_BT.reshape(-1, 1).to(dtype=liger_hidden_states_BT.dtype)
+                        flat_advantages = advantages_BT.reshape(-1)
+                        safe_old_logprobs_BT = torch.where(
+                            response_mask_BT, old_logprob_BT, local_logprobs_unmasked_BT.detach()
+                        )
+                        flat_old_logprobs = safe_old_logprobs_BT.reshape(-1, 1)
+                        flat_ref_logprobs = (
+                            torch.where(
+                                response_mask_BT,
+                                ref_logprobs_BT[i],
+                                local_logprobs_unmasked_BT.detach(),
+                            ).reshape(-1, 1)
+                            if self.args.load_ref_policy and self.args.beta != 0.0
+                            else None
+                        )
+                        flat_tis_weights = combined_tis_BT.reshape(-1, 1) if combined_tis_BT is not None else None
+                        # Liger divides num_items_in_batch by distributed world size internally.
+                        liger_num_items = float(loss_denominator) * self.args.world_size
+                        loss, _ = self.liger_grpo_loss(
+                            _input=flat_hidden_states,
+                            lin_weight=lm_head_weight,
+                            selected_token_ids=flat_selected_token_ids,
+                            attention_mask=flat_response_mask,
+                            advantages=flat_advantages,
+                            bias=lm_head_bias,
+                            old_per_token_logps=flat_old_logprobs,
+                            ref_per_token_logps=flat_ref_logprobs,
+                            vllm_is_ratio=flat_tis_weights,
+                            num_items_in_batch=liger_num_items,
+                        )
+                        with torch.no_grad():
+                            pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                                new_logprobs=new_logprobs_BT,
+                                ratio=ratio_BT,
+                                advantages=advantages_BT,
+                                ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                                config=self.args,
+                                tis_weights=combined_tis_BT,
+                                policy_freeze_mask=tvpo_mask_BT,
+                            )
+                    else:
+                        pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                            new_logprobs=new_logprobs_BT,
+                            ratio=ratio_BT,
+                            advantages=advantages_BT,
+                            ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                            config=self.args,
+                            tis_weights=combined_tis_BT,
+                            policy_freeze_mask=tvpo_mask_BT,
+                        )
+
+                        per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
+                        loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back

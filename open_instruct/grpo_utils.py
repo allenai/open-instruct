@@ -1,4 +1,5 @@
 import enum
+import importlib
 import math
 import os
 from dataclasses import dataclass, field
@@ -181,6 +182,12 @@ class GRPOExperimentConfig(
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
+    use_liger_grpo_loss: bool = False
+    """Whether to use Liger-Kernel's fused linear GRPO loss for the policy loss."""
+    liger_grpo_loss_chunk_size: int = 2048
+    """Batch chunk size passed to LigerFusedLinearGRPOLoss."""
+    liger_grpo_loss_compiled: bool = True
+    """Whether Liger should torch.compile the GRPO loss math."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -321,6 +328,21 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
+        if self.use_liger_grpo_loss:
+            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.cispo):
+                raise ValueError(
+                    "Liger GRPO loss currently only supports `loss_fn` values dapo and cispo in open-instruct "
+                    f"(got {self.loss_fn})."
+                )
+            if self.load_ref_policy and self.beta != 0.0 and self.kl_estimator != 2:
+                raise ValueError(
+                    "Liger GRPO loss computes the k2/k3-style KL estimator used by `kl_estimator=2`; "
+                    f"got kl_estimator={self.kl_estimator}."
+                )
+            if self.record_entropy:
+                raise ValueError("Liger GRPO loss does not support `record_entropy`.")
+            if self.liger_grpo_loss_chunk_size <= 0:
+                raise ValueError(f"liger_grpo_loss_chunk_size must be > 0, got {self.liger_grpo_loss_chunk_size}.")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
@@ -794,7 +816,7 @@ def build_fla_cp_context_for_sample(
     from zero state**, instead of being incorrectly chained across ranks.
     """
     # Lazy import so non-Qwen3.5 paths don't require fla's cp module.
-    from fla.ops.cp import build_cp_context
+    build_cp_context = importlib.import_module("fla.ops.cp").build_cp_context
 
     assert global_position_ids.dim() == 2 and global_position_ids.shape[0] == 1, (
         f"expected [1, L] position_ids, got {tuple(global_position_ids.shape)}"
@@ -865,6 +887,65 @@ def forward_for_logprobs(
             entropy = model_utils.entropy_from_logits(logits)
 
     return logprob_BT, entropy
+
+
+def _unwrap_deepspeed_model(model: torch.nn.Module) -> torch.nn.Module:
+    return getattr(model, "module", model)
+
+
+def get_causal_lm_backbone_and_head(model: torch.nn.Module) -> tuple[torch.nn.Module, torch.nn.Module]:
+    """Return the transformer backbone and output head for fused-loss paths."""
+    unwrapped_model = _unwrap_deepspeed_model(model)
+    language_model = getattr(unwrapped_model, "language_model", None)
+
+    lm_head = getattr(unwrapped_model, "lm_head", None)
+    if lm_head is None and language_model is not None:
+        lm_head = getattr(language_model, "lm_head", None)
+    if lm_head is None and hasattr(unwrapped_model, "get_output_embeddings"):
+        lm_head = unwrapped_model.get_output_embeddings()
+    if lm_head is None:
+        raise ValueError(f"Could not find an lm_head for {type(unwrapped_model).__name__}")
+
+    backbone = getattr(unwrapped_model, "model", None)
+    if backbone is None and language_model is not None:
+        backbone = getattr(language_model, "model", None)
+    if backbone is None:
+        base_model_prefix = getattr(unwrapped_model, "base_model_prefix", None)
+        if base_model_prefix:
+            backbone = getattr(unwrapped_model, base_model_prefix, None)
+    if backbone is None:
+        raise ValueError(f"Could not find a transformer backbone for {type(unwrapped_model).__name__}")
+
+    return backbone, lm_head
+
+
+def forward_for_liger_grpo_loss(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    position_ids: torch.Tensor,
+    pad_token_id: int,
+    cp_context: Any = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Forward the backbone only and prepare inputs for Liger's fused GRPO loss."""
+    extra_kwargs: dict = {}
+    if (position_ids.diff(dim=-1) < 0).any():
+        attention_mask = None
+        extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
+    elif cp_context is not None:
+        extra_kwargs = {"cp_context": cp_context}
+
+    backbone, lm_head = get_causal_lm_backbone_and_head(model)
+    output = backbone(
+        input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs
+    )
+    last_hidden_state = getattr(output, "last_hidden_state", output[0] if isinstance(output, tuple) else output)
+    last_hidden_state = last_hidden_state[:, :-1, :]
+
+    selected_token_ids = query_responses[:, 1:].clone().to(last_hidden_state.device)
+    selected_token_ids[selected_token_ids == pad_token_id] = 0
+
+    return last_hidden_state, lm_head.weight, selected_token_ids, getattr(lm_head, "bias", None)
 
 
 def compute_logprobs(
