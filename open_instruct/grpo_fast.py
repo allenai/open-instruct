@@ -1063,6 +1063,24 @@ class PolicyTrainerRayProcess(RayProcess):
                         with deepspeed.zero.GatheredParameters(
                             liger_lm_head_params, enabled=len(liger_lm_head_params) > 0
                         ):
+                            if self.args.debug_liger_shapes:
+                                print(
+                                    {
+                                        "rank": self.rank,
+                                        "epoch_idx": epoch_idx,
+                                        "sample_idx": i,
+                                        "local_step": local_step,
+                                        "_input": flat_hidden_states.shape,
+                                        "lin_weight": liger_forward_output.lm_head_weight.shape,
+                                        "selected": flat_selected_token_ids.shape,
+                                        "mask": flat_response_mask.shape,
+                                        "adv": flat_advantages.shape,
+                                        "old": flat_old_logprobs.shape,
+                                        "ref": None if flat_ref_logprobs is None else flat_ref_logprobs.shape,
+                                        "tis": None if flat_tis_weights is None else flat_tis_weights.shape,
+                                    },
+                                    flush=True,
+                                )
                             loss, _ = self.liger_grpo_loss(
                                 _input=flat_hidden_states,
                                 lin_weight=liger_forward_output.lm_head_weight,
@@ -1114,7 +1132,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                     # Tell deepspeed whether this backward is the last in the accumulation group.
                     self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                    self.model.backward(loss)
+                    if self.args.debug_liger_shapes:
+                        with torch.autograd.detect_anomaly():
+                            self.model.backward(loss)
+                    else:
+                        self.model.backward(loss)
                     if is_accumulation_boundary:
                         self.model.step()
                         grad_norms.append(float(self.model.get_global_grad_norm()))

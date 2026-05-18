@@ -188,6 +188,8 @@ class GRPOExperimentConfig(
     """Batch chunk size passed to LigerFusedLinearGRPOLoss."""
     liger_grpo_loss_compiled: bool = False
     """Whether Liger should torch.compile the GRPO loss math. Disabled by default for Ray/ZeRO dynamic shapes."""
+    debug_liger_shapes: bool = False
+    """Print Liger GRPO input shapes and enable autograd anomaly detection around backward."""
 
     # Ray
     single_gpu_mode: bool = False
