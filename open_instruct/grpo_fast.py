@@ -961,7 +961,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             tis_mask_kept_tokens += tis_mask_BT.sum()
                             tis_mask_total_tokens += response_mask_BT.sum()
 
-                    backward_done = False
                     if self.args.use_liger_grpo_loss:
                         assert self.liger_grpo_loss is not None
                         assert hidden_states_BT is not None
@@ -1018,17 +1017,6 @@ class PolicyTrainerRayProcess(RayProcess):
                                     tis_weights=combined_tis_BT,
                                     policy_freeze_mask=tvpo_mask_BT,
                                 )
-
-                            loss *= self.args.world_size // self.args.sequence_parallel_size
-                            torch.cuda.empty_cache()
-                            is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                            self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                            self.model.backward(loss)
-                        if is_accumulation_boundary:
-                            self.model.step()
-                            grad_norms.append(float(self.model.get_global_grad_norm()))
-                        local_step += 1
-                        backward_done = True
                     else:
                         pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                             new_logprobs=new_logprobs_BT,
@@ -1046,19 +1034,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    if not backward_done:
-                        loss *= self.args.world_size // self.args.sequence_parallel_size
+                    loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                        # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
-                        torch.cuda.empty_cache()
-                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                        # Tell deepspeed whether this backward is the last in the accumulation group.
-                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                        self.model.backward(loss)
-                        if is_accumulation_boundary:
-                            self.model.step()
-                            grad_norms.append(float(self.model.get_global_grad_norm()))
-                        local_step += 1
+                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                    torch.cuda.empty_cache()
+                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                    # Tell deepspeed whether this backward is the last in the accumulation group.
+                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                    self.model.backward(loss)
+                    if is_accumulation_boundary:
+                        self.model.step()
+                        grad_norms.append(float(self.model.get_global_grad_norm()))
+                    local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
                         i,
