@@ -61,6 +61,17 @@ class TestLogSoftmaxAndGather(unittest.TestCase):
         self.assertTrue(torch.all(result <= 0))
         self.assertTrue(torch.all(torch.isfinite(result)))
 
+    def test_log_softmax_and_gather_matches_log_softmax(self):
+        batch_size, seq_len, vocab_size = 3, 7, 11
+        logits_full = torch.randn(batch_size, seq_len + 1, vocab_size)
+        logits = logits_full[:, :-1, :]
+        index = torch.randint(0, vocab_size, (batch_size, seq_len))
+
+        result = open_instruct.model_utils.log_softmax_and_gather(logits, index)
+        expected = torch.gather(logits.log_softmax(dim=-1), dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
+
+        torch.testing.assert_close(result, expected)
+
 
 class TestTensorCache(unittest.TestCase):
     def test_getitem_returns_correct_tensors(self):

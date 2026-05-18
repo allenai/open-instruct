@@ -589,17 +589,18 @@ def save_with_accelerate(
 @torch.compile(dynamic=True)
 def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
     """
-    torch compiled version of the common `log_softmax -> gather` operation.
+    Memory-efficient version of the common `log_softmax -> gather` operation.
 
 
-    The compiled version of this opration avoids the (significant) memory overhead of
-    allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+    Computing the selected logit minus `logsumexp` avoids the significant memory overhead
+    of allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
 
 
     See https://github.com/allenai/open-instruct/pull/584
     """
-    logprobs = logits.log_softmax(dim=-1)
-    return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
+    selected_logits = torch.gather(logits, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
+    log_norm = torch.logsumexp(logits, dim=-1)
+    return selected_logits - log_norm
 
 
 @retry_on_exception()
