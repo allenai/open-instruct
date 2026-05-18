@@ -16,17 +16,27 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.optim import AdamWConfig, CosWithWarmup, LinearWithWarmup
-from olmo_core.train import callbacks
+from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
+from olmo_core.train import LoadStrategy, callbacks
+from olmo_core.train.checkpoint import CheckpointerConfig
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
+from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, vllm_utils
-from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
+from open_instruct import grpo_callbacks as grpo_callbacks_lib
+from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
+from open_instruct.grpo_callbacks import (
+    EvalCallback,
+    RefPolicyUpdateCallback,
+    StepTimingCallback,
+    VLLMWeightSyncCallback,
+    olmo_core_to_hf_name,
+)
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
@@ -51,11 +61,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         master_port: int | None,
         local_world_size: int,
         model_name_or_path: str,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
     ):
@@ -67,11 +76,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.max_sequence_length = max_sequence_length
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self.data_prep_actor_name = data_prep_actor_name
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
-        self.vllm_engines = None
+        self.vllm_engines: list[ray.actor.ActorHandle] = []
         self.model_update_group = None
         self.actor_manager = None
         self.with_tracking = False
@@ -80,6 +88,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.run_name = None
         self.json_config = None
         self.ref_policy_update_freq = None
+        self.eval_dataset = None
+        self.eval_data_loader = None
+        self.eval_generation_config = None
+        self.base_env_config = None
+        self.prompt_Q = None
+        self.evaluation_inference_results_Q = None
+        self.max_possible_score = 1.0
 
     def setup_model(self) -> int:
         """Initialize the OLMo-core model and training infrastructure.
@@ -106,17 +121,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
-        vocab_size = hf_config.vocab_size
-
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        self.model_config = olmo_core_utils.get_transformer_config(
-            self.model_name_or_path, vocab_size, attn_backend=self.attn_implementation
+        model_config_args = olmo_core_utils.ModelConfig(
+            model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
-        self.model = self.model_config.build(init_device="cpu")
+        self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
@@ -126,7 +138,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
         self.dataloader = self.streaming_config.build_dataloader(
-            data_prep_actor_name=self.data_prep_actor_name,
             tokenizer=self.tokenizer,
             dp_rank=self.rank,
             fs_local_rank=self.rank,
@@ -142,8 +153,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.grpo_config.lr_scheduler_type == "cosine":
             scheduler = CosWithWarmup(warmup_steps=warmup_steps)
-        else:
+        elif self.grpo_config.lr_scheduler_type == "constant":
+            scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
+        elif self.grpo_config.lr_scheduler_type == "linear":
             scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+        else:
+            raise ValueError(f"Unsupported lr_scheduler_type: {self.grpo_config.lr_scheduler_type}")
 
         optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
 
@@ -155,7 +170,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 shard_degree=self.grpo_config.fsdp_shard_degree,
                 param_dtype=olmo_core_dtype,
                 reduce_dtype=DType.float32,
-                wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+                wrapping_strategy=TransformerDataParallelWrappingStrategy.full,
             )
 
         ac_config = olmo_core_utils.build_ac_config(
@@ -173,9 +188,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ref_policy=self.ref_policy,
             dp_config=dp_config,
             ac_config=ac_config,
+            compile_model=self.grpo_config.compile_model,
             max_grad_norm=self.grpo_config.max_grad_norm,
             scheduler=scheduler,
             device=device,
+            streaming_config=self.streaming_config,
+            attn_implementation=self.attn_implementation,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
@@ -195,42 +213,60 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
     def setup_model_update_group(self, vllm_engines: list) -> None:
         """Set up the process group for weight synchronization with vLLM engines."""
         self.vllm_engines = vllm_engines
+        self.model_update_group = None
 
         if not vllm_engines or self.rank != 0:
             return
 
-        master_address = self.get_current_node_ip()
-        master_port = self.get_free_port()
-
-        vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
-        backend = self.vllm_config.vllm_sync_backend
+        if self.grpo_config.single_gpu_mode:
+            init_infos: list[dict] = [{} for _ in vllm_engines]
+            master_info: dict | None = None
+        else:
+            master_address = self.get_current_node_ip()
+            master_port = utils.find_free_port()
+            vllm_world_size = self.vllm_config.vllm_num_engines * self.vllm_config.vllm_tensor_parallel_size + 1
+            master_info = {"master_address": master_address, "master_port": master_port, "world_size": vllm_world_size}
+            init_infos = [
+                master_info | {"rank_offset": i * self.vllm_config.vllm_tensor_parallel_size + 1}
+                for i, _ in enumerate(vllm_engines)
+            ]
 
         refs = [
-            engine.init_process_group.remote(
-                master_address,
-                master_port,
-                i * self.vllm_config.vllm_tensor_parallel_size + 1,
-                vllm_world_size,
-                "openrlhf",
-                backend=backend,
-                timeout_minutes=self.grpo_config.backend_timeout,
-            )
-            for i, engine in enumerate(vllm_engines)
+            engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info=info))
+            for engine, info in zip(vllm_engines, init_infos)
         ]
 
-        # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
-        torch.cuda.set_device(0)
-        self.model_update_group = vllm_utils.init_process_group(
-            backend=backend,
-            init_method=f"tcp://{master_address}:{master_port}",
-            world_size=vllm_world_size,
-            rank=0,
-            group_name="openrlhf",
-            timeout=timedelta(minutes=self.grpo_config.backend_timeout),
-        )
+        if master_info is not None:
+            # Ray sets CUDA_VISIBLE_DEVICES per actor, so device 0 is always correct
+            torch.cuda.set_device(0)
+            self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
 
         ray.get(refs)
-        logger.info(f"[Rank {self.rank}] vLLM model update group initialized")
+        logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
+
+    def run_initial_weight_sync(self) -> None:
+        """Broadcast initial learner weights to vLLM engines before training starts.
+
+        Mirrors grpo_fast's pre-training weight sync (initialize_weight_sync) so the
+        first NCCL weight-broadcast collective fires from a known-good state.
+        """
+        if self.rank == 0:
+            ray.get(self.actor_manager.set_should_stop.remote(True))
+        refs = vllm_utils.broadcast_weights_to_vllm(
+            model=self.train_module.model,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            model_step=0,
+            name_mapper=olmo_core_to_hf_name,
+        )
+        if self.rank == 0:
+            utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
+            utils.ray_get_with_progress(
+                [engine.wake_up.remote() for engine in self.vllm_engines],
+                desc="Waking up vLLM engines after initial sync",
+                enable=False,
+            )
+            ray.get(self.actor_manager.set_should_stop.remote(False))
 
     def setup_callbacks(
         self,
@@ -251,6 +287,38 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.json_config = json_config
         self.ref_policy_update_freq = ref_policy_update_freq
 
+    def setup_eval(
+        self,
+        prompt_Q: Any,
+        evaluation_inference_results_Q: Any,
+        eval_dataset: Any,
+        eval_generation_config: Any,
+        base_env_config: Any,
+        max_possible_score: float,
+    ) -> None:
+        """Store eval configuration for use in fit().
+
+        Only rank 0 builds the eval data loader; other ranks store None and
+        won't have an EvalCallback registered.
+        """
+        self.prompt_Q = prompt_Q
+        self.evaluation_inference_results_Q = evaluation_inference_results_Q
+        self.eval_dataset = eval_dataset
+        self.eval_generation_config = eval_generation_config
+        self.base_env_config = base_env_config
+        self.max_possible_score = max_possible_score
+        if self.rank == 0 and eval_dataset is not None:
+            self.eval_data_loader = data_loader_lib.HFDataLoader(
+                dataset=eval_dataset,
+                batch_size=1,
+                seed=self.grpo_config.seed,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=self.grpo_config.output_dir,
+                automatic_reshuffle=False,
+                collator=data_loader_lib.single_example_collator,
+            )
+
     def fit(self) -> dict:
         """Run training using OLMo-core Trainer with callbacks.
 
@@ -259,13 +327,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         """
         trainer_callbacks: dict[str, callbacks.Callback] = {}
 
-        if self.vllm_engines:
-            trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
-                vllm_engines=self.vllm_engines,
-                model_update_group=self.model_update_group,
-                actor_manager=self.actor_manager,
-                name_mapper=olmo_core_to_hf_name,
-            )
+        trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
+            name_mapper=olmo_core_to_hf_name,
+        )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
             trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(
@@ -275,17 +342,52 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
 
+        model_dims = utils.ModelDims.from_hf_config(self.model_name_or_path)
+
+        trainer_callbacks["step_timing"] = StepTimingCallback(
+            model_dims=model_dims,
+            vllm_num_engines=self.vllm_config.vllm_num_engines,
+            vllm_tensor_parallel_size=self.vllm_config.vllm_tensor_parallel_size,
+            samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
+            num_training_gpus=self.world_size,
+        )
+
         if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(
                 name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
             )
 
+        if self.rank == 0 and self.eval_dataset is not None and self.grpo_config.local_eval_every > 0:
+            trainer_callbacks["eval"] = EvalCallback(
+                args=self.grpo_config,
+                prompt_Q=self.prompt_Q,  # ty: ignore[invalid-argument-type]
+                evaluation_inference_results_Q=self.evaluation_inference_results_Q,  # ty: ignore[invalid-argument-type]
+                eval_dataset=self.eval_dataset,
+                eval_data_loader=self.eval_data_loader,  # ty: ignore[invalid-argument-type]
+                eval_generation_config=self.eval_generation_config,
+                model_dims=model_dims,
+                base_env_config=self.base_env_config,
+                tokenizer=self.tokenizer,
+                max_possible_score=self.max_possible_score,
+                actor_manager=self.actor_manager,
+            )
+
+        if self.grpo_config.checkpoint_state_freq > 0:
+            trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
+                checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
+            )
+        trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
+
+        save_folder = self.grpo_config.checkpoint_state_dir or self.grpo_config.output_dir
+
         assert self.grpo_config.num_training_steps is not None
         self.trainer = train.TrainerConfig(
-            save_folder=self.grpo_config.output_dir,
+            save_folder=save_folder,
+            load_strategy=LoadStrategy.if_available,
             max_duration=train.Duration.steps(self.grpo_config.num_training_steps),
             metrics_collect_interval=10,
             callbacks=trainer_callbacks,
+            checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
         ).build(self.train_module, self.dataloader)
 
         logger.info(f"[Rank {self.rank}] Starting trainer.fit() with callbacks: {list(trainer_callbacks.keys())}")
@@ -311,9 +413,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         os.makedirs(output_dir, exist_ok=True)
-        olmo_core_utils.save_state_dict_as_hf(
-            self.model_config, state_dict, output_dir, self.model_name_or_path, tokenizer
-        )
+        olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 
@@ -328,11 +428,10 @@ class OLMoCoreModelGroup:
         pg,
         num_gpus_per_node: list[int],
         model_name_or_path: str,
-        grpo_config: grpo_utils.ExperimentConfig,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
     ):
@@ -359,7 +458,6 @@ class OLMoCoreModelGroup:
             "max_sequence_length": max_sequence_length,
             "streaming_config": streaming_config,
             "vllm_config": vllm_config,
-            "data_prep_actor_name": data_prep_actor_name,
             "tokenizer": tokenizer,
             "attn_implementation": attn_implementation,
         }

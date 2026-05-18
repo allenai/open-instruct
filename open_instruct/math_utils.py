@@ -197,6 +197,7 @@ def is_equiv(x1: str, x2: str) -> bool:
                 return sympy.simplify(diff) == 0
             except ValueError:
                 eval_logger.debug(f"Had some trouble simplifying when comparing {x1} and {x2}")
+                return False
     except TimeoutError:
         eval_logger.debug(f"Timed out comparing {x1} and {x2}")
         return False

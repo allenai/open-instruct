@@ -39,8 +39,13 @@ def get_encoding_for_model(model_name: str):
     """
     model_name_lower = model_name.lower()
 
-    # GPT models use cl100k_base
-    if "gpt-4" in model_name_lower or "gpt-3.5" in model_name_lower or "claude" in model_name_lower:
+    # GPT, Claude, and MiniMax models use cl100k_base
+    if (
+        "gpt-4" in model_name_lower
+        or "gpt-3.5" in model_name_lower
+        or "claude" in model_name_lower
+        or "minimax" in model_name_lower
+    ):
         return tiktoken.get_encoding("cl100k_base")
 
     # Models that use gpt2 encoding (including OLMo and other AI2 models)
@@ -210,7 +215,7 @@ def truncate_messages_to_fit_context(
 
         # Truncate other messages to fit
         truncated_messages = system_messages.copy()
-        current_tokens = system_tokens
+        current_tokens = 0  # tracks non-system tokens; compared against remaining_tokens
 
         for msg in other_messages:
             content = msg.get("content", "")
@@ -279,7 +284,7 @@ def truncate_messages_to_fit_context(
 
             # Truncate other messages to fit
             truncated_messages = system_messages.copy()
-            current_tokens = system_tokens
+            current_tokens = 0  # tracks non-system tokens; compared against remaining_tokens
 
             for msg in other_messages:
                 content = msg.get("content", "")

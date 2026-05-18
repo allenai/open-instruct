@@ -37,7 +37,7 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
             # but we should check this assumption
             beaker_dataset_ids = get_beaker_dataset_ids(beaker_runtime_config.beaker_workload_id, sort=True)
             command = f"""
-            python scripts/submit_eval_jobs.py \
+            python scripts/submit_eval_jobs_old.py \
                 --model_name {args.model_name} \
                 --location {beaker_dataset_ids[-1]} \
                 --is_tuned \
@@ -59,7 +59,7 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
             print(f"Beaker evaluation jobs: process return code: {process.returncode}")
 
             safety_command = f"""
-            python scripts/submit_eval_jobs.py \
+            python scripts/submit_eval_jobs_old.py \
                 --model_name {args.model_name} \
                 --location {beaker_dataset_ids[-1]} \
                 --is_tuned \

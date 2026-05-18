@@ -26,10 +26,10 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
-       --budget ai2/oe-adapt \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
+       --artifact_ttl 1d \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list allenai/Dolci-RLZero-Math-7B 1.0 \
     --dataset_mixer_list_splits train \

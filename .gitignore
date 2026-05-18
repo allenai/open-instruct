@@ -12,6 +12,7 @@ token_length.png
 birr/
 
 oe-eval-internal/
+olmo-eval-internal/
 
 results
 !cse-579-experiments/results/
@@ -50,6 +51,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+open_instruct/_version.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

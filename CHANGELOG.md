@@ -4,17 +4,88 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/1672).
+- Remove references to deleted `ppo_vllm_thread_ray_gtrl.py` script: delete broken launch scripts (`scripts/train/debug/ppo.sh`, `scripts/train/rlvr/tulu_rlvr.sh`, `scripts/train/tulu3/ppo_8b.sh`) and add historical-reference notes to `docs/tulu3.md` and `docs/archived_dev_scripts/olmoe_0125.sh` pointing to the deletion commit. Also drop the dead `update_command_args.py` references: delete `scripts/train/benchmark.sh` and its section in `docs/get_started/ai2_internal_setup.md`, and update the README RLVR quickstart to launch `grpo_fast.py` via `scripts/train/build_image_and_launch.sh`.
+- Bump vllm to >=0.19.1 (and refresh `uv.lock`, including compressed-tensors v0.14.0.1 → v0.15.0.1).
+- Move `maybe_evaluate` from `grpo_fast.py` to `grpo_utils.py` and drop the duplicate `PolicyTrainerRayProcess.calculate_token_counts` method, routing both trainer paths through the shared `grpo_utils.calculate_token_counts` (https://github.com/allenai/open-instruct/pull/1669).
+- Rename `time/trainer_idle_waiting_for_inference` to `time/trainer_waiting_for_data` and `time/generation_idle_waiting_for_trainer` to `time/generation_waiting_for_trainer`, and emit per-Group generation timing (`time/group_generation_{mean,max,min}` plus `batch/per_group_generation_times` histogram) so latency vs. throughput in the inference pipeline is legible from wandb  (https://github.com/allenai/open-instruct/pull/1690).
+- Add parameterized `combine_dataset` tests in `open_instruct/test_utils.py` against local jsonl fixtures (no network), covering varied fractional/sample-count weight combinations and split-count mismatch (would have caught the bug fixed in #1674). Extract the interleaved-list→dict parsing into a shared `utils.parse_dataset_mixer_list` helper (with its own parameterized unit tests) and tighten `combine_dataset` / `get_datasets` to accept dict-only `dataset_mixer`; the one external list-form caller (`rejection_sampling/generation.py`) now converts at the call site.
+- Make `mason.py` `--output_dir` / `--checkpoint_state_dir` overrides idempotent via `replace_or_append_flag`, add `open_instruct/grpo.py` to `OPEN_INSTRUCT_COMMANDS` / `OPEN_INSTRUCT_RESUMABLES`, and wire OLMo-core checkpoint save/resume into `grpo.py` (`CheckpointerCallback` + `DataPreparationActorCheckpointCallback` + `LoadStrategy.if_available`) so resumable Beaker jobs actually resume (https://github.com/allenai/open-instruct/pull/1666).
+- Make `--budget` optional in `mason.py` (falls back to the workspace's default budget) and drop the explicit `--budget` flag from launch scripts where it already matched the workspace default (https://github.com/allenai/open-instruct/pull/1673).
+- Restore 🤡 to resample warnings and use `self.training_step` in `DataPreparationActor.run` (https://github.com/allenai/open-instruct/pull/1663).
+- Add a unified `use_rho_correction` interface (clamp + mask, per-token or sequence-level) for the train/infer engine mismatch in GRPO loss; replaces `truncated_importance_sampling_ratio_cap` and the IcePop flags (https://github.com/allenai/open-instruct/pull/1650).
+- Resample on filtered batches in `DataPreparationActor` instead of emitting empty `CollatedBatchData`, unifying the `grpo.py` and `grpo_fast.py` consumer paths and removing the now-dead empty-batch checks in `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1660).
+- Update Beaker budget from `ai2/oe-omai` to `ai2/oe-other` across launch scripts and beaker configs.
+- Update Beaker budget from `ai2/oe-adapt` to `ai2/oe-omai` across launch scripts and beaker configs to fix experiment launch failures from the retired budget (https://github.com/allenai/open-instruct/pull/1662).
+- Log every filtered prompt in `accumulate_inference_batches` at INFO level with the zero/solved/nonzero breakdown, and add `batch/filtered_prompts_pct` to wandb so policy collapse / convergence is visible without spelunking debug logs (https://github.com/allenai/open-instruct/pull/1657).
+- Aggregate prompt/response lengths across all DP ranks (deduplicating SP groups) when computing GRPO step token counts and utilization metrics, instead of using only rank 0 (https://github.com/allenai/open-instruct/pull/1659).
+- Split `accumulate_inference_batches` into `process_single_result` and `combine_processed_results` for clarity (https://github.com/allenai/open-instruct/pull/1614).
+- Match reference SFT run: `olmo_core_finetune.py` parity with pure olmo-core; default CP strategy switched to `ulysses` and ring-flash-attn dependency removed (https://github.com/allenai/open-instruct/pull/1620).
+- Address review feedback on #1620: derive vocab size from the run's tokenizer (no longer hardcoded to dolma2), validate complete numpy artifacts before reusing the SFT cache, fold seed/max_seq_length into the cache directory, fix HF-vs-olmo-core checkpoint detection for relative local paths, and log which checkpoint format was detected (https://github.com/allenai/open-instruct/pull/1620).
+- Stream SFT tokens/labels/boundaries directly to `_*.partial.bin` files and derive per-dataset stats at the end from disk, dropping the explicit `_checkpoint.json` file. `--resume` now works by truncating the partial files to a consistent sample boundary (https://github.com/allenai/open-instruct/pull/1631).
+- Revert reapply of packaging fix from #1634 (https://github.com/allenai/open-instruct/pull/1637).
+- Drop unused `data_types` import and inline `batch["batch"].to(device)` in `GRPOTrainModule` (https://github.com/allenai/open-instruct/pull/1635).
+- Use incremental binary checkpoint for SFT tokenization resume, eliminating O(N²) re-serialization (https://github.com/allenai/open-instruct/pull/1633).
+- Extract numpy SFT conversion helpers into `open_instruct.numpy_dataset_conversion` (https://github.com/allenai/open-instruct/pull/1622).
+- Simplified model step tracking logic (https://github.com/allenai/open-instruct/pull/1616).
+- Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).
+- Migrate GRPO trainer→vLLM weight sync to vLLM 0.16.0's native weight transfer API (`NCCLWeightTransferEngine`), replacing custom NCCL process-group and broadcast code (https://github.com/allenai/open-instruct/pull/1515).
+- Extend pre-commit hook to also ban `nonlocal` keyword (https://github.com/allenai/open-instruct/pull/1613).
+- Set checkpoint_state_freq default in data_loader.py, not mason.py (https://github.com/allenai/open-instruct/pull/1600).
+- Inline data prep actor naming in `StreamingDataLoader` and GRPO, removing redundant helpers and parameter plumbing (https://github.com/allenai/open-instruct/pull/1326).
+- Use local fixture for AceCode test instead of downloading from HuggingFace (https://github.com/allenai/open-instruct/pull/1593).
+- Now, to disable `max_grad_norm` clipping, set None, not -1 (https://github.com/allenai/open-instruct/pull/1591).
+- Inline GRPO utility functions and rename `ExperimentConfig` to `GRPOExperimentConfig` (https://github.com/allenai/open-instruct/pull/1578).
 - Extract shared OLMo-core config classes and helpers into `olmo_core_utils.py`; refactor DPO to use shared configs (https://github.com/allenai/open-instruct/pull/1576).
 - Decouple `mix_data.py` from `finetune.py` by replacing `FlatArguments` import with a lightweight `MixDataArguments` dataclass (https://github.com/allenai/open-instruct/pull/1573).
+- Extracted shared `find_free_port` utility function (https://github.com/allenai/open-instruct/pull/1607).
 
 ### Deprecated
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
+### Changed
+- Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py` (https://github.com/allenai/open-instruct/pull/1671).
+
 ### Fixed
+- Pass packed-sequence `doc_lens`/`max_doc_lens` to OLMo-core models in `forward_for_logprobs` (instead of relying on `attention_mask`), so OLMo-core GRPO uses correct intra-document attention; bumps olmo-core to a commit that accepts these kwargs (https://github.com/allenai/open-instruct/pull/1670).
+- Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686).
+- Use processed vLLM logprobs in GRPO rollouts so sampled-token logprobs include sampling transforms like temperature (https://github.com/allenai/open-instruct/pull/1678).
+- Fix `_get_batch_logps` division-by-zero (NaN return) in `open_instruct/dpo_utils.py` when a sequence has every label masked (`-100`) and `average_log_prob=True`; clamp the denominator at 1 (supersedes #1625).
+- Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686).
+- Bundle IFEval correctness fixes: `validate_choice` operand direction and `validate_frequency_capital_words` "around" tolerance in `open_instruct/if_functions.py`; `IFEvalVerifier` `ZeroDivisionError` when the instruction list is empty; deduplicate by deleting the unused `scripts/eval_constraints/if_functions.py` copy (supersedes #1615, #1646, #1655).
+- Fix NameError on `streaming_config/vllm_config` when importing from `grpo_fast.py` due to implicit global dependency. (https://github.com/allenai/open-instruct/pull/1675)
+- Fix `grpo.py` token-count inflation by emitting bool `response_masks` from `DataPreparationActor` (instead of int64 doc-id-valued masks) and dropping per-consumer `.bool()` coercions in `grpo_fast.py`, `grpo_utils.py`, and `olmo_core_train_modules.py`. Previously the OLMo-core path summed the doc-id-valued mask in `calculate_token_counts`, inflating `loss_denominator` by ~60× (https://github.com/allenai/open-instruct/pull/1668).
+- Fix hardcoded project version (https://github.com/allenai/open-instruct/pull/1636) by using setuptools scm's automatic versioning.
+- Fix CUDA illegal-memory-access in FSDP2 weight sync to vLLM by also unsharding the root FSDPModule (root-level params like model.norm and lm_head were producing local-shard buffers with global stride) (https://github.com/allenai/open-instruct/pull/1649).
+- Fix weight sync on resume by initializing vLLM weight sync before the training loop and warming up the learner with a dummy forward so DeepSpeed Stage 3 params materialize before the first broadcast; accept IPC `update_info` dict in `LLMRayActor.update_weights`; replace toothless weight-sync tests with a real divergent-weight broadcast test (https://github.com/allenai/open-instruct/pull/1627).
+- Fix `verify_sentence_constraint` not recognising `!` as a sentence terminator, causing IFEval sentence-count checks to undercount any response containing exclamations (https://github.com/allenai/open-instruct/pull/1612).
+- Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
+- Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix DeepSpeed gradient clipping in `grpo_fast.py` by passing `max_norm` to the DS config. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `dpo_tune_cache.py` logging on every rank. (https://github.com/allenai/open-instruct/pull/1598)
+- Fix `truncate_messages_to_fit_context` double-counting system tokens, which under-filled the judge context window by `system_tokens` worth of space (https://github.com/allenai/open-instruct/pull/1601).
+- Fix `is_equiv` returning `None` instead of `False` when expression simplification raises `ValueError` (https://github.com/allenai/open-instruct/pull/1605).
+- Fix off-by-one in `find_shared_text` so the full shared prefix is returned when one string is a prefix of another, and handle empty-input cases (https://github.com/allenai/open-instruct/pull/1604).
+- Fix `PreferenceDatasetProcessor.filter` dropping the rejected-sequence length check, so over-long rejected completions were no longer filtered (https://github.com/allenai/open-instruct/pull/1597).
+- Fix dataset validation logic that rejected `--dataset_name` as the sole dataset mechanism in DPO and finetuning configs (https://github.com/allenai/open-instruct/pull/1595).
+- Improve GRPO vLLM timeout handling: retry `_check_health` on `TimeoutError` and ensure `set_should_stop` is always reset in the weight sync thread to prevent training hangs (https://github.com/allenai/open-instruct/pull/1532).
+- Fix `Batch.__getitem__` handling of `active_tools` for int and list indexing (https://github.com/allenai/open-instruct/pull/1592).
+- Fix `RepeatPhraseChecker.check_following` to validate all matched phrases differ by exactly one word and return a proper boolean instead of `None` (https://github.com/allenai/open-instruct/pull/1044).
+- Fix incorrect hardcoded checkpoint state path for multi-GPU DeepSpeed resumption (https://github.com/allenai/open-instruct/pull/1589).
+- Route GRPO LLM judge requests through the shared semaphore-guarded LiteLLM helper, preserving judge-specific retries and cost accounting while removing stale per-verifier client cleanup code (https://github.com/allenai/open-instruct/pull/1587).
+- Harden `grpo_fast` startup with explicit Ray resource preflight checks and actionable learner placement-group timeout diagnostics for single-node runs (https://github.com/allenai/open-instruct/pull/1586).
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
 
 ### Added
+- Replace `scripts/submit_eval_jobs.py` with a new olmo-eval-internal launcher (Beaker v2, no gantry); the previous script is preserved as `scripts/submit_eval_jobs_old.py` and emits a `DeprecationWarning` (https://github.com/allenai/open-instruct/pull/1638).
+- Add OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1579).
+- Add DR-TULU replication script for Qwen 3.5 4B with evolving rubrics, per-tool pool size overrides, `vllm_qwen3_xml` parser, and `<answer>` tag extraction in rubric scoring (https://github.com/allenai/open-instruct/pull/1609).
+- Add MiniMax provider support: register `minimax-m2.7` and `minimax-m2.7-highspeed` models in `PRICE_PER_TOKEN` for cost tracking and add cl100k_base encoding support in `context_window_checker` (https://github.com/allenai/open-instruct/pull/1602).
+- Wire evolving rubric config flags into the GRPO training loop so `apply_evolving_rubric_reward` actually triggers rubric generation, buffer management, and ground-truth overrides during training (https://github.com/allenai/open-instruct/pull/1581).
+- Add model step logging for GRPO/vLLM by propagating `model_step` through generation metadata/results, syncing vLLM engines to the latest training step after weight sync, and reporting `model_step_min/max/mean` reward metrics (https://github.com/allenai/open-instruct/pull/1508).
+- Add Qwen3.5 VLM-as-CausalLM support for GRPO, SFT, and DPO: `language_model_only` for vLLM, param name mapping for weight sync, VLM config handling, liger-kernel bump to 0.7.0, pre-download model on rank 0 to avoid HF cache race conditions, update vllm to 0.19.0, and fix Ulysses SP for VLM models by passing the model object to `register_with_transformers` (https://github.com/allenai/open-instruct/pull/1568).
 - Add OLMo-core sharding and parallelism documentation covering HSDP configuration across DPO, GRPO, and SFT (https://github.com/allenai/open-instruct/pull/1582).
 - Add a vLLM-based teacher logit sampling pipeline for offline distillation, including `sample_logits_vllm.py`, distillkit sampling writer utilities, and a launch script for generating compressed parquet shards (https://github.com/allenai/open-instruct/pull/1534).
 - Add user-focused documentation for tool use training, RL environments, parser selection, and rollout configuration (https://github.com/allenai/open-instruct/pull/1546).
@@ -52,9 +123,11 @@ All notable changes to this project will be documented in this file.
 - Extended CONTRIBUTING.md with documentation on running tests, CI workflows, Beaker experiments, GRPO/DPO test scripts, and environment variables.
 
 ### Changed
+- Add support for loading DeepSpeed universal checkpoints when resuming GRPO runs so checkpoints can be reused across different parallelisms and cluster sizes (https://github.com/allenai/open-instruct/pull/1517).
 - Extract shared GRPO metric helpers into `grpo_utils.py` and align `grpo.py` metrics with `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/1552).
 - Add a configurable vLLM attention backend option and switch remaining `flash_attention_2` defaults/references to `flash_attention_3` (https://github.com/allenai/open-instruct/pull/1559).
 - Switch back to CUDA 12.8.1, pin `flash-attn-3` to a direct x86_64 wheel URL to avoid flat-index drift to aarch64-only releases (https://github.com/allenai/open-instruct/pull/1560).
+- Added GRPO local eval `pass@k` metrics, plus optional `eval_response_length` handling so eval generations can exceed rollout response length without undersizing vLLM `max_model_len` (https://github.com/allenai/open-instruct/pull/1464).
 - Added other configs to wandb logging so all hyperparams are visible, set beaker name with RUN_NAME for grpo_fast.py (https://github.com/allenai/open-instruct/pull/1554).
 - Updated vLLM to 0.17.1 and torch to 2.10+.
 - Log `optim/grad_norm` in `grpo_fast`, including non-finite DeepSpeed values (`nan`/`inf`) when they occur (https://github.com/allenai/open-instruct/pull/1540).
@@ -75,6 +148,9 @@ All notable changes to this project will be documented in this file.
 - Made a bunch of changes to `dpo.py` so it matches `dpo_tune_cache.py` perfectly (https://github.com/allenai/open-instruct/pull/1451).
 
 ### Fixed
+- Fix GRPO data prep actor checkpoint resume so resumed runs restore data prep client state and continue from the next unseen learner step (https://github.com/allenai/open-instruct/pull/1523).
+- Fixed dataset cache hashing to include chat template source/content and tokenizer template metadata so dataset caches invalidate when chat templates change (https://github.com/allenai/open-instruct/pull/1497).
+- Fixed `dataset_mixer_list_splits` validation in `dataset_transformation` when multiple splits are provided, and prevent `combined_dataset` index-column conflicts by dropping an existing `index` column before adding a new one (https://github.com/allenai/open-instruct/pull/1494).
 - Fixed GSM8K reward verification for signed final answers by preserving explicit `+` and `-` signs when extracting the last numeric prediction, including boxed negative answers (https://github.com/allenai/open-instruct/pull/1530).
 - Exclude `CUDA_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` from the Ray `runtime_env` so Ray can manage per-worker GPU visibility correctly on heterogeneous clusters and avoid invalid GPU assignments (https://github.com/allenai/open-instruct/pull/1519).
 - Include tokenizer configuration in per-transform dataset cache fingerprints so rerunning transformations with a different tokenizer does not silently reuse stale cached outputs (https://github.com/allenai/open-instruct/pull/1518).

@@ -54,10 +54,11 @@ class GenerationResult:
     index: int | None
     prompt_id: str | None
     token_statistics: TokenStatistics | None = None
-    start_time: float | None = None
-    logprobs: list[list[float]] | None = None
+    start_time: float = 0.0
+    logprobs: list[list[float]] = field(default_factory=list)
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
+    model_step: int = 0
 
 
 @dataclass
@@ -95,6 +96,9 @@ class PromptRequest:
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
     env_config: EnvConfig = field(default_factory=EnvConfig)
+    ground_truth: Any = None
+    """Optional ground truth override (e.g. from evolving rubrics). When set, the vLLM
+    engine uses this instead of looking up the ground truth from the dataset."""
 
 
 @dataclass

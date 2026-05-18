@@ -1,6 +1,8 @@
 import argparse
+import contextlib
 import hashlib
 import os
+import pathlib
 import random
 import re
 import secrets
@@ -28,11 +30,13 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo.py",
     "open_instruct/dpo_tune_cache.py",
+    "open_instruct/grpo.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/reward_modeling.py",
 ]
 
-OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
+OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo.py", "open_instruct/grpo_fast.py"]
+
 
 CACHE_EXCLUDED_ARGS = {
     "--with_tracking": False,
@@ -52,24 +56,24 @@ def build_command_without_args(command, args_to_remove):
         args_to_remove: Dict mapping argument names to boolean indicating if they have values
                        e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
 
+    For value-bearing args, the following token is consumed only if it doesn't itself start
+    with "--" — otherwise the flag is dropped alone and the next flag is preserved.
+
     Returns:
         New command list with specified arguments removed
     """
-    result = []
-    skip_next = False
-
-    for item in command:
-        if skip_next:
-            skip_next = False
-            continue
-
+    result: list[str] = []
+    i = 0
+    while i < len(command):
+        item = command[i]
         if item in args_to_remove:
-            if args_to_remove[item]:
-                skip_next = True
+            if args_to_remove[item] and i + 1 < len(command) and not command[i + 1].startswith("--"):
+                i += 2
+            else:
+                i += 1
             continue
-
         result.append(item)
-
+        i += 1
     return result
 
 
@@ -112,7 +116,9 @@ def get_args():
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
-    parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
+    parser.add_argument(
+        "--budget", type=str, help="Budget to use. If omitted, the workspace's default budget is used.", default=None
+    )
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
         "--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb"
@@ -167,6 +173,13 @@ def get_args():
         type=str,
         default="/weka/oe-adapt-default/allennlp/deletable_checkpoint_states",
         help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix",
+    )
+    parser.add_argument(
+        "--artifact_ttl",
+        type=str,
+        default=None,
+        help="If set, append `/tmp-<ttl>` as the final dir of auto-generated "
+        "--output_dir and --checkpoint_state_dir (e.g. '1d' for 1-day retention).",
     )
     parser.add_argument(
         "--env",
@@ -470,24 +483,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     raise Exception(f"Error code {return_code} when creating cached dataset")
                 console.log("✅✅✅ Finished running the caching command")
 
-                if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
-                    need_to_override_checkpoint_state_dir = True
-                    default_checkpoint_state_freq = 200
-                    for idx, cmd in enumerate(command):
-                        if cmd == "--checkpoint_state_dir" and idx + 1 < len(command) and "/weka/" in command[idx + 1]:
-                            need_to_override_checkpoint_state_dir = False
-                        if cmd == "--checkpoint_state_freq" and idx + 1 < len(command):
-                            default_checkpoint_state_freq = command[idx + 1]
-
-                    if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
-                        new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-                        console.log(
-                            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-                        )
-                        command.append("--checkpoint_state_dir")
-                        command.append(new_checkpoint_state_dir)
-                        command.append("--checkpoint_state_freq")
-                        command.append(str(default_checkpoint_state_freq))
+        command = maybe_override_checkpoint_dir(
+            command, args.auto_checkpoint_state_dir, whoami, is_external_user, args.artifact_ttl
+        )
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -500,12 +498,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         need_to_override_output_dir = False
                         break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
-                    new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
+                    new_output_dir_path = pathlib.Path(args.auto_output_dir_path) / whoami
+                    if args.artifact_ttl:
+                        new_output_dir_path = new_output_dir_path / f"tmp-{args.artifact_ttl}"
                     console.log(
-                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`"
+                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir_path}/`"
                     )
-                    command.append("--output_dir")
-                    command.append(new_output_dir)
+                    command = build_command_without_args(command, {"--output_dir": True})
+                    command.extend(["--output_dir", f"{new_output_dir_path}/"])
             else:
                 no_eval_commands = [
                     ["--try_launch_beaker_eval_jobs", "False"],
@@ -529,17 +529,11 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     for idx in range(len(command)):
         if "{" in command[idx]:
             command[idx] = "'" + command[idx] + "'"
-    full_command = command
-    setup_commands = ""
-    if not args.pure_docker_mode:
-        setup_commands = f"cd {os.getcwd()} && "
-
-    join_full_command = " ".join(full_command)
-    # override accelerate call
+    joined_command = " ".join(command)
     if args.num_nodes > 1:
-        if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
+        if "--num_processes" not in joined_command and "accelerate" in joined_command:
             raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
-        join_full_command = re.sub(
+        joined_command = re.sub(
             r"--num_processes (\d+)",
             lambda m: (
                 f"--num_processes {int(m.group(1)) * args.num_nodes} "
@@ -548,9 +542,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 "--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME "
                 "--main_process_port 29400 "
             ),
-            join_full_command,
+            joined_command,
         )
-    full_command = setup_commands + join_full_command
+
+    setup_commands = ""
+    if not args.pure_docker_mode:
+        setup_commands = f"cd {os.getcwd()} && "
+    full_command = setup_commands + joined_command
     console.log("🔍🔍🔍 Full command")
     print(full_command)
     return full_command
@@ -613,7 +611,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
     return spec
 
 
-def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_dir_path: str, whoami: str):
+def maybe_download_tokenizer_from_gs_bucket(
+    filtered_command: list[str], auto_output_dir_path: str, whoami: str
+) -> list[str]:
     """if model is only on gs, download tokenizer from gs to local cache folder for dataset preprocessing"""
 
     if "--model_name_or_path" not in filtered_command:
@@ -642,6 +642,51 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     filtered_command[model_name_idx] = local_cache_folder
 
     return filtered_command
+
+
+def maybe_override_checkpoint_dir(
+    command: list[str],
+    auto_checkpoint_state_dir: str,
+    whoami: str,
+    is_external_user: bool,
+    artifact_ttl: str | None = None,
+):
+    """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
+
+    --checkpoint_state_dir is not overriden if it is already set and is on /weka (useful for restarting from a checkpoint)
+    """
+
+    if not any(file in command for file in OPEN_INSTRUCT_RESUMABLES):
+        return command
+
+    if not auto_checkpoint_state_dir or is_external_user:
+        return command
+
+    # get the last .index, not the first
+    checkpoint_arg_last_index = None
+    with contextlib.suppress(ValueError):
+        checkpoint_arg_last_index = len(command) - 1 - command[::-1].index("--checkpoint_state_dir")
+
+    # don't override if the checkpoint dir is on /weka/
+    if (
+        checkpoint_arg_last_index is not None
+        and checkpoint_arg_last_index + 1 < len(command)
+        and "/weka/" in command[checkpoint_arg_last_index + 1]
+    ):
+        return command
+
+    new_checkpoint_state_path = (
+        pathlib.Path(auto_checkpoint_state_dir) / whoami / f"{int(time.time())}_{random.randint(0, 1000000)}"
+    )
+    if artifact_ttl:
+        new_checkpoint_state_path = new_checkpoint_state_path / f"tmp-{artifact_ttl}"
+    console.log(
+        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_path}`"
+    )
+    command = build_command_without_args(command, {"--checkpoint_state_dir": True})
+    command.extend(["--checkpoint_state_dir", str(new_checkpoint_state_path)])
+
+    return command
 
 
 def main():

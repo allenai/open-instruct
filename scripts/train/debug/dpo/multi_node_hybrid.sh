@@ -14,6 +14,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --timeout 60m \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
@@ -23,7 +24,6 @@ uv run python mason.py \
     --env TORCH_DIST_INIT_BARRIER=1 \
     --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 \
     --num_nodes 2 \
-    --budget ai2/oe-adapt \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \

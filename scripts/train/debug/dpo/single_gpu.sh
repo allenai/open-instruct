@@ -11,8 +11,8 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --no-host-networking \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \

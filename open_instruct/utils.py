@@ -165,10 +165,20 @@ class MetricsTracker:
         idx = self._maybe_register_metric(name)
         self.metrics[idx] = value
 
+    def update(self, metrics: dict) -> None:
+        for name, value in metrics.items():
+            self[name] = value
+
     def get_metrics_list(self) -> dict[str, float]:
         # Convert to Python floats for logging systems (wandb, tensorboard)
         metrics_list = self.metrics.tolist()
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
+
+
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 def max_num_processes() -> int:
@@ -185,12 +195,12 @@ def repeat_each(seq, k):
 
 
 def ray_get_with_progress(
-    ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
+    ray_refs: Iterable[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
     """Execute ray.get() with a progress bar using futures and collect timings.
 
     Args:
-        ray_refs: List of ray object references
+        ray_refs: Iterable of ray object references
         desc: Description for the progress bar
         enable: Whether to show the progress bar (default: True)
         timeout: Optional timeout in seconds for all operations to complete
@@ -208,8 +218,8 @@ def ray_get_with_progress(
     ray_futures = [ref.future() for ref in ray_refs]
     fut_to_idx = {f: i for i, f in enumerate(ray_futures)}
 
-    results = [None] * len(ray_refs)
-    completion_times = [None] * len(ray_refs)
+    results = [None] * len(ray_futures)
+    completion_times = [None] * len(ray_futures)
 
     futures_iter = futures.as_completed(ray_futures, timeout=timeout)
     if enable:
@@ -351,8 +361,21 @@ def convert_rejection_samples_to_messages(example):
     return example
 
 
+def parse_dataset_mixer_list(mixer_list: list) -> dict:
+    """Convert an interleaved `[name, weight, name, weight, ...]` list into a `{name: weight}` dict."""
+    assert len(mixer_list) % 2 == 0, f"Data mixer list length is not even: {mixer_list}"
+    mixer_dict = {}
+    i = 0
+    while i < len(mixer_list) - 1:
+        assert isinstance(mixer_list[i], str), f"Invalid type in data mixer: {mixer_list}"
+        value = float(mixer_list[i + 1]) if "." in mixer_list[i + 1] else int(mixer_list[i + 1])
+        mixer_dict[mixer_list[i]] = value
+        i += 2
+    return mixer_dict
+
+
 def get_datasets(
-    dataset_mixer: dict | list,
+    dataset_mixer: dict,
     splits: list[str] | None = None,
     configs: list[str] | None = None,
     columns_to_keep: list[str] | None = None,
@@ -366,10 +389,8 @@ def get_datasets(
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`list` or `dict`):
-            Dictionary or list containing the dataset names and their training proportions.
-            By default, all test proportions are 1. Lists are formatted as
-            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
+        dataset_mixer (`dict`):
+            Dictionary mapping dataset names to their training proportions.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -391,17 +412,6 @@ def get_datasets(
         add_source_col (`bool`, *optional*, defaults to `False`):
             Whether to add a column to the dataset that indicates the source of the data explicitly.
     """
-    if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        mixer_dict = {}
-        i = 0
-        while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
-            mixer_dict[dataset_mixer[i]] = value
-            i += 2
-        dataset_mixer = mixer_dict
-
     splits = ["train", "test"] if splits is None else splits
     configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -577,7 +587,7 @@ def get_datasets(
 
 
 def combine_dataset(
-    dataset_mixer: dict | list,
+    dataset_mixer: dict,
     splits: list[str],
     configs: list[str] | None = None,
     columns_to_keep: list[str] | None = None,
@@ -590,7 +600,7 @@ def combine_dataset(
 
     Args:
         dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions.
+            Dictionary mapping dataset names to their training proportions.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -608,16 +618,6 @@ def combine_dataset(
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
     assert len(splits) == len(dataset_mixer), "Number of splits must match the number of datasets."
-    if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        mixer_dict = {}
-        i = 0
-        while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
-            mixer_dict[dataset_mixer[i]] = value
-            i += 2
-        dataset_mixer = mixer_dict
 
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
@@ -926,6 +926,44 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     )
 
 
+def ensure_universal_checkpoint_exists(checkpoint_state_dir: str) -> None:
+    latest_path = os.path.join(checkpoint_state_dir, "latest")
+    if not os.path.isfile(latest_path):
+        return
+
+    with open(latest_path) as f:
+        latest_checkpoint_tag = f.read().strip()
+
+    if not latest_checkpoint_tag or os.path.basename(latest_checkpoint_tag) != latest_checkpoint_tag:
+        return
+
+    latest_checkpoint_dir = os.path.join(checkpoint_state_dir, latest_checkpoint_tag)
+    if not os.path.isdir(latest_checkpoint_dir):
+        raise ValueError(f"Invalid checkpoint: {latest_checkpoint_dir} does not exist")
+
+    latest_universal_tag = f"ds_universal_{latest_checkpoint_tag}"
+    latest_universal_path = os.path.join(checkpoint_state_dir, "latest_universal")
+    latest_universal_dir = os.path.join(checkpoint_state_dir, latest_universal_tag)
+    if os.path.isdir(latest_universal_dir):
+        with open(latest_universal_path, "w") as f:
+            f.write(latest_universal_tag)
+        return
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "deepspeed.checkpoint.ds_to_universal",
+            "--input_folder",
+            latest_checkpoint_dir,
+            "--output_folder",
+            latest_universal_dir,
+            "--inject_missing_state",
+        ],
+        check=True,
+    )
+
+
 # ----------------------------------------------------------------------------
 # Ai2 user utilities
 @dataclass
@@ -1193,7 +1231,7 @@ def launch_ai2_evals_on_weka(
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
     command = f"""\
-python scripts/submit_eval_jobs.py \
+python scripts/submit_eval_jobs_old.py \
 --model_name {leaderboard_name} \
 --location {path} \
 --is_tuned \
@@ -1489,6 +1527,10 @@ def get_optimizer_grouped_parameters(
             "weight_decay": 0.0,
         },
     ]
+
+    # Filter empty groups to avoid issues with torch 2.10 and deepspeed
+    optimizer_grouped_parameters = [group for group in optimizer_grouped_parameters if group["params"]]
+
     return optimizer_grouped_parameters
 
 
@@ -1511,7 +1553,7 @@ class RayProcess:
         self.rank = rank
         self.local_rank = local_rank
         self.master_addr = master_addr if master_addr else self.get_current_node_ip()
-        self.master_port = master_port if master_port else self.get_free_port()
+        self.master_port = master_port if master_port else find_free_port()
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -1529,12 +1571,6 @@ class RayProcess:
         address = ray._private.services.get_node_ip_address()
         # strip ipv6 address
         return address.strip("[]")
-
-    @staticmethod
-    def get_free_port():
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            return sock.getsockname()[1]
 
     def get_master_addr_port(self):
         return self.master_addr, self.master_port

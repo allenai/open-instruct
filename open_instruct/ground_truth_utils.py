@@ -22,12 +22,11 @@ from typing import Any, Literal
 
 import numpy as np
 import requests
-from litellm import acompletion
 
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
+from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -36,8 +35,8 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.rubrics import RUBRIC_SCORING_PROMPT
-from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
+from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
+from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
 from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
@@ -352,7 +351,7 @@ class IFEvalVerifier(VerifierFunction):
                 rewards.append(1.0)
             else:
                 rewards.append(0.0)
-        return VerificationResult(score=sum(rewards) / len(rewards))
+        return VerificationResult(score=sum(rewards) / max(len(rewards), 1))
 
 
 class IFEvalVerifierOld(VerifierFunction):
@@ -700,9 +699,6 @@ class LMJudgeVerifier(VerifierFunction):
     Verifier that uses a language model's judgement to score a response.
     """
 
-    # Use WeakKeyDictionary to automatically clean up clients when event loops are garbage collected
-    _client_cache = weakref.WeakKeyDictionary()
-
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
@@ -747,9 +743,9 @@ class LMJudgeVerifier(VerifierFunction):
         model_name = model.split("/")[-1]  # for litellm, discard the namespace
         model_name = model_name.replace("-standard", "")  # azure OAI models have -standard in the name
         return (
-            PRICE_PER_TOKEN.get(model_name, {}).get("input", 0) * response.usage.prompt_tokens
-            + PRICE_PER_TOKEN.get(model_name, {}).get("output", 0) * response.usage.completion_tokens
-        )
+            PRICE_PER_MILLION_TOKENS.get(model_name, {}).get("input", 0) * response.usage.prompt_tokens
+            + PRICE_PER_MILLION_TOKENS.get(model_name, {}).get("output", 0) * response.usage.completion_tokens
+        ) / 1_000_000
 
     async def async_call(
         self,
@@ -762,7 +758,6 @@ class LMJudgeVerifier(VerifierFunction):
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
-        # client = self._get_client()
         final_answer = extract_final_answer(prediction)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
@@ -802,8 +797,8 @@ class LMJudgeVerifier(VerifierFunction):
                         logger.error("Cannot fit request within context window even after truncation.")
                         return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
                 # end of Faeze's context window check
-                response = await acompletion(
-                    model=self.verifier_config.llm_judge_model,
+                response = await run_litellm_async_raw(
+                    model_name=self.verifier_config.llm_judge_model,
                     messages=messages,
                     temperature=self.verifier_config.llm_judge_temperature,
                     max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
@@ -856,17 +851,9 @@ class LMJudgeVerifier(VerifierFunction):
     @classmethod
     async def cleanup_all_clients(cls):
         """
-        Manually close all cached clients. Call this before shutting down to avoid cleanup warnings.
+        Judge requests use the shared LiteLLM helper and do not own per-verifier clients.
         """
-        clients_to_close = list(cls._client_cache.values())
-        cls._client_cache.clear()
-
-        for client in clients_to_close:
-            try:
-                await client.close()
-            except Exception as e:
-                logger.warning(f"Error closing OpenAI client: {e}")
-                # Suppress the error to avoid breaking shutdown
+        return None
 
     @classmethod
     def get_config_class(cls) -> type:
@@ -1125,6 +1112,13 @@ class RubricVerifier(VerifierFunction):
             logger.warning("No rubrics found in ground truth")
             return VerificationResult(score=0.0)
 
+        # Extract content from <answer> tags if present, otherwise use full response.
+        # Use the last match in case the model outputs multiple answer blocks.
+        if answer_matches := re.findall(r"<answer>(.*?)</answer>", prediction, re.DOTALL):
+            response_for_scoring = answer_matches[-1].strip()
+        else:
+            response_for_scoring = prediction
+
         # Score each rubric in parallel
         async def score_rubric(rubric: dict) -> tuple[float, float]:
             description = rubric.get("description") or rubric.get("rubric_item") or rubric.get("Ingredient", "")
@@ -1134,7 +1128,7 @@ class RubricVerifier(VerifierFunction):
                 logger.warning("Rubric with empty description found, skipping.")
                 return 0.0, 0.0
 
-            user_prompt = f"<question>{question}</question>\n<response>{prediction}</response>\n<criterion>{description}</criterion>"
+            user_prompt = f"<question>{question}</question>\n<response>{response_for_scoring}</response>\n<criterion>{description}</criterion>"
 
             try:
                 model_name = os.environ.get("RUBRIC_JUDGE_MODEL", self.config.rubric_judge_model)

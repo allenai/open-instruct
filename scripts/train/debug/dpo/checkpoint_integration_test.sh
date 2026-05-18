@@ -5,7 +5,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 MODEL_NAME=Qwen/Qwen3-0.6B
 TIMESTAMP=$(date +%s)
-OUTPUT_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint_integration_test/dpo_cache_ckpt_test_${TIMESTAMP}
+OUTPUT_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint_integration_test/dpo_cache_ckpt_test_${TIMESTAMP}/tmp-1d
 EXP_NAME_RUN1="dpo-cache-ckpt-integ-run1-${TIMESTAMP}"
 EXP_NAME_RUN2="dpo-cache-ckpt-integ-run2-${TIMESTAMP}"
 
@@ -63,8 +63,8 @@ run1_output=$(uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
@@ -97,8 +97,8 @@ run2_output=$(uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
-    --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
