@@ -849,9 +849,10 @@ def forward_for_logprobs(
         extra_kwargs = {"cp_context": cp_context}
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
     logits = getattr(output, "logits", output)
-    logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
     logits = logits[:, :-1]
+    if temperature != 1.0:
+        logits.div_(temperature)
     labels = query_responses[:, 1:].clone().to(logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
