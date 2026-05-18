@@ -886,41 +886,27 @@ class PolicyTrainerRayProcess(RayProcess):
                     # mask from position_ids internally for packed sequences.
                     advantages_BT = data_BT.advantages[i][:, 1:]
                     if self.args.use_liger_grpo_loss:
-                        hidden_states_BT, lm_head_weight, selected_token_ids_BT, lm_head_bias = (
-                            grpo_utils.forward_for_liger_grpo_loss(
-                                self.model,
-                                data_BT.query_responses[i],
-                                None,
-                                data_BT.position_ids[i],
-                                self.pad_token_id,
-                                cp_context=cp_contexts_BT[i],
-                            )
+                        liger_forward_output = grpo_utils.forward_for_liger_grpo_loss(
+                            self.model,
+                            data_BT.query_responses[i],
+                            None,
+                            data_BT.position_ids[i],
+                            self.pad_token_id,
+                            lm_head_fp32=self.args.lm_head_fp32,
+                            cp_context=cp_contexts_BT[i],
                         )
-                        liger_hidden_states_BT = hidden_states_BT.float() if self.args.lm_head_fp32 else hidden_states_BT
-                        liger_lm_head_params = _z3_params_to_fetch(
-                            [param for param in (lm_head_weight, lm_head_bias) if isinstance(param, torch.Tensor)]
-                        )
+                        liger_lm_head_params = _z3_params_to_fetch(liger_forward_output.lm_head_tensors)
                         with torch.no_grad():
                             with deepspeed.zero.GatheredParameters(
                                 liger_lm_head_params, enabled=len(liger_lm_head_params) > 0
                             ):
-                                local_logprobs_unmasked_BT = grpo_utils.selective_logprobs_from_lm_head(
-                                    hidden_states=liger_hidden_states_BT.detach(),
-                                    lm_head_weight=lm_head_weight.detach(),
-                                    selected_token_ids=selected_token_ids_BT,
-                                    bias=lm_head_bias.detach() if lm_head_bias is not None else None,
-                                    temperature=self.streaming_config.temperature,
+                                local_logprobs_unmasked_BT = grpo_utils.selected_logprobs_for_liger_grpo(
+                                    liger_forward_output, temperature=self.streaming_config.temperature
                                 )
-                            local_logprobs_BT = grpo_utils.mask_logprobs(
-                                local_logprobs_unmasked_BT, response_mask_BT
-                            )
+                            local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_unmasked_BT, response_mask_BT)
                         entropy_BT = None
                     else:
-                        hidden_states_BT = None
-                        lm_head_weight = None
-                        selected_token_ids_BT = None
-                        lm_head_bias = None
-                        liger_hidden_states_BT = None
+                        liger_forward_output = None
                         liger_lm_head_params = []
                         local_logprobs_unmasked_BT = None
                         if self.args.lm_head_fp32 and not self.args.record_entropy:
@@ -1049,15 +1035,16 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     if self.args.use_liger_grpo_loss:
                         assert self.liger_grpo_loss is not None
-                        assert hidden_states_BT is not None
-                        assert liger_hidden_states_BT is not None
-                        assert lm_head_weight is not None
-                        assert selected_token_ids_BT is not None
+                        assert liger_forward_output is not None
                         assert local_logprobs_unmasked_BT is not None
 
-                        flat_hidden_states = liger_hidden_states_BT.reshape(-1, 1, liger_hidden_states_BT.shape[-1])
-                        flat_selected_token_ids = selected_token_ids_BT.reshape(-1, 1)
-                        flat_response_mask = response_mask_BT.reshape(-1, 1).to(dtype=liger_hidden_states_BT.dtype)
+                        flat_hidden_states = liger_forward_output.hidden_states.reshape(
+                            -1, 1, liger_forward_output.hidden_states.shape[-1]
+                        )
+                        flat_selected_token_ids = liger_forward_output.selected_token_ids.reshape(-1, 1)
+                        flat_response_mask = response_mask_BT.reshape(-1, 1).to(
+                            dtype=liger_forward_output.hidden_states.dtype
+                        )
                         flat_advantages = advantages_BT.reshape(-1)
                         safe_old_logprobs_BT = torch.where(
                             response_mask_BT, old_logprob_BT, local_logprobs_unmasked_BT.detach()
@@ -1078,11 +1065,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         ):
                             loss, _ = self.liger_grpo_loss(
                                 _input=flat_hidden_states,
-                                lin_weight=lm_head_weight,
+                                lin_weight=liger_forward_output.lm_head_weight,
                                 selected_token_ids=flat_selected_token_ids,
                                 attention_mask=flat_response_mask,
                                 advantages=flat_advantages,
-                                bias=lm_head_bias,
+                                bias=liger_forward_output.lm_head_bias,
                                 old_per_token_logps=flat_old_logprobs,
                                 ref_per_token_logps=flat_ref_logprobs,
                                 vllm_is_ratio=flat_tis_weights,

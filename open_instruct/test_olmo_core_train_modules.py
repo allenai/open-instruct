@@ -159,14 +159,27 @@ class TestForwardForLigerGRPOLoss(unittest.TestCase):
         attention_mask = torch.ones_like(query_responses)
         position_ids = torch.arange(query_responses.shape[1]).unsqueeze(0)
 
-        hidden_states, lm_head_weight, selected_token_ids, bias = grpo_utils.forward_for_liger_grpo_loss(
+        output = grpo_utils.forward_for_liger_grpo_loss(
             model, query_responses, attention_mask, position_ids, pad_token_id=0
         )
 
-        self.assertEqual(hidden_states.shape, (1, 3, 4))
-        self.assertIs(lm_head_weight, model.lm_head.weight)
-        self.assertIsNone(bias)
-        torch.testing.assert_close(selected_token_ids, torch.tensor([[2, 0, 3]]))
+        self.assertEqual(output.hidden_states.shape, (1, 3, 4))
+        self.assertIs(output.lm_head_weight, model.lm_head.weight)
+        self.assertIsNone(output.lm_head_bias)
+        torch.testing.assert_close(output.selected_token_ids, torch.tensor([[2, 0, 3]]))
+
+    def test_liger_fp32_casts_hidden_states(self):
+        model = _TinyCausalLM().to(torch.bfloat16)
+        query_responses = torch.tensor([[1, 2, 0, 3]])
+        attention_mask = torch.ones_like(query_responses)
+        position_ids = torch.arange(query_responses.shape[1]).unsqueeze(0)
+
+        output = grpo_utils.forward_for_liger_grpo_loss(
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, lm_head_fp32=True
+        )
+
+        self.assertEqual(output.hidden_states.dtype, torch.float32)
+        self.assertEqual(output.lm_head_weight.dtype, torch.bfloat16)
 
     def test_chunked_lm_head_logprobs_match_full_logits(self):
         model = _TinyCausalLM(vocab_size=11, hidden_size=5)

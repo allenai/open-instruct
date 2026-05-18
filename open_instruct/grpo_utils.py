@@ -931,6 +931,20 @@ def get_causal_lm_backbone_and_head(model: torch.nn.Module) -> tuple[torch.nn.Mo
     return backbone, lm_head
 
 
+@dataclass(frozen=True)
+class LigerGRPOForwardOutput:
+    """Backbone output and LM-head parameters shared by the Liger GRPO path."""
+
+    hidden_states: torch.Tensor
+    lm_head_weight: torch.Tensor
+    selected_token_ids: torch.Tensor
+    lm_head_bias: torch.Tensor | None = None
+
+    @property
+    def lm_head_tensors(self) -> list[torch.Tensor]:
+        return [param for param in (self.lm_head_weight, self.lm_head_bias) if isinstance(param, torch.Tensor)]
+
+
 def forward_for_chunked_lm_head_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
@@ -974,8 +988,9 @@ def forward_for_liger_grpo_loss(
     attention_mask: torch.Tensor | None,
     position_ids: torch.Tensor,
     pad_token_id: int,
+    lm_head_fp32: bool = False,
     cp_context: Any = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+) -> LigerGRPOForwardOutput:
     """Forward the backbone only and prepare inputs for Liger's fused GRPO loss."""
     attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
     backbone, lm_head = get_causal_lm_backbone_and_head(model)
@@ -988,7 +1003,26 @@ def forward_for_liger_grpo_loss(
     selected_token_ids = query_responses[:, 1:].clone().to(last_hidden_state.device)
     selected_token_ids[selected_token_ids == pad_token_id] = 0
 
-    return last_hidden_state, lm_head.weight, selected_token_ids, getattr(lm_head, "bias", None)
+    if lm_head_fp32:
+        last_hidden_state = last_hidden_state.float()
+
+    return LigerGRPOForwardOutput(
+        hidden_states=last_hidden_state,
+        lm_head_weight=lm_head.weight,
+        selected_token_ids=selected_token_ids,
+        lm_head_bias=getattr(lm_head, "bias", None),
+    )
+
+
+def selected_logprobs_for_liger_grpo(forward_output: LigerGRPOForwardOutput, temperature: float) -> torch.Tensor:
+    """Compute detached selected-token logprobs from Liger GRPO forward inputs."""
+    return selective_logprobs_from_lm_head(
+        hidden_states=forward_output.hidden_states.detach(),
+        lm_head_weight=forward_output.lm_head_weight.detach(),
+        selected_token_ids=forward_output.selected_token_ids,
+        bias=forward_output.lm_head_bias.detach() if forward_output.lm_head_bias is not None else None,
+        temperature=temperature,
+    )
 
 
 def selective_logprobs_from_lm_head(
