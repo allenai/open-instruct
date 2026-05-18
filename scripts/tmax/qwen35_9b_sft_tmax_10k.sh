@@ -8,7 +8,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with qwen3.5-sftv1-9b" \
+       --description "SWERL tmax-10k GRPO with qwen3.5-9b" \
        --pure_docker_mode \
        --workspace ai2/olmo-instruct \
        --priority urgent \
@@ -35,7 +35,7 @@ uv run python mason.py \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 hamishivi/agent-task-combined 1.0 \
+    --dataset_mixer_list hamishivi/swerl-tmax-15k 1.0 \
     --dataset_mixer_list_splits train train \
     --max_prompt_token_length 2048 \
     --per_turn_max_tokens 8192 \

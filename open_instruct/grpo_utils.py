@@ -952,7 +952,7 @@ def forward_for_chunked_lm_head_logprobs(
     position_ids: torch.Tensor,
     pad_token_id: int,
     temperature: float,
-    lm_head_chunk_size: int = 256,
+    lm_head_chunk_size: int = 2048,
     cp_context: Any = None,
 ) -> torch.Tensor:
     """Compute selected-token logprobs by running the lm_head over sequence chunks.
@@ -1087,7 +1087,7 @@ def compute_logprobs(
     cp_context: Any = None,
     cp_contexts: list[Any] | None = None,
     use_chunked_lm_head: bool = False,
-    lm_head_chunk_size: int = 256,
+    lm_head_chunk_size: int = 2048,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch.
 
