@@ -6,6 +6,8 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL="Qwen/Qwen3.5-9B"
 DATASET="allenai/gemini_axtree_webvoyager_like"
+WANDB_ENTITY="tanmayg"
+WANDB_PROJECT="qwen35-9b-axtree-sft"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -19,6 +21,7 @@ uv run python mason.py \
     --env BEAKER_SKIP_DOCKER_SOCKET=1 \
     --budget ai2/oe-omai \
     --gpus 8 \
+    --no_auto_dataset_cache \
     -- \
     accelerate launch \
     --mixed_precision bf16 \
