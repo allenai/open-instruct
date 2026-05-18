@@ -873,6 +873,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.model.step()
                             grad_norms.append(float(self.model.get_global_grad_norm()))
                         local_step += 1
+                        # Bound inter-iteration drift from async backward/ZeRO work
+                        # before this rank starts the next sample.
+                        torch.cuda.synchronize()
 
                         with torch.no_grad():
                             if self.args.beta != 0.0 and self.args.load_ref_policy:
