@@ -948,6 +948,58 @@ def forward_for_liger_grpo_loss(
     return last_hidden_state, lm_head.weight, selected_token_ids, getattr(lm_head, "bias", None)
 
 
+def selective_logprobs_from_lm_head(
+    hidden_states: torch.Tensor,
+    lm_head_weight: torch.Tensor,
+    selected_token_ids: torch.Tensor,
+    temperature: float,
+    bias: torch.Tensor | None = None,
+    vocab_chunk_size: int = 4096,
+    seq_chunk_size: int = 2048,
+) -> torch.Tensor:
+    """Compute selected-token logprobs without materializing full-vocab logits."""
+    batch_size, seq_len, hidden_size = hidden_states.shape
+    hidden = hidden_states.reshape(batch_size * seq_len, hidden_size).contiguous()
+    targets = selected_token_ids.reshape(batch_size * seq_len).contiguous()
+    logprobs = torch.empty(targets.shape, device=hidden.device, dtype=torch.float32)
+    inv_temperature = 1.0 / temperature
+    vocab_size = lm_head_weight.shape[0]
+
+    for seq_start in range(0, hidden.shape[0], seq_chunk_size):
+        seq_end = min(seq_start + seq_chunk_size, hidden.shape[0])
+        hidden_chunk = hidden[seq_start:seq_end]
+        targets_chunk = targets[seq_start:seq_end]
+        num_rows = seq_end - seq_start
+        row_idx = torch.arange(num_rows, device=hidden.device)
+
+        max_logits = torch.full((num_rows,), float("-inf"), device=hidden.device, dtype=torch.float32)
+        sum_exp = torch.zeros((num_rows,), device=hidden.device, dtype=torch.float32)
+        target_logits = torch.zeros((num_rows,), device=hidden.device, dtype=torch.float32)
+
+        for vocab_start in range(0, vocab_size, vocab_chunk_size):
+            vocab_end = min(vocab_start + vocab_chunk_size, vocab_size)
+            weight_chunk = lm_head_weight[vocab_start:vocab_end]
+            logits_chunk = (hidden_chunk @ weight_chunk.to(hidden_chunk.dtype).t()).float()
+            if bias is not None:
+                logits_chunk.add_(bias[vocab_start:vocab_end].float())
+            logits_chunk.mul_(inv_temperature)
+
+            chunk_max = logits_chunk.amax(dim=-1)
+            new_max = torch.maximum(max_logits, chunk_max)
+            sum_exp = sum_exp * torch.exp(max_logits - new_max) + torch.exp(logits_chunk - new_max.unsqueeze(-1)).sum(
+                dim=-1
+            )
+            max_logits = new_max
+
+            in_chunk = (targets_chunk >= vocab_start) & (targets_chunk < vocab_end)
+            local_idx = torch.clamp(targets_chunk - vocab_start, 0, vocab_end - vocab_start - 1)
+            target_logits += logits_chunk[row_idx, local_idx] * in_chunk
+
+        logprobs[seq_start:seq_end] = target_logits - (max_logits + torch.log(sum_exp))
+
+    return logprobs.reshape(batch_size, seq_len)
+
+
 def compute_logprobs(
     model: torch.nn.Module,
     data_BT: data_types.CollatedBatchData,

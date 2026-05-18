@@ -331,16 +331,13 @@ class PolicyTrainerRayProcess(RayProcess):
             mpu=self.mpu,
         )
         self.liger_grpo_loss = None
-        self.liger_selective_logprob_forward = None
         if args.use_liger_grpo_loss:
             liger_chunked_loss = importlib.import_module("liger_kernel.chunked_loss")
-            liger_fused_linear_ppo = importlib.import_module("liger_kernel.chunked_loss.fused_linear_ppo")
 
             logger.info(
                 "Using Liger-Kernel fused GRPO loss "
                 f"(loss_fn={args.loss_fn}, chunk_size={args.liger_grpo_loss_chunk_size})"
             )
-            self.liger_selective_logprob_forward = liger_fused_linear_ppo.LigerFusedLinearPPOBase.chunk_forward
             self.liger_grpo_loss = liger_chunked_loss.LigerFusedLinearGRPOLoss(
                 beta=args.beta if args.load_ref_policy else 0.0,
                 compiled=args.liger_grpo_loss_compiled,
@@ -791,7 +788,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     # mask from position_ids internally for packed sequences.
                     advantages_BT = data_BT.advantages[i][:, 1:]
                     if self.args.use_liger_grpo_loss:
-                        assert self.liger_selective_logprob_forward is not None
                         hidden_states_BT, lm_head_weight, selected_token_ids_BT, lm_head_bias = (
                             grpo_utils.forward_for_liger_grpo_loss(
                                 self.model,
@@ -804,10 +800,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                         liger_hidden_states_BT = hidden_states_BT.float() if self.args.lm_head_fp32 else hidden_states_BT
                         with torch.no_grad():
-                            local_logprobs_unmasked_BT = self.liger_selective_logprob_forward(
-                                liger_hidden_states_BT.detach(),
-                                lm_head_weight.detach(),
-                                selected_token_ids_BT,
+                            local_logprobs_unmasked_BT = grpo_utils.selective_logprobs_from_lm_head(
+                                hidden_states=liger_hidden_states_BT.detach(),
+                                lm_head_weight=lm_head_weight.detach(),
+                                selected_token_ids=selected_token_ids_BT,
                                 bias=lm_head_bias.detach() if lm_head_bias is not None else None,
                                 temperature=self.streaming_config.temperature,
                             )

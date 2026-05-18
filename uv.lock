@@ -1971,17 +1971,17 @@ wheels = [
 ]
 
 [[package]]
-name = "liger-kernel-nightly"
-version = "0.7.0.dev20260418154651"
+name = "liger-kernel"
+version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "triton", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/34/e8e5aa65b999a53a1fea6c9c8bc330b59592c7fc56237d693ecd9988cbb5/liger_kernel_nightly-0.7.0.dev20260418154651.tar.gz", hash = "sha256:e37e73cab3cfedfcff34d460987321ecca754edc254801d78510324051d9ee21", size = 3970960, upload-time = "2026-04-18T15:47:00.368Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/d6/85f032b40fc30c969e817f9f3527f987b508171b46d9958befd0868855fd/liger_kernel-0.8.0.tar.gz", hash = "sha256:f98b94faf018814a0757e7b72bb8ebaaf12a78782cd09b157732acca2791e72c", size = 3989670, upload-time = "2026-04-30T23:02:15.183Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/a6/6884e500bfd609e1d6a19cc32f9a51f7fdeacd114324de3185d99106fb31/liger_kernel_nightly-0.7.0.dev20260418154651-py3-none-any.whl", hash = "sha256:905d5e412f21052543ddbb6bb3e7a816b4801b1f0532ecce165b963e4f061c06", size = 385874, upload-time = "2026-04-18T15:46:59.159Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/6b/eb29b56f128a819e2cded552e293212c57daa949481206b82490b207deac/liger_kernel-0.8.0-py3-none-any.whl", hash = "sha256:e1f03eeb4ba6a6a413d585dacf92c4c15d164bab5844fa4ead2fede6bcac469c", size = 403120, upload-time = "2026-04-30T23:02:13.443Z" },
 ]
 
 [[package]]
@@ -2812,7 +2812,7 @@ dependencies = [
     { name = "hf-transfer", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "immutabledict", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "langdetect", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "liger-kernel-nightly", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "liger-kernel", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "litellm", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "matplotlib", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "mcp", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -2884,7 +2884,7 @@ requires-dist = [
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
-    { name = "liger-kernel-nightly", marker = "sys_platform != 'darwin'" },
+    { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = "==0.8.0" },
     { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "mcp", specifier = ">=1.9.0" },
