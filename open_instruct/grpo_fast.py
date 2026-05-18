@@ -80,7 +80,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
@@ -280,6 +280,28 @@ class PolicyTrainerRayProcess(RayProcess):
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         ds_config["checkpoint"] = {"load_universal": args.deepspeed_checkpoint_load_universal}
+        if args.use_liger_grpo_loss and args.deepspeed_stage == 3:
+            hf_config = AutoConfig.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                local_files_only=True,
+            )
+            dims_config = getattr(hf_config, "text_config", hf_config)
+            hidden_size = (
+                max(dims_config.hidden_sizes)
+                if getattr(dims_config, "hidden_sizes", None)
+                else getattr(dims_config, "hidden_size", None)
+            )
+            if hidden_size is not None:
+                ds_config["zero_optimization"]["reduce_bucket_size"] = hidden_size * hidden_size
+                ds_config["zero_optimization"]["stage3_param_persistence_threshold"] = 10 * hidden_size
+                ds_config["zero_optimization"]["stage3_prefetch_bucket_size"] = 0
+                logger.info(
+                    "Set ZeRO-3 bucket sizes for Liger GRPO: "
+                    f"reduce_bucket_size={hidden_size * hidden_size}, "
+                    f"stage3_param_persistence_threshold={10 * hidden_size}, "
+                    "stage3_prefetch_bucket_size=0"
+                )
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
