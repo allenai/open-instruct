@@ -138,6 +138,23 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 
+class _ForwardRedirection:
+    """Route a custom module call through a wrapper module's forward hooks."""
+
+    def __call__(self, wrapper_module: torch.nn.Module, original_module: torch.nn.Module, method, *args, **kwargs):
+        original_forward = original_module.forward
+
+        def wrapped_forward(*_args, **_kwargs):
+            original_module.forward = original_forward
+            return method(*_args, **_kwargs)
+
+        original_module.forward = wrapped_forward
+        try:
+            return wrapper_module(*args, **kwargs)
+        finally:
+            original_module.forward = original_forward
+
+
 def _count_sampled_episodes_for_step(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig, step_metrics: dict[str, Any]
 ) -> int:
@@ -352,6 +369,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
+        self._forward_redirection = _ForwardRedirection()
         self.liger_grpo_loss = None
         if args.use_liger_grpo_loss:
             liger_chunked_loss = importlib.import_module("liger_kernel.chunked_loss")
@@ -631,6 +649,69 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
+    def _forward_chunked_lm_head_logprobs(
+        self,
+        model: torch.nn.Module,
+        query_responses: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        position_ids: torch.Tensor,
+        cp_context: Any = None,
+    ) -> torch.Tensor:
+        module = getattr(model, "module", model)
+        if module is not model:
+            return self._forward_redirection(
+                model,
+                module,
+                grpo_utils.forward_for_chunked_lm_head_logprobs,
+                module,
+                query_responses,
+                attention_mask,
+                position_ids,
+                self.pad_token_id,
+                self.streaming_config.temperature,
+                cp_context=cp_context,
+            )
+        return grpo_utils.forward_for_chunked_lm_head_logprobs(
+            model,
+            query_responses,
+            attention_mask,
+            position_ids,
+            self.pad_token_id,
+            self.streaming_config.temperature,
+            cp_context=cp_context,
+        )
+
+    def _compute_logprobs(
+        self,
+        model: torch.nn.Module,
+        data_BT: data_types.CollatedBatchData,
+        cp_contexts_BT: list[Any],
+        use_chunked_lm_head: bool,
+    ) -> list[torch.Tensor]:
+        if not use_chunked_lm_head:
+            return grpo_utils.compute_logprobs(
+                model,
+                data_BT,
+                self.pad_token_id,
+                self.streaming_config.temperature,
+                use_grad=False,
+                cp_contexts=cp_contexts_BT,
+            )
+
+        logprobs_BT: list[torch.Tensor] = []
+        with torch.no_grad():
+            for i in range(len(data_BT.query_responses)):
+                logprobs = self._forward_chunked_lm_head_logprobs(
+                    model,
+                    data_BT.query_responses[i],
+                    None,
+                    data_BT.position_ids[i],
+                    cp_context=cp_contexts_BT[i],
+                )
+                response_mask_BT = data_BT.response_masks[i]
+                logprobs_BT.append(grpo_utils.mask_logprobs(logprobs, response_mask_BT[:, 1:].bool()))
+        return logprobs_BT
+
     def step(self, training_step: int | None = None):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -675,16 +756,14 @@ class PolicyTrainerRayProcess(RayProcess):
         cp_contexts_BT = self._build_cp_contexts_for_batch(data_BT)
 
         ref_logprobs_BT: list[torch.Tensor] = []
+        use_chunked_lm_head_logprobs = self.args.lm_head_fp32
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                ref_logprobs_BT = grpo_utils.compute_logprobs(
+                ref_logprobs_BT = self._compute_logprobs(
                     self.ref_policy,
                     data_BT,
-                    self.pad_token_id,
-                    self.streaming_config.temperature,
-                    use_grad=False,
-                    cp_contexts=cp_contexts_BT,
-                    use_chunked_lm_head=self.args.lm_head_fp32,
+                    cp_contexts_BT,
+                    use_chunked_lm_head_logprobs,
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -695,14 +774,11 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
-                    local_old_logprobs_BT = grpo_utils.compute_logprobs(
+                    local_old_logprobs_BT = self._compute_logprobs(
                         self.model,
                         data_BT,
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        use_grad=False,
-                        cp_contexts=cp_contexts_BT,
-                        use_chunked_lm_head=self.args.lm_head_fp32,
+                        cp_contexts_BT,
+                        use_chunked_lm_head_logprobs,
                     )
 
                 with torch.no_grad():
@@ -728,14 +804,11 @@ class PolicyTrainerRayProcess(RayProcess):
         ):
             with Timer("Trainer logprobs trace save", noop=self.rank != 0), torch.no_grad():
                 if all(x is None for x in old_logprobs_BT):
-                    trace_logprobs_BT = grpo_utils.compute_logprobs(
+                    trace_logprobs_BT = self._compute_logprobs(
                         self.model,
                         data_BT,
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        use_grad=False,
-                        cp_contexts=cp_contexts_BT,
-                        use_chunked_lm_head=self.args.lm_head_fp32,
+                        cp_contexts_BT,
+                        use_chunked_lm_head_logprobs,
                     )
                 else:
                     trace_logprobs_BT = [
@@ -851,13 +924,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         liger_lm_head_params = []
                         local_logprobs_unmasked_BT = None
                         if self.args.lm_head_fp32 and not self.args.record_entropy:
-                            local_logprobs_BT = grpo_utils.forward_for_chunked_lm_head_logprobs(
+                            local_logprobs_BT = self._forward_chunked_lm_head_logprobs(
                                 self.model,
                                 data_BT.query_responses[i],
                                 None,
                                 data_BT.position_ids[i],
-                                self.pad_token_id,
-                                self.streaming_config.temperature,
                                 cp_context=cp_contexts_BT[i],
                             )
                             entropy_BT = None
