@@ -98,6 +98,12 @@ class GRPOExperimentConfig(
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
     lm_head_fp32: bool = False
     """Whether to keep the final LM head projection in fp32 for both HF training and vLLM rollout models."""
+    use_liger_grpo_loss: bool = False
+    """Whether to use Liger's fused linear GRPO loss. Currently supported only for DAPO."""
+    liger_grpo_loss_chunk_size: int = 1
+    """Batch-dimension chunk size passed to LigerFusedLinearGRPOLoss."""
+    liger_grpo_loss_compile: bool = True
+    """Whether Liger should torch.compile the GRPO loss math."""
 
     # Algorithm
     num_mini_batches: int = 1
@@ -275,6 +281,23 @@ class GRPOExperimentConfig(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.use_liger_grpo_loss:
+            if self.loss_fn != GRPOLossType.dapo:
+                raise ValueError("`use_liger_grpo_loss` currently only supports `loss_fn=dapo`.")
+            if not self.use_vllm_logprobs:
+                raise ValueError("`use_liger_grpo_loss` requires `use_vllm_logprobs=True`.")
+            if self.record_entropy:
+                raise ValueError("`use_liger_grpo_loss` does not support `record_entropy=True`.")
+            if self.loss_denominator != "token":
+                raise ValueError("`use_liger_grpo_loss` currently requires `loss_denominator=token`.")
+            if self.kl_estimator != 2:
+                raise ValueError(
+                    "`use_liger_grpo_loss` matches the default KL estimator and requires `kl_estimator=2`."
+                )
+            if self.tis_mask_lower > 0.0 or self.tis_mask_upper > 0.0:
+                raise ValueError("`use_liger_grpo_loss` does not support TIS masks.")
+            if self.liger_grpo_loss_chunk_size <= 0:
+                raise ValueError("`liger_grpo_loss_chunk_size` must be greater than 0.")
         if self.loss_fn == GRPOLossType.dppo:
             if self.dppo_divergence_threshold <= 0.0:
                 raise ValueError(
@@ -866,6 +889,46 @@ def forward_for_logprobs(
             entropy = model_utils.entropy_from_logits(logits)
 
     return logprob_BT, entropy
+
+
+def _unwrap_causal_lm(model: torch.nn.Module) -> torch.nn.Module:
+    return getattr(model, "module", model)
+
+
+def get_causal_lm_backbone_and_lm_head(model: torch.nn.Module) -> tuple[torch.nn.Module, torch.nn.Module]:
+    causal_lm = _unwrap_causal_lm(model)
+    base_model_prefix = getattr(causal_lm, "base_model_prefix", None)
+    if isinstance(base_model_prefix, str) and hasattr(causal_lm, base_model_prefix):
+        backbone = getattr(causal_lm, base_model_prefix)
+    elif hasattr(causal_lm, "model"):
+        backbone = causal_lm.model
+    elif hasattr(causal_lm, "base_model"):
+        backbone = causal_lm.base_model
+    else:
+        raise AttributeError(f"Could not find causal LM backbone for {type(causal_lm).__name__}.")
+    lm_head = getattr(causal_lm, "lm_head", None)
+    if lm_head is None:
+        raise AttributeError(f"Could not find lm_head for {type(causal_lm).__name__}.")
+    return backbone, lm_head
+
+
+def forward_for_liger_hidden_states(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    position_ids: torch.Tensor,
+    cp_context: Any = None,
+) -> torch.Tensor:
+    attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
+    backbone, _ = get_causal_lm_backbone_and_lm_head(model)
+    output = backbone(
+        input_ids=query_responses,
+        attention_mask=attention_mask,
+        position_ids=position_ids,
+        **extra_kwargs,
+    )
+    hidden_states = output.last_hidden_state if hasattr(output, "last_hidden_state") else output[0]
+    return hidden_states[:, :-1]
 
 
 def _compute_forward_extra_kwargs(

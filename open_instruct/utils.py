@@ -1441,7 +1441,7 @@ def get_train_ds_config(
         "sub_group_size": "auto",
         "stage3_max_live_parameters": "auto",
         "stage3_max_reuse_distance": "auto",
-        "stage3_param_persistence_threshold": "auto",
+        "stage3_param_persistence_threshold": 1e10,
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
         # ZeRO++
@@ -1489,7 +1489,7 @@ def get_eval_ds_config(
         )
     zero_opt_dict = {
         "stage": stage,
-        "stage3_param_persistence_threshold": "auto",
+        "stage3_param_persistence_threshold": 1e10,
         "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
     ds_config = {

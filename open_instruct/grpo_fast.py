@@ -331,6 +331,26 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         if args.lm_head_fp32:
             patch_hf_lm_head_fp32(self.model)
+        self.liger_grpo_loss = None
+        if args.use_liger_grpo_loss:
+            try:
+                from liger_kernel.chunked_loss import (  # type: ignore[import-not-found]  # noqa: PLC0415
+                    LigerFusedLinearGRPOLoss,
+                )
+            except ImportError as exc:
+                raise ImportError(
+                    "`use_liger_grpo_loss=True` requires liger-kernel. Install the Linux dependency first."
+                ) from exc
+            self.liger_grpo_loss = LigerFusedLinearGRPOLoss(
+                beta=args.beta if args.load_ref_policy else 0.0,
+                compiled=args.liger_grpo_loss_compile,
+                use_ref_model=args.load_ref_policy,
+                chunk_size=args.liger_grpo_loss_chunk_size,
+                epsilon_low=args.clip_lower,
+                epsilon_high=args.clip_higher,
+                loss_type="dapo",
+                temperature=self.streaming_config.temperature,
+            )
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
@@ -585,6 +605,71 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
+    def _compute_liger_dapo_loss(
+        self,
+        query_responses: torch.Tensor,
+        position_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        advantages: torch.Tensor,
+        old_logprobs: torch.Tensor,
+        ref_logprobs: torch.Tensor | None,
+        loss_denominator: float,
+        cp_context: Any,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
+        if self.liger_grpo_loss is None:
+            raise RuntimeError("Liger GRPO loss was not initialized.")
+        hidden_states = grpo_utils.forward_for_liger_hidden_states(
+            self.model,
+            query_responses,
+            None,
+            position_ids,
+            cp_context=cp_context,
+        )
+        if self.args.lm_head_fp32:
+            hidden_states = hidden_states.float()
+
+        _, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(self.model)
+        selected_token_ids = query_responses[:, 1:].clone()
+        response_mask = response_mask.bool()
+        selected_token_ids = torch.where(response_mask, selected_token_ids, torch.zeros_like(selected_token_ids))
+        advantages = torch.where(response_mask, advantages, torch.zeros_like(advantages))
+        old_logprobs = torch.where(response_mask, old_logprobs, torch.zeros_like(old_logprobs))
+        if ref_logprobs is not None:
+            ref_logprobs = torch.where(response_mask, ref_logprobs, torch.zeros_like(ref_logprobs))
+
+        flat_hidden_states = hidden_states.reshape(-1, 1, hidden_states.shape[-1]).contiguous()
+        flat_selected_token_ids = selected_token_ids.reshape(-1, 1).contiguous()
+        flat_response_mask = response_mask.reshape(-1, 1).contiguous()
+        flat_advantages = advantages.reshape(-1).contiguous()
+        flat_old_logprobs = old_logprobs.reshape(-1, 1).contiguous()
+        flat_ref_logprobs = ref_logprobs.reshape(-1, 1).contiguous() if ref_logprobs is not None else None
+
+        bias = getattr(lm_head, "bias", None)
+        params = [lm_head.weight]
+        if isinstance(bias, torch.Tensor):
+            params.append(bias)
+        gather_ctx = deepspeed.zero.GatheredParameters(
+            params,
+            enabled=any(hasattr(param, "ds_id") for param in params),
+        )
+        with gather_ctx:
+            loss, metrics = self.liger_grpo_loss(
+                _input=flat_hidden_states,
+                lin_weight=lm_head.weight,
+                selected_token_ids=flat_selected_token_ids,
+                attention_mask=flat_response_mask,
+                advantages=flat_advantages,
+                bias=bias,
+                ref_per_token_logps=flat_ref_logprobs,
+                old_per_token_logps=flat_old_logprobs,
+            )
+
+        current_global_tokens = response_mask.sum().float().detach()
+        dist.all_reduce(current_global_tokens, op=dist.ReduceOp.SUM)
+        dp_world_size = self.args.world_size // self.args.sequence_parallel_size
+        scale = current_global_tokens * dp_world_size / (self.args.world_size * float(loss_denominator))
+        return loss * scale, tuple(metrics)
+
     def _compute_logprobs(
         self,
         model: torch.nn.Module,
@@ -769,6 +854,39 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
                     advantages_BT = data_BT.advantages[i][:, 1:]
+                    if self.args.use_liger_grpo_loss:
+                        vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
+                        loss, liger_metrics = self._compute_liger_dapo_loss(
+                            query_responses=data_BT.query_responses[i],
+                            position_ids=data_BT.position_ids[i],
+                            response_mask=response_mask_BT,
+                            advantages=advantages_BT,
+                            old_logprobs=vllm_logprobs_BT,
+                            ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                            loss_denominator=loss_denominator,
+                            cp_context=cp_contexts_BT[i],
+                        )
+
+                        torch.cuda.empty_cache()
+                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        self.model.backward(loss)
+                        if is_accumulation_boundary:
+                            self.model.step()
+                            grad_norms.append(float(self.model.get_global_grad_norm()))
+                        local_step += 1
+
+                        with torch.no_grad():
+                            if self.args.beta != 0.0 and self.args.load_ref_policy:
+                                loss_stats_B["objective/kl2_avg"][i] = liger_metrics[0]
+                                loss_stats_B["loss/kl_avg"][i] = liger_metrics[0] * self.args.beta
+                                clip_metric = liger_metrics[1]
+                            else:
+                                clip_metric = liger_metrics[0]
+                            loss_stats_B["policy/clipfrac_avg"][i] = clip_metric
+                            loss_stats_B["loss/total_avg"][i] = loss.detach()
+                        continue
+
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],

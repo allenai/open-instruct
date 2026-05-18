@@ -487,6 +487,35 @@ class TestDPPOLoss(unittest.TestCase):
             )
 
 
+class TestLigerGRPOLossConfig(unittest.TestCase):
+    def test_liger_grpo_loss_requires_dapo(self):
+        with self.assertRaisesRegex(ValueError, "loss_fn=dapo"):
+            grpo_utils.GRPOExperimentConfig(
+                use_liger_grpo_loss=True,
+                loss_fn=grpo_utils.GRPOLossType.cispo,
+                use_vllm_logprobs=True,
+                truncated_importance_sampling_ratio_cap=0.0,
+            )
+
+    def test_liger_grpo_loss_requires_vllm_logprobs(self):
+        with self.assertRaisesRegex(ValueError, "use_vllm_logprobs"):
+            grpo_utils.GRPOExperimentConfig(
+                use_liger_grpo_loss=True,
+                use_vllm_logprobs=False,
+                truncated_importance_sampling_ratio_cap=0.0,
+            )
+
+    def test_liger_grpo_loss_accepts_dapo_with_vllm_logprobs(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            use_liger_grpo_loss=True,
+            loss_fn=grpo_utils.GRPOLossType.dapo,
+            use_vllm_logprobs=True,
+            truncated_importance_sampling_ratio_cap=0.0,
+        )
+
+        self.assertTrue(config.use_liger_grpo_loss)
+
+
 class TestComputeTVPOMask(unittest.TestCase):
     def test_in_budget_returns_all_ones(self):
         # ratio = 1 everywhere → per-token TV contribution is 0 → all prompts
