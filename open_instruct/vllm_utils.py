@@ -1201,6 +1201,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     "include_stop_str_in_output": True,
                     "skip_special_tokens": False,
                     "min_tokens": min_tokens,
+                    # Keep rollout logprobs on the same temperature-scaled policy as trainer logprobs.
+                    "logprobs_mode": "processed_logprobs",
                 },
                 **params_dict,
             )
