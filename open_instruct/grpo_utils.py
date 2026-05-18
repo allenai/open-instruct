@@ -182,14 +182,6 @@ class GRPOExperimentConfig(
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
-    use_liger_grpo_loss: bool = False
-    """Whether to use Liger-Kernel's fused linear GRPO loss for the policy loss."""
-    liger_grpo_loss_chunk_size: int = 2048
-    """Batch chunk size passed to LigerFusedLinearGRPOLoss."""
-    liger_grpo_loss_compiled: bool = False
-    """Whether Liger should torch.compile the GRPO loss math. Disabled by default for Ray/ZeRO dynamic shapes."""
-    debug_liger_shapes: bool = False
-    """Print Liger GRPO input shapes and enable autograd anomaly detection around backward."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -330,21 +322,6 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
-        if self.use_liger_grpo_loss:
-            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.cispo):
-                raise ValueError(
-                    "Liger GRPO loss currently only supports `loss_fn` values dapo and cispo in open-instruct "
-                    f"(got {self.loss_fn})."
-                )
-            if self.load_ref_policy and self.beta != 0.0 and self.kl_estimator != 2:
-                raise ValueError(
-                    "Liger GRPO loss computes the k2/k3-style KL estimator used by `kl_estimator=2`; "
-                    f"got kl_estimator={self.kl_estimator}."
-                )
-            if self.record_entropy:
-                raise ValueError("Liger GRPO loss does not support `record_entropy`.")
-            if self.liger_grpo_loss_chunk_size <= 0:
-                raise ValueError(f"liger_grpo_loss_chunk_size must be > 0, got {self.liger_grpo_loss_chunk_size}.")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
@@ -903,182 +880,6 @@ def _compute_forward_extra_kwargs(
     return attention_mask, extra_kwargs
 
 
-def _unwrap_deepspeed_model(model: torch.nn.Module) -> torch.nn.Module:
-    return getattr(model, "module", model)
-
-
-def get_causal_lm_backbone_and_head(model: torch.nn.Module) -> tuple[torch.nn.Module, torch.nn.Module]:
-    """Return the transformer backbone and output head for fused-loss paths."""
-    unwrapped_model = _unwrap_deepspeed_model(model)
-    language_model = getattr(unwrapped_model, "language_model", None)
-
-    lm_head = getattr(unwrapped_model, "lm_head", None)
-    if lm_head is None and language_model is not None:
-        lm_head = getattr(language_model, "lm_head", None)
-    if lm_head is None and hasattr(unwrapped_model, "get_output_embeddings"):
-        lm_head = unwrapped_model.get_output_embeddings()
-    if lm_head is None:
-        raise ValueError(f"Could not find an lm_head for {type(unwrapped_model).__name__}")
-
-    backbone = getattr(unwrapped_model, "model", None)
-    if backbone is None and language_model is not None:
-        backbone = getattr(language_model, "model", None)
-    if backbone is None:
-        base_model_prefix = getattr(unwrapped_model, "base_model_prefix", None)
-        if base_model_prefix:
-            backbone = getattr(unwrapped_model, base_model_prefix, None)
-    if backbone is None:
-        raise ValueError(f"Could not find a transformer backbone for {type(unwrapped_model).__name__}")
-
-    return backbone, lm_head
-
-
-@dataclass(frozen=True)
-class LigerGRPOForwardOutput:
-    """Backbone output and LM-head parameters shared by the Liger GRPO path."""
-
-    hidden_states: torch.Tensor
-    lm_head_weight: torch.Tensor
-    selected_token_ids: torch.Tensor
-    lm_head_bias: torch.Tensor | None = None
-
-    @property
-    def lm_head_tensors(self) -> list[torch.Tensor]:
-        return [param for param in (self.lm_head_weight, self.lm_head_bias) if isinstance(param, torch.Tensor)]
-
-
-def forward_for_chunked_lm_head_logprobs(
-    model: torch.nn.Module,
-    query_responses: torch.Tensor,
-    attention_mask: torch.Tensor | None,
-    position_ids: torch.Tensor,
-    pad_token_id: int,
-    temperature: float,
-    lm_head_chunk_size: int = 2048,
-    cp_context: Any = None,
-) -> torch.Tensor:
-    """Compute selected-token logprobs by running the lm_head over sequence chunks.
-
-    This avoids materializing a full ``[batch, seq, vocab]`` logits tensor while
-    still calling the actual lm_head module, so DeepSpeed hooks and lm_head fp32
-    patches remain active.
-    """
-    attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
-    backbone, lm_head = get_causal_lm_backbone_and_head(model)
-    output = backbone(
-        input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs
-    )
-    hidden_states = getattr(output, "last_hidden_state", output[0] if isinstance(output, tuple) else output)
-    hidden_states = hidden_states[:, :-1, :]
-
-    labels = query_responses[:, 1:].clone().to(hidden_states.device)
-    labels[labels == pad_token_id] = 0
-
-    logprobs: list[torch.Tensor] = []
-    for start in range(0, hidden_states.shape[1], lm_head_chunk_size):
-        end = min(start + lm_head_chunk_size, hidden_states.shape[1])
-        logits = lm_head(hidden_states[:, start:end, :])
-        if temperature != 1.0:
-            logits = logits / temperature
-        logprobs.append(model_utils.log_softmax_and_gather(logits, labels[:, start:end]))
-    return torch.cat(logprobs, dim=1) if len(logprobs) > 1 else logprobs[0]
-
-
-def forward_for_liger_grpo_loss(
-    model: torch.nn.Module,
-    query_responses: torch.Tensor,
-    attention_mask: torch.Tensor | None,
-    position_ids: torch.Tensor,
-    pad_token_id: int,
-    lm_head_fp32: bool = False,
-    cp_context: Any = None,
-) -> LigerGRPOForwardOutput:
-    """Forward the backbone only and prepare inputs for Liger's fused GRPO loss."""
-    attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
-    backbone, lm_head = get_causal_lm_backbone_and_head(model)
-    output = backbone(
-        input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs
-    )
-    last_hidden_state = getattr(output, "last_hidden_state", output[0] if isinstance(output, tuple) else output)
-    last_hidden_state = last_hidden_state[:, :-1, :]
-
-    selected_token_ids = query_responses[:, 1:].clone().to(last_hidden_state.device)
-    selected_token_ids[selected_token_ids == pad_token_id] = 0
-
-    if lm_head_fp32:
-        last_hidden_state = last_hidden_state.float()
-
-    return LigerGRPOForwardOutput(
-        hidden_states=last_hidden_state,
-        lm_head_weight=lm_head.weight,
-        selected_token_ids=selected_token_ids,
-        lm_head_bias=getattr(lm_head, "bias", None),
-    )
-
-
-def selected_logprobs_for_liger_grpo(forward_output: LigerGRPOForwardOutput, temperature: float) -> torch.Tensor:
-    """Compute detached selected-token logprobs from Liger GRPO forward inputs."""
-    return selective_logprobs_from_lm_head(
-        hidden_states=forward_output.hidden_states.detach(),
-        lm_head_weight=forward_output.lm_head_weight.detach(),
-        selected_token_ids=forward_output.selected_token_ids,
-        bias=forward_output.lm_head_bias.detach() if forward_output.lm_head_bias is not None else None,
-        temperature=temperature,
-    )
-
-
-def selective_logprobs_from_lm_head(
-    hidden_states: torch.Tensor,
-    lm_head_weight: torch.Tensor,
-    selected_token_ids: torch.Tensor,
-    temperature: float,
-    bias: torch.Tensor | None = None,
-    vocab_chunk_size: int = 4096,
-    seq_chunk_size: int = 2048,
-) -> torch.Tensor:
-    """Compute selected-token logprobs without materializing full-vocab logits."""
-    batch_size, seq_len, hidden_size = hidden_states.shape
-    hidden = hidden_states.reshape(batch_size * seq_len, hidden_size).contiguous()
-    targets = selected_token_ids.reshape(batch_size * seq_len).contiguous()
-    logprobs = torch.empty(targets.shape, device=hidden.device, dtype=torch.float32)
-    inv_temperature = 1.0 / temperature
-    vocab_size = lm_head_weight.shape[0]
-
-    for seq_start in range(0, hidden.shape[0], seq_chunk_size):
-        seq_end = min(seq_start + seq_chunk_size, hidden.shape[0])
-        hidden_chunk = hidden[seq_start:seq_end]
-        targets_chunk = targets[seq_start:seq_end]
-        num_rows = seq_end - seq_start
-        row_idx = torch.arange(num_rows, device=hidden.device)
-
-        max_logits = torch.full((num_rows,), float("-inf"), device=hidden.device, dtype=torch.float32)
-        sum_exp = torch.zeros((num_rows,), device=hidden.device, dtype=torch.float32)
-        target_logits = torch.zeros((num_rows,), device=hidden.device, dtype=torch.float32)
-
-        for vocab_start in range(0, vocab_size, vocab_chunk_size):
-            vocab_end = min(vocab_start + vocab_chunk_size, vocab_size)
-            weight_chunk = lm_head_weight[vocab_start:vocab_end]
-            logits_chunk = (hidden_chunk @ weight_chunk.to(hidden_chunk.dtype).t()).float()
-            if bias is not None:
-                logits_chunk.add_(bias[vocab_start:vocab_end].float())
-            logits_chunk.mul_(inv_temperature)
-
-            chunk_max = logits_chunk.amax(dim=-1)
-            new_max = torch.maximum(max_logits, chunk_max)
-            sum_exp = sum_exp * torch.exp(max_logits - new_max) + torch.exp(logits_chunk - new_max.unsqueeze(-1)).sum(
-                dim=-1
-            )
-            max_logits = new_max
-
-            in_chunk = (targets_chunk >= vocab_start) & (targets_chunk < vocab_end)
-            local_idx = torch.clamp(targets_chunk - vocab_start, 0, vocab_end - vocab_start - 1)
-            target_logits += logits_chunk[row_idx, local_idx] * in_chunk
-
-        logprobs[seq_start:seq_end] = target_logits - (max_logits + torch.log(sum_exp))
-
-    return logprobs.reshape(batch_size, seq_len)
-
-
 def compute_logprobs(
     model: torch.nn.Module,
     data_BT: data_types.CollatedBatchData,
@@ -1088,8 +889,6 @@ def compute_logprobs(
     batch_size: int | None = None,
     cp_context: Any = None,
     cp_contexts: list[Any] | None = None,
-    use_chunked_lm_head: bool = False,
-    lm_head_chunk_size: int = 2048,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch.
 
@@ -1129,28 +928,16 @@ def compute_logprobs(
 
             if len(set(shapes)) != 1 or different_ctx:
                 for i in batch_indices:
-                    if use_chunked_lm_head:
-                        single_logprobs = forward_for_chunked_lm_head_logprobs(
-                            model,
-                            data_BT.query_responses[i],
-                            None,
-                            data_BT.position_ids[i],
-                            pad_token_id,
-                            temperature,
-                            lm_head_chunk_size=lm_head_chunk_size,
-                            cp_context=ctx_for(i),
-                        )
-                    else:
-                        single_logprobs, _ = forward_for_logprobs(
-                            model,
-                            data_BT.query_responses[i],
-                            None,
-                            data_BT.position_ids[i],
-                            pad_token_id,
-                            temperature,
-                            False,
-                            cp_context=ctx_for(i),
-                        )
+                    single_logprobs, _ = forward_for_logprobs(
+                        model,
+                        data_BT.query_responses[i],
+                        None,
+                        data_BT.position_ids[i],
+                        pad_token_id,
+                        temperature,
+                        False,
+                        cp_context=ctx_for(i),
+                    )
 
                     response_mask_BT = data_BT.response_masks[i]
                     single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
@@ -1160,28 +947,16 @@ def compute_logprobs(
             batch_query_responses = torch.cat(query_responses, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
 
-            if use_chunked_lm_head:
-                batch_logprobs = forward_for_chunked_lm_head_logprobs(
-                    model,
-                    batch_query_responses,
-                    None,
-                    batch_position_ids,
-                    pad_token_id,
-                    temperature,
-                    lm_head_chunk_size=lm_head_chunk_size,
-                    cp_context=ctx_for(batch_indices[0]),
-                )
-            else:
-                batch_logprobs, _ = forward_for_logprobs(
-                    model,
-                    batch_query_responses,
-                    None,
-                    batch_position_ids,
-                    pad_token_id,
-                    temperature,
-                    False,
-                    cp_context=ctx_for(batch_indices[0]),
-                )
+            batch_logprobs, _ = forward_for_logprobs(
+                model,
+                batch_query_responses,
+                None,
+                batch_position_ids,
+                pad_token_id,
+                temperature,
+                False,
+                cp_context=ctx_for(batch_indices[0]),
+            )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
             split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)

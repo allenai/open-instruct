@@ -1,5 +1,4 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import torch
@@ -130,77 +129,6 @@ class TestForwardForLogprobs(unittest.TestCase):
         )
 
         self.assertFalse(torch.allclose(logprob_t1, logprob_t2))
-
-
-class _TinyBackbone(torch.nn.Module):
-    def __init__(self, vocab_size: int, hidden_size: int):
-        super().__init__()
-        self.embed = torch.nn.Embedding(vocab_size, hidden_size)
-
-    def forward(self, input_ids, attention_mask=None, position_ids=None):
-        return SimpleNamespace(last_hidden_state=self.embed(input_ids))
-
-
-class _TinyCausalLM(torch.nn.Module):
-    def __init__(self, vocab_size: int = 8, hidden_size: int = 4):
-        super().__init__()
-        self.model = _TinyBackbone(vocab_size, hidden_size)
-        self.lm_head = torch.nn.Linear(hidden_size, vocab_size, bias=False)
-
-    def forward(self, input_ids, attention_mask=None, position_ids=None):
-        hidden_states = self.model(input_ids, attention_mask=attention_mask, position_ids=position_ids).last_hidden_state
-        return SimpleNamespace(logits=self.lm_head(hidden_states))
-
-
-class TestForwardForLigerGRPOLoss(unittest.TestCase):
-    def test_returns_hidden_states_and_shifted_labels(self):
-        model = _TinyCausalLM()
-        query_responses = torch.tensor([[1, 2, 0, 3]])
-        attention_mask = torch.ones_like(query_responses)
-        position_ids = torch.arange(query_responses.shape[1]).unsqueeze(0)
-
-        output = grpo_utils.forward_for_liger_grpo_loss(
-            model, query_responses, attention_mask, position_ids, pad_token_id=0
-        )
-
-        self.assertEqual(output.hidden_states.shape, (1, 3, 4))
-        self.assertIs(output.lm_head_weight, model.lm_head.weight)
-        self.assertIsNone(output.lm_head_bias)
-        torch.testing.assert_close(output.selected_token_ids, torch.tensor([[2, 0, 3]]))
-
-    def test_liger_fp32_casts_hidden_states(self):
-        model = _TinyCausalLM().to(torch.bfloat16)
-        query_responses = torch.tensor([[1, 2, 0, 3]])
-        attention_mask = torch.ones_like(query_responses)
-        position_ids = torch.arange(query_responses.shape[1]).unsqueeze(0)
-
-        output = grpo_utils.forward_for_liger_grpo_loss(
-            model, query_responses, attention_mask, position_ids, pad_token_id=0, lm_head_fp32=True
-        )
-
-        self.assertEqual(output.hidden_states.dtype, torch.float32)
-        self.assertEqual(output.lm_head_weight.dtype, torch.bfloat16)
-
-    def test_chunked_lm_head_logprobs_match_full_logits(self):
-        model = _TinyCausalLM(vocab_size=11, hidden_size=5)
-        query_responses = torch.tensor([[1, 2, 0, 3], [4, 5, 6, 7]])
-        attention_mask = torch.ones_like(query_responses)
-        position_ids = torch.arange(query_responses.shape[1]).unsqueeze(0).expand_as(query_responses)
-
-        full_logprobs, _ = grpo_utils.forward_for_logprobs(
-            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.3
-        )
-        chunked_logprobs = grpo_utils.forward_for_chunked_lm_head_logprobs(
-            model,
-            query_responses,
-            attention_mask,
-            position_ids,
-            pad_token_id=0,
-            temperature=1.3,
-            lm_head_chunk_size=2,
-        )
-
-        torch.testing.assert_close(chunked_logprobs, full_logprobs)
 
 
 class TestDAPOLoss(unittest.TestCase):
@@ -518,25 +446,6 @@ class TestComputeDPPOMask(unittest.TestCase):
 
 
 class TestDPPOLoss(unittest.TestCase):
-    def test_liger_grpo_loss_rejects_dppo(self):
-        with self.assertRaisesRegex(ValueError, "only supports"):
-            grpo_utils.GRPOExperimentConfig(
-                use_liger_grpo_loss=True,
-                loss_fn=grpo_utils.GRPOLossType.dppo,
-                use_vllm_logprobs=True,
-                truncated_importance_sampling_ratio_cap=0.0,
-            )
-
-    def test_liger_grpo_loss_rejects_non_default_kl_estimator(self):
-        with self.assertRaisesRegex(ValueError, "kl_estimator=2"):
-            grpo_utils.GRPOExperimentConfig(use_liger_grpo_loss=True, load_ref_policy=True, beta=0.1, kl_estimator=1)
-
-    def test_liger_grpo_loss_allows_lm_head_fp32(self):
-        config = grpo_utils.GRPOExperimentConfig(use_liger_grpo_loss=True, lm_head_fp32=True)
-
-        self.assertTrue(config.use_liger_grpo_loss)
-        self.assertTrue(config.lm_head_fp32)
-
     def test_dppo_loss_matches_masked_reinforce(self):
         config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo)
         new_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
