@@ -1462,7 +1462,7 @@ class DataPreparationActor:
                 correct_mask = scores_per_prompt > self.config.length_reward_correctness_threshold
                 group_solve_rate = float(correct_mask.mean(axis=-1).mean()) if correct_mask.size else 0.0
                 length_reward_warmup_weight = length_reward_shaping.compute_warmup_weight(
-                    step=step,
+                    step=self.training_step,
                     num_training_steps=self.num_training_steps,
                     warmup_type=self.config.length_reward_warmup_type,
                     warmup_fraction=self.config.length_reward_warmup_fraction,
