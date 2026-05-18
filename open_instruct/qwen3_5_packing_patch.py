@@ -180,6 +180,24 @@ def patch_qwen3_5_packing():
     logger.info("Applied Qwen3.5 packing patch for GatedDeltaNet seq_idx/cu_seqlens support")
 
 
+def _cast_lm_head_param_fp32(param):
+    if not torch.is_floating_point(param):
+        return
+
+    param.data = param.data.float()
+    if hasattr(param, "ds_id"):
+        # DeepSpeed ZeRO-3 gathers from the partition tensor, not just
+        # ``param.data``. Cast that storage too so the materialized weight used
+        # by the ZeRO linear wrapper is fp32.
+        param.comm_dtype = torch.float32
+        ds_tensor = getattr(param, "ds_tensor", None)
+        if ds_tensor is not None:
+            ds_tensor.data = ds_tensor.data.float()
+        ds_secondary_tensor = getattr(param, "ds_secondary_tensor", None)
+        if ds_secondary_tensor is not None:
+            param.ds_secondary_tensor = ds_secondary_tensor.float()
+
+
 def patch_hf_lm_head_fp32(model):
     """Keep a Hugging Face causal LM's final projection in fp32."""
     lm_head = getattr(model, "lm_head", None)
@@ -190,13 +208,22 @@ def patch_hf_lm_head_fp32(model):
         return False
 
     lm_head.float()
+    for param in lm_head.parameters(recurse=False):
+        _cast_lm_head_param_fp32(param)
     if getattr(lm_head, "_open_instruct_lm_head_fp32_patch", False):
         return False
 
     original_forward = lm_head.forward
 
     def patched_forward(hidden_states, *args, **kwargs):
+        weight = getattr(lm_head, "weight", None)
+        weight_dtype = getattr(weight, "dtype", None)
         if isinstance(hidden_states, torch.Tensor):
+            if weight_dtype != torch.float32:
+                raise RuntimeError(
+                    f"Expected fp32 lm_head weight after applying --lm_head_fp32, got {weight_dtype}. "
+                    "For ZeRO-3, ensure the lm_head parameter partition storage was cast to fp32."
+                )
             hidden_states = hidden_states.float()
         return original_forward(hidden_states, *args, **kwargs)
 
