@@ -45,10 +45,13 @@ uv run python mason.py \
     --num_train_epochs 2 \
     --dataset_mixer_list $DATASET 1.0 \
     --dataset_mixer_list_splits train \
+    --dataset_transform_fn last_turn_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
     --seed 42 \
+    --wandb_entity $WANDB_ENTITY \
+    --wandb_project_name $WANDB_PROJECT \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false
